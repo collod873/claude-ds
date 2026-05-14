@@ -23,7 +23,7 @@ slice_of: .claude/plans/claude-ds.md
 **Files:**
 - Create: `src/lib/exceptions.ts`, `tests/unit/exceptions.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   Scope: `tests/unit/exceptions.test.ts` only
 
   ```ts
@@ -48,10 +48,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/unit/exceptions.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement exceptions**
+- [x] **Step 3: Implement exceptions**
   Scope: `src/lib/exceptions.ts` only
 
   ```ts
@@ -76,10 +76,10 @@ slice_of: .claude/plans/claude-ds.md
   }
   ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/unit/exceptions.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -93,7 +93,7 @@ slice_of: .claude/plans/claude-ds.md
 **Files:**
 - Create: `src/lib/classify.ts`, `tests/unit/classify.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   Scope: `tests/unit/classify.test.ts` only
 
   ```ts
@@ -113,10 +113,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/unit/classify.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement classify**
+- [x] **Step 3: Implement classify**
   Scope: `src/lib/classify.ts` only
 
   ```ts
@@ -131,10 +131,10 @@ slice_of: .claude/plans/claude-ds.md
   }
   ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/unit/classify.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -150,7 +150,7 @@ slice_of: .claude/plans/claude-ds.md
 - Modify: `src/cli.ts`
 - Test: `tests/integration/migrate.test.ts`
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
   Scope: `tests/integration/migrate.test.ts` only
 
   ```ts
@@ -199,10 +199,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/integration/migrate.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `migrate`**
+- [x] **Step 3: Implement `migrate`**
   Scope: `src/commands/migrate.ts`, `src/cli.ts` only
 
   ```ts
@@ -247,10 +247,10 @@ slice_of: .claude/plans/claude-ds.md
 
   Register `migrate <path> --reason <text> [--tier atom|composite] [--rename <name>] [--yes]` in `src/cli.ts`.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/integration/migrate.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -266,7 +266,7 @@ slice_of: .claude/plans/claude-ds.md
 - Modify: `src/cli.ts`
 - Test: `tests/integration/enforce.test.ts`
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
   Scope: `tests/integration/enforce.test.ts` only
 
   ```ts
@@ -309,10 +309,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/integration/enforce.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `enforce`**
+- [x] **Step 3: Implement `enforce`**
   Scope: `src/commands/enforce.ts`, `src/cli.ts` only
 
   ```ts
@@ -341,10 +341,10 @@ slice_of: .claude/plans/claude-ds.md
 
   Register `enforce [--yes]` in `src/cli.ts`.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/integration/enforce.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
