@@ -173,7 +173,7 @@ slice_of: .claude/plans/claude-ds.md
 **Files:**
 - Create: `src/lib/ownership.ts`, `src/lib/fsops.ts`, `src/lib/log.ts`, `tests/unit/ownership.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   Scope: `tests/unit/ownership.test.ts` only
 
   ```ts
@@ -198,10 +198,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/unit/ownership.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement ownership, fsops, log**
+- [x] **Step 3: Implement ownership, fsops, log**
   Scope: `src/lib/ownership.ts`, `src/lib/fsops.ts`, `src/lib/log.ts` only
 
   ```ts
@@ -245,10 +245,10 @@ slice_of: .claude/plans/claude-ds.md
   }
   ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/unit/ownership.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -263,7 +263,7 @@ slice_of: .claude/plans/claude-ds.md
 - Create: `packs/next-react/manifest.json`, `packs/next-react/files/.claude/settings.json`, `packs/next-react/files/contracts.md`, `packs/next-react/files/tokens.json`, `packs/next-react/files/design-system/README.md`, `packs/next-react/files/design-system/atoms/.gitkeep`, `packs/next-react/files/design-system/composites/.gitkeep`, `packs/next-react/files/commitlint.config.js`, `packs/next-react/files/CLAUDE.md.fragment`, `packs/next-react/files/package.json.seed`, `packs/next-react/files/exceptions.json`, `packs/next-react/files/failure-log.md`
 - Create: `tests/unit/pack-manifest.test.ts`
 
-- [ ] **Step 1: Write the failing manifest-shape test**
+- [x] **Step 1: Write the failing manifest-shape test**
   Scope: `tests/unit/pack-manifest.test.ts` only
 
   ```ts
@@ -296,10 +296,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/unit/pack-manifest.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Author the manifest + seeded files**
+- [x] **Step 3: Author the manifest + seeded files**
   Scope: `packs/next-react/manifest.json`, `packs/next-react/files/...` (every path listed in this task's `Files:` block)
 
   ```json
@@ -327,10 +327,10 @@ slice_of: .claude/plans/claude-ds.md
 
   Write the matching seeded files under `packs/next-react/files/`. Use `package.json.seed` and `CLAUDE.md.fragment` as on-disk source names for files whose installed name (`package.json`, `CLAUDE.md`) would collide with the repo's own `package.json` / would need wrapping markers on install.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/unit/pack-manifest.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
