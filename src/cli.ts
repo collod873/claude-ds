@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import pkg from "../package.json" with { type: "json" };
 import { versionCmd } from "./commands/version.js";
 import { initCmd } from "./commands/init.js";
@@ -44,7 +44,7 @@ program
   .command("migrate")
   .argument("<path>", "source component path")
   .requiredOption("--reason <text>", "reason for exception")
-  .option("--tier <tier>", "force tier: atom or composite")
+  .addOption(new Option("--tier <tier>", "force tier: atom or composite").choices(["atom", "composite"]))
   .option("--rename <name>", "destination filename override")
   .option("--yes", "skip confirmation prompt")
   .action(async (source: string, opts: { reason: string; tier?: string; rename?: string; yes?: boolean }) => {
