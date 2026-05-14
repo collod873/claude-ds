@@ -14,6 +14,7 @@
 - 2026-05-14 — Slice 3 `brownfield-audit-adopt` shipped (already-integrated short-circuit, on main at 5fd040f). DoD pass. Next: slice 4 `migrate-enforce`.
 - 2026-05-14 — Slice 4 `migrate-enforce` built AFK via Sonnet sub (TDD strict, scope-respected). 4 commits: `feat(exceptions)`, `feat(classify)`, `feat(migrate)`, `feat(enforce)`. Tests 36→47 (+11). Build clean. No deviations.
 - 2026-05-14 — `/verify` slice 4 Stage 1 ✅. Stage 2 ❌ (2 Important + 1 logic-gap Minor): `migrate.ts` bypassed `parseExceptions`; `--tier` flag unvalidated cast; path-traversal guard missed root-equal case. Sonnet sub fixed all 3 in `8a087b6` (parseExceptions imported, `.choices(["atom","composite"])` via Commander Option, `path.relative` guard). Stage 1+2 re-verify ✅. DoD pass.
+- 2026-05-14 — Slice 4 `migrate-enforce` shipped to origin/main at `dbcc480` (push, 7 commits). Next: slice 5 `sync`.
 - Deferred (slice 3 Minors, not blockers): extract duplicated `exists()` helper to `lib/fsops.ts` (3rd copy across init/audit/adopt); harden invalid-pack-name error (raw stack trace today, pre-existing in init.ts too); `--suggest-removals` is a v1 stub asserting on its own echo.
 - Deferred (not blockers): broaden integration test to all 14 artifacts; cover shell-format markers; add `token-only.sh` to pack-manifest test; switch `init.ts` `writeFile` calls to `fsops.safeWrite`; replace `e: any` with `NodeJS.ErrnoException`; decide hook-vs-settings scope for `token-only`.
 
