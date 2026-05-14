@@ -35,7 +35,12 @@ export async function initCmd(opts) {
             f.path === "CLAUDE.md" ? "CLAUDE.md.fragment" :
                 f.path;
         const src = join(packDir, "files", srcName);
-        const dest = join(cwd, f.path);
+        const dest = resolve(cwd, f.path);
+        const cwdResolved = resolve(cwd);
+        if (dest !== cwdResolved && !dest.startsWith(cwdResolved + "/")) {
+            err(`manifest path escapes project root: ${f.path}`);
+            process.exit(2);
+        }
         await mkdir(dirname(dest), { recursive: true });
         const content = await readFile(src, "utf8");
         if (f.category === "hybrid" && f.format === "markdown") {

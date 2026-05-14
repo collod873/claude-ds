@@ -405,6 +405,7 @@ slice_of: .claude/plans/claude-ds.md
   if grep -nE 'from\s+["'\''][^"'\'']*design-system/composites/' "$file" >/dev/null; then
     line=$(grep -nE 'from\s+["'\''][^"'\'']*design-system/composites/' "$file" | head -n1 | cut -d: -f1)
     echo "$file:$line: atom-imports: atoms may not import from composites" >&2
+    bash scripts/log-failure.sh "atom-imports" "$file" "$line" "atoms may not import from composites" || true
     exit 2
   fi
   exit 0
@@ -419,10 +420,13 @@ slice_of: .claude/plans/claude-ds.md
   if grep -nE '#[0-9A-Fa-f]{3,8}\b' "$file" >/dev/null; then
     line=$(grep -nE '#[0-9A-Fa-f]{3,8}\b' "$file" | head -n1 | cut -d: -f1)
     echo "$file:$line: token-only: raw hex color found; use a token" >&2
+    bash scripts/log-failure.sh "token-only" "$file" "$line" "raw hex color found; use a token" || true
     exit 2
   fi
   exit 0
   ```
+
+  Both hooks call through `scripts/log-failure.sh` per spec §35 ("the `log-failure.sh` interface every blocking hook must call through"). `|| true` keeps the block path intact if the log helper is missing.
 
   Fixtures: minimal `.tsx` content per case — `atom-bad/atom.tsx` imports from `@/design-system/composites/card`; `atom-ok/atom.tsx` imports only `react`; `token-bad/atom.tsx` contains `color: '#ff0000'`; `token-ok/atom.tsx` contains `color: tokens.primary`.
 
@@ -437,6 +441,16 @@ slice_of: .claude/plans/claude-ds.md
   ```
 
   **Mid-build revision:** Fixture dir names changed from `atom-{bad,ok}` / `token-{bad,ok}` to `atoms-{bad,ok}` / `tokens-{bad,ok}` so the resolved paths contain `atoms` and pass `atom-imports.sh`'s `*atoms*` path filter. Hook script and test updated to match. Same task scope, no plan re-work needed.
+
+  **Post-verify-stage-1 fix (2026-05-14):** Initial hook implementations exited `2` directly without invoking `log-failure.sh`, violating spec §35. Both hooks now call `bash scripts/log-failure.sh <rule_id> <file> <line> <hint>` before `exit 2`. Tests still green (31/31).
+
+  **Post-verify-stage-2 fix (2026-05-14):** (a) `$CLAUDE_FILE_PATHS` is a space-separated multi-file list — hooks previously only inspected `$1`, silently skipping enforcement on subsequent files. `settings.json` now passes `$CLAUDE_FILE_PATHS` unquoted (word-split into separate args), and both hooks `for file in "$@"; do ... done` accumulating `rc=2` so any violation across the batch still blocks. (b) `init.ts` now resolves `dest` and rejects any manifest `path` that escapes `cwd` (path-traversal guard against a future untrusted pack source).
+
+  **Known follow-up gaps (deferred — not spec violations, code is correct):**
+  - `tests/integration/init.test.ts` only asserts 4 of 14 slice-goal artifacts (missing `tokens.json`, `composites/.gitkeep`, `commitlint.config.js`, `CLAUDE.md` + marker shape, `package.json`, `exceptions.json`, `failure-log.md`).
+  - `tests/unit/markers.test.ts` exercises only the markdown marker pair; shell-format pair untested.
+  - `tests/unit/pack-manifest.test.ts` checks `atom-imports.sh` but omits `token-only.sh`.
+  - `token-only.sh` has no path scope filter — runs on every write. Whether scoping belongs in the hook or in `settings.json` globs is unspecified; deferred to scaffold doc / future slice.
 
 ---
 

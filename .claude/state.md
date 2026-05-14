@@ -6,6 +6,9 @@
 - Sliced 2026-05-14 → 6 slices (all HITL) under `.claude/plans/`: `bootstrap-version`, `init-greenfield`, `brownfield-audit-adopt`, `migrate-enforce`, `sync`, `release-v0.1.0`
 - Implementation: slice 1 `bootstrap-version` complete; slice 2 `init-greenfield` complete 2026-05-14 (6 tasks / 30 steps, build clean + 31/31 tests green)
 - Mid-build revision in slice 2 / Task 12: fixture dirs renamed `atom-{bad,ok}` → `atoms-{bad,ok}` (and `token-*` → `tokens-*`) so paths contain `atoms` and pass `atom-imports.sh`'s `*atoms*` filter without weakening the hook's production semantics.
+- 2026-05-14 — `/verify` slice 2 Stage 1 returned ❌ (hooks bypassed `log-failure.sh`, violating spec §35). Fixed; Stage 1 re-verify ✅.
+- 2026-05-14 — `/verify` slice 2 Stage 2 returned ❌. Fixed: (1) hooks now loop over `"$@"` so multi-file `$CLAUDE_FILE_PATHS` batches all get enforced (`settings.json` passes unquoted); (2) `init.ts` rejects manifest paths that escape `cwd`. Build clean, 31/31 green. Re-verify pending.
+- Deferred (not blockers): broaden integration test to all 14 artifacts; cover shell-format markers; add `token-only.sh` to pack-manifest test; switch `init.ts` `writeFile` calls to `fsops.safeWrite`; replace `e: any` with `NodeJS.ErrnoException`; decide hook-vs-settings scope for `token-only`.
 
 ## Decisions log
 - 2026-05-14 — `/spec-first` cycle completed. Spec at `.claude/spec.md`. Project name `claude-ds`. v1 ships `next-react` pack only. TypeScript CLI with committed `dist/`, distributed via `npx github:collin-lodato/claude-ds#vX.Y.Z`. Brownfield adoption ladder: `audit` → `adopt` (WARN) → `migrate` → `enforce` (BLOCK). Greenfield: `init`. Steady-state: `sync`.
