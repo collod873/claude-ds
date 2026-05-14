@@ -1,0 +1,19 @@
+{
+  "files": [
+    { "path": ".claude/settings.json", "category": "managed" },
+    { "path": ".claude/hooks/atom-imports.sh", "category": "managed" },
+    { "path": ".claude/hooks/token-only.sh", "category": "managed" },
+    { "path": "scripts/log-failure.sh", "category": "managed" },
+    { "path": "contracts.md", "category": "seeded" },
+    { "path": "tokens.json", "category": "seeded" },
+    { "path": "design-system/README.md", "category": "seeded" },
+    { "path": "design-system/atoms/.gitkeep", "category": "seeded" },
+    { "path": "design-system/composites/.gitkeep", "category": "seeded" },
+    { "path": "commitlint.config.js", "category": "seeded" },
+    { "path": "CLAUDE.md", "category": "hybrid", "format": "markdown" },
+    { "path": "package.json", "category": "seeded" },
+    { "path": "exceptions.json", "category": "seeded" },
+    { "path": "failure-log.md", "category": "seeded" },
+    { "path": "manifest.json", "category": "generated" }
+  ]
+}

@@ -1,0 +1,6 @@
+This project uses claude-ds.
+
+- See `contracts.md` for design-system rules.
+- See `tokens.json` for the token set.
+- Hook scripts in `.claude/hooks/` enforce the contracts on every Edit/Write.
+- Failures are appended to `failure-log.md`.

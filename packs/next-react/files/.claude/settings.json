@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": ".claude/hooks/atom-imports.sh \"$CLAUDE_FILE_PATHS\"" },
+          { "type": "command", "command": ".claude/hooks/token-only.sh \"$CLAUDE_FILE_PATHS\"" }
+        ]
+      }
+    ]
+  }
+}
