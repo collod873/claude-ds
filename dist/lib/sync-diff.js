@@ -1,4 +1,4 @@
-import { extractMarkerInner, mergeMarkers } from "./markers";
+import { extractMarkerInner, mergeMarkers } from "./markers.js";
 export function diffFile(info, d) {
     if (info.category === "generated")
         return { action: "skip", reason: "generated" };

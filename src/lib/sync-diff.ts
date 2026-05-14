@@ -1,5 +1,5 @@
-import type { Category, Format } from "./manifest";
-import { extractMarkerInner, mergeMarkers } from "./markers";
+import type { Category, Format } from "./manifest.js";
+import { extractMarkerInner, mergeMarkers } from "./markers.js";
 
 export type FileVerdict =
   | { action: "skip"; reason: string }
