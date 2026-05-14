@@ -1,6 +1,7 @@
 # Project State
 
 ## Status
+- 2026-05-14 — **v0.1.3 shipped** at `bd0cef3`. Tag pushed. Consumer smoke with full CrewOps-shape settings.json (4 PreToolUse validators + SessionStart banner + permissions) confirmed namespace-aware merge works: all user hooks preserved verbatim, PostToolUse cleanly added. **v0.1.2 is broken — do not use.** CrewOps retry now safe.
 - 2026-05-14 — **v0.1.3 staged** (awaiting HITL gate — do not tag/push). Namespace-aware hook merge regression fix: `mergeJsonKeys` now deep-merges `hooks` by `.claude/hooks/` ownership rather than wholesale-replacing; user hooks (`PreToolUse`, `SessionStart`, non-pack entries) survive `adopt` and `sync`. `CLAUDE_DS_HOOK_NAMESPACE` constant added. Spec §49 amended with hook namespace rule. Tests 68→81 (+13). Build clean. dist/ committed.
 - 2026-05-14 — **v0.1.2 shipped** at `fbfc943`. Tag pushed. Consumer smoke confirmed merge: pre-existing settings.json with `permissions.allow` preserved verbatim; `hooks` block added from pack. CrewOps adoption now safe to retry.
 - 2026-05-14 — **v0.1.2 staged** (local main at `3e3de20`, not yet tagged/pushed — awaiting HITL gate). `.claude/settings.json` promoted from `managed` to `hybrid+json`; CLI now owns only the `hooks` top-level key. New: `src/lib/json-merge.ts` (`mergeJsonKeys`), sync-diff hybrid+json branch (rewrite with newContent), adopt merge-on-install for settings.json, `--backup-settings` flag removed. Spec §47/§49/§83/§104 amended. Tests 53→68 (+15). Build clean. dist/ committed.
