@@ -19,7 +19,7 @@ export async function versionCmd(opts: { offline?: boolean; cwd?: string }) {
   const installed = raw ? parseConfig(raw).version : "(none)";
   let latest = "unknown";
   if (!opts.offline) {
-    const r = spawnSync("git", ["ls-remote","--tags","https://github.com/collin-lodato/claude-ds"], { encoding: "utf8" });
+    const r = spawnSync("git", ["ls-remote","--tags","https://github.com/collod873/claude-ds"], { encoding: "utf8" });
     if (r.status === 0) { const tags = parseLsRemote(r.stdout); latest = tags[tags.length - 1] ?? "unknown"; }
   }
   console.log(`installed: ${installed}`);
