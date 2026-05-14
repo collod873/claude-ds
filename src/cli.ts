@@ -4,6 +4,7 @@ import pkg from "../package.json" with { type: "json" };
 import { versionCmd } from "./commands/version.js";
 import { initCmd } from "./commands/init.js";
 import { auditCmd } from "./commands/audit.js";
+import { adoptCmd } from "./commands/adopt.js";
 
 const program = new Command();
 program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`);
@@ -27,6 +28,14 @@ program
   .option("--suggest-removals", "suggest ad-hoc files for removal")
   .action(async (opts: { pack: string; suggestRemovals?: boolean }) => {
     await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals });
+  });
+program
+  .command("adopt")
+  .requiredOption("--pack <name>", "pack to adopt")
+  .option("--yes", "skip confirmation prompt")
+  .option("--backup-settings", "back up pre-existing .claude/settings.json before adopting")
+  .action(async (opts: { pack: string; yes?: boolean; backupSettings?: boolean }) => {
+    await adoptCmd({ pack: opts.pack, yes: opts.yes, backupSettings: opts.backupSettings });
   });
 
 program.parseAsync(process.argv).catch((e: unknown) => {
