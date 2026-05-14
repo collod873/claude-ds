@@ -62,7 +62,7 @@ export async function syncCmd(opts) {
         const prev = null;
         const current = (await exists(dest)) ? await readFile(dest, "utf8") : null;
         const verdict = diffFile({ category: f.category, format: f.format }, { prev, upstream, current });
-        actions.push({ path: f.path, verdict });
+        actions.push({ path: f.path, upstream, verdict });
         info(`${verdict.action}: ${f.path} — ${verdict.reason}`);
     }
     if (!(await confirm("Apply the above?"))) {
@@ -71,13 +71,15 @@ export async function syncCmd(opts) {
     }
     for (const a of actions) {
         const dest = join(cwd, a.path);
-        const srcName = a.path === "package.json" ? "package.json.seed" : a.path === "CLAUDE.md" ? "CLAUDE.md.fragment" : a.path;
         if (a.verdict.action === "rewrite") {
             await mkdir(dirname(dest), { recursive: true });
-            await writeFile(dest, await readFile(join(packDir, "files", srcName), "utf8"), "utf8");
+            await writeFile(dest, a.upstream, "utf8");
         }
         else if (a.verdict.action === "rewrite-region") {
             await writeFile(dest, a.verdict.newContent, "utf8");
+        }
+        else if (a.verdict.action === "abort") {
+            err(`skipped (abort): ${a.path} — ${a.verdict.reason}`);
         }
     }
     cfg.version = target;
