@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 describe("version", () => {
@@ -10,7 +10,6 @@ describe("version", () => {
   afterEach(async () => { await cleanup(dir); });
 
   it("prints installed and (offline) latest unknown", async () => {
-    await mkdir(join(dir, ".claude"), { recursive: true });
     await writeFile(join(dir, ".claude-ds.json"),
       JSON.stringify({ version: "v1.0.0", pack: "next-react", mode: "warn" }));
     const r = await runCli(["version", "--offline"], { cwd: dir });

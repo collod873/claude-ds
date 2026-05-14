@@ -19,4 +19,19 @@ describe("parseConfig", () => {
     expect(() => parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"hard"}`))
       .toThrow(ConfigError);
   });
+  it("rejects invalid JSON", () => {
+    expect(() => parseConfig(`{not json`)).toThrow(ConfigError);
+  });
+  it("rejects negative enforce_threshold", () => {
+    expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","enforce_threshold":-1}`))
+      .toThrow(ConfigError);
+  });
+  it("rejects non-integer enforce_threshold", () => {
+    expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","enforce_threshold":1.5}`))
+      .toThrow(ConfigError);
+  });
+  it("rejects removed with non-string elements", () => {
+    expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","removed":["a",1]}`))
+      .toThrow(ConfigError);
+  });
 });

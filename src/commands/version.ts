@@ -5,7 +5,12 @@ import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
 async function readIfExistsLocal(p: string): Promise<string | null> {
-  try { return await readFile(p, "utf8"); } catch (e: any) { if (e.code === "ENOENT") return null; throw e; }
+  try {
+    return await readFile(p, "utf8");
+  } catch (e) {
+    if (e instanceof Error && (e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
 }
 
 export async function versionCmd(opts: { offline?: boolean; cwd?: string }) {

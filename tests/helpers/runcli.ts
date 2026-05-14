@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 export interface RunResult { code: number; stdout: string; stderr: string; }
+const CLI_PATH = fileURLToPath(new URL("../../src/cli.ts", import.meta.url));
 export async function runCli(args: string[], opts: { cwd: string; stdin?: string } = { cwd: process.cwd() }): Promise<RunResult> {
   return await new Promise((res) => {
-    const cli = resolve(process.cwd(), "src/cli.ts");
-    const child = spawn("npx", ["tsx", cli, ...args], { cwd: opts.cwd });
+    const child = spawn("npx", ["tsx", CLI_PATH, ...args], { cwd: opts.cwd });
     let stdout = "", stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
