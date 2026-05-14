@@ -1,6 +1,9 @@
 # Project State
 
 ## Status
+- 2026-05-14 — **v0.1.2 staged** (local main at `3e3de20`, not yet tagged/pushed — awaiting HITL gate). `.claude/settings.json` promoted from `managed` to `hybrid+json`; CLI now owns only the `hooks` top-level key. New: `src/lib/json-merge.ts` (`mergeJsonKeys`), sync-diff hybrid+json branch (rewrite with newContent), adopt merge-on-install for settings.json, `--backup-settings` flag removed. Spec §47/§49/§83/§104 amended. Tests 53→68 (+15). Build clean. dist/ committed.
+- 2026-05-14 — **v0.1.1 shipped** at `15ec27e`. Consumer smoke caught ESM bug in v0.1.0: `src/lib/sync-diff.ts` imported `./markers` without `.js`; `moduleResolution: "Bundler"` in tsconfig permitted it but Node ESM strict resolution rejected it at runtime (vitest tolerated, so suite was green). Fix: added `.js` to both imports in sync-diff.ts. Re-smoke clean (version/init/audit all work via `npx github:collod873/claude-ds#v0.1.1`). **Follow-up:** switch tsconfig `moduleResolution` to `NodeNext` to make TS enforce `.js` extensions and prevent recurrence.
+- 2026-05-14 — 🎉 **v0.1.0 SHIPPED.** Tag `v0.1.0` pushed to `origin` at `ac86682` (`chore: build dist + README quickref`). `npx github:collod873/claude-ds#v0.1.0` now resolves. Slice 6 `release-v0.1.0` complete (5/5 steps, DoD pass). All 6 slices done. Tests 53/53, build clean, `dist/cli.js` committed. Deferred minors (slice 3 + slice 5, all cosmetic) carry into v0.1.1.
 - Spec approved 2026-05-14
 - Plan: written 2026-05-14 → `.claude/plans/claude-ds.md` (19 tasks, ~95 steps)
 - Sliced 2026-05-14 → 6 slices (all HITL) under `.claude/plans/`: `bootstrap-version`, `init-greenfield`, `brownfield-audit-adopt`, `migrate-enforce`, `sync`, `release-v0.1.0`
@@ -24,6 +27,7 @@
 - 2026-05-14 — Slice 5 `sync` built AFK via Sonnet sub (TDD strict, scope-respected). 2 commits: `2e27da3 feat(sync-diff)` + `ce9228f feat(sync)`. Tests 47→53 (+6). Build clean. Deviations: (1) plan `prev=upstream` → `prev=null` (v1 gap: no prior-snapshot → false abort; test proves correct); (2) `--offline-fixture` relative path resolved from repoRoot not cwd (matches init.ts pattern; plan's `resolve(cwd, fixture)` fails in tests). Slice 5 built and awaiting /verify.
 - Deferred (slice 3 Minors, not blockers): extract duplicated `exists()` helper to `lib/fsops.ts` (3rd copy across init/audit/adopt); harden invalid-pack-name error (raw stack trace today, pre-existing in init.ts too); `--suggest-removals` is a v1 stub asserting on its own echo.
 - Deferred (not blockers): broaden integration test to all 14 artifacts; cover shell-format markers; add `token-only.sh` to pack-manifest test; switch `init.ts` `writeFile` calls to `fsops.safeWrite`; replace `e: any` with `NodeJS.ErrnoException`; decide hook-vs-settings scope for `token-only`.
+- 2026-05-14 — Slice 6 `release-v0.1.0` steps 1–4 complete AFK. Build clean (dist/cli.js 2.6K). Tests 53/53 green. README updated with install one-liner + subcommand quickref. Commit `ac86682 chore: build dist + README quickref` pushed to origin/main. HITL halt at step 5 (git tag v0.1.0 + push --tags) — awaiting human confirmation.
 
 ## Decisions log
 - 2026-05-14 — `/spec-first` cycle completed. Spec at `.claude/spec.md`. Project name `claude-ds`. v1 ships `next-react` pack only. TypeScript CLI with committed `dist/`, distributed via `npx github:collin-lodato/claude-ds#vX.Y.Z`. Brownfield adoption ladder: `audit` → `adopt` (WARN) → `migrate` → `enforce` (BLOCK). Greenfield: `init`. Steady-state: `sync`.
