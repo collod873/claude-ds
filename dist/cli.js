@@ -34,9 +34,8 @@ program
     .command("adopt")
     .requiredOption("--pack <name>", "pack to adopt")
     .option("--yes", "skip confirmation prompt")
-    .option("--backup-settings", "back up pre-existing .claude/settings.json before adopting")
     .action(async (opts) => {
-    await adoptCmd({ pack: opts.pack, yes: opts.yes, backupSettings: opts.backupSettings });
+    await adoptCmd({ pack: opts.pack, yes: opts.yes });
 });
 program
     .command("migrate")

@@ -1,7 +1,8 @@
-import { readFile, writeFile, mkdir, stat, rename } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
+import { mergeJsonKeys } from "../lib/json-merge.js";
 import { info, err, confirm } from "../lib/log.js";
 // Read package.json for version (avoid JSON import assertions for broader compat).
 async function getVersion(packageJsonPath) {
@@ -21,17 +22,9 @@ export async function adoptCmd(opts) {
         err(".claude-ds.json already exists");
         process.exit(2);
     }
-    const settingsPath = join(cwd, ".claude/settings.json");
-    if (await exists(settingsPath) && !opts.backupSettings) {
-        err(".claude/settings.json present; pass --backup-settings to back it up before adopting");
-        process.exit(2);
-    }
     if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${opts.pack}, WARN mode) here?`))) {
         info("aborted");
         return;
-    }
-    if (opts.backupSettings && await exists(settingsPath)) {
-        await rename(settingsPath, `${settingsPath}.pre-claude-ds`);
     }
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..", "..");
@@ -58,6 +51,16 @@ export async function adoptCmd(opts) {
         }
         else if (f.category === "hybrid" && f.format === "markdown") {
             await writeFile(dest, `# Project\n<!-- >>> claude-ds managed >>> -->\n${content}\n<!-- <<< claude-ds managed <<< -->\n`, "utf8");
+        }
+        else if (f.category === "hybrid" && f.format === "json") {
+            if (await exists(dest)) {
+                const current = await readFile(dest, "utf8");
+                const merged = mergeJsonKeys(content, current, ["hooks"]);
+                await writeFile(dest, merged, "utf8");
+            }
+            else {
+                await writeFile(dest, content, "utf8");
+            }
         }
         else {
             await writeFile(dest, content, "utf8");
