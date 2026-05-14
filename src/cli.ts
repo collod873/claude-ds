@@ -8,6 +8,7 @@ import { adoptCmd } from "./commands/adopt.js";
 import { migrateCmd } from "./commands/migrate.js";
 import { enforceCmd } from "./commands/enforce.js";
 import { syncCmd } from "./commands/sync.js";
+import { doctorCmd } from "./commands/doctor.js";
 
 const program = new Command();
 program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`);
@@ -69,6 +70,13 @@ program
   .option("--offline-fixture <path>", "use local pack directory instead of fetching upstream")
   .action(async (opts: { offlineFixture?: string }) => {
     await syncCmd({ offlineFixture: opts.offlineFixture });
+  });
+
+program
+  .command("doctor")
+  .requiredOption("--pack <name>", "pack to check against")
+  .action(async (opts: { pack: string }) => {
+    await doctorCmd({ pack: opts.pack });
   });
 
 program.parseAsync(process.argv).catch((e: unknown) => {

@@ -1,5 +1,5 @@
 import { readdir, stat } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { join, basename, extname } from "node:path";
 
 export interface Finding {
   canonical: string;
@@ -54,13 +54,31 @@ async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
 }
 
+/** Strip file extension, returning just the stem. */
+function stem(name: string): string {
+  const ext = extname(name);
+  return ext ? name.slice(0, -ext.length) : name;
+}
+
 /** Returns true if candidate is a lookalike of canonicalBase.
- *  Lookalike = Levenshtein distance ≤ 4 OR substring containment. */
+ *  Lookalike = Levenshtein distance ≤ 4 OR substring containment (full name or stem). */
 function isLookalike(canonicalBase: string, candidateBase: string): boolean {
   if (canonicalBase === candidateBase) return false; // exact match handled separately
   const dist = levenshtein(canonicalBase, candidateBase);
   if (dist <= 4) return true;
+  // Full-name substring containment
   if (canonicalBase.includes(candidateBase) || candidateBase.includes(canonicalBase)) return true;
+  // Stem-based substring containment
+  const cStem = stem(canonicalBase);
+  const dStem = stem(candidateBase);
+  if (cStem.length >= 4 && dStem.includes(cStem)) return true;
+  if (dStem.length >= 4 && cStem.includes(dStem)) return true;
+  // Root-based: strip trailing 's' from canonical stem to get root, check if root in candidate stem
+  // e.g. "contracts" → "contract" appears in "atom-kit-contract"
+  if (cStem.endsWith("s") && cStem.length >= 5) {
+    const root = cStem.slice(0, -1);
+    if (dStem.includes(root)) return true;
+  }
   return false;
 }
 
