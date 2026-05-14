@@ -3,6 +3,7 @@ import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
 import { versionCmd } from "./commands/version.js";
 import { initCmd } from "./commands/init.js";
+import { auditCmd } from "./commands/audit.js";
 
 const program = new Command();
 program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`);
@@ -18,6 +19,14 @@ program
   .option("--yes", "skip confirmation prompt")
   .action(async (opts: { pack: string; yes?: boolean }) => {
     await initCmd({ pack: opts.pack, yes: opts.yes });
+  });
+
+program
+  .command("audit")
+  .requiredOption("--pack <name>", "pack to audit against")
+  .option("--suggest-removals", "suggest ad-hoc files for removal")
+  .action(async (opts: { pack: string; suggestRemovals?: boolean }) => {
+    await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals });
   });
 
 program.parseAsync(process.argv).catch((e: unknown) => {
