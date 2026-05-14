@@ -36,9 +36,8 @@ program
   .command("adopt")
   .requiredOption("--pack <name>", "pack to adopt")
   .option("--yes", "skip confirmation prompt")
-  .option("--backup-settings", "back up pre-existing .claude/settings.json before adopting")
-  .action(async (opts: { pack: string; yes?: boolean; backupSettings?: boolean }) => {
-    await adoptCmd({ pack: opts.pack, yes: opts.yes, backupSettings: opts.backupSettings });
+  .action(async (opts: { pack: string; yes?: boolean }) => {
+    await adoptCmd({ pack: opts.pack, yes: opts.yes });
   });
 
 program

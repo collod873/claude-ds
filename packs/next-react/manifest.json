@@ -1,6 +1,6 @@
 {
   "files": [
-    { "path": ".claude/settings.json", "category": "managed" },
+    { "path": ".claude/settings.json", "category": "hybrid", "format": "json" },
     { "path": ".claude/hooks/atom-imports.sh", "category": "managed" },
     { "path": ".claude/hooks/token-only.sh", "category": "managed" },
     { "path": "scripts/log-failure.sh", "category": "managed" },

@@ -20,20 +20,33 @@ describe("adopt", () => {
     await stat(join(dir, "design-system/atoms/.gitkeep"));
   });
 
-  it("refuses on pre-existing .claude/settings.json without --backup-settings", async () => {
+  it("merges hooks into pre-existing settings.json, preserving permissions", async () => {
     await mkdir(join(dir, ".claude"), { recursive: true });
-    await writeFile(join(dir, ".claude/settings.json"), "{}");
+    await writeFile(join(dir, ".claude/settings.json"), JSON.stringify({
+      permissions: ["Bash(git:*)"],
+      hooks: { old: true }
+    }, null, 2));
     const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
-    expect(r.code).not.toBe(0);
-    expect(r.stderr).toMatch(/settings\.json/);
+    expect(r.code).toBe(0);
+    const settings = JSON.parse(await readFile(join(dir, ".claude/settings.json"), "utf8"));
+    // permissions preserved
+    expect(settings.permissions).toEqual(["Bash(git:*)"]);
+    // hooks replaced with pack's version
+    expect(settings.hooks).toHaveProperty("PostToolUse");
   });
 
-  it("backs up settings.json with --backup-settings", async () => {
-    await mkdir(join(dir, ".claude"), { recursive: true });
-    await writeFile(join(dir, ".claude/settings.json"), "{\"prev\":true}");
-    const r = await runCli(["adopt", "--pack", "next-react", "--yes", "--backup-settings"], { cwd: dir });
+  it("writes pack settings.json as-is when file is absent", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
-    const backup = await readFile(join(dir, ".claude/settings.json.pre-claude-ds"), "utf8");
-    expect(backup).toContain("\"prev\":true");
+    const settings = JSON.parse(await readFile(join(dir, ".claude/settings.json"), "utf8"));
+    expect(settings.hooks).toHaveProperty("PostToolUse");
+  });
+
+  it("does not accept --backup-settings flag (flag removed in v0.1.2)", async () => {
+    await mkdir(join(dir, ".claude"), { recursive: true });
+    await writeFile(join(dir, ".claude/settings.json"), "{}");
+    // --backup-settings is no longer a valid flag; CLI should still succeed via merge
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
   });
 });
