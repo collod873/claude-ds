@@ -1,0 +1,93 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdir, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { mkdtemp } from "node:fs/promises";
+import { detectLookalikes } from "../../src/lib/lookalike.js";
+
+async function fresh(): Promise<string> {
+  return await mkdtemp(join(tmpdir(), "lookalike-"));
+}
+
+describe("detectLookalikes", () => {
+  let dir: string;
+
+  beforeEach(async () => { dir = await fresh(); });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it("returns present=true, lookalike=null when canonical exists exactly", async () => {
+    await writeFile(join(dir, "tokens.json"), "{}");
+    const findings = await detectLookalikes(dir, ["tokens.json"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toEqual({ canonical: "tokens.json", present: true, lookalike: null });
+  });
+
+  it("returns present=false with a lookalike path when similar file exists", async () => {
+    // design-tokens.json is a lookalike for tokens.json
+    await writeFile(join(dir, "design-tokens.json"), "{}");
+    const findings = await detectLookalikes(dir, ["tokens.json"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].present).toBe(false);
+    expect(findings[0].lookalike).toBe("design-tokens.json");
+  });
+
+  it("returns present=false with lookalike=null when no similar file exists", async () => {
+    // completely unrelated project files
+    await writeFile(join(dir, "readme.txt"), "hello");
+    const findings = await detectLookalikes(dir, ["tokens.json"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toEqual({ canonical: "tokens.json", present: false, lookalike: null });
+  });
+
+  it("returns closest lookalike (lowest Levenshtein distance) when multiple candidates exist", async () => {
+    // "token.json" (dist 1 from "tokens.json") and "design-tokens.json" (dist 8) both exist
+    await writeFile(join(dir, "token.json"), "{}");
+    await writeFile(join(dir, "design-tokens.json"), "{}");
+    const findings = await detectLookalikes(dir, ["tokens.json"]);
+    expect(findings[0].present).toBe(false);
+    // token.json is closer (dist 1) than design-tokens.json (dist 8 after substring check doesn't help the dist comparison)
+    expect(findings[0].lookalike).toBe("token.json");
+  });
+
+  it("handles canonical directory paths — finds lookalike directory", async () => {
+    // design-system/atoms canonical; src/components/branded is unrelated; atom-kit might match
+    await mkdir(join(dir, "atoms-old"), { recursive: true });
+    await writeFile(join(dir, "atoms-old", "button.tsx"), "");
+    const findings = await detectLookalikes(dir, ["design-system/atoms"]);
+    expect(findings[0].present).toBe(false);
+    // atoms-old basename is "atoms-old", canonical basename is "atoms" — dist = 4, should match
+    expect(findings[0].lookalike).not.toBeNull();
+  });
+
+  it("skips node_modules, .git, dist in scan", async () => {
+    await mkdir(join(dir, "node_modules/tokens.json"), { recursive: true });
+    await mkdir(join(dir, ".git"), { recursive: true });
+    await writeFile(join(dir, ".git", "tokens.json"), "");
+    const findings = await detectLookalikes(dir, ["tokens.json"]);
+    expect(findings[0].present).toBe(false);
+    expect(findings[0].lookalike).toBeNull();
+  });
+
+  it("handles multiple canonical paths independently", async () => {
+    await writeFile(join(dir, "contracts.md"), "# contracts");
+    await writeFile(join(dir, "design-tokens.json"), "{}");
+    const findings = await detectLookalikes(dir, ["tokens.json", "contracts.md"]);
+    expect(findings).toHaveLength(2);
+    const tokenFinding = findings.find(f => f.canonical === "tokens.json")!;
+    const contractFinding = findings.find(f => f.canonical === "contracts.md")!;
+    expect(tokenFinding.present).toBe(false);
+    expect(tokenFinding.lookalike).toBe("design-tokens.json");
+    expect(contractFinding.present).toBe(true);
+    expect(contractFinding.lookalike).toBeNull();
+  });
+
+  it("handles nested canonical paths — src/components/branded lookalike for design-system/atoms", async () => {
+    await mkdir(join(dir, "src", "components", "branded"), { recursive: true });
+    await writeFile(join(dir, "src", "components", "branded", "Button.tsx"), "");
+    // canonical "design-system/atoms" - base "atoms" vs "branded" - no match (dist > 4, no substring)
+    // This should be no lookalike since "branded" != "atoms" by any similarity rule
+    const findings = await detectLookalikes(dir, ["design-system/atoms"]);
+    expect(findings[0].present).toBe(false);
+    expect(findings[0].lookalike).toBeNull();
+  });
+});

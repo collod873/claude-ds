@@ -15,5 +15,17 @@
     { "path": "exceptions.json", "category": "seeded" },
     { "path": "failure-log.md", "category": "seeded" },
     { "path": "manifest.json", "category": "generated" }
+  ],
+  "canonical_paths": [
+    "tokens.json",
+    "contracts.md",
+    "design-system/atoms",
+    "design-system/composites",
+    "design-system/README.md",
+    "exceptions.json",
+    "failure-log.md",
+    "scripts/log-failure.sh",
+    ".claude/hooks/atom-imports.sh",
+    ".claude/hooks/token-only.sh"
   ]
 }
