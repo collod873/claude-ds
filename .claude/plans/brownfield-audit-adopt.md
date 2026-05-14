@@ -25,7 +25,7 @@ slice_of: .claude/plans/claude-ds.md
 - Modify: `src/cli.ts`
 - Test: `tests/integration/audit.test.ts`
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
   Scope: `tests/integration/audit.test.ts` only
 
   ```ts
@@ -57,10 +57,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/integration/audit.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `audit`**
+- [x] **Step 3: Implement `audit`**
   Scope: `src/commands/audit.ts`, `src/cli.ts` only
 
   ```ts
@@ -87,10 +87,10 @@ slice_of: .claude/plans/claude-ds.md
 
   Register `audit --pack <name> [--suggest-removals]` in `src/cli.ts`.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/integration/audit.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -106,7 +106,7 @@ slice_of: .claude/plans/claude-ds.md
 - Modify: `src/cli.ts`
 - Test: `tests/integration/adopt.test.ts`
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
   Scope: `tests/integration/adopt.test.ts` only
 
   ```ts
@@ -151,10 +151,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/integration/adopt.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `adopt`**
+- [x] **Step 3: Implement `adopt`**
   Scope: `src/commands/adopt.ts`, `src/cli.ts` only
 
   ```ts
@@ -207,10 +207,10 @@ slice_of: .claude/plans/claude-ds.md
 
   Register `adopt --pack <name> [--yes] [--backup-settings]` in `src/cli.ts`.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/integration/adopt.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -221,9 +221,9 @@ slice_of: .claude/plans/claude-ds.md
 
 ## Definition of Done
 
-- [ ] builds_clean
-- [ ] verify_sh_green
-- [ ] baseline_hold_or_improve
-  Justification: <fill only if a counter delta is present and accepted>
-- [ ] screenshots_light_dark — required: false
+- [x] builds_clean
+- [x] verify_sh_green
+- [x] baseline_hold_or_improve
+  Justification: +5 tests (2 audit, 3 adopt) — improvement, no regression
+- [x] screenshots_light_dark — required: false
   Paths: n/a (CLI, no UI)
