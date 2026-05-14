@@ -29,42 +29,55 @@ describe("sync-diff (hybrid markdown)", () => {
 });
 
 describe("sync-diff (hybrid json)", () => {
+  // Realistic pack hook shape — commands under .claude/hooks/ namespace
+  const packHookEntry = {
+    matcher: "Edit|Write",
+    hooks: [{ type: "command", command: ".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS" }],
+  };
+
   const makeSettings = (hooks: unknown, extra?: Record<string, unknown>) =>
     JSON.stringify({ hooks, ...extra }, null, 2) + "\n";
 
-  it("returns rewrite when hooks differ between upstream and current", () => {
-    const upstream = makeSettings({ post: "new-hook" });
-    const current = makeSettings({ post: "old-hook" }, { permissions: ["read"] });
+  it("returns rewrite when pack adds new hooks not yet in current", () => {
+    const upstream = makeSettings({ PostToolUse: [packHookEntry] });
+    const current = makeSettings({}, { permissions: ["read"] });
     const v = diffFile({ category: "hybrid", format: "json" }, { prev: null, upstream, current });
     expect(v.action).toBe("rewrite");
   });
 
-  it("rewrite result preserves user-owned permissions key", () => {
-    const upstream = makeSettings({ post: "new-hook" });
-    const current = makeSettings({ post: "old-hook" }, { permissions: ["read"] });
+  it("rewrite result preserves user-owned permissions key and adds pack hooks", () => {
+    const upstream = makeSettings({ PostToolUse: [packHookEntry] });
+    const current = makeSettings({}, { permissions: ["read"] });
     const v = diffFile({ category: "hybrid", format: "json" }, { prev: null, upstream, current });
     expect(v.action).toBe("rewrite");
-    // rewrite for hybrid+json carries newContent with the merged result
     expect(v).toHaveProperty("newContent");
     if (v.action === "rewrite" && "newContent" in v) {
       const parsed = JSON.parse((v as { newContent: string }).newContent);
       expect(parsed.permissions).toEqual(["read"]);
-      expect(parsed.hooks).toEqual({ post: "new-hook" });
+      expect(parsed.hooks.PostToolUse).toBeDefined();
+      expect(parsed.hooks.PostToolUse[0].hooks[0].command).toContain(".claude/hooks/");
     }
   });
 
-  it("returns skip when merged result equals current (no effective change)", () => {
-    const upstream = makeSettings({ post: "same-hook" });
-    const current = makeSettings({ post: "same-hook" }, { permissions: ["read"] });
+  it("returns skip when pack hooks already present in current (no effective change)", () => {
+    // current already has the pack hook — merged result should equal current
+    const upstream = makeSettings({ PostToolUse: [packHookEntry] });
+    const current = makeSettings({ PostToolUse: [packHookEntry] }, { permissions: ["read"] });
     const v = diffFile({ category: "hybrid", format: "json" }, { prev: null, upstream, current });
     expect(v.action).toBe("skip");
   });
 
-  it("user-owned key in current is preserved even if upstream has different value", () => {
-    const upstream = JSON.stringify({ hooks: { a: 1 }, permissions: ["upstream-only"] }, null, 2) + "\n";
-    const current = JSON.stringify({ hooks: { a: 1 }, permissions: ["current-perm"] }, null, 2) + "\n";
+  it("user-owned permissions preserved even if upstream has different permissions value", () => {
+    const upstream = JSON.stringify({
+      hooks: { PostToolUse: [packHookEntry] },
+      permissions: ["upstream-only"],
+    }, null, 2) + "\n";
+    const current = JSON.stringify({
+      hooks: { PostToolUse: [packHookEntry] },
+      permissions: ["current-perm"],
+    }, null, 2) + "\n";
     const v = diffFile({ category: "hybrid", format: "json" }, { prev: null, upstream, current });
-    // hooks identical so result should be skip
+    // hooks identical — skip
     expect(v.action).toBe("skip");
   });
 });

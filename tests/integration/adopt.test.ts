@@ -49,4 +49,48 @@ describe("adopt", () => {
     const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
   });
+
+  it("CrewOps regression: adopt preserves PreToolUse validators and SessionStart banner", async () => {
+    await mkdir(join(dir, ".claude"), { recursive: true });
+    // Exact shape from the CrewOps bug report
+    await writeFile(join(dir, ".claude/settings.json"), JSON.stringify({
+      permissions: { allow: ["Bash(npm test:*)"] },
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Edit|Write|MultiEdit",
+            hooks: [{ type: "command", command: "scripts/ui-token-validator.sh" }],
+          },
+        ],
+        SessionStart: [
+          {
+            matcher: "",
+            hooks: [{ type: "command", command: "scripts/banner.sh" }],
+          },
+        ],
+      },
+    }, null, 2));
+
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const settings = JSON.parse(await readFile(join(dir, ".claude/settings.json"), "utf8"));
+
+    // permissions intact
+    expect(settings.permissions).toEqual({ allow: ["Bash(npm test:*)"] });
+
+    // PreToolUse validator survived
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe("scripts/ui-token-validator.sh");
+
+    // SessionStart banner survived
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toBe("scripts/banner.sh");
+
+    // Pack's PostToolUse hooks added
+    expect(settings.hooks.PostToolUse).toBeDefined();
+    const postCommands = settings.hooks.PostToolUse[0].hooks.map((h: { command: string }) => h.command);
+    expect(postCommands).toContain(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
+    expect(postCommands).toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
+  });
 });
