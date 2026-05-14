@@ -68,9 +68,8 @@ program
 program
   .command("sync")
   .option("--offline-fixture <path>", "use local pack directory instead of fetching upstream")
-  .option("--yes", "skip confirmation prompt")
-  .action(async (opts: { offlineFixture?: string; yes?: boolean }) => {
-    await syncCmd({ offlineFixture: opts.offlineFixture, yes: opts.yes });
+  .action(async (opts: { offlineFixture?: string }) => {
+    await syncCmd({ offlineFixture: opts.offlineFixture });
   });
 
 program.parseAsync(process.argv).catch((e: unknown) => {

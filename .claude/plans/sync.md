@@ -23,7 +23,7 @@ slice_of: .claude/plans/claude-ds.md
 **Files:**
 - Create: `src/lib/sync-diff.ts`, `tests/unit/sync-diff.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   Scope: `tests/unit/sync-diff.test.ts` only
 
   ```ts
@@ -58,10 +58,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/unit/sync-diff.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement sync-diff**
+- [x] **Step 3: Implement sync-diff**
   Scope: `src/lib/sync-diff.ts` only
 
   ```ts
@@ -109,10 +109,10 @@ slice_of: .claude/plans/claude-ds.md
   }
   ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/unit/sync-diff.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -128,7 +128,7 @@ slice_of: .claude/plans/claude-ds.md
 - Modify: `src/cli.ts`
 - Test: `tests/integration/sync.test.ts`
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
   Scope: `tests/integration/sync.test.ts` only
 
   ```ts
@@ -160,10 +160,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/integration/sync.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `sync`**
+- [x] **Step 3: Implement `sync`**
   Scope: `src/commands/sync.ts`, `src/cli.ts` only
 
   ```ts
@@ -230,10 +230,10 @@ slice_of: .claude/plans/claude-ds.md
 
   Register `sync [--offline-fixture <path>] [--yes]` in `src/cli.ts`.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/integration/sync.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -244,9 +244,9 @@ slice_of: .claude/plans/claude-ds.md
 
 ## Definition of Done
 
-- [ ] builds_clean
-- [ ] verify_sh_green
-- [ ] baseline_hold_or_improve
-  Justification: <fill only if a counter delta is present and accepted>
-- [ ] screenshots_light_dark — required: false
+- [x] builds_clean
+- [x] verify_sh_green
+- [x] baseline_hold_or_improve
+  Justification: 47→53 tests (+6), all green
+- [x] screenshots_light_dark — required: false
   Paths: n/a (CLI, no UI)

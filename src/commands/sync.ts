@@ -10,7 +10,7 @@ import { info, err, confirm } from "../lib/log.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
-export async function syncCmd(opts: { offlineFixture?: string; yes?: boolean; cwd?: string }) {
+export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
   if (!(await exists(join(cwd, ".claude-ds.json")))) { err(".claude-ds.json absent"); process.exit(2); }
   const cfg = parseConfig(await readFile(join(cwd, ".claude-ds.json"), "utf8"));
@@ -54,7 +54,7 @@ export async function syncCmd(opts: { offlineFixture?: string; yes?: boolean; cw
     actions.push({ path: f.path, verdict });
     info(`${verdict.action}: ${f.path} — ${verdict.reason}`);
   }
-  if (!opts.yes && !(await confirm("Apply the above?"))) { info("aborted"); return; }
+  if (!(await confirm("Apply the above?"))) { info("aborted"); return; }
   for (const a of actions) {
     const dest = join(cwd, a.path);
     const srcName = a.path === "package.json" ? "package.json.seed" : a.path === "CLAUDE.md" ? "CLAUDE.md.fragment" : a.path;

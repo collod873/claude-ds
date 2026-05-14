@@ -18,7 +18,7 @@ describe("sync", () => {
     await mkdir(join(dir, ".claude"), { recursive: true });
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version:"v0.0.0", pack:"next-react", mode:"warn" }));
     await writeFile(join(dir, ".claude/settings.json"), `{"old":true}`);
-    const r = await runCli(["sync", "--offline-fixture", "packs/next-react", "--yes"], { cwd: dir });
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
     expect(r.code).toBe(0);
     const cur = await readFile(join(dir, ".claude/settings.json"), "utf8");
     expect(cur).not.toBe(`{"old":true}`);
