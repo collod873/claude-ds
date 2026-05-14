@@ -23,7 +23,7 @@ slice_of: .claude/plans/claude-ds.md
 **Files:**
 - Create: `src/lib/manifest.ts`, `tests/unit/manifest.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   Scope: `tests/unit/manifest.test.ts` only
 
   ```ts
@@ -51,10 +51,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/unit/manifest.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement parseManifest**
+- [x] **Step 3: Implement parseManifest**
   Scope: `src/lib/manifest.ts` only
 
   ```ts
@@ -81,10 +81,10 @@ slice_of: .claude/plans/claude-ds.md
   }
   ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/unit/manifest.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -98,7 +98,7 @@ slice_of: .claude/plans/claude-ds.md
 **Files:**
 - Create: `src/lib/markers.ts`, `tests/unit/markers.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   Scope: `tests/unit/markers.test.ts` only
 
   ```ts
@@ -124,10 +124,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/unit/markers.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement markers**
+- [x] **Step 3: Implement markers**
   Scope: `src/lib/markers.ts` only
 
   ```ts
@@ -156,10 +156,10 @@ slice_of: .claude/plans/claude-ds.md
   function escapeRe(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
   ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/unit/markers.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -345,7 +345,7 @@ slice_of: .claude/plans/claude-ds.md
 - Create: `packs/next-react/files/scripts/log-failure.sh`, `packs/next-react/files/.claude/hooks/atom-imports.sh`, `packs/next-react/files/.claude/hooks/token-only.sh`
 - Create: `packs/next-react/tests/hooks.test.ts`, `packs/next-react/tests/fixtures/atom-bad/atom.tsx`, `packs/next-react/tests/fixtures/atom-ok/atom.tsx`, `packs/next-react/tests/fixtures/token-bad/atom.tsx`, `packs/next-react/tests/fixtures/token-ok/atom.tsx`
 
-- [ ] **Step 1: Write the failing pack-fixture test**
+- [x] **Step 1: Write the failing pack-fixture test**
   Scope: `packs/next-react/tests/hooks.test.ts` only
 
   ```ts
@@ -380,10 +380,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run packs/next-react/tests/hooks.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Write hook scripts + fixtures**
+- [x] **Step 3: Write hook scripts + fixtures**
   Scope: `packs/next-react/files/scripts/log-failure.sh`, `packs/next-react/files/.claude/hooks/atom-imports.sh`, `packs/next-react/files/.claude/hooks/token-only.sh`, `packs/next-react/tests/fixtures/...` only
 
   ```bash
@@ -426,15 +426,17 @@ slice_of: .claude/plans/claude-ds.md
 
   Fixtures: minimal `.tsx` content per case — `atom-bad/atom.tsx` imports from `@/design-system/composites/card`; `atom-ok/atom.tsx` imports only `react`; `token-bad/atom.tsx` contains `color: '#ff0000'`; `token-ok/atom.tsx` contains `color: tokens.primary`.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run packs/next-react/tests/hooks.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
   git add packs/next-react/files/scripts packs/next-react/files/.claude/hooks packs/next-react/tests && git commit -m "feat(pack): atom-imports + token-only hooks with fixture tests"
   ```
+
+  **Mid-build revision:** Fixture dir names changed from `atom-{bad,ok}` / `token-{bad,ok}` to `atoms-{bad,ok}` / `tokens-{bad,ok}` so the resolved paths contain `atoms` and pass `atom-imports.sh`'s `*atoms*` path filter. Hook script and test updated to match. Same task scope, no plan re-work needed.
 
 ---
 
