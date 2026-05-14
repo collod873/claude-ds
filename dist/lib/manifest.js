@@ -1,0 +1,22 @@
+export class ManifestError extends Error {
+}
+const CATS = new Set(["managed", "seeded", "generated", "hybrid"]);
+const FMTS = new Set(["markdown", "shell", "json"]);
+export function parseManifest(raw) {
+    const o = JSON.parse(raw);
+    if (!Array.isArray(o.files))
+        throw new ManifestError("files: array required");
+    const out = [];
+    for (const e of o.files) {
+        if (typeof e.path !== "string")
+            throw new ManifestError("entry.path: string required");
+        if (!CATS.has(e.category))
+            throw new ManifestError(`entry.category invalid: ${e.category}`);
+        if (e.category === "hybrid") {
+            if (!FMTS.has(e.format))
+                throw new ManifestError(`hybrid entry missing/invalid format: ${e.path}`);
+        }
+        out.push({ path: e.path, category: e.category, format: e.format });
+    }
+    return { files: out };
+}
