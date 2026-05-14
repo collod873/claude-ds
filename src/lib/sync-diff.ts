@@ -1,9 +1,10 @@
 import type { Category, Format } from "./manifest.js";
 import { extractMarkerInner, mergeMarkers } from "./markers.js";
+import { mergeJsonKeys } from "./json-merge.js";
 
 export type FileVerdict =
   | { action: "skip"; reason: string }
-  | { action: "rewrite"; reason: string }
+  | { action: "rewrite"; reason: string; newContent?: string }
   | { action: "rewrite-region"; reason: string; newContent: string }
   | { action: "abort"; reason: string };
 
@@ -22,7 +23,17 @@ export function diffFile(info: EntryInfo, d: DiffInput): FileVerdict {
   }
 
   if (info.category === "hybrid") {
-    if (!info.format || info.format === "json") return { action: "abort", reason: "hybrid json unsupported at v1" };
+    if (info.format === "json") {
+      let merged: string;
+      try {
+        merged = mergeJsonKeys(d.upstream, d.current, ["hooks"]);
+      } catch (e) {
+        return { action: "abort", reason: `json merge failed: ${(e as Error).message}` };
+      }
+      if (merged === d.current) return { action: "skip", reason: "hybrid json in sync" };
+      return { action: "rewrite", reason: "hybrid json hooks changed upstream", newContent: merged };
+    }
+    if (!info.format) return { action: "abort", reason: "hybrid file has no format declared" };
     const fmt = info.format;
     let currentInner: string, upstreamInner: string, prevInner: string | null;
     try {
