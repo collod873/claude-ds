@@ -31,9 +31,9 @@ const SKIP_DIRS = new Set(["node_modules", ".git", "dist"]);
 async function collectPaths(root: string): Promise<string[]> {
   const results: string[] = [];
   async function walk(dir: string, rel: string): Promise<void> {
-    let entries: Awaited<ReturnType<typeof readdir>>;
+    let entries: import("node:fs").Dirent<string>[];
     try {
-      entries = await readdir(dir, { withFileTypes: true });
+      entries = await readdir(dir, { withFileTypes: true, encoding: "utf8" });
     } catch {
       return;
     }
