@@ -447,7 +447,7 @@ slice_of: .claude/plans/claude-ds.md
 - Modify: `src/cli.ts`
 - Test: `tests/integration/init.test.ts`
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
   Scope: `tests/integration/init.test.ts` only
 
   ```ts
@@ -483,10 +483,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/integration/init.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `init`**
+- [x] **Step 3: Implement `init`**
   Scope: `src/commands/init.ts`, `src/cli.ts` only
 
   ```ts
@@ -527,10 +527,10 @@ slice_of: .claude/plans/claude-ds.md
 
   Register `init --pack <name> [--yes]` in `src/cli.ts`.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/integration/init.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -541,9 +541,9 @@ slice_of: .claude/plans/claude-ds.md
 
 ## Definition of Done
 
-- [ ] builds_clean
-- [ ] verify_sh_green
-- [ ] baseline_hold_or_improve
-  Justification: <fill only if a counter delta is present and accepted>
-- [ ] screenshots_light_dark — required: false
+- [x] builds_clean — `npm run build` clean on 2026-05-14.
+- [x] verify_sh_green — n/a: no `verify.sh` in repo; project verifier is `npx vitest run` (31/31 pass on 2026-05-14).
+- [x] baseline_hold_or_improve
+  Justification: No counter delta; test count grew 21 → 31 (added Task 3/4/8/11/12/13 tests).
+- [x] screenshots_light_dark — required: false
   Paths: n/a (CLI, no UI)
