@@ -3,6 +3,8 @@ import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
 import { versionCmd } from "./commands/version.js";
 import { initCmd } from "./commands/init.js";
+import { auditCmd } from "./commands/audit.js";
+import { adoptCmd } from "./commands/adopt.js";
 const program = new Command();
 program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`);
 program
@@ -17,6 +19,21 @@ program
     .option("--yes", "skip confirmation prompt")
     .action(async (opts) => {
     await initCmd({ pack: opts.pack, yes: opts.yes });
+});
+program
+    .command("audit")
+    .requiredOption("--pack <name>", "pack to audit against")
+    .option("--suggest-removals", "suggest ad-hoc files for removal")
+    .action(async (opts) => {
+    await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals });
+});
+program
+    .command("adopt")
+    .requiredOption("--pack <name>", "pack to adopt")
+    .option("--yes", "skip confirmation prompt")
+    .option("--backup-settings", "back up pre-existing .claude/settings.json before adopting")
+    .action(async (opts) => {
+    await adoptCmd({ pack: opts.pack, yes: opts.yes, backupSettings: opts.backupSettings });
 });
 program.parseAsync(process.argv).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);
