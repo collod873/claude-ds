@@ -7,6 +7,7 @@ import { auditCmd } from "./commands/audit.js";
 import { adoptCmd } from "./commands/adopt.js";
 import { migrateCmd } from "./commands/migrate.js";
 import { enforceCmd } from "./commands/enforce.js";
+import { syncCmd } from "./commands/sync.js";
 
 const program = new Command();
 program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`);
@@ -62,6 +63,14 @@ program
   .option("--yes", "skip confirmation prompt")
   .action(async (opts: { yes?: boolean }) => {
     await enforceCmd({ yes: opts.yes });
+  });
+
+program
+  .command("sync")
+  .option("--offline-fixture <path>", "use local pack directory instead of fetching upstream")
+  .option("--yes", "skip confirmation prompt")
+  .action(async (opts: { offlineFixture?: string; yes?: boolean }) => {
+    await syncCmd({ offlineFixture: opts.offlineFixture, yes: opts.yes });
   });
 
 program.parseAsync(process.argv).catch((e: unknown) => {
