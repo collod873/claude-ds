@@ -21,7 +21,8 @@ describe("next-react manifest", () => {
       "failure-log.md",
     ]) expect(paths).toContain(p);
     expect(m.files.find((f) => f.path === "CLAUDE.md")!.category).toBe("hybrid");
-    expect(m.files.find((f) => f.path === ".claude/settings.json")!.category).toBe("managed");
+    expect(m.files.find((f) => f.path === ".claude/settings.json")!.category).toBe("hybrid");
+    expect(m.files.find((f) => f.path === ".claude/settings.json")!.format).toBe("json");
     expect(m.files.find((f) => f.path === "contracts.md")!.category).toBe("seeded");
   });
 });
