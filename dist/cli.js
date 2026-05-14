@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import pkg from "../package.json" with { type: "json" };
 import { versionCmd } from "./commands/version.js";
 import { initCmd } from "./commands/init.js";
 import { auditCmd } from "./commands/audit.js";
 import { adoptCmd } from "./commands/adopt.js";
+import { migrateCmd } from "./commands/migrate.js";
+import { enforceCmd } from "./commands/enforce.js";
 const program = new Command();
 program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`);
 program
@@ -34,6 +36,28 @@ program
     .option("--backup-settings", "back up pre-existing .claude/settings.json before adopting")
     .action(async (opts) => {
     await adoptCmd({ pack: opts.pack, yes: opts.yes, backupSettings: opts.backupSettings });
+});
+program
+    .command("migrate")
+    .argument("<path>", "source component path")
+    .requiredOption("--reason <text>", "reason for exception")
+    .addOption(new Option("--tier <tier>", "force tier: atom or composite").choices(["atom", "composite"]))
+    .option("--rename <name>", "destination filename override")
+    .option("--yes", "skip confirmation prompt")
+    .action(async (source, opts) => {
+    await migrateCmd({
+        source,
+        reason: opts.reason,
+        tier: opts.tier,
+        rename: opts.rename,
+        yes: opts.yes,
+    });
+});
+program
+    .command("enforce")
+    .option("--yes", "skip confirmation prompt")
+    .action(async (opts) => {
+    await enforceCmd({ yes: opts.yes });
 });
 program.parseAsync(process.argv).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);

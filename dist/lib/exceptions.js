@@ -1,0 +1,22 @@
+export class ExceptionError extends Error {
+}
+export function parseExceptions(raw) {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr))
+        throw new ExceptionError("exceptions.json must be an array");
+    for (const e of arr) {
+        if (typeof e.rule_id !== "string" || typeof e.file !== "string" || typeof e.reason !== "string" || typeof e.expiry !== "string")
+            throw new ExceptionError(`malformed exception entry: ${JSON.stringify(e)}`);
+        if (!e.reason.trim())
+            throw new ExceptionError(`reason required for ${e.file}`);
+    }
+    return arr;
+}
+export function openCount(ex, now) {
+    return ex.filter((e) => new Date(e.expiry) > now).length;
+}
+export function gate(ex, threshold, now) {
+    const n = openCount(ex, now);
+    if (n > threshold)
+        throw new ExceptionError(`open exceptions (${n}) exceed threshold (${threshold})`);
+}

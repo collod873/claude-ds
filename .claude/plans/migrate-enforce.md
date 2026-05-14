@@ -355,9 +355,9 @@ slice_of: .claude/plans/claude-ds.md
 
 ## Definition of Done
 
-- [ ] builds_clean
-- [ ] verify_sh_green
-- [ ] baseline_hold_or_improve
-  Justification: <fill only if a counter delta is present and accepted>
-- [ ] screenshots_light_dark — required: false
+- [x] builds_clean
+- [x] verify_sh_green
+- [x] baseline_hold_or_improve
+  Justification: 36 → 47 tests (+11 new); no counters regressed.
+- [x] screenshots_light_dark — required: false
   Paths: n/a (CLI, no UI)
