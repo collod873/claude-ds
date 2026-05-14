@@ -93,4 +93,24 @@ describe("adopt", () => {
     expect(postCommands).toContain(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
     expect(postCommands).toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
   });
+
+  it("v0.1.3 regression: refuses adopt when lookalikes exist (CrewOps-shaped fixture)", async () => {
+    // Simulate a project with different vocabulary — these are the parallel files the v0.1.3 bug created
+    await writeFile(join(dir, "design-tokens.json"), "{}");
+    await mkdir(join(dir, "src", "components", "branded"), { recursive: true });
+    await writeFile(join(dir, "src", "components", "branded", "Button.tsx"), "export const Button = () => null;");
+    await writeFile(join(dir, "atom-kit-contract.md"), "# contracts");
+
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+
+    // Must refuse — non-zero exit, nothing mutated
+    expect(r.code).not.toBe(0);
+    // Doctor output sent to stderr
+    expect(r.stderr).toContain("design-tokens.json");
+    expect(r.stderr).toContain("atom-kit-contract.md");
+    // .claude-ds.json must NOT have been created
+    await expect(stat(join(dir, ".claude-ds.json"))).rejects.toThrow();
+    // Parallel files must NOT have been seeded
+    await expect(stat(join(dir, "tokens.json"))).rejects.toThrow();
+  });
 });

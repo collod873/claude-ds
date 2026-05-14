@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
 import { mergeJsonKeys } from "../lib/json-merge.js";
 import { info, err, confirm } from "../lib/log.js";
+import { detectLookalikes } from "../lib/lookalike.js";
 
 // Read package.json for version (avoid JSON import assertions for broader compat).
 async function getVersion(packageJsonPath: string): Promise<string> {
@@ -22,6 +23,28 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; cwd?: string
   const repoRoot = resolve(here, "..", "..");
   const packDir = join(repoRoot, "packs", opts.pack);
   const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+
+  // Precondition gate: refuse if any canonical path is missing but has a lookalike.
+  // This prevents parallel files being seeded next to differently-named existing files.
+  const findings = await detectLookalikes(cwd, manifest.canonical_paths);
+  const blockers = findings.filter(f => !f.present && f.lookalike !== null);
+  if (blockers.length > 0) {
+    const lines: string[] = [
+      "adopt refused: lookalike files detected — rename to canonical names first.",
+      "",
+      "The following project files use different vocabulary than the canonical names.",
+      "Rename them before running adopt (use `doctor` to see the full report):",
+      "",
+    ];
+    for (const b of blockers) {
+      lines.push(`  ${b.lookalike} → ${b.canonical}`);
+    }
+    lines.push("");
+    lines.push("No files were modified.");
+    process.stderr.write(lines.join("\n") + "\n");
+    process.exit(2);
+  }
+
   for (const f of manifest.files) {
     if (f.category === "generated") continue;
     const srcName = f.path === "package.json" ? "package.json.seed" : f.path === "CLAUDE.md" ? "CLAUDE.md.fragment" : f.path;

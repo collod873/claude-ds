@@ -61,11 +61,13 @@ function stem(name: string): string {
 }
 
 /** Returns true if candidate is a lookalike of canonicalBase.
- *  Lookalike = Levenshtein distance ≤ 4 OR substring containment (full name or stem). */
+ *  Lookalike = Levenshtein distance ≤ 3 OR substring containment (full name or stem).
+ *  Note: threshold is 3 (not 4) to avoid false positives between generic names like
+ *  "components" (dist=4 from "composites") that share no semantic relationship. */
 function isLookalike(canonicalBase: string, candidateBase: string): boolean {
   if (canonicalBase === candidateBase) return false; // exact match handled separately
   const dist = levenshtein(canonicalBase, candidateBase);
-  if (dist <= 4) return true;
+  if (dist <= 3) return true;
   // Full-name substring containment
   if (canonicalBase.includes(candidateBase) || candidateBase.includes(canonicalBase)) return true;
   // Stem-based substring containment
