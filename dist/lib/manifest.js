@@ -18,5 +18,8 @@ export function parseManifest(raw) {
         }
         out.push({ path: e.path, category: e.category, format: e.format });
     }
-    return { files: out };
+    const canonical_paths = Array.isArray(o.canonical_paths)
+        ? o.canonical_paths.filter((p) => typeof p === "string")
+        : [];
+    return { files: out, canonical_paths };
 }
