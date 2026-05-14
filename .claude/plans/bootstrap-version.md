@@ -163,7 +163,7 @@ slice_of: .claude/plans/claude-ds.md
   Run: `npm install && npx vitest run tests/integration/version.test.ts`
   Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
   Scope: git only
 
   ```bash
@@ -177,7 +177,7 @@ slice_of: .claude/plans/claude-ds.md
 **Files:**
 - Create: `src/lib/config.ts`, `tests/unit/config.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   Scope: `tests/unit/config.test.ts` only
 
   ```ts
@@ -205,12 +205,12 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only
 
   Run: `npx vitest run tests/unit/config.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement parseConfig**
+- [x] **Step 3: Implement parseConfig**
   Scope: `src/lib/config.ts` only
 
   ```ts
@@ -238,12 +238,12 @@ slice_of: .claude/plans/claude-ds.md
   }
   ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Scope: read-only
 
   Run: `npx vitest run tests/unit/config.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -257,7 +257,7 @@ slice_of: .claude/plans/claude-ds.md
 **Files:**
 - Create: `src/lib/tags.ts`, `tests/unit/tags.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   Scope: `tests/unit/tags.test.ts` only
 
   ```ts
@@ -284,10 +284,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/unit/tags.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement tags**
+- [x] **Step 3: Implement tags**
   Scope: `src/lib/tags.ts` only
 
   ```ts
@@ -307,10 +307,10 @@ slice_of: .claude/plans/claude-ds.md
   }
   ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/unit/tags.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -326,7 +326,7 @@ slice_of: .claude/plans/claude-ds.md
 - Modify: `src/cli.ts`
 - Test: `tests/integration/version.test.ts` (extend)
 
-- [ ] **Step 1: Extend the integration test**
+- [x] **Step 1: Extend the integration test**
   Scope: `tests/integration/version.test.ts` only
 
   ```ts
@@ -359,10 +359,10 @@ slice_of: .claude/plans/claude-ds.md
   });
   ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
   Scope: read-only. Run: `npx vitest run tests/integration/version.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `version` command**
+- [x] **Step 3: Implement `version` command**
   Scope: `src/commands/version.ts`, `src/cli.ts` only
 
   ```ts
@@ -396,10 +396,10 @@ slice_of: .claude/plans/claude-ds.md
 
   Update `src/cli.ts` to register `version` with a `--offline` flag and route to `versionCmd`, replacing the inline stub.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
   Scope: read-only. Run: `npx vitest run tests/integration/version.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Scope: git only
 
   ```bash
@@ -410,9 +410,9 @@ slice_of: .claude/plans/claude-ds.md
 
 ## Definition of Done
 
-- [ ] builds_clean
-- [ ] verify_sh_green
-- [ ] baseline_hold_or_improve
-  Justification: <fill only if a counter delta is present and accepted>
-- [ ] screenshots_light_dark — required: false
+- [x] builds_clean
+- [x] verify_sh_green
+- [x] baseline_hold_or_improve
+  Justification: first slice, no prior baseline to regress against
+- [x] screenshots_light_dark — required: false
   Paths: n/a (CLI, no UI)
