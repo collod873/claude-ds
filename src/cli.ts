@@ -6,6 +6,7 @@ import { initCmd } from "./commands/init.js";
 import { auditCmd } from "./commands/audit.js";
 import { adoptCmd } from "./commands/adopt.js";
 import { migrateCmd } from "./commands/migrate.js";
+import { enforceCmd } from "./commands/enforce.js";
 
 const program = new Command();
 program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`);
@@ -54,6 +55,13 @@ program
       rename: opts.rename,
       yes: opts.yes,
     });
+  });
+
+program
+  .command("enforce")
+  .option("--yes", "skip confirmation prompt")
+  .action(async (opts: { yes?: boolean }) => {
+    await enforceCmd({ yes: opts.yes });
   });
 
 program.parseAsync(process.argv).catch((e: unknown) => {
