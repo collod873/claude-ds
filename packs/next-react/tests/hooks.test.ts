@@ -49,6 +49,58 @@ describe("next-react hooks (fixture)", () => {
     expect(r.code).toBe(0);
   });
 
+  // TSX-* tests (Tier A scope-gate stub — both cases exit 0 in stub mode)
+  it("pre-write-tsx: allows .tsx outside design-system/ (in-scope, stub mode)", () => {
+    const r = runHook("pre-write-tsx.sh", "tsx-app-scope/MyComponent.tsx");
+    expect(r.code).toBe(0);
+  });
+  it("pre-write-tsx: skips .tsx under design-system/ (out-of-scope, exits 0)", () => {
+    const r = runHook("pre-write-tsx.sh", "tsx-ds-scope-skip/design-system/atoms/Button.tsx");
+    expect(r.code).toBe(0);
+  });
+
+  // EXC-* tests
+  it("pre-write-ds-exceptions: allows valid exceptions.json", () => {
+    const r = runHook("pre-write-ds-exceptions.sh", "exceptions-ok/design-system/exceptions.json");
+    expect(r.code).toBe(0);
+  });
+  it("pre-write-ds-exceptions: blocks exceptions.json missing reason (EXC-001)", () => {
+    const r = runHook("pre-write-ds-exceptions.sh", "exceptions-bad-missing-reason/design-system/exceptions.json");
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/^[^:]+:\d+: EXC-001: /);
+  });
+
+  // TIER-* tests
+  it("pre-write-ds-tier-imports: allows clean atom with no forbidden imports", () => {
+    const r = runHook("pre-write-ds-tier-imports.sh", "tier-imports-ok-atom/design-system/atoms/Label.tsx");
+    expect(r.code).toBe(0);
+  });
+  it("pre-write-ds-tier-imports: blocks atom importing from composites/ (TIER-001)", () => {
+    const r = runHook("pre-write-ds-tier-imports.sh", "tier-imports-bad-atom/design-system/atoms/BadAtom.tsx");
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/^[^:]+:\d+: TIER-001: /);
+  });
+
+  // COMMIT-* tests
+  it("pre-commit-global: skips non-git-commit bash commands (exit 0)", () => {
+    const r = spawnSync(
+      "bash",
+      [resolve("packs/next-react/files/.claude/hooks", "pre-commit-global.sh"), "npm run build"],
+      { encoding: "utf8" }
+    );
+    expect(r.status).toBe(0);
+  });
+  it("pre-commit-global: exits 1 with COMMIT-000 when commitlint not in PATH", () => {
+    // Use a PATH that has bash/coreutils but no commitlint binary
+    const r = spawnSync(
+      "bash",
+      [resolve("packs/next-react/files/.claude/hooks", "pre-commit-global.sh"), "git commit -m 'test'"],
+      { encoding: "utf8", env: { ...process.env, PATH: "/bin:/usr/bin" } }
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/COMMIT-000/);
+  });
+
   // SIM-* tests — skipped until Slice F adds similarity-check.ts
   it.skip("pre-write-ds-similarity: exits 1 self-error when similarity-check.ts missing (un-skip after Slice F adds similarity-check.ts)", () => {
     const r = runHook("pre-write-ds-similarity.sh", "states-ok/design-system/atoms/Button.tsx");

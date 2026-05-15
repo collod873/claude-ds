@@ -1,0 +1,9 @@
+{
+  "exceptions": [
+    {
+      "rule": "TOKEN-001",
+      "reason": "Legacy brand color approved by design team",
+      "expiry": "2027-01-01"
+    }
+  ]
+}

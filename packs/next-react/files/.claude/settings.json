@@ -6,7 +6,16 @@
         "hooks": [
           { "type": "command", "command": ".claude/hooks/pre-write-ds-states.sh $CLAUDE_FILE_PATHS" },
           { "type": "command", "command": ".claude/hooks/pre-write-ds-manifest.sh $CLAUDE_FILE_PATHS" },
-          { "type": "command", "command": ".claude/hooks/pre-write-ds-similarity.sh $CLAUDE_FILE_PATHS" }
+          { "type": "command", "command": ".claude/hooks/pre-write-ds-similarity.sh $CLAUDE_FILE_PATHS" },
+          { "type": "command", "command": ".claude/hooks/pre-write-tsx.sh $CLAUDE_FILE_PATHS" },
+          { "type": "command", "command": ".claude/hooks/pre-write-ds-exceptions.sh $CLAUDE_FILE_PATHS" },
+          { "type": "command", "command": ".claude/hooks/pre-write-ds-tier-imports.sh $CLAUDE_FILE_PATHS" }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": ".claude/hooks/pre-commit-global.sh $CLAUDE_BASH_COMMAND" }
         ]
       }
     ],

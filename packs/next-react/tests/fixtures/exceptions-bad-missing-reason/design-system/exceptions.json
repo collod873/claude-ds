@@ -1,0 +1,8 @@
+{
+  "exceptions": [
+    {
+      "rule": "TOKEN-001",
+      "expiry": "2027-01-01"
+    }
+  ]
+}
