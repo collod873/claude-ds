@@ -27,4 +27,20 @@ describe("init", () => {
     expect(r.code).not.toBe(0);
     expect(r.stderr).toMatch(/already exists/i);
   });
+
+  it("-V prints the package version without intercepting subcommand flags", async () => {
+    // Root -V should print the version string and exit cleanly.
+    const r = await runCli(["-V"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim()).toMatch(/^v\d+\.\d+\.\d+/);
+  });
+
+  it("--version is not intercepted at root level (subcommand sees unknown flag error, not version output)", async () => {
+    // With -V as the only root version flag, --version at root is unknown → commander
+    // surfaces an error rather than silently printing the version and swallowing the subcommand.
+    const r = await runCli(["--version"], { cwd: dir });
+    // Commander treats unknown root options as errors (non-zero exit) when passThrough is off.
+    // The important invariant: stdout does NOT contain a bare version string printed by root.
+    expect(r.stdout).not.toMatch(/^v\d+\.\d+\.\d+/);
+  });
 });

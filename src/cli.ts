@@ -12,7 +12,7 @@ import { doctorCmd } from "./commands/doctor.js";
 import { migrateLayoutCmd } from "./commands/migrate-layout.js";
 
 const program = new Command();
-program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`);
+program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`, "-V");
 program
   .command("version")
   .option("--offline", "skip remote latest-tag lookup")
@@ -29,9 +29,9 @@ program
 
 program
   .command("audit")
-  .requiredOption("--pack <name>", "pack to audit against")
+  .option("--pack <name>", "pack to audit against")
   .option("--suggest-removals", "suggest ad-hoc files for removal")
-  .action(async (opts: { pack: string; suggestRemovals?: boolean }) => {
+  .action(async (opts: { pack?: string; suggestRemovals?: boolean }) => {
     await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals });
   });
 program
@@ -76,19 +76,19 @@ program
 
 program
   .command("doctor")
-  .requiredOption("--pack <name>", "pack to check against")
+  .option("--pack <name>", "pack to check against")
   .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
   .option("--verify-hooks", "invoke each pack-registered hook with a pass fixture and report results")
-  .action(async (opts: { pack: string; ignore?: string; verifyHooks?: boolean }) => {
+  .action(async (opts: { pack?: string; ignore?: string; verifyHooks?: boolean }) => {
     await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks });
   });
 
 program
   .command("migrate-layout")
-  .requiredOption("--pack <name>", "pack to migrate layout for")
+  .option("--pack <name>", "pack to migrate layout for")
   .option("--yes", "skip confirmation prompt")
   .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
-  .action(async (opts: { pack: string; yes?: boolean; ignore?: string }) => {
+  .action(async (opts: { pack?: string; yes?: boolean; ignore?: string }) => {
     await migrateLayoutCmd({ pack: opts.pack, yes: opts.yes, ignore: opts.ignore });
   });
 
