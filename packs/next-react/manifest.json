@@ -65,6 +65,43 @@
     { "path": "tests/a11y/.keep", "category": "seeded" },
     { "path": "tests/a11y/README.md", "category": "seeded" }
   ],
+  "deprecated_paths": [
+    {
+      "path": "contracts.md",
+      "since_version": "v0.3.0",
+      "reason": "v0.2.1 adopt wrote this to repo root; canonical location is design-system/contracts.md"
+    },
+    {
+      "path": "exceptions.json",
+      "since_version": "v0.3.0",
+      "reason": "v0.2.1 adopt wrote this to repo root; canonical location is design-system/exceptions.json"
+    },
+    {
+      "path": "failure-log.md",
+      "since_version": "v0.3.0",
+      "reason": "v0.2.1 adopt wrote this to repo root; canonical location is design-system/failure-log.md"
+    },
+    {
+      "path": ".claude/skills/badge-system/SKILL.md",
+      "since_version": "v0.4.0",
+      "reason": "Tier-C skill removed from scaffold; only aesthetic-principles and design-system are required (issue #22)"
+    },
+    {
+      "path": ".claude/skills/typography/SKILL.md",
+      "since_version": "v0.4.0",
+      "reason": "Tier-C skill removed from scaffold; only aesthetic-principles and design-system are required (issue #22)"
+    },
+    {
+      "path": ".claude/skills/design-review/SKILL.md",
+      "since_version": "v0.4.0",
+      "reason": "Tier-C skill removed from scaffold; only aesthetic-principles and design-system are required (issue #22)"
+    },
+    {
+      "path": ".claude/skills/icons/SKILL.md",
+      "since_version": "v0.4.0",
+      "reason": "Tier-C skill removed from scaffold; only aesthetic-principles and design-system are required (issue #22)"
+    }
+  ],
   "canonical_paths": [
     "design-system/tokens.json",
     "design-system/contracts.md",

@@ -2,11 +2,19 @@ export class ManifestError extends Error {}
 export type Category = "managed" | "seeded" | "generated" | "hybrid";
 export type Format = "markdown" | "shell" | "json";
 export interface ManifestEntry { path: string; category: Category; format?: Format; owned_keys?: string[]; }
-export interface Manifest { files: ManifestEntry[]; canonical_paths: string[]; lookalike_ignore: string[]; }
+/** A path written by a prior pack version that should no longer exist in consumer repos. */
+export interface DeprecatedPath { path: string; since_version: string; reason: string; }
+export interface Manifest {
+  files: ManifestEntry[];
+  canonical_paths: string[];
+  lookalike_ignore: string[];
+  /** Paths that prior pack versions seeded/managed but are now obsolete. `reconcile` surfaces these. */
+  deprecated_paths: DeprecatedPath[];
+}
 const CATS = new Set<Category>(["managed","seeded","generated","hybrid"]);
 const FMTS = new Set<Format>(["markdown","shell","json"]);
 export function parseManifest(raw: string): Manifest {
-  const o = JSON.parse(raw) as { files?: unknown; canonical_paths?: unknown; lookalike_ignore?: unknown };
+  const o = JSON.parse(raw) as { files?: unknown; canonical_paths?: unknown; lookalike_ignore?: unknown; deprecated_paths?: unknown };
   if (!Array.isArray(o.files)) throw new ManifestError("files: array required");
   const out: ManifestEntry[] = [];
   for (const e of o.files as Record<string, unknown>[]) {
@@ -26,5 +34,14 @@ export function parseManifest(raw: string): Manifest {
   const lookalike_ignore: string[] = Array.isArray(o.lookalike_ignore)
     ? (o.lookalike_ignore as unknown[]).filter((p): p is string => typeof p === "string")
     : [];
-  return { files: out, canonical_paths, lookalike_ignore };
+  const deprecated_paths: DeprecatedPath[] = [];
+  if (Array.isArray(o.deprecated_paths)) {
+    for (const d of o.deprecated_paths as Record<string, unknown>[]) {
+      if (typeof d.path !== "string") throw new ManifestError("deprecated_paths entry missing path");
+      if (typeof d.since_version !== "string") throw new ManifestError(`deprecated_paths[${d.path}]: since_version required`);
+      if (typeof d.reason !== "string") throw new ManifestError(`deprecated_paths[${d.path}]: reason required`);
+      deprecated_paths.push({ path: d.path, since_version: d.since_version, reason: d.reason });
+    }
+  }
+  return { files: out, canonical_paths, lookalike_ignore, deprecated_paths };
 }
