@@ -50,15 +50,15 @@ async function countLines(p: string): Promise<number> {
   }
 }
 
-function showcaseStub(fileBase: string, displayName: string): string {
+function showcaseStub(displayName: string, fileBase: string): string {
   return [
-    `// TODO(claude-ds): reconform stub — replace with real content`,
-    `// Showcase for ${displayName}`,
-    `import React from "react";`,
+    `// TODO(claude-ds): reconform stub — replace with real showcase`,
     `import { ${displayName} } from "./${fileBase}";`,
     ``,
+    `void ${displayName};`,
+    ``,
     `export default function ${displayName}Showcase() {`,
-    `  return <${displayName} />;`,
+    `  return null;`,
     `}`,
     ``,
   ].join("\n");
@@ -69,17 +69,15 @@ function statesStub(): string {
   return `[]`;
 }
 
-function testStub(fileBase: string, displayName: string): string {
+function testStub(displayName: string, fileBase: string): string {
   return [
-    `// TODO(claude-ds): reconform stub — replace with real content`,
+    `// TODO(claude-ds): reconform stub — replace with real assertions`,
     `import { describe, it, expect } from "vitest";`,
-    `import { render } from "@testing-library/react";`,
-    `import { ${displayName} } from "./${fileBase}";`,
+    `import * as Mod from "./${fileBase}";`,
     ``,
     `describe("${displayName}", () => {`,
-    `  it("renders without crashing", () => {`,
-    `    // TODO(claude-ds): reconform stub — add real assertions`,
-    `    expect(true).toBe(true);`,
+    `  it("module loads", () => {`,
+    `    expect(Mod).toBeDefined();`,
     `  });`,
     `});`,
     ``,
@@ -169,7 +167,7 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string }): Pr
       const companions: Array<{ path: string; stub: () => string; label: string }> = [
         {
           path: join(tierDir, `${componentName}.showcase.tsx`),
-          stub: () => showcaseStub(componentName, displayName),
+          stub: () => showcaseStub(displayName, componentName),
           label: `${componentName}.showcase.tsx`,
         },
         {
@@ -179,7 +177,7 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string }): Pr
         },
         {
           path: join(tierDir, `${componentName}.test.tsx`),
-          stub: () => testStub(componentName, displayName),
+          stub: () => testStub(displayName, componentName),
           label: `${componentName}.test.tsx`,
         },
       ];
