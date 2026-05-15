@@ -8,7 +8,7 @@ async function adopted(dir: string) {
   await mkdir(join(dir, "design-system/atoms"), { recursive: true });
   await mkdir(join(dir, "design-system/composites"), { recursive: true });
   await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version:"v0.0.0", pack:"next-react", mode:"warn" }));
-  await writeFile(join(dir, "exceptions.json"), "[]");
+  await writeFile(join(dir, "exceptions.json"), JSON.stringify({ exceptions: [] }));
 }
 
 describe("migrate", () => {

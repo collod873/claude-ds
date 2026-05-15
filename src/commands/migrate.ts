@@ -33,6 +33,6 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   const cur = parseExceptions(await readFile(exPath, "utf8"));
   const expiry = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   cur.push({ rule_id: "migration-default", file: dest.replace(cwd + "/", ""), reason: opts.reason, expiry });
-  await writeFile(exPath, JSON.stringify(cur, null, 2) + "\n", "utf8");
+  await writeFile(exPath, JSON.stringify({ exceptions: cur }, null, 2) + "\n", "utf8");
   info(`migrated → ${dest} (tier=${tier}), exception registered (expiry=${expiry})`);
 }
