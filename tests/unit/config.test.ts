@@ -34,4 +34,25 @@ describe("parseConfig", () => {
     expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","removed":["a",1]}`))
       .toThrow(ConfigError);
   });
+
+  // v0.2.1: lookalike_ignore field
+  it("accepts valid lookalike_ignore string array", () => {
+    const c = parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","lookalike_ignore":[".vercel/**","**/_actions/**"]}`);
+    expect(c.lookalike_ignore).toEqual([".vercel/**", "**/_actions/**"]);
+  });
+
+  it("defaults lookalike_ignore to [] when absent (v0.2.0 files continue to work)", () => {
+    const c = parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"warn"}`);
+    expect(c.lookalike_ignore).toEqual([]);
+  });
+
+  it("rejects lookalike_ignore with non-string elements", () => {
+    expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","lookalike_ignore":[".vercel/**",42]}`))
+      .toThrow(ConfigError);
+  });
+
+  it("rejects lookalike_ignore that is not an array", () => {
+    expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","lookalike_ignore":".vercel/**"}`))
+      .toThrow(ConfigError);
+  });
 });

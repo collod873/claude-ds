@@ -1,9 +1,9 @@
 export class ConfigError extends Error {}
 export interface Config {
   version: string; pack: string; mode: "warn" | "block";
-  enforce_threshold: number; removed: string[];
+  enforce_threshold: number; removed: string[]; lookalike_ignore: string[];
 }
-const ALLOWED = new Set(["version","pack","mode","enforce_threshold","removed"]);
+const ALLOWED = new Set(["version","pack","mode","enforce_threshold","removed","lookalike_ignore"]);
 const VERSION_RE = /^v\d+\.\d+\.\d+$/;
 export function parseConfig(raw: string): Config {
   let obj: unknown;
@@ -18,5 +18,7 @@ export function parseConfig(raw: string): Config {
   if (!Number.isInteger(enforce_threshold) || enforce_threshold < 0) throw new ConfigError(`enforce_threshold must be ≥ 0 integer`);
   const removed = o.removed === undefined ? [] : o.removed;
   if (!Array.isArray(removed) || removed.some((x) => typeof x !== "string")) throw new ConfigError(`removed must be string[]`);
-  return { version: o.version, pack: o.pack, mode: o.mode, enforce_threshold, removed: removed as string[] };
+  const lookalike_ignore = o.lookalike_ignore === undefined ? [] : o.lookalike_ignore;
+  if (!Array.isArray(lookalike_ignore) || lookalike_ignore.some((x) => typeof x !== "string")) throw new ConfigError(`lookalike_ignore must be string[]`);
+  return { version: o.version, pack: o.pack, mode: o.mode, enforce_threshold, removed: removed as string[], lookalike_ignore: lookalike_ignore as string[] };
 }

@@ -37,8 +37,9 @@ program
   .command("adopt")
   .requiredOption("--pack <name>", "pack to adopt")
   .option("--yes", "skip confirmation prompt")
-  .action(async (opts: { pack: string; yes?: boolean }) => {
-    await adoptCmd({ pack: opts.pack, yes: opts.yes });
+  .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
+  .action(async (opts: { pack: string; yes?: boolean; ignore?: string }) => {
+    await adoptCmd({ pack: opts.pack, yes: opts.yes, ignore: opts.ignore });
   });
 
 program
@@ -75,8 +76,9 @@ program
 program
   .command("doctor")
   .requiredOption("--pack <name>", "pack to check against")
-  .action(async (opts: { pack: string }) => {
-    await doctorCmd({ pack: opts.pack });
+  .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
+  .action(async (opts: { pack: string; ignore?: string }) => {
+    await doctorCmd({ pack: opts.pack, ignore: opts.ignore });
   });
 
 program.parseAsync(process.argv).catch((e: unknown) => {
