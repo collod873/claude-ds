@@ -1,10 +1,14 @@
 import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
 import { mergeJsonKeys } from "../lib/json-merge.js";
 import { info, err, confirm } from "../lib/log.js";
 import { detectLookalikes } from "../lib/lookalike.js";
+import { detectPackageManager, runCmd } from "../lib/package-manager.js";
+const execFile = promisify(execFileCb);
 // Read package.json for version (avoid JSON import assertions for broader compat).
 async function getVersion(packageJsonPath) {
     const raw = await readFile(packageJsonPath, "utf8");
@@ -56,6 +60,7 @@ export async function adoptCmd(opts) {
         info("aborted");
         return;
     }
+    const overwrites = [];
     for (const f of manifest.files) {
         if (f.category === "generated")
             continue;
@@ -73,6 +78,10 @@ export async function adoptCmd(opts) {
         if (f.category === "hybrid" && f.format === "markdown" && await exists(dest)) {
             const cur = await readFile(dest, "utf8");
             const merged = `${cur}\n<!-- >>> claude-ds managed >>> -->\n${content}\n<!-- <<< claude-ds managed <<< -->\n`;
+            // Record overwrite only when merged result differs from current on-disk content.
+            if (merged !== cur) {
+                overwrites.push({ path: f.path, prevSize: Buffer.byteLength(cur, "utf8"), newSize: Buffer.byteLength(merged, "utf8") });
+            }
             await writeFile(dest, merged, "utf8");
         }
         else if (f.category === "hybrid" && f.format === "markdown") {
@@ -84,7 +93,10 @@ export async function adoptCmd(opts) {
                 // Detect existing indentation: find first indented line, check if it starts with a tab.
                 const firstIndented = current.split("\n").find(l => l.startsWith(" ") || l.startsWith("\t"));
                 const indent = firstIndented && firstIndented.startsWith("\t") ? "\t" : 2;
-                const merged = mergeJsonKeys(content, current, ["hooks"], indent);
+                const merged = mergeJsonKeys(content, current, f.owned_keys ?? ["hooks"], indent);
+                if (merged !== current) {
+                    overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(merged, "utf8") });
+                }
                 await writeFile(dest, merged, "utf8");
             }
             else {
@@ -92,7 +104,38 @@ export async function adoptCmd(opts) {
             }
         }
         else {
+            // managed category: check for overwrite before writing.
+            if (f.category === "managed" && await exists(dest)) {
+                const current = await readFile(dest, "utf8");
+                if (current !== content) {
+                    overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(content, "utf8") });
+                }
+            }
             await writeFile(dest, content, "utf8");
+        }
+    }
+    if (overwrites.length > 0) {
+        const lines = [`Overwrote ${overwrites.length} managed file(s):`];
+        for (const o of overwrites) {
+            lines.push(`  ${o.path}  (was ${o.prevSize} bytes, now ${o.newSize} bytes)`);
+        }
+        lines.push("Project-specific customizations to these files have been replaced.");
+        lines.push("To diff before adopt, run: claude-ds doctor --pack <name>");
+        process.stdout.write(lines.join("\n") + "\n");
+    }
+    const buildScriptPath = join(cwd, "scripts", "build-manifest.ts");
+    const manifestPath = join(cwd, "design-system", "manifest.json");
+    if (await exists(buildScriptPath) && !(await exists(manifestPath))) {
+        try {
+            await execFile("node", ["--experimental-strip-types", buildScriptPath], {
+                cwd,
+                timeout: 30_000,
+            });
+            info("bootstrapped design-system/manifest.json");
+        }
+        catch (e) {
+            const exitCode = e.code ?? "?";
+            info(`warning: build-manifest failed (exit ${exitCode}), manifest.json not created. Run manually: node --experimental-strip-types scripts/build-manifest.ts`);
         }
     }
     const version = await getVersion(join(repoRoot, "package.json"));
@@ -100,5 +143,6 @@ export async function adoptCmd(opts) {
     if (flagGlobs.length > 0)
         cfg.lookalike_ignore = flagGlobs;
     await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
-    info(`adopted claude-ds (${opts.pack}, mode=warn). Run 'enforce' when ready.`);
+    const pm = await detectPackageManager(cwd);
+    info(`adopted claude-ds (${opts.pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);
 }

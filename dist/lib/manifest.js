@@ -16,7 +16,10 @@ export function parseManifest(raw) {
             if (!FMTS.has(e.format))
                 throw new ManifestError(`hybrid entry missing/invalid format: ${e.path}`);
         }
-        out.push({ path: e.path, category: e.category, format: e.format });
+        const owned_keys = Array.isArray(e.owned_keys)
+            ? e.owned_keys.filter((k) => typeof k === "string")
+            : undefined;
+        out.push({ path: e.path, category: e.category, format: e.format, owned_keys });
     }
     const canonical_paths = Array.isArray(o.canonical_paths)
         ? o.canonical_paths.filter((p) => typeof p === "string")

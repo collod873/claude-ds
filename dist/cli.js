@@ -9,6 +9,7 @@ import { migrateCmd } from "./commands/migrate.js";
 import { enforceCmd } from "./commands/enforce.js";
 import { syncCmd } from "./commands/sync.js";
 import { doctorCmd } from "./commands/doctor.js";
+import { migrateLayoutCmd } from "./commands/migrate-layout.js";
 const program = new Command();
 program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`);
 program
@@ -71,8 +72,17 @@ program
     .command("doctor")
     .requiredOption("--pack <name>", "pack to check against")
     .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
+    .option("--verify-hooks", "invoke each pack-registered hook with a pass fixture and report results")
     .action(async (opts) => {
-    await doctorCmd({ pack: opts.pack, ignore: opts.ignore });
+    await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks });
+});
+program
+    .command("migrate-layout")
+    .requiredOption("--pack <name>", "pack to migrate layout for")
+    .option("--yes", "skip confirmation prompt")
+    .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
+    .action(async (opts) => {
+    await migrateLayoutCmd({ pack: opts.pack, yes: opts.yes, ignore: opts.ignore });
 });
 program.parseAsync(process.argv).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);

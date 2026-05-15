@@ -1,10 +1,14 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, writeFile, mkdir, rm, readdir, copyFile, chmod } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { parseManifest } from "../lib/manifest.js";
 import { parseConfig } from "../lib/config.js";
 import { parseExceptions, openCount } from "../lib/exceptions.js";
 import { detectLookalikes } from "../lib/lookalike.js";
+import { detectPackageManager } from "../lib/package-manager.js";
 async function exists(p) {
     try {
         await stat(p);
@@ -18,6 +22,7 @@ function renderMarkdown(result) {
     const lines = [];
     if (result.mode === "pre-adopt") {
         lines.push("## claude-ds doctor — pre-adopt mode\n");
+        lines.push(`Package manager: **${result.packageManager}**\n`);
         lines.push("No `.claude-ds.json` found. Run `adopt` to install the scaffold.\n");
         const lookalikes = result.canonical.filter(f => !f.present && f.lookalike !== null);
         const missing = result.canonical.filter(f => !f.present && f.lookalike === null);
@@ -48,6 +53,7 @@ function renderMarkdown(result) {
     }
     else {
         lines.push("## claude-ds doctor — post-adopt mode\n");
+        lines.push(`Package manager: **${result.packageManager}**\n`);
         const lookalikes = result.canonical.filter(f => !f.present && f.lookalike !== null);
         const missing = result.canonical.filter(f => !f.present && f.lookalike === null);
         const present = result.canonical.filter(f => f.present);
@@ -78,11 +84,142 @@ function renderMarkdown(result) {
     }
     return lines.join("\n");
 }
+const STDERR_CONTRACT = /^[^:]+:\d+: [A-Z]+-\d+: .+/m;
+function runHookWithTimeout(hookPath, arg, cwd, timeoutMs) {
+    return new Promise((resolve) => {
+        execFile("bash", [hookPath, arg], { cwd, timeout: timeoutMs }, (err, _stdout, stderr) => {
+            // When hook exits non-zero, err is set. err.code holds numeric exit code for ChildProcessError.
+            const code = err
+                ? (typeof err.code === "number"
+                    ? err.code
+                    : 1)
+                : 0;
+            resolve({ code, stderr });
+        });
+    });
+}
+async function verifyHooks(packDir, cwd) {
+    const hooksDir = join(packDir, "files/.claude/hooks");
+    const hookFiles = (await readdir(hooksDir)).filter(f => f.endsWith(".sh"));
+    const results = [];
+    for (const hookFile of hookFiles.sort()) {
+        const hookPath = join(cwd, ".claude/hooks", hookFile);
+        const fixturePath = join(hooksDir, `${hookFile}.verify-fixture.json`);
+        // Check hook exists on disk
+        if (!(await exists(hookPath))) {
+            results.push({ hook: hookFile, status: "FAIL", reason: "hook script missing from adopted project" });
+            continue;
+        }
+        // Check fixture exists
+        if (!(await exists(fixturePath))) {
+            results.push({ hook: hookFile, status: "FAIL", reason: "no verify-fixture.json found" });
+            continue;
+        }
+        let fixture;
+        try {
+            fixture = JSON.parse(await readFile(fixturePath, "utf8"));
+        }
+        catch {
+            results.push({ hook: hookFile, status: "FAIL", reason: "malformed verify-fixture.json" });
+            continue;
+        }
+        const { pass } = fixture;
+        // Build a temp working dir for this hook invocation
+        const tmp = await mkdtemp(join(tmpdir(), "claude-ds-verify-"));
+        try {
+            // Copy hook scripts from the ADOPTED project (cwd) so we exercise what's actually on disk.
+            // This ensures replaced/modified hooks are tested, not the pack originals.
+            const adoptedHooksDir = join(cwd, ".claude/hooks");
+            const tmpHooksDir = join(tmp, ".claude/hooks");
+            const tmpHooksLib = join(tmp, ".claude/hooks/lib");
+            await mkdir(tmpHooksLib, { recursive: true });
+            // Copy all .sh files and lib/ from the adopted project
+            for (const f of await readdir(adoptedHooksDir)) {
+                const src = join(adoptedHooksDir, f);
+                const dst = join(tmpHooksDir, f);
+                const s = await stat(src);
+                if (s.isDirectory()) {
+                    await mkdir(dst, { recursive: true });
+                    for (const lf of await readdir(src)) {
+                        await copyFile(join(src, lf), join(dst, lf));
+                        await chmod(join(dst, lf), 0o755);
+                    }
+                }
+                else if (f.endsWith(".sh")) {
+                    await copyFile(src, dst);
+                    await chmod(dst, 0o755);
+                }
+            }
+            // Seed setup files
+            for (const s of pass.setup) {
+                const filePath = join(tmp, s.path);
+                await mkdir(dirname(filePath), { recursive: true });
+                await writeFile(filePath, s.content, "utf8");
+            }
+            // For similarity hook, copy similarity-check.ts
+            if (pass.needs_similarity_script) {
+                const simSrc = join(packDir, "files/scripts/similarity-check.ts");
+                const simDst = join(tmp, "scripts/similarity-check.ts");
+                await mkdir(dirname(simDst), { recursive: true });
+                await copyFile(simSrc, simDst);
+            }
+            const hookInTmp = join(tmp, ".claude/hooks", hookFile);
+            const { code, stderr } = await runHookWithTimeout(hookInTmp, pass.arg, tmp, 5000);
+            if (code === 0) {
+                results.push({ hook: hookFile, status: "PASS" });
+            }
+            else if (code === 2) {
+                // exit 2 from pass payload — unexpected block; check if stderr matches contract
+                if (STDERR_CONTRACT.test(stderr)) {
+                    results.push({ hook: hookFile, status: "FAIL", reason: "hook blocked pass payload (exit 2)" });
+                }
+                else {
+                    results.push({ hook: hookFile, status: "FAIL", reason: "stderr does not match contract" });
+                }
+            }
+            else if (code === 1) {
+                // exit 1 is self-error
+                results.push({ hook: hookFile, status: "FAIL", reason: `hook self-error (exit 1): ${stderr.slice(0, 120).trim()}` });
+            }
+            else {
+                results.push({ hook: hookFile, status: "FAIL", reason: `unexpected exit code ${code}` });
+            }
+        }
+        finally {
+            await rm(tmp, { recursive: true, force: true });
+        }
+    }
+    return results;
+}
+function renderVerifyTable(results) {
+    const lines = [];
+    lines.push("## claude-ds doctor --verify-hooks\n");
+    lines.push("| Hook | Result | Reason |");
+    lines.push("|------|--------|--------|");
+    for (const r of results) {
+        const reason = r.reason ?? "";
+        lines.push(`| ${r.hook} | ${r.status} | ${reason} |`);
+    }
+    lines.push("");
+    const passed = results.filter(r => r.status === "PASS").length;
+    const total = results.length;
+    lines.push(`${passed}/${total} hooks verified.\n`);
+    return lines.join("\n");
+}
 export async function doctorCmd(opts) {
     const cwd = opts.cwd ?? process.cwd();
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..", "..");
     const packDir = join(repoRoot, "packs", opts.pack);
+    if (opts.verifyHooks) {
+        const results = await verifyHooks(packDir, cwd);
+        const table = renderVerifyTable(results);
+        process.stdout.write(table);
+        const anyFail = results.some(r => r.status === "FAIL");
+        if (anyFail)
+            process.exit(1);
+        return;
+    }
     const manifestRaw = await readFile(join(packDir, "manifest.json"), "utf8");
     const manifest = parseManifest(manifestRaw);
     const canonicalPaths = manifest.canonical_paths;
@@ -102,6 +239,7 @@ export async function doctorCmd(opts) {
     const flagGlobs = opts.ignore ? opts.ignore.split(",").map(g => g.trim()).filter(Boolean) : [];
     const ignoreGlobs = [...manifest.lookalike_ignore, ...configIgnore, ...flagGlobs];
     const findings = await detectLookalikes(cwd, canonicalPaths, ignoreGlobs);
+    const pm = await detectPackageManager(cwd);
     const isPostAdopt = await exists(configPath);
     let result;
     if (isPostAdopt) {
@@ -135,6 +273,7 @@ export async function doctorCmd(opts) {
                 missing: missingManaged,
                 open_exceptions: openExceptions,
             },
+            packageManager: pm,
         };
         // Suppress unused variable warning
         void cfg;
@@ -143,6 +282,7 @@ export async function doctorCmd(opts) {
         result = {
             mode: "pre-adopt",
             canonical: findings,
+            packageManager: pm,
         };
     }
     const md = renderMarkdown(result);
