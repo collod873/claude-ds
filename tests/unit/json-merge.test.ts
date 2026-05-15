@@ -73,6 +73,53 @@ describe("mergeJsonKeys — non-hooks owned keys (wholesale replace)", () => {
   });
 });
 
+describe("mergeJsonKeys — scripts namespace-aware merge", () => {
+  // Pack-owned prefixes: ds:, ci:, and exact names generate:showcase, lint:commits
+
+  it("scripts merge preserves user scripts alongside pack scripts", () => {
+    const upstream = JSON.stringify({ scripts: { "ds:check-states": "node --experimental-strip-types scripts/check-states-coverage.ts" } });
+    const current = JSON.stringify({ name: "my-app", scripts: { test: "vitest", myproj: "echo hi" } });
+    const result = mergeJsonKeys(upstream, current, ["scripts"]);
+    const parsed = JSON.parse(result);
+    // all 3 scripts present
+    expect(parsed.scripts["test"]).toBe("vitest");
+    expect(parsed.scripts["myproj"]).toBe("echo hi");
+    expect(parsed.scripts["ds:check-states"]).toBe("node --experimental-strip-types scripts/check-states-coverage.ts");
+    // other top-level keys untouched
+    expect(parsed.name).toBe("my-app");
+  });
+
+  it("stale pack-owned scripts stripped and new pack scripts added on re-merge", () => {
+    const upstream = JSON.stringify({ scripts: { "ds:check-states": "node --experimental-strip-types scripts/check-states-coverage.ts", "ci:consistency": "bash scripts/consistency-probe.sh" } });
+    // current has a stale ds: script that is no longer in upstream
+    const current = JSON.stringify({ scripts: { "ds:old-name": "node scripts/old.ts", test: "vitest" } });
+    const result = mergeJsonKeys(upstream, current, ["scripts"]);
+    const parsed = JSON.parse(result);
+    // stale pack script removed
+    expect(parsed.scripts["ds:old-name"]).toBeUndefined();
+    // new pack scripts present
+    expect(parsed.scripts["ds:check-states"]).toBeDefined();
+    expect(parsed.scripts["ci:consistency"]).toBeDefined();
+    // user script survives
+    expect(parsed.scripts["test"]).toBe("vitest");
+  });
+
+  it("ds:-prefixed user script not in upstream is stripped (pack owns the namespace)", () => {
+    // NOTE: we own the ds: namespace entirely. If a user writes ds:custom and it's not in
+    // upstream, it gets stripped. This is intentional — document here so future-Collin isn't burned.
+    const upstream = JSON.stringify({ scripts: { "ds:check-states": "node --experimental-strip-types scripts/check-states-coverage.ts" } });
+    const current = JSON.stringify({ scripts: { "ds:custom": "echo user-script", test: "vitest" } });
+    const result = mergeJsonKeys(upstream, current, ["scripts"]);
+    const parsed = JSON.parse(result);
+    // ds:custom stripped because ds: namespace is pack-owned
+    expect(parsed.scripts["ds:custom"]).toBeUndefined();
+    // user's non-namespaced script survives
+    expect(parsed.scripts["test"]).toBe("vitest");
+    // pack script present
+    expect(parsed.scripts["ds:check-states"]).toBeDefined();
+  });
+});
+
 describe("mergeJsonKeys — hooks namespace-aware merge (CrewOps regression)", () => {
   // The pack's two hooks live under .claude/hooks/ namespace
   const packUpstream = JSON.stringify({

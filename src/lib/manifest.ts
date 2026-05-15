@@ -1,7 +1,7 @@
 export class ManifestError extends Error {}
 export type Category = "managed" | "seeded" | "generated" | "hybrid";
 export type Format = "markdown" | "shell" | "json";
-export interface ManifestEntry { path: string; category: Category; format?: Format; }
+export interface ManifestEntry { path: string; category: Category; format?: Format; owned_keys?: string[]; }
 export interface Manifest { files: ManifestEntry[]; canonical_paths: string[]; lookalike_ignore: string[]; }
 const CATS = new Set<Category>(["managed","seeded","generated","hybrid"]);
 const FMTS = new Set<Format>(["markdown","shell","json"]);
@@ -15,7 +15,10 @@ export function parseManifest(raw: string): Manifest {
     if (e.category === "hybrid") {
       if (!FMTS.has(e.format as Format)) throw new ManifestError(`hybrid entry missing/invalid format: ${e.path}`);
     }
-    out.push({ path: e.path, category: e.category as Category, format: e.format as Format | undefined });
+    const owned_keys: string[] | undefined = Array.isArray(e.owned_keys)
+      ? (e.owned_keys as unknown[]).filter((k): k is string => typeof k === "string")
+      : undefined;
+    out.push({ path: e.path, category: e.category as Category, format: e.format as Format | undefined, owned_keys });
   }
   const canonical_paths: string[] = Array.isArray(o.canonical_paths)
     ? (o.canonical_paths as unknown[]).filter((p): p is string => typeof p === "string")
