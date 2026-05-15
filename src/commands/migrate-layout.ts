@@ -1,21 +1,31 @@
-import { readFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir, stat } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { parseManifest } from "../lib/manifest.js";
+import { parseConfig } from "../lib/config.js";
 import { detectLookalikes } from "../lib/lookalike.js";
 import { info, err, confirm } from "../lib/log.js";
 
 const execFile = promisify(execFileCb);
 
+async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
+
 export async function migrateLayoutCmd(opts: {
-  pack: string;
+  pack?: string;
   yes?: boolean;
   ignore?: string;
   cwd?: string;
 }) {
   const cwd = opts.cwd ?? process.cwd();
+  let pack = opts.pack;
+  if (!pack) {
+    const cfgPath = join(cwd, ".claude-ds.json");
+    if (!(await exists(cfgPath))) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
+    const cfg = parseConfig(await readFile(cfgPath, "utf8"));
+    pack = cfg.pack;
+  }
 
   // Refuse if not inside a git repo
   try {
@@ -36,7 +46,7 @@ export async function migrateLayoutCmd(opts: {
 
   const here = dirname(fileURLToPath(import.meta.url));
   const repoRoot = resolve(here, "..", "..");
-  const packDir = join(repoRoot, "packs", opts.pack);
+  const packDir = join(repoRoot, "packs", pack);
   const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
 
   const flagGlobs = opts.ignore
@@ -88,7 +98,7 @@ export async function migrateLayoutCmd(opts: {
   }
 
   // Commit the renames
-  await execFile("git", ["commit", "-m", `migrate-layout: rename lookalikes to canonical paths (pack=${opts.pack})`], { cwd });
+  await execFile("git", ["commit", "-m", `migrate-layout: rename lookalikes to canonical paths (pack=${pack})`], { cwd });
 
   info(`migrated ${renames.length} file(s) — re-run adopt to proceed`);
 }

@@ -23,4 +23,17 @@ describe("audit", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/suggest-removals/);
   });
+
+  it("reads pack from .claude-ds.json when --pack is omitted", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }));
+    const r = await runCli(["audit"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/missing: \.claude\/settings\.json/);
+  });
+
+  it("errors with exit 2 when --pack omitted and no .claude-ds.json", async () => {
+    const r = await runCli(["audit"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/--pack required/);
+  });
 });

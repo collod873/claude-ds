@@ -71,6 +71,22 @@ describe("doctor", () => {
     expect(rAfter.code).toBe(0);
   });
 
+  it("reads pack from .claude-ds.json when --pack is omitted", async () => {
+    // Adopt first so managed files are present and doctor can exit clean
+    const adoptResult = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adoptResult.code).toBe(0);
+    // Now run doctor without --pack — should read pack from .claude-ds.json
+    const r = await runCli(["doctor"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("post-adopt");
+  });
+
+  it("errors with exit 2 when --pack omitted and no .claude-ds.json", async () => {
+    const r = await runCli(["doctor"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/--pack required/);
+  });
+
   it("doctor honors lookalike_ignore in .claude-ds.json without needing the flag", async () => {
     // Adopt with --ignore to persist the list into config, then run doctor without flag
     await mkdir(join(dir, ".vercel"), { recursive: true });

@@ -90,6 +90,29 @@ describe("migrate-layout", () => {
     expect(r.stdout).toMatch(/nothing to migrate/i);
   });
 
+  it("reads pack from .claude-ds.json when --pack is omitted", async () => {
+    await gitInit(dir);
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }));
+    await writeFile(join(dir, "design-tokens.json"), "{}");
+    await gitAdd(dir, ".claude-ds.json", "design-tokens.json");
+    await gitCommit(dir, "initial");
+
+    const r = await runCli(["migrate-layout", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    await stat(join(dir, "design-system/tokens.json"));
+  });
+
+  it("errors with exit 2 when --pack omitted and no .claude-ds.json", async () => {
+    await gitInit(dir);
+    await gitCommit(dir, "empty").catch(() => {
+      // empty repo is fine — migrate-layout will fail before needing a commit
+    });
+
+    const r = await runCli(["migrate-layout", "--yes"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/--pack required/);
+  });
+
   it("git mv preserves history: git log --follow shows pre-move commit", async () => {
     await gitInit(dir);
     await writeFile(join(dir, "design-tokens.json"), "{}");
