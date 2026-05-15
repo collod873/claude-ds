@@ -18,7 +18,7 @@ describe("init", () => {
     await stat(join(dir, ".claude/settings.json"));
     await stat(join(dir, "design-system/contracts.md"));
     await stat(join(dir, ".claude/hooks/lib/log-failure.sh"));
-    await stat(join(dir, "design-system/atoms/.gitkeep"));
+    await stat(join(dir, "design-system/atoms/.keep"));
   });
 
   it("refuses if .claude-ds.json already exists", async () => {

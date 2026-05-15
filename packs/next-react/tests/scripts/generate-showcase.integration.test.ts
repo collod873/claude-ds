@@ -239,6 +239,60 @@ describe("generate-showcase.ts [integration]", () => {
     expect(existsSync(join(dir, "app", "_design", "motion", "page.tsx"))).toBe(true);
   });
 
+  // Issue #17 — kebab-case component names must produce valid TS identifiers
+  it("converts kebab-case component name to PascalCase in import/export identifiers", async () => {
+    // File paths stay kebab-case; only identifier bindings must be PascalCase
+    const tier = "atoms" as const;
+    const dsDir = join(dir, "design-system", tier);
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "icon-button.tsx"),
+      `export function IconButton() { return null; }\nexport default IconButton;\n`
+    );
+    await writeFile(
+      join(dsDir, "icon-button.showcase.tsx"),
+      `export default function IconButtonShowcase() { return null; }\n`
+    );
+    await writeFile(
+      join(dsDir, "icon-button.states.json"),
+      JSON.stringify([{ label: "default", props: {} }], null, 2)
+    );
+    await writeManifest(dir, [
+      {
+        name: "icon-button",
+        tier: "atom",
+        path: "design-system/atoms/icon-button.tsx",
+        has_showcase: true,
+        has_states: true,
+        has_snapshot: false,
+        has_test: false,
+      },
+    ]);
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+
+    const compPath = join(dir, "app", "_design", "icon-button", "page.tsx");
+    expect(existsSync(compPath)).toBe(true);
+
+    const content = readFileSync(compPath, "utf8");
+
+    // Import binding must be PascalCase, not kebab-case
+    expect(content).toContain("import IconButton from");
+    expect(content).toContain("import IconButtonShowcase from");
+    // JSX tags must use PascalCase
+    expect(content).toContain("<IconButton");
+    expect(content).toContain("<IconButtonShowcase");
+    // Export function name must be PascalCase (valid TS identifier)
+    expect(content).toMatch(/export default function IconButton/);
+    // Must NOT use raw kebab-case as an identifier
+    expect(content).not.toMatch(/import icon-button/);
+    expect(content).not.toMatch(/<icon-button/);
+  });
+
   it("generates all four required routes (index + tokens + motion + component)", async () => {
     await seedBundle(dir, "Avatar");
     await writeManifest(dir, [
