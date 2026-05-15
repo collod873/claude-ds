@@ -80,7 +80,7 @@ export async function adoptCmd(opts) {
             const merged = `${cur}\n<!-- >>> claude-ds managed >>> -->\n${content}\n<!-- <<< claude-ds managed <<< -->\n`;
             // Record overwrite only when merged result differs from current on-disk content.
             if (merged !== cur) {
-                overwrites.push({ path: f.path, prevSize: Buffer.byteLength(cur, "utf8"), newSize: Buffer.byteLength(merged, "utf8") });
+                overwrites.push({ path: f.path, prevSize: Buffer.byteLength(cur, "utf8"), newSize: Buffer.byteLength(merged, "utf8"), category: "hybrid" });
             }
             await writeFile(dest, merged, "utf8");
         }
@@ -95,7 +95,7 @@ export async function adoptCmd(opts) {
                 const indent = firstIndented && firstIndented.startsWith("\t") ? "\t" : 2;
                 const merged = mergeJsonKeys(content, current, f.owned_keys ?? ["hooks"], indent);
                 if (merged !== current) {
-                    overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(merged, "utf8") });
+                    overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(merged, "utf8"), category: "hybrid" });
                 }
                 await writeFile(dest, merged, "utf8");
             }
@@ -108,18 +108,32 @@ export async function adoptCmd(opts) {
             if (f.category === "managed" && await exists(dest)) {
                 const current = await readFile(dest, "utf8");
                 if (current !== content) {
-                    overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(content, "utf8") });
+                    overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(content, "utf8"), category: "managed" });
                 }
             }
             await writeFile(dest, content, "utf8");
         }
     }
     if (overwrites.length > 0) {
-        const lines = [`Overwrote ${overwrites.length} managed file(s):`];
-        for (const o of overwrites) {
-            lines.push(`  ${o.path}  (was ${o.prevSize} bytes, now ${o.newSize} bytes)`);
+        const managedOvr = overwrites.filter(o => o.category === "managed");
+        const hybridOvr = overwrites.filter(o => o.category === "hybrid");
+        const lines = [];
+        if (managedOvr.length > 0) {
+            lines.push(`Overwrote ${managedOvr.length} managed file(s) (pack-owned, previous content replaced):`);
+            for (const o of managedOvr) {
+                lines.push(`  ${o.path}  (was ${o.prevSize} bytes, now ${o.newSize} bytes)`);
+            }
+            lines.push("Project-specific customizations to these files have been replaced.");
         }
-        lines.push("Project-specific customizations to these files have been replaced.");
+        if (hybridOvr.length > 0) {
+            if (lines.length > 0)
+                lines.push("");
+            lines.push(`Updated ${hybridOvr.length} hybrid file(s) (pack-owned regions updated; user-owned content preserved):`);
+            for (const o of hybridOvr) {
+                lines.push(`  ${o.path}  (was ${o.prevSize} bytes, now ${o.newSize} bytes)`);
+            }
+            lines.push("Pack-owned regions updated; user-owned content preserved.");
+        }
         lines.push("To diff before adopt, run: claude-ds doctor --pack <name>");
         process.stdout.write(lines.join("\n") + "\n");
     }

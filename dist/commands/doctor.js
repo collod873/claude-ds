@@ -208,9 +208,19 @@ function renderVerifyTable(results) {
 }
 export async function doctorCmd(opts) {
     const cwd = opts.cwd ?? process.cwd();
+    let pack = opts.pack;
+    if (!pack) {
+        const cfgPath = join(cwd, ".claude-ds.json");
+        if (!(await exists(cfgPath))) {
+            process.stderr.write("error: --pack required (no .claude-ds.json found)\n");
+            process.exit(2);
+        }
+        const cfg = parseConfig(await readFile(cfgPath, "utf8"));
+        pack = cfg.pack;
+    }
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..", "..");
-    const packDir = join(repoRoot, "packs", opts.pack);
+    const packDir = join(repoRoot, "packs", pack);
     if (opts.verifyHooks) {
         const results = await verifyHooks(packDir, cwd);
         const table = renderVerifyTable(results);

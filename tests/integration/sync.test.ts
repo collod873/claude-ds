@@ -32,6 +32,26 @@ describe("sync", () => {
   });
 });
 
+describe("CLAUDE.md hybrid+markdown sync (fragment marker bug)", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("sync after adopt: CLAUDE.md shows skip (in sync), never abort", async () => {
+    // Set up via adopt so CLAUDE.md has proper marker wrappers on disk
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    // Now sync — CLAUDE.md is already in sync so it must skip, not abort
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
+    expect(r.code).toBe(0);
+    // Must NOT have aborted on CLAUDE.md
+    expect(r.stdout).not.toMatch(/abort:.*CLAUDE\.md/);
+    // Must report the marker region as in sync
+    expect(r.stdout).toMatch(/skip: CLAUDE\.md — marker region in sync/);
+  });
+});
+
 describe("settings.json hybrid+json preservation", () => {
   let dir: string;
   beforeEach(async () => { dir = await freshTmpDir(); });
