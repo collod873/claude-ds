@@ -99,7 +99,7 @@ function mergeHooks(upstreamHooks, currentHooks) {
  * @param ownedKeys - top-level keys the CLI manages; `hooks` gets special treatment
  * @returns Formatted JSON string (2-space indent, trailing newline)
  */
-export function mergeJsonKeys(upstream, current, ownedKeys) {
+export function mergeJsonKeys(upstream, current, ownedKeys, indent = 2) {
     let upstreamObj;
     let currentObj;
     try {
@@ -129,5 +129,5 @@ export function mergeJsonKeys(upstream, current, ownedKeys) {
             }
         }
     }
-    return JSON.stringify(merged, null, 2) + "\n";
+    return JSON.stringify(merged, null, indent) + "\n";
 }

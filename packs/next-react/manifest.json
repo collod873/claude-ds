@@ -1,4 +1,13 @@
 {
+  "lookalike_ignore": [
+    ".next/**",
+    ".vercel/**",
+    ".turbo/**",
+    "node_modules/**",
+    "src/app/**",
+    ".git/**",
+    "dist/**"
+  ],
   "files": [
     { "path": ".claude/settings.json", "category": "hybrid", "format": "json" },
     { "path": ".claude/hooks/atom-imports.sh", "category": "managed" },

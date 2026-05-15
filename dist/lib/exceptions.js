@@ -1,13 +1,17 @@
 export class ExceptionError extends Error {
 }
 export function parseExceptions(raw) {
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr))
-        throw new ExceptionError("exceptions.json must be an array");
+    const parsed = JSON.parse(raw);
+    // Accept wrapped shape { exceptions: [...] } — reject bare array (old format).
+    if (Array.isArray(parsed))
+        throw new ExceptionError("exceptions.json must use wrapped shape { \"exceptions\": [...] }");
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.exceptions))
+        throw new ExceptionError("exceptions.json must have an \"exceptions\" array");
+    const arr = parsed.exceptions;
     for (const e of arr) {
         if (typeof e.rule_id !== "string" || typeof e.file !== "string" || typeof e.reason !== "string" || typeof e.expiry !== "string")
             throw new ExceptionError(`malformed exception entry: ${JSON.stringify(e)}`);
-        if (!e.reason.trim())
+        if (!e.reason || !(String(e.reason)).trim())
             throw new ExceptionError(`reason required for ${e.file}`);
     }
     return arr;

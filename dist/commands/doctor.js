@@ -87,6 +87,7 @@ export async function doctorCmd(opts) {
     const manifest = parseManifest(manifestRaw);
     const canonicalPaths = manifest.canonical_paths;
     // Load ignore globs from on-disk config (if present), then merge with --ignore flag globs.
+    // Order: pack defaults < project config < --ignore flag (project/flag extend, not replace).
     const configPath = join(cwd, ".claude-ds.json");
     let configIgnore = [];
     if (await exists(configPath)) {
@@ -99,7 +100,7 @@ export async function doctorCmd(opts) {
         }
     }
     const flagGlobs = opts.ignore ? opts.ignore.split(",").map(g => g.trim()).filter(Boolean) : [];
-    const ignoreGlobs = [...configIgnore, ...flagGlobs];
+    const ignoreGlobs = [...manifest.lookalike_ignore, ...configIgnore, ...flagGlobs];
     const findings = await detectLookalikes(cwd, canonicalPaths, ignoreGlobs);
     const isPostAdopt = await exists(configPath);
     let result;
@@ -152,6 +153,9 @@ export async function doctorCmd(opts) {
     const hasLookalikes = findings.some(f => !f.present && f.lookalike !== null);
     const hasMissingManaged = result.drift && result.drift.missing.length > 0;
     if (hasLookalikes || hasMissingManaged) {
+        if (hasLookalikes) {
+            process.stderr.write("If these matches are false positives, re-run with --ignore '<glob>,<glob>'\n");
+        }
         process.exit(1);
     }
 }
