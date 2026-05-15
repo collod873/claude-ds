@@ -145,7 +145,7 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string }): Pr
     const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
 
     for (const entry of entries) {
-      if (entry === ".gitkeep") continue;
+      if (entry === ".keep" || entry === ".gitkeep") continue;
 
       // Flat layout: skip non-.tsx files and companion files
       if (!entry.endsWith(".tsx")) continue;

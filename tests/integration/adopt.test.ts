@@ -17,7 +17,7 @@ describe("adopt", () => {
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.mode).toBe("warn");
     await stat(join(dir, "src/components/legacy.tsx"));
-    await stat(join(dir, "design-system/atoms/.gitkeep"));
+    await stat(join(dir, "design-system/atoms/.keep"));
   });
 
   it("merges hooks into pre-existing settings.json, preserving permissions", async () => {

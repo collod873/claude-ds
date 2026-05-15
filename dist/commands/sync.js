@@ -1,4 +1,4 @@
-import { readFile, writeFile, stat, mkdir } from "node:fs/promises";
+import { readFile, writeFile, stat, mkdir, chmod } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -70,7 +70,21 @@ export async function syncCmd(opts) {
         const current = (await exists(dest)) ? await readFile(dest, "utf8") : null;
         const verdict = diffFile({ category: f.category, format: f.format, owned_keys: f.owned_keys }, { prev, upstream, current });
         actions.push({ path: f.path, upstream, verdict });
-        info(`${verdict.action}: ${f.path} — ${verdict.reason}`);
+        // #18c: distinguish new files (create:) from content-changed files (rewrite:)
+        const displayAction = (verdict.action === "rewrite" && current === null) ? "create" : verdict.action;
+        info(`${displayAction}: ${f.path} — ${verdict.reason}`);
+    }
+    // #18d: summarise whether .claude-ds.json config keys (aside from version) will change
+    {
+        const nonVersionKeys = Object.keys(cfg).filter(k => k !== "version");
+        const nextVersion = target;
+        const changedKeys = nonVersionKeys.filter(k => JSON.stringify(cfg[k]) !== JSON.stringify({ ...cfg, version: nextVersion }[k]));
+        if (changedKeys.length > 0) {
+            info(`config will change: ${changedKeys.join(", ")}`);
+        }
+        else {
+            info("config unchanged");
+        }
     }
     if (!(await confirm("Apply the above?"))) {
         info("aborted");
@@ -80,10 +94,16 @@ export async function syncCmd(opts) {
         const dest = join(cwd, a.path);
         if (a.verdict.action === "rewrite") {
             await mkdir(dirname(dest), { recursive: true });
-            await writeFile(dest, a.verdict.newContent ?? a.upstream, "utf8");
+            const content = a.verdict.newContent ?? a.upstream;
+            await writeFile(dest, content, "utf8");
+            // #15: hook and script files must be executable
+            if (a.path.startsWith(".claude/hooks/") || a.path.startsWith("scripts/"))
+                await chmod(dest, 0o755);
         }
         else if (a.verdict.action === "rewrite-region") {
             await writeFile(dest, a.verdict.newContent, "utf8");
+            if (a.path.startsWith(".claude/hooks/") || a.path.startsWith("scripts/"))
+                await chmod(dest, 0o755);
         }
         else if (a.verdict.action === "abort") {
             err(`skipped (abort): ${a.path} — ${a.verdict.reason}`);

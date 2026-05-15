@@ -46,15 +46,15 @@ async function countLines(p) {
         return 0;
     }
 }
-function showcaseStub(fileBase, displayName) {
+function showcaseStub(displayName, fileBase) {
     return [
-        `// TODO(claude-ds): reconform stub — replace with real content`,
-        `// Showcase for ${displayName}`,
-        `import React from "react";`,
-        `import { ${displayName} } from "./${fileBase}";`,
+        `// TODO(claude-ds): reconform stub — replace with real showcase`,
+        `import * as Mod from "./${fileBase}";`,
+        ``,
+        `void Mod;`,
         ``,
         `export default function ${displayName}Showcase() {`,
-        `  return <${displayName} />;`,
+        `  return null;`,
         `}`,
         ``,
     ].join("\n");
@@ -63,17 +63,15 @@ function statesStub() {
     // .states.json must be valid JSON; the stub-warning is printed via info()
     return `[]`;
 }
-function testStub(fileBase, displayName) {
+function testStub(displayName, fileBase) {
     return [
-        `// TODO(claude-ds): reconform stub — replace with real content`,
+        `// TODO(claude-ds): reconform stub — replace with real assertions`,
         `import { describe, it, expect } from "vitest";`,
-        `import { render } from "@testing-library/react";`,
-        `import { ${displayName} } from "./${fileBase}";`,
+        `import * as Mod from "./${fileBase}";`,
         ``,
         `describe("${displayName}", () => {`,
-        `  it("renders without crashing", () => {`,
-        `    // TODO(claude-ds): reconform stub — add real assertions`,
-        `    expect(true).toBe(true);`,
+        `  it("module loads", () => {`,
+        `    expect(Mod).toBeDefined();`,
         `  });`,
         `});`,
         ``,
@@ -135,7 +133,7 @@ export async function reconformCmd(opts) {
         const COMPANION_SUFFIXES = [".showcase.tsx", ".states.json", ".test.tsx", ".stories.tsx"];
         const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
         for (const entry of entries) {
-            if (entry === ".gitkeep")
+            if (entry === ".keep" || entry === ".gitkeep")
                 continue;
             // Flat layout: skip non-.tsx files and companion files
             if (!entry.endsWith(".tsx"))
@@ -158,7 +156,7 @@ export async function reconformCmd(opts) {
             const companions = [
                 {
                     path: join(tierDir, `${componentName}.showcase.tsx`),
-                    stub: () => showcaseStub(componentName, displayName),
+                    stub: () => showcaseStub(displayName, componentName),
                     label: `${componentName}.showcase.tsx`,
                 },
                 {
@@ -168,7 +166,7 @@ export async function reconformCmd(opts) {
                 },
                 {
                     path: join(tierDir, `${componentName}.test.tsx`),
-                    stub: () => testStub(componentName, displayName),
+                    stub: () => testStub(displayName, componentName),
                     label: `${componentName}.test.tsx`,
                 },
             ];
@@ -211,20 +209,26 @@ export async function reconformCmd(opts) {
         }
     }
     // ── Check pass ──────────────────────────────────────────────────────────────
-    const CHECK_SCRIPTS = [
-        "check-tier-imports.ts",
-        "check-states-coverage.ts",
-        "similarity-check.ts",
-        "a11y-scan.ts",
-    ];
+    // Check scripts are installed into <project>/scripts/ by `sync`, not kept in
+    // the pack distribution. Discover all check-*.ts files there at runtime so
+    // new scripts added by future syncs are picked up automatically.
+    const projectScriptsDir = join(cwd, "scripts");
+    let checkScriptNames = [];
+    try {
+        const allScripts = await readdir(projectScriptsDir);
+        checkScriptNames = allScripts.filter(f => f.startsWith("check-") && f.endsWith(".ts"));
+    }
+    catch {
+        // scripts/ dir absent — no check scripts to run
+    }
     const allViolations = [];
-    for (const script of CHECK_SCRIPTS) {
-        const scriptPath = join(packScriptsDir, script);
+    for (const script of checkScriptNames) {
+        const scriptPath = join(projectScriptsDir, script);
         if (!(await exists(scriptPath)))
             continue;
         if (dryRun) {
-            info(`[dry-run] would invoke check: ${scriptPath}`);
-            continue;
+            info(`[dry-run] would invoke check: ${script}`);
+            // Still run the script in dry-run so violations are surfaced for review
         }
         const result = spawnSync("node", ["--experimental-strip-types", scriptPath], { cwd, encoding: "utf8", timeout: 30_000 });
         if (result.status === 1) {
