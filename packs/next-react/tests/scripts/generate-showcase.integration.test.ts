@@ -280,12 +280,11 @@ describe("generate-showcase.ts [integration]", () => {
 
     const content = readFileSync(compPath, "utf8");
 
-    // Import binding must be PascalCase, not kebab-case.
-    // Component uses named export ({ Foo }); showcase uses default export.
-    expect(content).toContain("import { IconButton } from");
+    // Bare component import/render dropped — showcase IS the demo.
+    expect(content).not.toContain("import { IconButton } from");
+    expect(content).not.toContain("<IconButton />");
+    // Showcase import and render must be present (PascalCase)
     expect(content).toContain("import IconButtonShowcase from");
-    // JSX tags must use PascalCase
-    expect(content).toContain("<IconButton");
     expect(content).toContain("<IconButtonShowcase");
     // Export function name must be PascalCase (valid TS identifier)
     expect(content).toMatch(/export default function IconButton/);
