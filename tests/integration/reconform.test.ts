@@ -99,6 +99,38 @@ describe("reconform", () => {
     expect(r.stderr).toMatch(/\.claude-ds\.json/i);
   });
 
+  it("kebab-case filename → PascalCase identifiers in stubs, kebab in import path", async () => {
+    await scaffoldProject(dir);
+    // Add a kebab-case component (the bug case)
+    await writeFile(
+      join(dir, "design-system", "atoms", "top-bar.tsx"),
+      `export function TopBar() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const showcaseContent = await readFile(
+      join(dir, "design-system", "atoms", "top-bar.showcase.tsx"),
+      "utf8"
+    );
+    // import uses kebab path, identifier uses PascalCase
+    expect(showcaseContent).toContain(`import { TopBar } from "./top-bar"`);
+    expect(showcaseContent).toContain(`function TopBarShowcase()`);
+    expect(showcaseContent).toContain(`<TopBar />`);
+    // must NOT contain the raw kebab identifier (would be a syntax error)
+    expect(showcaseContent).not.toContain("{ top-bar }");
+    expect(showcaseContent).not.toContain("top-barShowcase");
+
+    const testContent = await readFile(
+      join(dir, "design-system", "atoms", "top-bar.test.tsx"),
+      "utf8"
+    );
+    expect(testContent).toContain(`import { TopBar } from "./top-bar"`);
+    expect(testContent).toContain(`describe("TopBar"`);
+    expect(testContent).not.toContain("{ top-bar }");
+  });
+
   it("stub warning: contracts.md and tokens.json under threshold → warning printed", async () => {
     await scaffoldProject(dir);
     // Overwrite the full-length files with short stubs (< 25 lines)

@@ -27,6 +27,15 @@ function parseViolations(stderr) {
     }
     return violations;
 }
+/** Convert kebab-case or snake_case to PascalCase for use as a JS identifier.
+ *  e.g. "top-bar" → "TopBar", "tag_picker" → "TagPicker", "activitytimeline" → "Activitytimeline"
+ */
+function toPascalCase(name) {
+    return name
+        .split(/[-_]/)
+        .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
+        .join("");
+}
 /** Count lines in a file. Returns 0 if file is absent or unreadable. */
 async function countLines(p) {
     try {
@@ -37,15 +46,15 @@ async function countLines(p) {
         return 0;
     }
 }
-function showcaseStub(componentName) {
+function showcaseStub(fileBase, displayName) {
     return [
         `// TODO(claude-ds): reconform stub — replace with real content`,
-        `// Showcase for ${componentName}`,
+        `// Showcase for ${displayName}`,
         `import React from "react";`,
-        `import { ${componentName} } from "./${componentName}";`,
+        `import { ${displayName} } from "./${fileBase}";`,
         ``,
-        `export default function ${componentName}Showcase() {`,
-        `  return <${componentName} />;`,
+        `export default function ${displayName}Showcase() {`,
+        `  return <${displayName} />;`,
         `}`,
         ``,
     ].join("\n");
@@ -54,14 +63,14 @@ function statesStub() {
     // .states.json must be valid JSON; the stub-warning is printed via info()
     return `[]`;
 }
-function testStub(componentName) {
+function testStub(fileBase, displayName) {
     return [
         `// TODO(claude-ds): reconform stub — replace with real content`,
         `import { describe, it, expect } from "vitest";`,
         `import { render } from "@testing-library/react";`,
-        `import { ${componentName} } from "./${componentName}";`,
+        `import { ${displayName} } from "./${fileBase}";`,
         ``,
-        `describe("${componentName}", () => {`,
+        `describe("${displayName}", () => {`,
         `  it("renders without crashing", () => {`,
         `    // TODO(claude-ds): reconform stub — add real assertions`,
         `    expect(true).toBe(true);`,
@@ -141,14 +150,15 @@ export async function reconformCmd(opts) {
             if (!entryStat || !entryStat.isFile())
                 continue;
             // Derive component name by stripping .tsx
-            const componentName = entry.slice(0, -4); // "button"
+            const componentName = entry.slice(0, -4); // "top-bar" (kebab, used for file paths)
+            const displayName = toPascalCase(componentName); // "TopBar" (PascalCase, used in identifiers/JSX)
             // ── Companion pass ────────────────────────────────────────────────────
             // Companions are siblings in the same tier directory (flat layout).
             // .snapshot.png is intentionally skipped per spec (post-write hook produces it)
             const companions = [
                 {
                     path: join(tierDir, `${componentName}.showcase.tsx`),
-                    stub: () => showcaseStub(componentName),
+                    stub: () => showcaseStub(componentName, displayName),
                     label: `${componentName}.showcase.tsx`,
                 },
                 {
@@ -158,7 +168,7 @@ export async function reconformCmd(opts) {
                 },
                 {
                     path: join(tierDir, `${componentName}.test.tsx`),
-                    stub: () => testStub(componentName),
+                    stub: () => testStub(componentName, displayName),
                     label: `${componentName}.test.tsx`,
                 },
             ];
