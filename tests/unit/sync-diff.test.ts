@@ -67,6 +67,28 @@ describe("sync-diff (hybrid json)", () => {
     expect(v.action).toBe("skip");
   });
 
+  it("uses owned_keys from EntryInfo — scripts key merged, not hooks", () => {
+    const upstream = JSON.stringify({ scripts: { build: "tsc", test: "vitest" } }, null, 2) + "\n";
+    const current = JSON.stringify({ scripts: {}, devDependencies: { typescript: "^5" } }, null, 2) + "\n";
+    const v = diffFile(
+      { category: "hybrid", format: "json", owned_keys: ["scripts"] },
+      { prev: null, upstream, current },
+    );
+    // upstream added scripts.build and scripts.test — should rewrite
+    expect(v.action).toBe("rewrite");
+    expect(v).toHaveProperty("newContent");
+    if (v.action === "rewrite" && "newContent" in v) {
+      const parsed = JSON.parse((v as { newContent: string }).newContent);
+      // scripts from upstream propagated
+      expect(parsed.scripts.build).toBe("tsc");
+      expect(parsed.scripts.test).toBe("vitest");
+      // user key preserved
+      expect(parsed.devDependencies).toEqual({ typescript: "^5" });
+      // no spurious hooks key introduced
+      expect(parsed.hooks).toBeUndefined();
+    }
+  });
+
   it("user-owned permissions preserved even if upstream has different permissions value", () => {
     const upstream = JSON.stringify({
       hooks: { PostToolUse: [packHookEntry] },

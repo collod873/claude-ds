@@ -18,14 +18,14 @@ export function diffFile(info, d) {
         if (info.format === "json") {
             let merged;
             try {
-                merged = mergeJsonKeys(d.upstream, d.current, ["hooks"]);
+                merged = mergeJsonKeys(d.upstream, d.current, info.owned_keys ?? ["hooks"]);
             }
             catch (e) {
                 return { action: "abort", reason: `json merge failed: ${e.message}` };
             }
             if (merged === d.current)
                 return { action: "skip", reason: "hybrid json in sync" };
-            return { action: "rewrite", reason: "hybrid json hooks changed upstream", newContent: merged };
+            return { action: "rewrite", reason: "hybrid json owned keys changed upstream", newContent: merged };
         }
         if (!info.format)
             return { action: "abort", reason: "hybrid file has no format declared" };

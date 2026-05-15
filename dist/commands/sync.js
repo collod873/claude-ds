@@ -56,12 +56,19 @@ export async function syncCmd(opts) {
             process.exit(2);
         }
         const srcName = f.path === "package.json" ? "package.json.seed" : f.path === "CLAUDE.md" ? "CLAUDE.md.fragment" : f.path;
-        const upstream = await readFile(join(packDir, "files", srcName), "utf8");
+        let upstream = await readFile(join(packDir, "files", srcName), "utf8");
+        // Fragment files ship without marker wrappers — add them so diffFile can extract the inner region.
+        if (f.category === "hybrid" && f.format === "markdown" && srcName.endsWith(".fragment")) {
+            upstream = `<!-- >>> claude-ds managed >>> -->\n${upstream}\n<!-- <<< claude-ds managed <<< -->`;
+        }
+        else if (f.category === "hybrid" && f.format === "shell" && srcName.endsWith(".fragment")) {
+            upstream = `# >>> claude-ds managed >>>\n${upstream}\n# <<< claude-ds managed <<<`;
+        }
         // v1 gap: no prior-snapshot cache — use prev=null so managed files without a known
         // prior state are treated as "upstream wins" rather than false-abort on hand-edit detection.
         const prev = null;
         const current = (await exists(dest)) ? await readFile(dest, "utf8") : null;
-        const verdict = diffFile({ category: f.category, format: f.format }, { prev, upstream, current });
+        const verdict = diffFile({ category: f.category, format: f.format, owned_keys: f.owned_keys }, { prev, upstream, current });
         actions.push({ path: f.path, upstream, verdict });
         info(`${verdict.action}: ${f.path} — ${verdict.reason}`);
     }

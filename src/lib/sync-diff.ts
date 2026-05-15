@@ -9,7 +9,7 @@ export type FileVerdict =
   | { action: "abort"; reason: string };
 
 export interface DiffInput { prev: string | null; upstream: string; current: string | null; }
-export interface EntryInfo { category: Category; format?: Format; }
+export interface EntryInfo { category: Category; format?: Format; owned_keys?: string[]; }
 
 export function diffFile(info: EntryInfo, d: DiffInput): FileVerdict {
   if (info.category === "generated") return { action: "skip", reason: "generated" };
@@ -26,12 +26,12 @@ export function diffFile(info: EntryInfo, d: DiffInput): FileVerdict {
     if (info.format === "json") {
       let merged: string;
       try {
-        merged = mergeJsonKeys(d.upstream, d.current, ["hooks"]);
+        merged = mergeJsonKeys(d.upstream, d.current, info.owned_keys ?? ["hooks"]);
       } catch (e) {
         return { action: "abort", reason: `json merge failed: ${(e as Error).message}` };
       }
       if (merged === d.current) return { action: "skip", reason: "hybrid json in sync" };
-      return { action: "rewrite", reason: "hybrid json hooks changed upstream", newContent: merged };
+      return { action: "rewrite", reason: "hybrid json owned keys changed upstream", newContent: merged };
     }
     if (!info.format) return { action: "abort", reason: "hybrid file has no format declared" };
     const fmt = info.format;
