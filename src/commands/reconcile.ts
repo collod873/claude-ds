@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { parseManifest, DeprecatedPath } from "../lib/manifest.js";
 import { parseConfig } from "../lib/config.js";
 import { info, err, confirm } from "../lib/log.js";
+import { createInterface } from "node:readline/promises";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -116,16 +117,38 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     process.exit(0);
   }
 
-  // ── Prompt or auto-accept (--force) ────────────────────────────────────────
-  if (!force && !(await confirm(`Delete the ${allFindings.length} listed file(s)?`))) {
-    info("aborted — no files modified");
-    return;
+  // ── Prompt or auto-accept (--force / non-TTY) ─────────────────────────────
+  // Separate collision findings (CLAUDE.md) from regular deprecated-path orphans.
+  // CLAUDE.md collisions get a 3-way prompt because both files may have user content.
+  // In --force/non-TTY mode we skip collisions with a warning rather than auto-deleting.
+  const collisionList = allFindings.filter(f => f.kind === "collision");
+  const deprecatedList = allFindings.filter(f => f.kind === "deprecated");
+
+  const isTTY = Boolean(process.stdin.isTTY);
+
+  if (!force && isTTY) {
+    // Interactive mode: confirm all deprecated orphans in bulk, then handle each collision
+    if (deprecatedList.length > 0) {
+      if (!(await confirm(`Delete the ${deprecatedList.length} deprecated orphan(s)?`))) {
+        info("aborted — no files modified");
+        return;
+      }
+    }
+  } else if (!force && !isTTY) {
+    // Non-TTY, non-force: can't prompt, bail out
+    if (deprecatedList.length === 0 && collisionList.length === 0) return;
+    if (!(force)) {
+      info("reconcile: non-interactive mode — pass --force to delete deprecated orphans");
+      process.exit(0);
+    }
   }
 
-  // ── Remediate ──────────────────────────────────────────────────────────────
+  // ── Remediate deprecated orphans ──────────────────────────────────────────
   let deleted = 0;
   let skipped = 0;
-  for (const f of allFindings) {
+
+  const toDelete = (force || isTTY) ? deprecatedList : [];
+  for (const f of toDelete) {
     const full = join(cwd, f.path);
     try {
       await unlink(full);
@@ -133,6 +156,48 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
       deleted++;
     } catch (e) {
       info(`warning: could not delete ${f.path}: ${(e as Error).message}`);
+      skipped++;
+    }
+  }
+
+  // ── Handle CLAUDE.md collisions ───────────────────────────────────────────
+  for (const f of collisionList) {
+    if (force || !isTTY) {
+      // Safe default: skip — auto-deleting either file could destroy user content
+      info(`warning: CLAUDE.md collision needs manual resolution — run \`reconcile\` interactively`);
+      skipped++;
+      continue;
+    }
+
+    // Interactive 3-way prompt
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    process.stdout.write(`\nCLAUDE.md collision: both CLAUDE.md (pack-written) and .claude/CLAUDE.md (pre-existing) exist.\n`);
+    process.stdout.write(`  (a) delete root CLAUDE.md   — keeps .claude/CLAUDE.md\n`);
+    process.stdout.write(`  (b) delete .claude/CLAUDE.md — keeps root CLAUDE.md\n`);
+    process.stdout.write(`  (c) skip — resolve manually\n`);
+    const ans = (await rl.question(`Choose [a/b/c]: `)).trim().toLowerCase();
+    rl.close();
+
+    if (ans === "a") {
+      try {
+        await unlink(join(cwd, "CLAUDE.md"));
+        info(`deleted: CLAUDE.md`);
+        deleted++;
+      } catch (e) {
+        info(`warning: could not delete CLAUDE.md: ${(e as Error).message}`);
+        skipped++;
+      }
+    } else if (ans === "b") {
+      try {
+        await unlink(join(cwd, ".claude", "CLAUDE.md"));
+        info(`deleted: .claude/CLAUDE.md`);
+        deleted++;
+      } catch (e) {
+        info(`warning: could not delete .claude/CLAUDE.md: ${(e as Error).message}`);
+        skipped++;
+      }
+    } else {
+      info(`skipped: CLAUDE.md collision — resolve manually`);
       skipped++;
     }
   }

@@ -83,22 +83,22 @@
     },
     {
       "path": ".claude/skills/badge-system/SKILL.md",
-      "since_version": "v0.4.0",
+      "since_version": "v0.3.0",
       "reason": "Tier-C skill removed from scaffold; only aesthetic-principles and design-system are required (issue #22)"
     },
     {
       "path": ".claude/skills/typography/SKILL.md",
-      "since_version": "v0.4.0",
+      "since_version": "v0.3.0",
       "reason": "Tier-C skill removed from scaffold; only aesthetic-principles and design-system are required (issue #22)"
     },
     {
       "path": ".claude/skills/design-review/SKILL.md",
-      "since_version": "v0.4.0",
+      "since_version": "v0.3.0",
       "reason": "Tier-C skill removed from scaffold; only aesthetic-principles and design-system are required (issue #22)"
     },
     {
       "path": ".claude/skills/icons/SKILL.md",
-      "since_version": "v0.4.0",
+      "since_version": "v0.3.0",
       "reason": "Tier-C skill removed from scaffold; only aesthetic-principles and design-system are required (issue #22)"
     }
   ],

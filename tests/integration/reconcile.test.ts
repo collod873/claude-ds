@@ -83,7 +83,7 @@ describe("reconcile", () => {
     expect(await exists(join(dir, ".claude/skills/badge-system/SKILL.md"))).toBe(true);
   });
 
-  it("--force deletes all deprecated-path orphans without prompting", async () => {
+  it("--force deletes all deprecated-path orphans without prompting, skips CLAUDE.md collision", async () => {
     await buildCrewopsFixture(dir);
     const r = await runCli(["reconcile", "--force"], { cwd: dir });
     expect(r.code).toBe(0);
@@ -99,19 +99,24 @@ describe("reconcile", () => {
     expect(await exists(join(dir, ".claude/skills/design-review/SKILL.md"))).toBe(false);
     expect(await exists(join(dir, ".claude/skills/icons/SKILL.md"))).toBe(false);
 
-    // CLAUDE.md collision: root CLAUDE.md removed (it's the pack-written one)
-    expect(await exists(join(dir, "CLAUDE.md"))).toBe(false);
+    // CLAUDE.md collision: --force must NOT auto-delete either file — both may have user content
+    // Instead it warns and skips; manual resolution required
+    expect(await exists(join(dir, "CLAUDE.md"))).toBe(true);
+    expect(await exists(join(dir, ".claude/CLAUDE.md"))).toBe(true);
+    expect(r.stdout).toMatch(/CLAUDE\.md collision needs manual resolution/);
 
     // Canonical copies preserved
     expect(await exists(join(dir, "design-system/contracts.md"))).toBe(true);
     expect(await exists(join(dir, "design-system/exceptions.json"))).toBe(true);
     expect(await exists(join(dir, "design-system/failure-log.md"))).toBe(true);
-    // .claude/CLAUDE.md preserved
-    expect(await exists(join(dir, ".claude/CLAUDE.md"))).toBe(true);
   });
 
-  it("idempotent: running reconcile --force twice on a clean tree is a no-op the second time", async () => {
+  it("idempotent: running reconcile --force twice on a tree with no CLAUDE.md collision is a no-op the second time", async () => {
     await buildCrewopsFixture(dir);
+    // Remove the CLAUDE.md collision so --force can fully clean the tree
+    const { unlink: rm } = await import("node:fs/promises");
+    await rm(join(dir, "CLAUDE.md")).catch(() => {});
+
     const r1 = await runCli(["reconcile", "--force"], { cwd: dir });
     expect(r1.code).toBe(0);
 
