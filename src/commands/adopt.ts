@@ -14,7 +14,7 @@ async function getVersion(packageJsonPath: string): Promise<string> {
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
-export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: string; cwd?: string }) {
+export async function adoptCmd(opts: { pack: string; yes?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
   if (await exists(join(cwd, ".claude-ds.json"))) { err(".claude-ds.json already exists"); process.exit(2); }
   if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${opts.pack}, WARN mode) here?`))) { info("aborted"); return; }
@@ -24,12 +24,9 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
   const packDir = join(repoRoot, "packs", opts.pack);
   const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
 
-  // Parse --ignore flag globs (comma-separated).
-  const flagGlobs = opts.ignore ? opts.ignore.split(",").map(g => g.trim()).filter(Boolean) : [];
-
   // Precondition gate: refuse if any canonical path is missing but has a lookalike.
-  // ignoreGlobs lets users suppress false positives from the heuristic.
-  const findings = await detectLookalikes(cwd, manifest.canonical_paths, flagGlobs);
+  // This prevents parallel files being seeded next to differently-named existing files.
+  const findings = await detectLookalikes(cwd, manifest.canonical_paths);
   const blockers = findings.filter(f => !f.present && f.lookalike !== null);
   if (blockers.length > 0) {
     const lines: string[] = [
@@ -79,8 +76,7 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
     }
   }
   const version = await getVersion(join(repoRoot, "package.json"));
-  const cfg: Record<string, unknown> = { version: `v${version}`, pack: opts.pack, mode: "warn", enforce_threshold: 10, removed: [] };
-  if (flagGlobs.length > 0) cfg.lookalike_ignore = flagGlobs;
+  const cfg = { version: `v${version}`, pack: opts.pack, mode: "warn", enforce_threshold: 10, removed: [] };
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
   info(`adopted claude-ds (${opts.pack}, mode=warn). Run 'enforce' when ready.`);
 }

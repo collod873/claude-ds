@@ -35,9 +35,8 @@ program
     .command("adopt")
     .requiredOption("--pack <name>", "pack to adopt")
     .option("--yes", "skip confirmation prompt")
-    .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
     .action(async (opts) => {
-    await adoptCmd({ pack: opts.pack, yes: opts.yes, ignore: opts.ignore });
+    await adoptCmd({ pack: opts.pack, yes: opts.yes });
 });
 program
     .command("migrate")
@@ -70,9 +69,8 @@ program
 program
     .command("doctor")
     .requiredOption("--pack <name>", "pack to check against")
-    .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
     .action(async (opts) => {
-    await doctorCmd({ pack: opts.pack, ignore: opts.ignore });
+    await doctorCmd({ pack: opts.pack });
 });
 program.parseAsync(process.argv).catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);

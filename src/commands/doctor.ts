@@ -96,7 +96,7 @@ function renderMarkdown(result: DoctorResult): string {
   return lines.join("\n");
 }
 
-export async function doctorCmd(opts: { pack: string; ignore?: string; cwd?: string }): Promise<void> {
+export async function doctorCmd(opts: { pack: string; cwd?: string }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const here = dirname(fileURLToPath(import.meta.url));
   const repoRoot = resolve(here, "..", "..");
@@ -106,22 +106,9 @@ export async function doctorCmd(opts: { pack: string; ignore?: string; cwd?: str
   const manifest = parseManifest(manifestRaw);
   const canonicalPaths = manifest.canonical_paths;
 
-  // Load ignore globs from on-disk config (if present), then merge with --ignore flag globs.
+  const findings = await detectLookalikes(cwd, canonicalPaths);
+
   const configPath = join(cwd, ".claude-ds.json");
-  let configIgnore: string[] = [];
-  if (await exists(configPath)) {
-    try {
-      const cfg = parseConfig(await readFile(configPath, "utf8"));
-      configIgnore = cfg.lookalike_ignore;
-    } catch {
-      // parseConfig will error properly later; don't block doctor on it here
-    }
-  }
-  const flagGlobs = opts.ignore ? opts.ignore.split(",").map(g => g.trim()).filter(Boolean) : [];
-  const ignoreGlobs = [...configIgnore, ...flagGlobs];
-
-  const findings = await detectLookalikes(cwd, canonicalPaths, ignoreGlobs);
-
   const isPostAdopt = await exists(configPath);
 
   let result: DoctorResult;

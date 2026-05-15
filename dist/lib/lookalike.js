@@ -1,6 +1,5 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, basename, extname } from "node:path";
-import picomatch from "picomatch";
 /** Levenshtein distance between two strings. */
 function levenshtein(a, b) {
     const m = a.length;
@@ -89,17 +88,10 @@ function isLookalike(canonicalBase, candidateBase) {
  * If missing, scan for lookalikes (files/dirs with similar basename).
  * Returns the closest lookalike (lowest Levenshtein distance) per canonical.
  *
- * ignoreGlobs: candidate paths (relative to projectRoot) matching any of these
- * globs are excluded from lookalike detection. Empty array = v0.2.0 behavior.
- *
  * Pure: no fs side effects beyond reads.
  */
-export async function detectLookalikes(projectRoot, canonicalPaths, ignoreGlobs = []) {
+export async function detectLookalikes(projectRoot, canonicalPaths) {
     const allPaths = await collectPaths(projectRoot);
-    // Build a single matcher from all ignore globs (if any).
-    const shouldIgnore = ignoreGlobs.length > 0
-        ? picomatch(ignoreGlobs, { dot: true })
-        : () => false;
     const findings = [];
     for (const canonical of canonicalPaths) {
         const fullCanonical = join(projectRoot, canonical);
@@ -113,9 +105,6 @@ export async function detectLookalikes(projectRoot, canonicalPaths, ignoreGlobs 
         let bestMatch = null;
         let bestDist = Infinity;
         for (const candidate of allPaths) {
-            // Skip any candidate whose relative path matches an ignore glob.
-            if (shouldIgnore(candidate))
-                continue;
             const candidateBase = basename(candidate);
             if (!isLookalike(canonicalBase, candidateBase))
                 continue;

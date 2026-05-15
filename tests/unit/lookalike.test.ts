@@ -90,44 +90,4 @@ describe("detectLookalikes", () => {
     expect(findings[0].present).toBe(false);
     expect(findings[0].lookalike).toBeNull();
   });
-
-  // v0.2.1: ignoreGlobs tests
-  it("empty ignoreGlobs behaves identically to v0.2.0 (finds lookalike)", async () => {
-    await writeFile(join(dir, "design-tokens.json"), "{}");
-    const findingsWithout = await detectLookalikes(dir, ["tokens.json"]);
-    const findingsWith = await detectLookalikes(dir, ["tokens.json"], []);
-    expect(findingsWith).toEqual(findingsWithout);
-    expect(findingsWith[0].lookalike).toBe("design-tokens.json");
-  });
-
-  it("ignoreGlobs suppresses matching candidate — no lookalike reported", async () => {
-    // .vercel/README.txt is a lookalike for README.md via stem containment
-    await mkdir(join(dir, ".vercel"), { recursive: true });
-    await writeFile(join(dir, ".vercel", "README.txt"), "auto-generated");
-    const findings = await detectLookalikes(dir, ["README.md"], [".vercel/**"]);
-    expect(findings[0].present).toBe(false);
-    expect(findings[0].lookalike).toBeNull();
-  });
-
-  it("ignoreGlobs suppresses one candidate but still returns another non-ignored lookalike", async () => {
-    await mkdir(join(dir, ".vercel"), { recursive: true });
-    await writeFile(join(dir, ".vercel", "README.txt"), "auto-generated");
-    await writeFile(join(dir, "README.txt"), "local readme");
-    // Both are lookalikes for README.md; .vercel/README.txt ignored, README.txt not
-    const findings = await detectLookalikes(dir, ["README.md"], [".vercel/**"]);
-    expect(findings[0].present).toBe(false);
-    // README.txt (not in .vercel) should still be reported
-    expect(findings[0].lookalike).toBe("README.txt");
-  });
-
-  it("ignoreGlobs with _actions pattern suppresses CRM action file", async () => {
-    await mkdir(join(dir, "src", "app", "(dashboard)", "crm", "_actions"), { recursive: true });
-    await writeFile(join(dir, "src", "app", "(dashboard)", "crm", "_actions", "import.ts"), "");
-    // This should not be a lookalike for atom-imports.sh but confirm ignore works in general
-    const findingsNoIgnore = await detectLookalikes(dir, ["README.md"]);
-    const findingsIgnored = await detectLookalikes(dir, ["README.md"], ["**/_actions/**"]);
-    // import.ts wouldn't match README.md anyway, but the glob should still work without error
-    expect(findingsIgnored[0].lookalike).toBeNull();
-    expect(findingsNoIgnore[0].lookalike).toBeNull();
-  });
 });
