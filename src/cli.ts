@@ -10,6 +10,7 @@ import { enforceCmd } from "./commands/enforce.js";
 import { syncCmd } from "./commands/sync.js";
 import { doctorCmd } from "./commands/doctor.js";
 import { migrateLayoutCmd } from "./commands/migrate-layout.js";
+import { reconformCmd } from "./commands/reconform.js";
 
 const program = new Command();
 program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`, "-V");
@@ -90,6 +91,13 @@ program
   .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
   .action(async (opts: { pack?: string; yes?: boolean; ignore?: string }) => {
     await migrateLayoutCmd({ pack: opts.pack, yes: opts.yes, ignore: opts.ignore });
+  });
+
+program
+  .command("reconform")
+  .option("--dry-run", "report what would happen without mutating anything")
+  .action(async (opts: { dryRun?: boolean }) => {
+    await reconformCmd({ dryRun: opts.dryRun });
   });
 
 program.parseAsync(process.argv).catch((e: unknown) => {
