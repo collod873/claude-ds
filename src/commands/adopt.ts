@@ -14,6 +14,8 @@ async function getVersion(packageJsonPath: string): Promise<string> {
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
+interface OverwriteRecord { path: string; prevSize: number; newSize: number; }
+
 export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: string; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
   if (await exists(join(cwd, ".claude-ds.json"))) { err(".claude-ds.json already exists"); process.exit(2); }
@@ -52,6 +54,8 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
 
   if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${opts.pack}, WARN mode) here?`))) { info("aborted"); return; }
 
+  const overwrites: OverwriteRecord[] = [];
+
   for (const f of manifest.files) {
     if (f.category === "generated") continue;
     const srcName = f.path === "package.json" ? "package.json.seed" : f.path === "CLAUDE.md" ? "CLAUDE.md.fragment" : f.path;
@@ -67,6 +71,10 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
     if (f.category === "hybrid" && f.format === "markdown" && await exists(dest)) {
       const cur = await readFile(dest, "utf8");
       const merged = `${cur}\n<!-- >>> claude-ds managed >>> -->\n${content}\n<!-- <<< claude-ds managed <<< -->\n`;
+      // Record overwrite only when merged result differs from current on-disk content.
+      if (merged !== cur) {
+        overwrites.push({ path: f.path, prevSize: Buffer.byteLength(cur, "utf8"), newSize: Buffer.byteLength(merged, "utf8") });
+      }
       await writeFile(dest, merged, "utf8");
     } else if (f.category === "hybrid" && f.format === "markdown") {
       await writeFile(dest, `# Project\n<!-- >>> claude-ds managed >>> -->\n${content}\n<!-- <<< claude-ds managed <<< -->\n`, "utf8");
@@ -77,14 +85,37 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
         const firstIndented = current.split("\n").find(l => l.startsWith(" ") || l.startsWith("\t"));
         const indent = firstIndented && firstIndented.startsWith("\t") ? "\t" : 2;
         const merged = mergeJsonKeys(content, current, ["hooks"], indent);
+        // Record overwrite when merged result differs from current on-disk content.
+        if (merged !== current) {
+          overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(merged, "utf8") });
+        }
         await writeFile(dest, merged, "utf8");
       } else {
         await writeFile(dest, content, "utf8");
       }
     } else {
+      // managed category: check for overwrite before writing.
+      if (f.category === "managed" && await exists(dest)) {
+        const current = await readFile(dest, "utf8");
+        if (current !== content) {
+          overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(content, "utf8") });
+        }
+      }
       await writeFile(dest, content, "utf8");
     }
   }
+
+  // Print overwrite summary BEFORE success line so it's not buried.
+  if (overwrites.length > 0) {
+    const lines: string[] = [`Overwrote ${overwrites.length} managed file(s):`];
+    for (const o of overwrites) {
+      lines.push(`  ${o.path}  (was ${o.prevSize} bytes, now ${o.newSize} bytes)`);
+    }
+    lines.push("Project-specific customizations to these files have been replaced.");
+    lines.push("To diff before adopt, run: claude-ds doctor --pack <name>");
+    process.stdout.write(lines.join("\n") + "\n");
+  }
+
   const version = await getVersion(join(repoRoot, "package.json"));
   const cfg: Record<string, unknown> = { version: `v${version}`, pack: opts.pack, mode: "warn", enforce_threshold: 10, removed: [] };
   if (flagGlobs.length > 0) cfg.lookalike_ignore = flagGlobs;

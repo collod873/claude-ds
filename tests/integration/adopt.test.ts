@@ -144,4 +144,42 @@ describe("adopt", () => {
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.lookalike_ignore).toBeUndefined();
   });
+
+  it("managed overwrite detected: reports overwritten files when pre-existing content differs", async () => {
+    // Pre-seed with custom content (different from pack version).
+    // Use --ignore to suppress lookalike false positives from the pre-seeded hook file.
+    await mkdir(join(dir, ".claude/hooks"), { recursive: true });
+    await writeFile(join(dir, ".claude/hooks/atom-imports.sh"), "# custom");
+    const r = await runCli(
+      ["adopt", "--pack", "next-react", "--yes", "--ignore", ".claude/hooks/**"],
+      { cwd: dir }
+    );
+    expect(r.code).toBe(0);
+    // Overwrite summary must appear before success line
+    expect(r.stdout).toMatch(/Overwrote 1 managed file\(s\)/);
+    expect(r.stdout).toContain(".claude/hooks/atom-imports.sh");
+    // File on disk matches pack version (not custom content)
+    const onDisk = await readFile(join(dir, ".claude/hooks/atom-imports.sh"), "utf8");
+    expect(onDisk).not.toBe("# custom");
+  });
+
+  it("no overwrite noise when pre-existing managed file is byte-identical to pack version", async () => {
+    // Pre-seed atom-imports.sh with the exact pack content (byte-identical).
+    // Adopt must NOT report it as overwritten — byte-equal content is never an overwrite.
+    const { fileURLToPath } = await import("node:url");
+    const { resolve: res, dirname: dn } = await import("node:path");
+    const packContent = await readFile(
+      res(dn(fileURLToPath(import.meta.url)), "..", "..", "packs", "next-react", "files", ".claude", "hooks", "atom-imports.sh"),
+      "utf8"
+    );
+    await mkdir(join(dir, ".claude/hooks"), { recursive: true });
+    await writeFile(join(dir, ".claude/hooks/atom-imports.sh"), packContent);
+    const r = await runCli(
+      ["adopt", "--pack", "next-react", "--yes", "--ignore", ".claude/hooks/**"],
+      { cwd: dir }
+    );
+    expect(r.code).toBe(0);
+    // Stdout must NOT contain an overwrite notice for atom-imports.sh
+    expect(r.stdout).not.toContain("atom-imports.sh");
+  });
 });
