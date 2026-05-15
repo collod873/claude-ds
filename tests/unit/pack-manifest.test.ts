@@ -10,7 +10,7 @@ describe("next-react manifest", () => {
     for (const p of [
       ".claude/settings.json",
       ".claude/hooks/atom-imports.sh",
-      "scripts/log-failure.sh",
+      ".claude/hooks/lib/log-failure.sh",
       "design-system/contracts.md",
       "design-system/tokens.json",
       "design-system/README.md",

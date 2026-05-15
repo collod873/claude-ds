@@ -1,11 +1,22 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": ".claude/hooks/pre-write-ds-states.sh $CLAUDE_FILE_PATHS" },
+          { "type": "command", "command": ".claude/hooks/pre-write-ds-manifest.sh $CLAUDE_FILE_PATHS" },
+          { "type": "command", "command": ".claude/hooks/pre-write-ds-similarity.sh $CLAUDE_FILE_PATHS" }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
         "hooks": [
           { "type": "command", "command": ".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS" },
-          { "type": "command", "command": ".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS" }
+          { "type": "command", "command": ".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS" },
+          { "type": "command", "command": ".claude/hooks/post-write-design.sh $CLAUDE_FILE_PATHS" }
         ]
       }
     ]

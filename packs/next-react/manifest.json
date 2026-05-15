@@ -12,7 +12,12 @@
     { "path": ".claude/settings.json", "category": "hybrid", "format": "json" },
     { "path": ".claude/hooks/atom-imports.sh", "category": "managed" },
     { "path": ".claude/hooks/token-only.sh", "category": "managed" },
-    { "path": "scripts/log-failure.sh", "category": "managed" },
+    { "path": ".claude/hooks/lib/log-failure.sh", "category": "managed" },
+    { "path": ".claude/hooks/README.md", "category": "seeded" },
+    { "path": ".claude/hooks/pre-write-ds-states.sh", "category": "managed" },
+    { "path": ".claude/hooks/pre-write-ds-manifest.sh", "category": "managed" },
+    { "path": ".claude/hooks/pre-write-ds-similarity.sh", "category": "managed" },
+    { "path": ".claude/hooks/post-write-design.sh", "category": "managed" },
     { "path": "design-system/contracts.md", "category": "seeded" },
     { "path": "design-system/tokens.json", "category": "seeded" },
     { "path": "design-system/README.md", "category": "seeded" },
@@ -40,8 +45,13 @@
     "design-system/README.md",
     "design-system/exceptions.json",
     "design-system/failure-log.md",
-    "scripts/log-failure.sh",
+    ".claude/hooks/lib/log-failure.sh",
+    ".claude/hooks/README.md",
     ".claude/hooks/atom-imports.sh",
-    ".claude/hooks/token-only.sh"
+    ".claude/hooks/token-only.sh",
+    ".claude/hooks/pre-write-ds-states.sh",
+    ".claude/hooks/pre-write-ds-manifest.sh",
+    ".claude/hooks/pre-write-ds-similarity.sh",
+    ".claude/hooks/post-write-design.sh"
   ]
 }

@@ -17,7 +17,7 @@ describe("init", () => {
     expect(cfg.mode).toBe("block");
     await stat(join(dir, ".claude/settings.json"));
     await stat(join(dir, "design-system/contracts.md"));
-    await stat(join(dir, "scripts/log-failure.sh"));
+    await stat(join(dir, ".claude/hooks/lib/log-failure.sh"));
     await stat(join(dir, "design-system/atoms/.gitkeep"));
   });
 

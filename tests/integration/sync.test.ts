@@ -103,9 +103,11 @@ describe("settings.json hybrid+json preservation", () => {
     // permissions intact
     expect(settings.permissions).toEqual({ allow: ["Bash(npm test:*)"] });
 
-    // PreToolUse validator survived
-    expect(settings.hooks.PreToolUse).toHaveLength(1);
-    expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe("scripts/ui-token-validator.sh");
+    // PreToolUse validator survived (pack now adds its own PreToolUse block too, so length >= 1)
+    const userPreToolUse = settings.hooks.PreToolUse.find((b: { hooks: { command: string }[] }) =>
+      b.hooks.some((h) => h.command === "scripts/ui-token-validator.sh")
+    );
+    expect(userPreToolUse).toBeDefined();
 
     // SessionStart banner survived
     expect(settings.hooks.SessionStart).toHaveLength(1);
