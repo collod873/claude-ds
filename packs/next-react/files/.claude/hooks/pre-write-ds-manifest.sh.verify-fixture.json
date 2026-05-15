@@ -1,0 +1,8 @@
+{
+  "pass": {
+    "arg": "design-system/contracts.md",
+    "setup": [
+      { "path": "design-system/contracts.md", "content": "# contracts\n" }
+    ]
+  }
+}

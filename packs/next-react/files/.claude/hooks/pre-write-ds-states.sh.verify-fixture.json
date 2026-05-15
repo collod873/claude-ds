@@ -1,0 +1,9 @@
+{
+  "pass": {
+    "arg": "design-system/atoms/Button.tsx",
+    "setup": [
+      { "path": "design-system/atoms/Button.tsx", "content": "export const Button = () => <button>Click</button>;\n" },
+      { "path": "design-system/atoms/Button.states.json", "content": "{}\n" }
+    ]
+  }
+}

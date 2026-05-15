@@ -1,0 +1,8 @@
+{
+  "pass": {
+    "arg": "design-system/atoms/Button.tsx",
+    "setup": [
+      { "path": "design-system/atoms/Button.tsx", "content": "import { tokens } from \"@/tokens\";\nexport const Button = () => <button style={{ color: tokens.primary }}>Click</button>;\n" }
+    ]
+  }
+}

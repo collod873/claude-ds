@@ -1,0 +1,6 @@
+{
+  "pass": {
+    "arg": "npm run build",
+    "setup": []
+  }
+}

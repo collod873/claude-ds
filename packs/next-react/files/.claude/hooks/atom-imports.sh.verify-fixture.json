@@ -1,0 +1,8 @@
+{
+  "pass": {
+    "arg": "src/atoms/Button.tsx",
+    "setup": [
+      { "path": "src/atoms/Button.tsx", "content": "import React from \"react\";\nexport const Button = () => <button>Click</button>;\n" }
+    ]
+  }
+}

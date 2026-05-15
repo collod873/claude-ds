@@ -1,0 +1,8 @@
+{
+  "pass": {
+    "arg": "design-system/atoms/Label.tsx",
+    "setup": [
+      { "path": "design-system/atoms/Label.tsx", "content": "import { tokens } from \"design-system/tokens\";\nexport function Label({ text }: { text: string }) {\n  return <span style={{ color: tokens.text }}>{text}</span>;\n}\n" }
+    ]
+  }
+}
