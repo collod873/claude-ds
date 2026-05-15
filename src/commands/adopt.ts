@@ -5,6 +5,7 @@ import { parseManifest } from "../lib/manifest.js";
 import { mergeJsonKeys } from "../lib/json-merge.js";
 import { info, err, confirm } from "../lib/log.js";
 import { detectLookalikes } from "../lib/lookalike.js";
+import { detectPackageManager, runCmd } from "../lib/package-manager.js";
 
 // Read package.json for version (avoid JSON import assertions for broader compat).
 async function getVersion(packageJsonPath: string): Promise<string> {
@@ -119,5 +120,6 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
   const cfg: Record<string, unknown> = { version: `v${version}`, pack: opts.pack, mode: "warn", enforce_threshold: 10, removed: [] };
   if (flagGlobs.length > 0) cfg.lookalike_ignore = flagGlobs;
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
-  info(`adopted claude-ds (${opts.pack}, mode=warn). Run 'enforce' when ready.`);
+  const pm = await detectPackageManager(cwd);
+  info(`adopted claude-ds (${opts.pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);
 }

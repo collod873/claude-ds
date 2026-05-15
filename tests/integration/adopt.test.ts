@@ -201,4 +201,11 @@ describe("adopt", () => {
     expect(pkg.name).toBe("my-app");
     expect(pkg.version).toBe("1.2.3");
   });
+
+  it("adopt success message includes detected package manager when pnpm-lock.yaml present", async () => {
+    await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '6.0'");
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("Detected package manager: pnpm");
+  });
 });

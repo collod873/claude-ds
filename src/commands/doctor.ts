@@ -5,6 +5,7 @@ import { parseManifest } from "../lib/manifest.js";
 import { parseConfig } from "../lib/config.js";
 import { parseExceptions, openCount } from "../lib/exceptions.js";
 import { detectLookalikes, Finding } from "../lib/lookalike.js";
+import { detectPackageManager, PackageManager } from "../lib/package-manager.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -19,6 +20,7 @@ interface DoctorResult {
   mode: "pre-adopt" | "post-adopt";
   canonical: Finding[];
   drift?: DriftResult;
+  packageManager: PackageManager;
 }
 
 function renderMarkdown(result: DoctorResult): string {
@@ -26,6 +28,7 @@ function renderMarkdown(result: DoctorResult): string {
 
   if (result.mode === "pre-adopt") {
     lines.push("## claude-ds doctor — pre-adopt mode\n");
+    lines.push(`Package manager: **${result.packageManager}**\n`);
     lines.push("No `.claude-ds.json` found. Run `adopt` to install the scaffold.\n");
 
     const lookalikes = result.canonical.filter(f => !f.present && f.lookalike !== null);
@@ -59,6 +62,7 @@ function renderMarkdown(result: DoctorResult): string {
     }
   } else {
     lines.push("## claude-ds doctor — post-adopt mode\n");
+    lines.push(`Package manager: **${result.packageManager}**\n`);
 
     const lookalikes = result.canonical.filter(f => !f.present && f.lookalike !== null);
     const missing = result.canonical.filter(f => !f.present && f.lookalike === null);
@@ -122,6 +126,7 @@ export async function doctorCmd(opts: { pack: string; ignore?: string; cwd?: str
   const ignoreGlobs = [...manifest.lookalike_ignore, ...configIgnore, ...flagGlobs];
 
   const findings = await detectLookalikes(cwd, canonicalPaths, ignoreGlobs);
+  const pm = await detectPackageManager(cwd);
 
   const isPostAdopt = await exists(configPath);
 
@@ -158,6 +163,7 @@ export async function doctorCmd(opts: { pack: string; ignore?: string; cwd?: str
         missing: missingManaged,
         open_exceptions: openExceptions,
       },
+      packageManager: pm,
     };
 
     // Suppress unused variable warning
@@ -166,6 +172,7 @@ export async function doctorCmd(opts: { pack: string; ignore?: string; cwd?: str
     result = {
       mode: "pre-adopt",
       canonical: findings,
+      packageManager: pm,
     };
   }
 
