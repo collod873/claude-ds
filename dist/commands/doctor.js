@@ -108,7 +108,7 @@ export async function doctorCmd(opts) {
         // Post-adopt: check drift (missing managed files + exception count)
         const cfg = parseConfig(await readFile(configPath, "utf8"));
         let openExceptions = 0;
-        const exceptionsPath = join(cwd, "exceptions.json");
+        const exceptionsPath = join(cwd, "design-system/exceptions.json");
         if (await exists(exceptionsPath)) {
             try {
                 const ex = parseExceptions(await readFile(exceptionsPath, "utf8"));

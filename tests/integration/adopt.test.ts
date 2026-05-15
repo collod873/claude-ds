@@ -111,7 +111,7 @@ describe("adopt", () => {
     // .claude-ds.json must NOT have been created
     await expect(stat(join(dir, ".claude-ds.json"))).rejects.toThrow();
     // Parallel files must NOT have been seeded
-    await expect(stat(join(dir, "tokens.json"))).rejects.toThrow();
+    await expect(stat(join(dir, "design-system/tokens.json"))).rejects.toThrow();
   });
 
   // v0.2.1: --ignore flag and lookalike_ignore persistence

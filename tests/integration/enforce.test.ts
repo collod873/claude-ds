@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
-import { writeFile, readFile } from "node:fs/promises";
+import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 describe("enforce", () => {
@@ -13,7 +13,8 @@ describe("enforce", () => {
   afterEach(async () => { await cleanup(dir); });
 
   it("flips warn→block when under threshold", async () => {
-    await writeFile(join(dir, "exceptions.json"), JSON.stringify({ exceptions: [] }));
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({ exceptions: [] }));
     const r = await runCli(["enforce", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
@@ -22,7 +23,8 @@ describe("enforce", () => {
 
   it("refuses when over threshold", async () => {
     const many = Array.from({ length: 3 }).map((_, i) => ({ rule_id:`r${i}`, file:`f${i}`, reason:"x", expiry:"2099-01-01" }));
-    await writeFile(join(dir, "exceptions.json"), JSON.stringify({ exceptions: many }));
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({ exceptions: many }));
     const r = await runCli(["enforce", "--yes"], { cwd: dir });
     expect(r.code).not.toBe(0);
     expect(r.stderr).toMatch(/threshold/i);

@@ -55,7 +55,7 @@ export async function migrateCmd(opts) {
     const states = dest.replace(/\.tsx$/, ".states.json");
     await writeFile(showcase, `// auto-generated showcase stub for ${destName}\nexport default function Showcase(){ return null; }\n`, "utf8");
     await writeFile(states, `[]`, "utf8");
-    const exPath = join(cwd, "exceptions.json");
+    const exPath = join(cwd, "design-system/exceptions.json");
     const cur = parseExceptions(await readFile(exPath, "utf8"));
     const expiry = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().slice(0, 10);
     cur.push({ rule_id: "migration-default", file: dest.replace(cwd + "/", ""), reason: opts.reason, expiry });

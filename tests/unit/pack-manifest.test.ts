@@ -11,18 +11,19 @@ describe("next-react manifest", () => {
       ".claude/settings.json",
       ".claude/hooks/atom-imports.sh",
       "scripts/log-failure.sh",
-      "contracts.md",
-      "tokens.json",
+      "design-system/contracts.md",
+      "design-system/tokens.json",
       "design-system/README.md",
+      "design-system/CLAUDE.md",
       "commitlint.config.js",
       "CLAUDE.md",
       "package.json",
-      "exceptions.json",
-      "failure-log.md",
+      "design-system/exceptions.json",
+      "design-system/failure-log.md",
     ]) expect(paths).toContain(p);
     expect(m.files.find((f) => f.path === "CLAUDE.md")!.category).toBe("hybrid");
     expect(m.files.find((f) => f.path === ".claude/settings.json")!.category).toBe("hybrid");
     expect(m.files.find((f) => f.path === ".claude/settings.json")!.format).toBe("json");
-    expect(m.files.find((f) => f.path === "contracts.md")!.category).toBe("seeded");
+    expect(m.files.find((f) => f.path === "design-system/contracts.md")!.category).toBe("seeded");
   });
 });

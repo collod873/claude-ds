@@ -18,7 +18,7 @@ export async function enforceCmd(opts) {
         process.exit(2);
     }
     const cfg = parseConfig(await readFile(cfgPath, "utf8"));
-    const ex = parseExceptions(await readFile(join(cwd, "exceptions.json"), "utf8"));
+    const ex = parseExceptions(await readFile(join(cwd, "design-system/exceptions.json"), "utf8"));
     try {
         gate(ex, cfg.enforce_threshold, new Date());
     }

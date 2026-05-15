@@ -13,7 +13,7 @@ describe("audit", () => {
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/missing: \.claude\/settings\.json/);
-    expect(r.stdout).toMatch(/missing: contracts\.md/);
+    expect(r.stdout).toMatch(/missing: design-system\/contracts\.md/);
   });
 
   it("--suggest-removals lists ad-hoc files but mutates nothing", async () => {

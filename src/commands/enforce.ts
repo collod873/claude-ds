@@ -11,7 +11,7 @@ export async function enforceCmd(opts: { yes?: boolean; cwd?: string }) {
   const cfgPath = join(cwd, ".claude-ds.json");
   if (!(await exists(cfgPath))) { err(".claude-ds.json absent; run init or adopt first"); process.exit(2); }
   const cfg = parseConfig(await readFile(cfgPath, "utf8"));
-  const ex = parseExceptions(await readFile(join(cwd, "exceptions.json"), "utf8"));
+  const ex = parseExceptions(await readFile(join(cwd, "design-system/exceptions.json"), "utf8"));
   try { gate(ex, cfg.enforce_threshold, new Date()); } catch (e) { err((e as Error).message); process.exit(2); }
   if (!opts.yes && !(await confirm(`Flip mode warn → block (open exceptions ≤ ${cfg.enforce_threshold})?`))) { info("aborted"); return; }
   cfg.mode = "block";

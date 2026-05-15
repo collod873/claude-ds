@@ -1,6 +1,7 @@
 This project uses claude-ds.
 
-- See `contracts.md` for design-system rules.
-- See `tokens.json` for the token set.
-- Hook scripts in `.claude/hooks/` enforce the contracts on every Edit/Write.
-- Failures are appended to `failure-log.md`.
+- UI / `.tsx` work → read `design-system/CLAUDE.md` AND grep `design-system/manifest.json` first
+- No Bash mutation of `.tsx` or `design-system/**` (no heredoc, no `sed -i`, no `awk` in-place — use Write/Edit/MultiEdit)
+- Hook scripts in `.claude/hooks/` enforce the contracts on every Edit/Write
+- Blocking failures append to `design-system/failure-log.md` via `.claude/hooks/lib/log-failure.sh`
+- Precedence on conflict: hooks > contracts > principles > skills
