@@ -37,10 +37,10 @@ program
   });
 program
   .command("adopt")
-  .requiredOption("--pack <name>", "pack to adopt")
+  .option("--pack <name>", "pack to adopt (auto-detected when only one pack is available)")
   .option("--yes", "skip confirmation prompt")
   .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
-  .action(async (opts: { pack: string; yes?: boolean; ignore?: string }) => {
+  .action(async (opts: { pack?: string; yes?: boolean; ignore?: string }) => {
     await adoptCmd({ pack: opts.pack, yes: opts.yes, ignore: opts.ignore });
   });
 

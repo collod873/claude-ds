@@ -237,4 +237,36 @@ describe("adopt", () => {
     expect(cfg.mode).toBe("warn");
     expect(r.stdout).toContain("build-manifest failed");
   });
+
+  // Issue #18a: auto-detect pack when --pack is omitted
+  it("#18a adopt without --pack defaults to sole available pack (next-react)", async () => {
+    const r = await runCli(["adopt", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.pack).toBe("next-react");
+  });
+
+  // Issue #18b: error message when .claude-ds.json already exists
+  it("#18b adopt on existing .claude-ds.json suggests sync", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }));
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("did you mean `claude-ds sync`?");
+  });
+
+  // Issue #15: hook and script files get executable bit set after adopt
+  it("#15 .claude/hooks/ files are chmod +x after adopt", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const hookStat = await stat(join(dir, ".claude/hooks/atom-imports.sh"));
+    // mode & 0o111 checks that at least one execute bit is set
+    expect(hookStat.mode & 0o111).not.toBe(0);
+  });
+
+  it("#15 scripts/ files are chmod +x after adopt", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const scriptStat = await stat(join(dir, "scripts/check-hook-contract.sh"));
+    expect(scriptStat.mode & 0o111).not.toBe(0);
+  });
 });

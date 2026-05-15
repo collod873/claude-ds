@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat, readdir, chmod } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { join, dirname, resolve } from "node:path";
@@ -19,15 +19,44 @@ async function getVersion(packageJsonPath: string): Promise<string> {
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
+// Paths under these prefixes require the executable bit (relative to project root).
+function needsExecBit(relPath: string): boolean {
+  return relPath.startsWith(".claude/hooks/") || relPath.startsWith("scripts/");
+}
+
+async function writeExecutable(dest: string, content: string, relPath: string): Promise<void> {
+  await writeFile(dest, content, "utf8");
+  if (needsExecBit(relPath)) await chmod(dest, 0o755);
+}
+
 interface OverwriteRecord { path: string; prevSize: number; newSize: number; category: "managed" | "hybrid"; }
 
-export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: string; cwd?: string }) {
+export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: string; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
-  if (await exists(join(cwd, ".claude-ds.json"))) { err(".claude-ds.json already exists"); process.exit(2); }
+  if (await exists(join(cwd, ".claude-ds.json"))) { err(".claude-ds.json already exists — did you mean `claude-ds sync`?"); process.exit(2); }
 
   const here = dirname(fileURLToPath(import.meta.url));
   const repoRoot = resolve(here, "..", "..");
-  const packDir = join(repoRoot, "packs", opts.pack);
+
+  // Auto-detect pack if not specified: list packs/ dir and default when only one exists.
+  let pack = opts.pack;
+  if (!pack) {
+    const packsDir = join(repoRoot, "packs");
+    let available: string[] = [];
+    try {
+      const entries = await readdir(packsDir, { withFileTypes: true });
+      available = entries.filter(e => e.isDirectory()).map(e => e.name);
+    } catch { available = []; }
+    if (available.length === 1) {
+      pack = available[0];
+    } else if (available.length === 0) {
+      err("--pack required: no packs found in packs/"); process.exit(2);
+    } else {
+      err(`--pack required: valid packs are: ${available.join(", ")}`); process.exit(2);
+    }
+  }
+
+  const packDir = join(repoRoot, "packs", pack);
   const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
 
   // Parse --ignore flag globs (comma-separated).
@@ -57,7 +86,7 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
     process.exit(2);
   }
 
-  if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${opts.pack}, WARN mode) here?`))) { info("aborted"); return; }
+  if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${pack}, WARN mode) here?`))) { info("aborted"); return; }
 
   const overwrites: OverwriteRecord[] = [];
 
@@ -80,9 +109,9 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
       if (merged !== cur) {
         overwrites.push({ path: f.path, prevSize: Buffer.byteLength(cur, "utf8"), newSize: Buffer.byteLength(merged, "utf8"), category: "hybrid" });
       }
-      await writeFile(dest, merged, "utf8");
+      await writeExecutable(dest, merged, f.path);
     } else if (f.category === "hybrid" && f.format === "markdown") {
-      await writeFile(dest, `# Project\n<!-- >>> claude-ds managed >>> -->\n${content}\n<!-- <<< claude-ds managed <<< -->\n`, "utf8");
+      await writeExecutable(dest, `# Project\n<!-- >>> claude-ds managed >>> -->\n${content}\n<!-- <<< claude-ds managed <<< -->\n`, f.path);
     } else if (f.category === "hybrid" && f.format === "json") {
       if (await exists(dest)) {
         const current = await readFile(dest, "utf8");
@@ -93,9 +122,9 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
         if (merged !== current) {
           overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(merged, "utf8"), category: "hybrid" });
         }
-        await writeFile(dest, merged, "utf8");
+        await writeExecutable(dest, merged, f.path);
       } else {
-        await writeFile(dest, content, "utf8");
+        await writeExecutable(dest, content, f.path);
       }
     } else {
       // managed category: check for overwrite before writing.
@@ -105,7 +134,7 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
           overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(content, "utf8"), category: "managed" });
         }
       }
-      await writeFile(dest, content, "utf8");
+      await writeExecutable(dest, content, f.path);
     }
   }
 
@@ -148,9 +177,9 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
   }
 
   const version = await getVersion(join(repoRoot, "package.json"));
-  const cfg: Record<string, unknown> = { version: `v${version}`, pack: opts.pack, mode: "warn", enforce_threshold: 10, removed: [] };
+  const cfg: Record<string, unknown> = { version: `v${version}`, pack, mode: "warn", enforce_threshold: 10, removed: [] };
   if (flagGlobs.length > 0) cfg.lookalike_ignore = flagGlobs;
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
   const pm = await detectPackageManager(cwd);
-  info(`adopted claude-ds (${opts.pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);
+  info(`adopted claude-ds (${pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);
 }
