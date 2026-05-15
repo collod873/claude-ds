@@ -1,5 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, basename, extname } from "node:path";
+import picomatch from "picomatch";
 
 export interface Finding {
   canonical: string;
@@ -89,13 +90,22 @@ function isLookalike(canonicalBase: string, candidateBase: string): boolean {
  * If missing, scan for lookalikes (files/dirs with similar basename).
  * Returns the closest lookalike (lowest Levenshtein distance) per canonical.
  *
+ * ignoreGlobs: candidate paths (relative to projectRoot) matching any of these
+ * globs are excluded from lookalike detection. Empty array = v0.2.0 behavior.
+ *
  * Pure: no fs side effects beyond reads.
  */
 export async function detectLookalikes(
   projectRoot: string,
-  canonicalPaths: string[]
+  canonicalPaths: string[],
+  ignoreGlobs: string[] = []
 ): Promise<Finding[]> {
   const allPaths = await collectPaths(projectRoot);
+
+  // Build a single matcher from all ignore globs (if any).
+  const shouldIgnore = ignoreGlobs.length > 0
+    ? picomatch(ignoreGlobs, { dot: true })
+    : () => false;
 
   const findings: Finding[] = [];
 
@@ -114,6 +124,8 @@ export async function detectLookalikes(
     let bestDist = Infinity;
 
     for (const candidate of allPaths) {
+      // Skip any candidate whose relative path matches an ignore glob.
+      if (shouldIgnore(candidate)) continue;
       const candidateBase = basename(candidate);
       if (!isLookalike(canonicalBase, candidateBase)) continue;
       // Don't suggest children of the canonical path itself
