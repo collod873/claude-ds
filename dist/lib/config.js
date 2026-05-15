@@ -1,6 +1,6 @@
 export class ConfigError extends Error {
 }
-const ALLOWED = new Set(["version", "pack", "mode", "enforce_threshold", "removed"]);
+const ALLOWED = new Set(["version", "pack", "mode", "enforce_threshold", "removed", "lookalike_ignore"]);
 const VERSION_RE = /^v\d+\.\d+\.\d+$/;
 export function parseConfig(raw) {
     let obj;
@@ -28,5 +28,8 @@ export function parseConfig(raw) {
     const removed = o.removed === undefined ? [] : o.removed;
     if (!Array.isArray(removed) || removed.some((x) => typeof x !== "string"))
         throw new ConfigError(`removed must be string[]`);
-    return { version: o.version, pack: o.pack, mode: o.mode, enforce_threshold, removed: removed };
+    const lookalike_ignore = o.lookalike_ignore === undefined ? [] : o.lookalike_ignore;
+    if (!Array.isArray(lookalike_ignore) || lookalike_ignore.some((x) => typeof x !== "string"))
+        throw new ConfigError(`lookalike_ignore must be string[]`);
+    return { version: o.version, pack: o.pack, mode: o.mode, enforce_threshold, removed: removed, lookalike_ignore: lookalike_ignore };
 }

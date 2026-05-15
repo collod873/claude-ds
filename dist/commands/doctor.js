@@ -86,8 +86,21 @@ export async function doctorCmd(opts) {
     const manifestRaw = await readFile(join(packDir, "manifest.json"), "utf8");
     const manifest = parseManifest(manifestRaw);
     const canonicalPaths = manifest.canonical_paths;
-    const findings = await detectLookalikes(cwd, canonicalPaths);
+    // Load ignore globs from on-disk config (if present), then merge with --ignore flag globs.
     const configPath = join(cwd, ".claude-ds.json");
+    let configIgnore = [];
+    if (await exists(configPath)) {
+        try {
+            const cfg = parseConfig(await readFile(configPath, "utf8"));
+            configIgnore = cfg.lookalike_ignore;
+        }
+        catch {
+            // parseConfig will error properly later; don't block doctor on it here
+        }
+    }
+    const flagGlobs = opts.ignore ? opts.ignore.split(",").map(g => g.trim()).filter(Boolean) : [];
+    const ignoreGlobs = [...configIgnore, ...flagGlobs];
+    const findings = await detectLookalikes(cwd, canonicalPaths, ignoreGlobs);
     const isPostAdopt = await exists(configPath);
     let result;
     if (isPostAdopt) {

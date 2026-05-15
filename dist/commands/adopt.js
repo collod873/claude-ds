@@ -31,9 +31,11 @@ export async function adoptCmd(opts) {
     const repoRoot = resolve(here, "..", "..");
     const packDir = join(repoRoot, "packs", opts.pack);
     const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+    // Parse --ignore flag globs (comma-separated).
+    const flagGlobs = opts.ignore ? opts.ignore.split(",").map(g => g.trim()).filter(Boolean) : [];
     // Precondition gate: refuse if any canonical path is missing but has a lookalike.
-    // This prevents parallel files being seeded next to differently-named existing files.
-    const findings = await detectLookalikes(cwd, manifest.canonical_paths);
+    // ignoreGlobs lets users suppress false positives from the heuristic.
+    const findings = await detectLookalikes(cwd, manifest.canonical_paths, flagGlobs);
     const blockers = findings.filter(f => !f.present && f.lookalike !== null);
     if (blockers.length > 0) {
         const lines = [
@@ -89,6 +91,8 @@ export async function adoptCmd(opts) {
     }
     const version = await getVersion(join(repoRoot, "package.json"));
     const cfg = { version: `v${version}`, pack: opts.pack, mode: "warn", enforce_threshold: 10, removed: [] };
+    if (flagGlobs.length > 0)
+        cfg.lookalike_ignore = flagGlobs;
     await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
     info(`adopted claude-ds (${opts.pack}, mode=warn). Run 'enforce' when ready.`);
 }
