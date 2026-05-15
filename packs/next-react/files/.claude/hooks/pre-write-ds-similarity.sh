@@ -14,4 +14,4 @@ if [ ! -f "$similarity_script" ]; then
 fi
 
 # Slice F is present — delegate and proxy exit code
-npx ts-node "$similarity_script" "$file"
+node --experimental-strip-types "$similarity_script" "$file"

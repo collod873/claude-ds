@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 function runHook(script: string, file: string) {
   const r = spawnSync("bash", [resolve("packs/next-react/files/.claude/hooks", script), resolve("packs/next-react/tests/fixtures", file)], { encoding: "utf8" });
@@ -101,14 +103,36 @@ describe("next-react hooks (fixture)", () => {
     expect(r.stderr).toMatch(/COMMIT-000/);
   });
 
-  // SIM-* tests — skipped until Slice F adds similarity-check.ts
-  it.skip("pre-write-ds-similarity: exits 1 self-error when similarity-check.ts missing (un-skip after Slice F adds similarity-check.ts)", () => {
+  // SIM-* tests — un-skipped after Slice F added similarity-check.ts.
+  // The hook checks for scripts/similarity-check.ts relative to cwd.
+  // In an adopted project, scripts/ lives at project root. In this fixture
+  // harness, we run with cwd=packs/next-react/files/ which contains scripts/.
+  it("pre-write-ds-similarity: exits 1 self-error with SIM-000 when scripts/ not in cwd", () => {
+    // runHook() uses default cwd (repo root) — no scripts/ there.
     const r = runHook("pre-write-ds-similarity.sh", "states-ok/design-system/atoms/Button.tsx");
     expect(r.code).toBe(1);
-    expect(r.stderr).toMatch(/^[^:]+:\d+: [A-Z]+-\d+: /);
+    expect(r.stderr).toMatch(/SIM-000/);
   });
-  it.skip("pre-write-ds-similarity: allows when similarity-check.ts present and passes (un-skip after Slice F adds similarity-check.ts)", () => {
-    const r = runHook("pre-write-ds-similarity.sh", "states-ok/design-system/atoms/Button.tsx");
-    expect(r.code).toBe(0);
+  it("pre-write-ds-similarity: exits 0 when similarity-check.ts present and no near-duplicates found", () => {
+    // Build a temp dir with scripts/ + clean design-system/ so hook can delegate successfully.
+    const tmp = mkdtempSync(join(tmpdir(), "sim-hook-"));
+    try {
+      mkdirSync(join(tmp, "scripts"), { recursive: true });
+      mkdirSync(join(tmp, "design-system", "atoms"), { recursive: true });
+      copyFileSync(
+        resolve("packs/next-react/files/scripts/similarity-check.ts"),
+        join(tmp, "scripts", "similarity-check.ts")
+      );
+      writeFileSync(join(tmp, "design-system", "atoms", "Button.tsx"), "");
+      const r = spawnSync(
+        "bash",
+        [resolve("packs/next-react/files/.claude/hooks/pre-write-ds-similarity.sh"),
+         join(tmp, "design-system", "atoms", "Button.tsx")],
+        { encoding: "utf8", cwd: tmp }
+      );
+      expect(r.status).toBe(0);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

@@ -3,7 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "lint:commits": "commitlint --from=HEAD~1"
+    "lint:commits": "commitlint --from=HEAD~1",
+    "ds:build-manifest": "node --experimental-strip-types scripts/build-manifest.ts",
+    "ds:check-states": "node --experimental-strip-types scripts/check-states-coverage.ts",
+    "ds:check-tiers": "node --experimental-strip-types scripts/check-tier-imports.ts",
+    "ds:similarity": "node --experimental-strip-types scripts/similarity-check.ts",
+    "ds:a11y": "node --experimental-strip-types scripts/a11y-scan.ts",
+    "ds:principles": "node --experimental-strip-types scripts/check-principles-freshness.ts",
+    "ds:tokens": "node --experimental-strip-types scripts/update-tokens.ts",
+    "ci:hook-contract": "bash scripts/check-hook-contract.sh",
+    "ci:consistency": "bash scripts/consistency-probe.sh"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",

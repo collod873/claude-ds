@@ -36,7 +36,16 @@
     { "path": "package.json", "category": "seeded" },
     { "path": "design-system/exceptions.json", "category": "seeded" },
     { "path": "design-system/failure-log.md", "category": "seeded" },
-    { "path": "manifest.json", "category": "generated" }
+    { "path": "manifest.json", "category": "generated" },
+    { "path": "scripts/build-manifest.ts", "category": "seeded" },
+    { "path": "scripts/check-states-coverage.ts", "category": "seeded" },
+    { "path": "scripts/check-tier-imports.ts", "category": "seeded" },
+    { "path": "scripts/similarity-check.ts", "category": "seeded" },
+    { "path": "scripts/a11y-scan.ts", "category": "seeded" },
+    { "path": "scripts/check-principles-freshness.ts", "category": "seeded" },
+    { "path": "scripts/update-tokens.ts", "category": "seeded" },
+    { "path": "scripts/check-hook-contract.sh", "category": "managed" },
+    { "path": "scripts/consistency-probe.sh", "category": "managed" }
   ],
   "canonical_paths": [
     "design-system/tokens.json",
