@@ -49,7 +49,11 @@
     { "path": "scripts/generate-showcase.ts", "category": "seeded" },
     { "path": ".claude/skills/aesthetic-principles/SKILL.md", "category": "seeded" },
     { "path": ".claude/skills/design-system/SKILL.md", "category": "seeded" },
-    { "path": ".claude/skills/design-system/contracts.md", "category": "seeded" }
+    { "path": ".claude/skills/design-system/contracts.md", "category": "seeded" },
+    { "path": "tests/visual/.gitkeep", "category": "seeded" },
+    { "path": "tests/visual/README.md", "category": "seeded" },
+    { "path": "tests/a11y/.gitkeep", "category": "seeded" },
+    { "path": "tests/a11y/README.md", "category": "seeded" }
   ],
   "canonical_paths": [
     "design-system/tokens.json",
