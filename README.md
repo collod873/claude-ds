@@ -2,7 +2,7 @@
 
 Shared design-system governance + scaffold CLI.
 
-Install (per-project, no global): `npx github:collin-lodato/claude-ds#v0.1.0 <subcommand>`
+Install (per-project, no global): `npx github:collod873/claude-ds#v0.1.0 <subcommand>`
 
 Subcommands: `init`, `audit`, `adopt`, `migrate`, `enforce`, `sync`, `version`.
 
