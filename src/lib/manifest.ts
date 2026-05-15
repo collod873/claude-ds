@@ -2,11 +2,11 @@ export class ManifestError extends Error {}
 export type Category = "managed" | "seeded" | "generated" | "hybrid";
 export type Format = "markdown" | "shell" | "json";
 export interface ManifestEntry { path: string; category: Category; format?: Format; }
-export interface Manifest { files: ManifestEntry[]; canonical_paths: string[]; }
+export interface Manifest { files: ManifestEntry[]; canonical_paths: string[]; lookalike_ignore: string[]; }
 const CATS = new Set<Category>(["managed","seeded","generated","hybrid"]);
 const FMTS = new Set<Format>(["markdown","shell","json"]);
 export function parseManifest(raw: string): Manifest {
-  const o = JSON.parse(raw) as { files?: unknown; canonical_paths?: unknown };
+  const o = JSON.parse(raw) as { files?: unknown; canonical_paths?: unknown; lookalike_ignore?: unknown };
   if (!Array.isArray(o.files)) throw new ManifestError("files: array required");
   const out: ManifestEntry[] = [];
   for (const e of o.files as Record<string, unknown>[]) {
@@ -20,5 +20,8 @@ export function parseManifest(raw: string): Manifest {
   const canonical_paths: string[] = Array.isArray(o.canonical_paths)
     ? (o.canonical_paths as unknown[]).filter((p): p is string => typeof p === "string")
     : [];
-  return { files: out, canonical_paths };
+  const lookalike_ignore: string[] = Array.isArray(o.lookalike_ignore)
+    ? (o.lookalike_ignore as unknown[]).filter((p): p is string => typeof p === "string")
+    : [];
+  return { files: out, canonical_paths, lookalike_ignore };
 }

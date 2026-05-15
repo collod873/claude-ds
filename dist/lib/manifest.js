@@ -21,5 +21,8 @@ export function parseManifest(raw) {
     const canonical_paths = Array.isArray(o.canonical_paths)
         ? o.canonical_paths.filter((p) => typeof p === "string")
         : [];
-    return { files: out, canonical_paths };
+    const lookalike_ignore = Array.isArray(o.lookalike_ignore)
+        ? o.lookalike_ignore.filter((p) => typeof p === "string")
+        : [];
+    return { files: out, canonical_paths, lookalike_ignore };
 }

@@ -23,19 +23,17 @@ export async function adoptCmd(opts) {
         err(".claude-ds.json already exists");
         process.exit(2);
     }
-    if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${opts.pack}, WARN mode) here?`))) {
-        info("aborted");
-        return;
-    }
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..", "..");
     const packDir = join(repoRoot, "packs", opts.pack);
     const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
     // Parse --ignore flag globs (comma-separated).
+    // Merge order: pack defaults < --ignore flag (flag extends, not replaces).
     const flagGlobs = opts.ignore ? opts.ignore.split(",").map(g => g.trim()).filter(Boolean) : [];
-    // Precondition gate: refuse if any canonical path is missing but has a lookalike.
+    const ignoreGlobs = [...manifest.lookalike_ignore, ...flagGlobs];
+    // Precondition gate runs BEFORE the confirmation prompt — fail fast on lookalikes.
     // ignoreGlobs lets users suppress false positives from the heuristic.
-    const findings = await detectLookalikes(cwd, manifest.canonical_paths, flagGlobs);
+    const findings = await detectLookalikes(cwd, manifest.canonical_paths, ignoreGlobs);
     const blockers = findings.filter(f => !f.present && f.lookalike !== null);
     if (blockers.length > 0) {
         const lines = [
@@ -50,8 +48,13 @@ export async function adoptCmd(opts) {
         }
         lines.push("");
         lines.push("No files were modified.");
+        lines.push("If these matches are false positives, re-run with --ignore '<glob>,<glob>'");
         process.stderr.write(lines.join("\n") + "\n");
         process.exit(2);
+    }
+    if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${opts.pack}, WARN mode) here?`))) {
+        info("aborted");
+        return;
     }
     for (const f of manifest.files) {
         if (f.category === "generated")
@@ -78,7 +81,10 @@ export async function adoptCmd(opts) {
         else if (f.category === "hybrid" && f.format === "json") {
             if (await exists(dest)) {
                 const current = await readFile(dest, "utf8");
-                const merged = mergeJsonKeys(content, current, ["hooks"]);
+                // Detect existing indentation: find first indented line, check if it starts with a tab.
+                const firstIndented = current.split("\n").find(l => l.startsWith(" ") || l.startsWith("\t"));
+                const indent = firstIndented && firstIndented.startsWith("\t") ? "\t" : 2;
+                const merged = mergeJsonKeys(content, current, ["hooks"], indent);
                 await writeFile(dest, merged, "utf8");
             }
             else {
