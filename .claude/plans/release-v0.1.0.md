@@ -7,7 +7,7 @@ slice_of: .claude/plans/claude-ds.md
 
 # Slice: release-v0.1.0
 
-**Goal:** First public tag of `claude-ds` — `dist/cli.js` committed, full vitest suite green, README quickref written, `v0.1.0` tag pushed to origin so `npx github:collin-lodato/claude-ds#v0.1.0` resolves.
+**Goal:** First public tag of `claude-ds` — `dist/cli.js` committed, full vitest suite green, README quickref written, `v0.1.0` tag pushed to origin so `npx github:collod873/claude-ds#v0.1.0` resolves.
 
 **Architectural decisions inherited:** committed `dist/` (consumers don't build); git tags are the release unit; no npm publish; README contains the subcommand quickref + install one-liner.
 
@@ -44,7 +44,7 @@ slice_of: .claude/plans/claude-ds.md
 
   Shared design-system governance + scaffold CLI.
 
-  Install (per-project, no global): `npx github:collin-lodato/claude-ds#v0.1.0 <subcommand>`
+  Install (per-project, no global): `npx github:collod873/claude-ds#v0.1.0 <subcommand>`
 
   Subcommands: `init`, `audit`, `adopt`, `migrate`, `enforce`, `sync`, `version`.
 

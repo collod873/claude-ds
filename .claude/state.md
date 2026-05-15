@@ -36,7 +36,7 @@
 - 2026-05-14 — Slice 6 `release-v0.1.0` steps 1–4 complete AFK. Build clean (dist/cli.js 2.6K). Tests 53/53 green. README updated with install one-liner + subcommand quickref. Commit `ac86682 chore: build dist + README quickref` pushed to origin/main. HITL halt at step 5 (git tag v0.1.0 + push --tags) — awaiting human confirmation.
 
 ## Decisions log
-- 2026-05-14 — `/spec-first` cycle completed. Spec at `.claude/spec.md`. Project name `claude-ds`. v1 ships `next-react` pack only. TypeScript CLI with committed `dist/`, distributed via `npx github:collin-lodato/claude-ds#vX.Y.Z`. Brownfield adoption ladder: `audit` → `adopt` (WARN) → `migrate` → `enforce` (BLOCK). Greenfield: `init`. Steady-state: `sync`.
+- 2026-05-14 — `/spec-first` cycle completed. Spec at `.claude/spec.md`. Project name `claude-ds`. v1 ships `next-react` pack only. TypeScript CLI with committed `dist/`, distributed via `npx github:collod873/claude-ds#vX.Y.Z`. Brownfield adoption ladder: `audit` → `adopt` (WARN) → `migrate` → `enforce` (BLOCK). Greenfield: `init`. Steady-state: `sync`.
 
 ## Open questions
 - Day-one threshold default for `enforce` (`enforce_threshold` defaults to 10 in spec — may want to revisit after first real brownfield run; CrewOps adopted in WARN, not yet flipped to BLOCK).

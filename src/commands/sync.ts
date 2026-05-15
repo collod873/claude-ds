@@ -26,7 +26,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
     packDir = resolve(repoRoot, opts.offlineFixture);
     target = cfg.version;
   } else {
-    const r = spawnSync("git", ["ls-remote", "--tags", "https://github.com/collin-lodato/claude-ds"], { encoding: "utf8" });
+    const r = spawnSync("git", ["ls-remote", "--tags", "https://github.com/collod873/claude-ds"], { encoding: "utf8" });
     if (r.status !== 0) { err("network: cannot reach upstream"); process.exit(2); }
     const tags = parseLsRemote(r.stdout);
     target = tags[tags.length - 1] ?? cfg.version;

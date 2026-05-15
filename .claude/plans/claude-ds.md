@@ -8,7 +8,7 @@ hitl: false
 
 > **For agents:** Use Collin's `/implement` to execute this plan. It wires the two-stage verifier into Phase 3 per D5. Steps use `- [ ]` checkbox syntax.
 
-**Goal:** Build the `claude-ds` CLI (universal core + `next-react` pack) so that `npx github:collin-lodato/claude-ds#vX.Y.Z` can `init`, `audit`, `adopt`, `migrate`, `enforce`, `sync`, and report `version` against a consuming project, exactly as specified in `.claude/spec.md`.
+**Goal:** Build the `claude-ds` CLI (universal core + `next-react` pack) so that `npx github:collod873/claude-ds#vX.Y.Z` can `init`, `audit`, `adopt`, `migrate`, `enforce`, `sync`, and report `version` against a consuming project, exactly as specified in `.claude/spec.md`.
 
 **Architecture:** TypeScript CLI compiled to a committed `dist/cli.js`. The repo has two top-level concerns: a stack-agnostic **universal core** under `src/` (config loader, pack-manifest loader, marker-block parse/merge, exception/threshold gate, sync-diff, tag/version comparison, migrate-classifier, file-ownership interpreter, log/prompt) and a directory of **stack packs** under `packs/<name>/`, of which only `next-react` ships at v1. Each pack carries a `manifest.json` (declares ownership categories per path), a tree of scaffold files under `files/`, and its own fixture tests under `tests/`. Commands compose the lib primitives and never reach into pack content directly — they consult the pack manifest.
 
@@ -926,7 +926,7 @@ Tasks below are ordered so each one can be implemented and tested in isolation (
     const installed = raw ? parseConfig(raw).version : "(none)";
     let latest = "unknown";
     if (!opts.offline) {
-      const r = spawnSync("git", ["ls-remote","--tags","https://github.com/collin-lodato/claude-ds"], { encoding: "utf8" });
+      const r = spawnSync("git", ["ls-remote","--tags","https://github.com/collod873/claude-ds"], { encoding: "utf8" });
       if (r.status === 0) { const tags = parseLsRemote(r.stdout); latest = tags[tags.length - 1] ?? "unknown"; }
     }
     info(`installed: ${installed}`);
@@ -1716,7 +1716,7 @@ Tasks below are ordered so each one can be implemented and tested in isolation (
       packDir = resolve(cwd, opts.offlineFixture);
       target = cfg.version; // synthetic same-tag for tests
     } else {
-      const r = spawnSync("git", ["ls-remote","--tags","https://github.com/collin-lodato/claude-ds"], { encoding: "utf8" });
+      const r = spawnSync("git", ["ls-remote","--tags","https://github.com/collod873/claude-ds"], { encoding: "utf8" });
       if (r.status !== 0) { err("network: cannot reach upstream"); process.exit(2); }
       const tags = parseLsRemote(r.stdout);
       target = tags[tags.length - 1] ?? cfg.version;
@@ -1795,7 +1795,7 @@ Tasks below are ordered so each one can be implemented and tested in isolation (
 
   Shared design-system governance + scaffold CLI.
 
-  Install (per-project, no global): `npx github:collin-lodato/claude-ds#v0.1.0 <subcommand>`
+  Install (per-project, no global): `npx github:collod873/claude-ds#v0.1.0 <subcommand>`
 
   Subcommands: `init`, `audit`, `adopt`, `migrate`, `enforce`, `sync`, `version`.
 

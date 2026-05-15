@@ -32,7 +32,7 @@ export async function syncCmd(opts) {
         target = cfg.version;
     }
     else {
-        const r = spawnSync("git", ["ls-remote", "--tags", "https://github.com/collin-lodato/claude-ds"], { encoding: "utf8" });
+        const r = spawnSync("git", ["ls-remote", "--tags", "https://github.com/collod873/claude-ds"], { encoding: "utf8" });
         if (r.status !== 0) {
             err("network: cannot reach upstream");
             process.exit(2);
