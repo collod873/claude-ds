@@ -84,8 +84,7 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
         // Detect existing indentation: find first indented line, check if it starts with a tab.
         const firstIndented = current.split("\n").find(l => l.startsWith(" ") || l.startsWith("\t"));
         const indent = firstIndented && firstIndented.startsWith("\t") ? "\t" : 2;
-        const merged = mergeJsonKeys(content, current, ["hooks"], indent);
-        // Record overwrite when merged result differs from current on-disk content.
+        const merged = mergeJsonKeys(content, current, f.owned_keys ?? ["hooks"], indent);
         if (merged !== current) {
           overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(merged, "utf8") });
         }

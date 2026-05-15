@@ -33,7 +33,7 @@
     { "path": "design-system/utils/.gitkeep", "category": "seeded" },
     { "path": "commitlint.config.js", "category": "seeded" },
     { "path": "CLAUDE.md", "category": "hybrid", "format": "markdown" },
-    { "path": "package.json", "category": "seeded" },
+    { "path": "package.json", "category": "hybrid", "format": "json", "owned_keys": ["scripts"] },
     { "path": "design-system/exceptions.json", "category": "seeded" },
     { "path": "design-system/failure-log.md", "category": "seeded" },
     { "path": "manifest.json", "category": "generated" },

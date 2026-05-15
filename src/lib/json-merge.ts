@@ -6,6 +6,63 @@
 const CLAUDE_DS_HOOK_NAMESPACE = ".claude/hooks/";
 
 /**
+ * Patterns that identify pack-owned script keys.
+ * A script key is "pack-owned" if its name starts with one of these prefixes
+ * OR matches one of the exact names in this list.
+ *
+ * NOTE: The ds:, ci: namespaces are wholly owned by the pack. If a user writes
+ * ds:custom and it is not present in the upstream pack, it will be stripped.
+ * This is intentional — the pack owns the namespace, not individual keys.
+ */
+const PACK_OWNED_SCRIPT_PATTERNS: (string | RegExp)[] = [
+  /^ds:/,
+  /^ci:/,
+  "generate:showcase",
+  "lint:commits",
+];
+
+/**
+ * Returns true if a script key is owned by the pack.
+ */
+function isPackOwnedScript(key: string): boolean {
+  for (const pattern of PACK_OWNED_SCRIPT_PATTERNS) {
+    if (typeof pattern === "string") {
+      if (key === pattern) return true;
+    } else {
+      if (pattern.test(key)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Namespace-aware merge of two `scripts` objects.
+ *
+ * Algorithm:
+ * 1. Start with current.scripts as base.
+ * 2. Remove any keys from base that match pack-owned patterns (idempotency — stale pack scripts stripped).
+ * 3. Add every key from upstream.scripts into base.
+ * 4. User-named scripts (anything not matching pack-owned patterns) survive untouched.
+ */
+function mergeScripts(
+  upstreamScripts: Record<string, unknown>,
+  currentScripts: Record<string, unknown>
+): Record<string, unknown> {
+  // Step 1+2: start with current, strip pack-owned keys
+  const base: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(currentScripts)) {
+    if (!isPackOwnedScript(key)) {
+      base[key] = value;
+    }
+  }
+  // Step 3: add all upstream (pack) scripts
+  for (const [key, value] of Object.entries(upstreamScripts)) {
+    base[key] = value;
+  }
+  return base;
+}
+
+/**
  * Represents a single inner hook entry (the objects inside a matcher's `hooks[]` array).
  */
 interface HookEntry {
@@ -145,6 +202,11 @@ export function mergeJsonKeys(upstream: string, current: string, ownedKeys: stri
       const upstreamHooks = (upstreamObj["hooks"] ?? {}) as Record<string, unknown>;
       const currentHooks = (currentObj["hooks"] ?? {}) as Record<string, unknown>;
       merged["hooks"] = mergeHooks(upstreamHooks, currentHooks);
+    } else if (key === "scripts") {
+      // Namespace-aware merge: user scripts survive, pack-owned namespace is idempotently applied
+      const upstreamScripts = (upstreamObj["scripts"] ?? {}) as Record<string, unknown>;
+      const currentScripts = (currentObj["scripts"] ?? {}) as Record<string, unknown>;
+      merged["scripts"] = mergeScripts(upstreamScripts, currentScripts);
     } else {
       // Wholesale replace for all other owned keys
       if (Object.prototype.hasOwnProperty.call(upstreamObj, key)) {

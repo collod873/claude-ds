@@ -146,8 +146,6 @@ describe("adopt", () => {
   });
 
   it("managed overwrite detected: reports overwritten files when pre-existing content differs", async () => {
-    // Pre-seed with custom content (different from pack version).
-    // Use --ignore to suppress lookalike false positives from the pre-seeded hook file.
     await mkdir(join(dir, ".claude/hooks"), { recursive: true });
     await writeFile(join(dir, ".claude/hooks/atom-imports.sh"), "# custom");
     const r = await runCli(
@@ -155,17 +153,13 @@ describe("adopt", () => {
       { cwd: dir }
     );
     expect(r.code).toBe(0);
-    // Overwrite summary must appear before success line
     expect(r.stdout).toMatch(/Overwrote 1 managed file\(s\)/);
     expect(r.stdout).toContain(".claude/hooks/atom-imports.sh");
-    // File on disk matches pack version (not custom content)
     const onDisk = await readFile(join(dir, ".claude/hooks/atom-imports.sh"), "utf8");
     expect(onDisk).not.toBe("# custom");
   });
 
   it("no overwrite noise when pre-existing managed file is byte-identical to pack version", async () => {
-    // Pre-seed atom-imports.sh with the exact pack content (byte-identical).
-    // Adopt must NOT report it as overwritten — byte-equal content is never an overwrite.
     const { fileURLToPath } = await import("node:url");
     const { resolve: res, dirname: dn } = await import("node:path");
     const packContent = await readFile(
@@ -179,7 +173,32 @@ describe("adopt", () => {
       { cwd: dir }
     );
     expect(r.code).toBe(0);
-    // Stdout must NOT contain an overwrite notice for atom-imports.sh
     expect(r.stdout).not.toContain("atom-imports.sh");
+  });
+
+  it("adopt merges pack scripts into existing package.json, preserving user scripts and other keys", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({
+      name: "my-app",
+      version: "1.2.3",
+      scripts: { test: "vitest" }
+    }, null, 2));
+
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+
+    const packScripts = [
+      "ds:build-manifest", "ds:check-states", "ds:check-tiers", "ds:similarity",
+      "ds:a11y", "ds:principles", "ds:tokens", "ci:hook-contract", "ci:consistency",
+      "generate:showcase"
+    ];
+    for (const s of packScripts) {
+      expect(pkg.scripts[s]).toBeDefined();
+    }
+
+    expect(pkg.scripts["test"]).toBe("vitest");
+    expect(pkg.name).toBe("my-app");
+    expect(pkg.version).toBe("1.2.3");
   });
 });
