@@ -121,7 +121,7 @@ function mergeHooks(
  * @param ownedKeys - top-level keys the CLI manages; `hooks` gets special treatment
  * @returns Formatted JSON string (2-space indent, trailing newline)
  */
-export function mergeJsonKeys(upstream: string, current: string, ownedKeys: string[]): string {
+export function mergeJsonKeys(upstream: string, current: string, ownedKeys: string[], indent: number | string = 2): string {
   let upstreamObj: Record<string, unknown>;
   let currentObj: Record<string, unknown>;
 
@@ -153,5 +153,5 @@ export function mergeJsonKeys(upstream: string, current: string, ownedKeys: stri
     }
   }
 
-  return JSON.stringify(merged, null, 2) + "\n";
+  return JSON.stringify(merged, null, indent) + "\n";
 }
