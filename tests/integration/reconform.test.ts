@@ -114,14 +114,17 @@ describe("reconform", () => {
       join(dir, "design-system", "atoms", "top-bar.showcase.tsx"),
       "utf8"
     );
-    // import uses kebab path, identifier uses PascalCase
-    expect(showcaseContent).toContain(`import { TopBar } from "./top-bar"`);
-    expect(showcaseContent).toContain(`void TopBar`);
+    // import uses namespace pattern, function name uses PascalCase
+    expect(showcaseContent).toContain(`import * as Mod from "./top-bar"`);
+    expect(showcaseContent).toContain(`void Mod`);
     expect(showcaseContent).toContain(`return null`);
     expect(showcaseContent).toContain(`function TopBarShowcase()`);
     // new stub must NOT render with unknown props or import testing-library
     expect(showcaseContent).not.toContain("@testing-library");
     expect(showcaseContent).not.toContain("<TopBar");
+    // must NOT contain the old named PascalCase import
+    expect(showcaseContent).not.toContain(`import { TopBar }`);
+    expect(showcaseContent).not.toContain(`void TopBar`);
     // must NOT contain the raw kebab identifier (would be a syntax error)
     expect(showcaseContent).not.toContain("{ top-bar }");
     expect(showcaseContent).not.toContain("top-barShowcase");

@@ -53,9 +53,9 @@ async function countLines(p: string): Promise<number> {
 function showcaseStub(displayName: string, fileBase: string): string {
   return [
     `// TODO(claude-ds): reconform stub — replace with real showcase`,
-    `import { ${displayName} } from "./${fileBase}";`,
+    `import * as Mod from "./${fileBase}";`,
     ``,
-    `void ${displayName};`,
+    `void Mod;`,
     ``,
     `export default function ${displayName}Showcase() {`,
     `  return null;`,
