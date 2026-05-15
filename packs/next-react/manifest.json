@@ -46,6 +46,7 @@
     { "path": "scripts/update-tokens.ts", "category": "seeded" },
     { "path": "scripts/check-hook-contract.sh", "category": "managed" },
     { "path": "scripts/consistency-probe.sh", "category": "managed" },
+    { "path": "scripts/generate-showcase.ts", "category": "seeded" },
     { "path": ".claude/skills/aesthetic-principles/SKILL.md", "category": "seeded" },
     { "path": ".claude/skills/design-system/SKILL.md", "category": "seeded" },
     { "path": ".claude/skills/design-system/contracts.md", "category": "seeded" }
