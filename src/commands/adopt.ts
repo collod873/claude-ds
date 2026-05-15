@@ -1,4 +1,6 @@
 import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
@@ -6,6 +8,8 @@ import { mergeJsonKeys } from "../lib/json-merge.js";
 import { info, err, confirm } from "../lib/log.js";
 import { detectLookalikes } from "../lib/lookalike.js";
 import { detectPackageManager, runCmd } from "../lib/package-manager.js";
+
+const execFile = promisify(execFileCb);
 
 // Read package.json for version (avoid JSON import assertions for broader compat).
 async function getVersion(packageJsonPath: string): Promise<string> {
@@ -105,7 +109,6 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
     }
   }
 
-  // Print overwrite summary BEFORE success line so it's not buried.
   if (overwrites.length > 0) {
     const lines: string[] = [`Overwrote ${overwrites.length} managed file(s):`];
     for (const o of overwrites) {
@@ -114,6 +117,21 @@ export async function adoptCmd(opts: { pack: string; yes?: boolean; ignore?: str
     lines.push("Project-specific customizations to these files have been replaced.");
     lines.push("To diff before adopt, run: claude-ds doctor --pack <name>");
     process.stdout.write(lines.join("\n") + "\n");
+  }
+
+  const buildScriptPath = join(cwd, "scripts", "build-manifest.ts");
+  const manifestPath = join(cwd, "design-system", "manifest.json");
+  if (await exists(buildScriptPath) && !(await exists(manifestPath))) {
+    try {
+      await execFile("node", ["--experimental-strip-types", buildScriptPath], {
+        cwd,
+        timeout: 30_000,
+      });
+      info("bootstrapped design-system/manifest.json");
+    } catch (e: unknown) {
+      const exitCode = (e as { code?: number }).code ?? "?";
+      info(`warning: build-manifest failed (exit ${exitCode}), manifest.json not created. Run manually: node --experimental-strip-types scripts/build-manifest.ts`);
+    }
   }
 
   const version = await getVersion(join(repoRoot, "package.json"));

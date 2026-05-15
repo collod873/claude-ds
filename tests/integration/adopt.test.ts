@@ -208,4 +208,33 @@ describe("adopt", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("Detected package manager: pnpm");
   });
+
+  it("#7 manifest bootstrapped on fresh adopt: design-system/manifest.json exists and parses as valid JSON", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const raw = await readFile(join(dir, "design-system", "manifest.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed).toHaveProperty("generated");
+    expect(parsed).toHaveProperty("components");
+  });
+
+  it("#7 pre-existing manifest preserved: adopt does not overwrite user content", async () => {
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system", "manifest.json"), JSON.stringify({ custom: true }), "utf8");
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes", "--ignore", "design-system/manifest.json"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const raw = await readFile(join(dir, "design-system", "manifest.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.custom).toBe(true);
+  });
+
+  it("#7 build-manifest failure is non-fatal: adopt succeeds and .claude-ds.json written even when build-manifest exits 1", async () => {
+    await mkdir(join(dir, "scripts"), { recursive: true });
+    await writeFile(join(dir, "scripts", "build-manifest.ts"), "process.exit(1);\n", "utf8");
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.mode).toBe("warn");
+    expect(r.stdout).toContain("build-manifest failed");
+  });
 });
