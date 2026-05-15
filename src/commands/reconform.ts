@@ -229,22 +229,27 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string }): Pr
   }
 
   // ── Check pass ──────────────────────────────────────────────────────────────
-  const CHECK_SCRIPTS = [
-    "check-tier-imports.ts",
-    "check-states-coverage.ts",
-    "similarity-check.ts",
-    "a11y-scan.ts",
-  ];
+  // Check scripts are installed into <project>/scripts/ by `sync`, not kept in
+  // the pack distribution. Discover all check-*.ts files there at runtime so
+  // new scripts added by future syncs are picked up automatically.
+  const projectScriptsDir = join(cwd, "scripts");
+  let checkScriptNames: string[] = [];
+  try {
+    const allScripts = await readdir(projectScriptsDir);
+    checkScriptNames = allScripts.filter(f => f.startsWith("check-") && f.endsWith(".ts"));
+  } catch {
+    // scripts/ dir absent — no check scripts to run
+  }
 
   const allViolations: Violation[] = [];
 
-  for (const script of CHECK_SCRIPTS) {
-    const scriptPath = join(packScriptsDir, script);
+  for (const script of checkScriptNames) {
+    const scriptPath = join(projectScriptsDir, script);
     if (!(await exists(scriptPath))) continue;
 
     if (dryRun) {
-      info(`[dry-run] would invoke check: ${scriptPath}`);
-      continue;
+      info(`[dry-run] would invoke check: ${script}`);
+      // Still run the script in dry-run so violations are surfaced for review
     }
 
     const result = spawnSync(

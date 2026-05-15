@@ -153,4 +153,22 @@ describe("reconform", () => {
     expect(r.stdout).toMatch(/stub|WARNING/i);
     expect(r.stdout).toMatch(/contracts\.md|tokens\.json/i);
   });
+
+  it("check phase: invokes project-local scripts/check-*.ts (not pack-internal)", async () => {
+    // Issue #16 — check scripts live in <project>/scripts/ after sync,
+    // not inside the pack distribution. Reconform must resolve them there.
+    await scaffoldProject(dir);
+    await mkdir(join(dir, "scripts"), { recursive: true });
+
+    // A minimal check script that always reports one violation (exit 2 + stderr line)
+    const checkScript = [
+      `process.stderr.write("design-system/atoms/button.tsx:1: TST-001: sentinel violation\\n");`,
+      `process.exit(2);`,
+    ].join("\n");
+    await writeFile(join(dir, "scripts", "check-sentinel.ts"), checkScript);
+
+    const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
+    // dry-run prints violations it found without prompting
+    expect(r.stdout).toMatch(/sentinel violation|TST-001/i);
+  });
 });
