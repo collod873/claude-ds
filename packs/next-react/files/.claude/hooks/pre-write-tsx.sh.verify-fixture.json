@@ -1,0 +1,8 @@
+{
+  "pass": {
+    "arg": "src/MyComponent.tsx",
+    "setup": [
+      { "path": "src/MyComponent.tsx", "content": "export function MyComponent() {\n  return <div>Hello</div>;\n}\n" }
+    ]
+  }
+}

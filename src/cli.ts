@@ -78,8 +78,9 @@ program
   .command("doctor")
   .requiredOption("--pack <name>", "pack to check against")
   .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
-  .action(async (opts: { pack: string; ignore?: string }) => {
-    await doctorCmd({ pack: opts.pack, ignore: opts.ignore });
+  .option("--verify-hooks", "invoke each pack-registered hook with a pass fixture and report results")
+  .action(async (opts: { pack: string; ignore?: string; verifyHooks?: boolean }) => {
+    await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks });
   });
 
 program
