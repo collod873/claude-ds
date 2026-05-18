@@ -76,7 +76,9 @@ describe("generate-showcase.ts [integration]", () => {
     expect(r.stderr).toMatch(/SHOWCASE-000/);
   });
 
-  it("generates index page with component link when manifest has one component", async () => {
+  // #36: output must be app/design/ (no underscore) — underscore-prefixed folders are excluded
+  // from Next.js App Router routing entirely.
+  it("generates index page at app/design/ (no underscore)", async () => {
     await seedBundle(dir, "Button");
     await writeManifest(dir, [
       {
@@ -97,20 +99,46 @@ describe("generate-showcase.ts [integration]", () => {
 
     expect(r.status).toBe(0);
 
-    const indexPath = join(dir, "app", "_design", "page.tsx");
+    // Must write to app/design/ — NOT app/_design/
+    const indexPath = join(dir, "app", "design", "page.tsx");
     expect(existsSync(indexPath)).toBe(true);
+    expect(existsSync(join(dir, "app", "_design", "page.tsx"))).toBe(false);
 
     const indexContent = readFileSync(indexPath, "utf8");
     // Must reference the component name
     expect(indexContent).toContain("Button");
-    // Must link to /_design/Button
-    expect(indexContent).toContain("_design/Button");
+    // Must link to /design/Button — NOT /_design/Button
+    expect(indexContent).toContain("/design/Button");
+    expect(indexContent).not.toContain("/_design/");
     // Must link to tokens and motion
-    expect(indexContent).toContain("_design/tokens");
-    expect(indexContent).toContain("_design/motion");
+    expect(indexContent).toContain("/design/tokens");
+    expect(indexContent).toContain("/design/motion");
   });
 
-  it("generates per-component page importing .tsx and .showcase.tsx when has_showcase=true", async () => {
+  // #36: layout.tsx must call notFound() when NODE_ENV === 'production'
+  it("generates layout.tsx that calls notFound() in production", async () => {
+    await writeManifest(dir, []);
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+
+    const layoutPath = join(dir, "app", "design", "layout.tsx");
+    expect(existsSync(layoutPath)).toBe(true);
+
+    const content = readFileSync(layoutPath, "utf8");
+    // Must import notFound from next/navigation
+    expect(content).toContain("notFound");
+    expect(content).toContain("next/navigation");
+    // Must guard on NODE_ENV === 'production'
+    expect(content).toContain('NODE_ENV');
+    expect(content).toContain('"production"');
+  });
+
+  // #25: dynamic route instead of per-component static pages
+  it("generates single dynamic [component] route — no per-component static files", async () => {
     await seedBundle(dir, "Badge");
     await writeManifest(dir, [
       {
@@ -130,21 +158,98 @@ describe("generate-showcase.ts [integration]", () => {
     });
     expect(r.status).toBe(0);
 
-    const compPath = join(dir, "app", "_design", "Badge", "page.tsx");
-    expect(existsSync(compPath)).toBe(true);
+    // Dynamic route exists
+    const dynamicPath = join(dir, "app", "design", "[component]", "page.tsx");
+    expect(existsSync(dynamicPath)).toBe(true);
 
-    const content = readFileSync(compPath, "utf8");
-    // Imports component
+    // No per-component static page
+    expect(existsSync(join(dir, "app", "design", "Badge", "page.tsx"))).toBe(false);
+
+    const content = readFileSync(dynamicPath, "utf8");
+    // Must export generateStaticParams
+    expect(content).toContain("generateStaticParams");
+    // Must reference the component name in the switch/params
     expect(content).toContain("Badge");
-    // Imports showcase (has_showcase=true)
+    // Must import showcase and states for Badge
     expect(content).toContain(".showcase");
-    // Imports states (has_states=true)
     expect(content).toContain(".states.json");
-    // Renders <Badge />
-    expect(content).toContain("<Badge");
   });
 
-  it("generates per-component page WITHOUT showcase import when has_showcase=false", async () => {
+  // #25: generateStaticParams must list every component in the manifest
+  it("generateStaticParams in dynamic route lists all manifest components", async () => {
+    await seedBundle(dir, "Card");
+    await seedBundle(dir, "Alert");
+    await writeManifest(dir, [
+      {
+        name: "Card",
+        tier: "atom",
+        path: "design-system/atoms/Card.tsx",
+        has_showcase: true,
+        has_states: false,
+        has_snapshot: false,
+        has_test: false,
+      },
+      {
+        name: "Alert",
+        tier: "composite",
+        path: "design-system/composites/Alert.tsx",
+        has_showcase: false,
+        has_states: false,
+        has_snapshot: false,
+        has_test: false,
+      },
+    ]);
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+
+    const content = readFileSync(
+      join(dir, "app", "design", "[component]", "page.tsx"),
+      "utf8"
+    );
+    // generateStaticParams must enumerate both components
+    expect(content).toContain('"Card"');
+    expect(content).toContain('"Alert"');
+    // Both should appear in generateStaticParams section
+    expect(content).toMatch(/generateStaticParams[\s\S]*Card[\s\S]*Alert/);
+  });
+
+  // #25: exactly 5 files emitted (layout + index + dynamic + tokens + motion)
+  // no per-component files regardless of manifest size
+  it("emits exactly 5 files for a manifest with N components", async () => {
+    await seedBundle(dir, "Foo");
+    await seedBundle(dir, "Bar");
+    await seedBundle(dir, "Baz");
+    await writeManifest(dir, [
+      { name: "Foo", tier: "atom", path: "design-system/atoms/Foo.tsx", has_showcase: true, has_states: true, has_snapshot: false, has_test: false },
+      { name: "Bar", tier: "atom", path: "design-system/atoms/Bar.tsx", has_showcase: true, has_states: false, has_snapshot: false, has_test: false },
+      { name: "Baz", tier: "composite", path: "design-system/composites/Baz.tsx", has_showcase: false, has_states: false, has_snapshot: false, has_test: false },
+    ]);
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+
+    const designDir = join(dir, "app", "design");
+    // The 5 expected files
+    expect(existsSync(join(designDir, "layout.tsx"))).toBe(true);
+    expect(existsSync(join(designDir, "page.tsx"))).toBe(true);
+    expect(existsSync(join(designDir, "[component]", "page.tsx"))).toBe(true);
+    expect(existsSync(join(designDir, "tokens", "page.tsx"))).toBe(true);
+    expect(existsSync(join(designDir, "motion", "page.tsx"))).toBe(true);
+
+    // No per-component static routes
+    expect(existsSync(join(designDir, "Foo", "page.tsx"))).toBe(false);
+    expect(existsSync(join(designDir, "Bar", "page.tsx"))).toBe(false);
+    expect(existsSync(join(designDir, "Baz", "page.tsx"))).toBe(false);
+  });
+
+  it("dynamic route handles has_showcase=false gracefully (no import)", async () => {
     await seedBundle(dir, "Chip");
     await writeManifest(dir, [
       {
@@ -164,11 +269,13 @@ describe("generate-showcase.ts [integration]", () => {
     });
 
     const content = readFileSync(
-      join(dir, "app", "_design", "Chip", "page.tsx"),
+      join(dir, "app", "design", "[component]", "page.tsx"),
       "utf8"
     );
-    expect(content).not.toContain(".showcase");
-    expect(content).not.toContain(".states.json");
+    // Chip case: no showcase import, fallback to null
+    expect(content).toContain("Chip");
+    // When no showcase, should use a null component fallback
+    expect(content).toContain("() => null");
   });
 
   it("generates tokens page from design-system/tokens.json", async () => {
@@ -186,7 +293,7 @@ describe("generate-showcase.ts [integration]", () => {
     });
     expect(r.status).toBe(0);
 
-    const tokensPagePath = join(dir, "app", "_design", "tokens", "page.tsx");
+    const tokensPagePath = join(dir, "app", "design", "tokens", "page.tsx");
     expect(existsSync(tokensPagePath)).toBe(true);
 
     const content = readFileSync(tokensPagePath, "utf8");
@@ -215,7 +322,7 @@ describe("generate-showcase.ts [integration]", () => {
     });
     expect(r.status).toBe(0);
 
-    const motionPagePath = join(dir, "app", "_design", "motion", "page.tsx");
+    const motionPagePath = join(dir, "app", "design", "motion", "page.tsx");
     expect(existsSync(motionPagePath)).toBe(true);
 
     const content = readFileSync(motionPagePath, "utf8");
@@ -235,13 +342,12 @@ describe("generate-showcase.ts [integration]", () => {
     });
     expect(r.status).toBe(0);
 
-    expect(existsSync(join(dir, "app", "_design", "tokens", "page.tsx"))).toBe(true);
-    expect(existsSync(join(dir, "app", "_design", "motion", "page.tsx"))).toBe(true);
+    expect(existsSync(join(dir, "app", "design", "tokens", "page.tsx"))).toBe(true);
+    expect(existsSync(join(dir, "app", "design", "motion", "page.tsx"))).toBe(true);
   });
 
-  // Issue #17 — kebab-case component names must produce valid TS identifiers
-  it("converts kebab-case component name to PascalCase in import/export identifiers", async () => {
-    // File paths stay kebab-case; only identifier bindings must be PascalCase
+  // Issue #17 — kebab-case component names must produce valid TS identifiers in dynamic route
+  it("converts kebab-case component name to PascalCase in generateStaticParams and case block", async () => {
     const tier = "atoms" as const;
     const dsDir = join(dir, "design-system", tier);
     await mkdir(dsDir, { recursive: true });
@@ -275,25 +381,23 @@ describe("generate-showcase.ts [integration]", () => {
     });
     expect(r.status).toBe(0);
 
-    const compPath = join(dir, "app", "_design", "icon-button", "page.tsx");
-    expect(existsSync(compPath)).toBe(true);
+    // Dynamic route exists (not a per-component static file)
+    const dynamicPath = join(dir, "app", "design", "[component]", "page.tsx");
+    expect(existsSync(dynamicPath)).toBe(true);
+    expect(existsSync(join(dir, "app", "design", "icon-button", "page.tsx"))).toBe(false);
 
-    const content = readFileSync(compPath, "utf8");
+    const content = readFileSync(dynamicPath, "utf8");
 
-    // Bare component import/render dropped — showcase IS the demo.
-    expect(content).not.toContain("import { IconButton } from");
-    expect(content).not.toContain("<IconButton />");
-    // Showcase import and render must be present (PascalCase)
-    expect(content).toContain("import IconButtonShowcase from");
-    expect(content).toContain("<IconButtonShowcase");
-    // Export function name must be PascalCase (valid TS identifier)
-    expect(content).toMatch(/export default function IconButton/);
-    // Must NOT use raw kebab-case as an identifier
+    // Component name appears in generateStaticParams
+    expect(content).toContain('"icon-button"');
+    // Showcase import references the showcase file for this component
+    expect(content).toContain("icon-button.showcase");
+    // Must NOT use raw kebab-case as a JS identifier
     expect(content).not.toMatch(/import icon-button/);
-    expect(content).not.toMatch(/<icon-button/);
   });
 
-  it("generates all four required routes (index + tokens + motion + component)", async () => {
+  // #36 + #25: comprehensive: all 5 files emitted, all reference /design/ not /_design/
+  it("generates all five required files — layout, index, dynamic, tokens, motion", async () => {
     await seedBundle(dir, "Avatar");
     await writeManifest(dir, [
       {
@@ -313,9 +417,16 @@ describe("generate-showcase.ts [integration]", () => {
     });
     expect(r.status).toBe(0);
 
-    expect(existsSync(join(dir, "app", "_design", "page.tsx"))).toBe(true);
-    expect(existsSync(join(dir, "app", "_design", "Avatar", "page.tsx"))).toBe(true);
-    expect(existsSync(join(dir, "app", "_design", "tokens", "page.tsx"))).toBe(true);
-    expect(existsSync(join(dir, "app", "_design", "motion", "page.tsx"))).toBe(true);
+    // The 5 expected files — all under app/design/ (no underscore)
+    expect(existsSync(join(dir, "app", "design", "layout.tsx"))).toBe(true);        // #36
+    expect(existsSync(join(dir, "app", "design", "page.tsx"))).toBe(true);          // index
+    expect(existsSync(join(dir, "app", "design", "[component]", "page.tsx"))).toBe(true); // #25 dynamic
+    expect(existsSync(join(dir, "app", "design", "tokens", "page.tsx"))).toBe(true);
+    expect(existsSync(join(dir, "app", "design", "motion", "page.tsx"))).toBe(true);
+
+    // No old underscore-prefixed paths
+    expect(existsSync(join(dir, "app", "_design", "page.tsx"))).toBe(false);
+    // No static per-component route
+    expect(existsSync(join(dir, "app", "design", "Avatar", "page.tsx"))).toBe(false);
   });
 });
