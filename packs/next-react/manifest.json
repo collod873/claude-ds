@@ -252,6 +252,14 @@
       "category": "seeded"
     },
     {
+      "path": ".claude/skills/scaffold-component/SKILL.md",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/design-system-scaffold.md",
+      "category": "seeded"
+    },
+    {
       "path": "tests/a11y/.keep",
       "category": "seeded"
     },
