@@ -32,6 +32,7 @@
     { "path": ".claude/hooks/pre-commit-global.sh.verify-fixture.json", "category": "seeded" },
     { "path": ".claude/hooks/pre-write-ds-similarity.sh.verify-fixture.json", "category": "seeded" },
     { "path": ".claude/hooks/post-write-design.sh.verify-fixture.json", "category": "seeded" },
+    { "path": ".claude/hooks/regenerate-companions.sh.verify-fixture.json", "category": "seeded" },
     { "path": "design-system/contracts.md", "category": "seeded" },
     { "path": "design-system/tokens.json", "category": "seeded" },
     { "path": "design-system/README.md", "category": "seeded" },

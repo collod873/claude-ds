@@ -9,14 +9,14 @@ describe("doctor --verify-hooks", () => {
   beforeEach(async () => { dir = await freshTmpDir(); });
   afterEach(async () => { await cleanup(dir); });
 
-  it("all hooks pass on clean adopted project (10/10)", async () => {
+  it("all hooks pass on clean adopted project (11/11)", async () => {
     // First adopt so all hook scripts are on disk
     const adoptResult = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
     expect(adoptResult.code).toBe(0);
 
     const r = await runCli(["doctor", "--pack", "next-react", "--verify-hooks"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain("10/10");
+    expect(r.stdout).toContain("11/11");
     expect(r.stdout).toMatch(/PASS/);
     expect(r.stdout).not.toMatch(/FAIL/);
   }, 60_000);
