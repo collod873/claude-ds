@@ -228,6 +228,55 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string }): Pr
     }
   }
 
+  // ── Meta-export pass ────────────────────────────────────────────────────────
+  // Every .tsx under design-system/ (atoms/, composites/, references/) must
+  // export `meta`. Companion files (.showcase.tsx, .test.tsx) and skip files are
+  // exempt. Regex on `export const meta` is intentional (v1 — AST would be over-engineering).
+  const META_SCAN_DIRS = [
+    join(cwd, "design-system", "atoms"),
+    join(cwd, "design-system", "composites"),
+    join(cwd, "design-system", "references"),
+  ];
+  const META_COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
+  const META_SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
+  const META_RE = /export\s+const\s+meta\b/;
+
+  const metaMissing: string[] = [];
+
+  for (const scanDir of META_SCAN_DIRS) {
+    if (!(await exists(scanDir))) continue;
+    let scanEntries: string[];
+    try {
+      scanEntries = await readdir(scanDir);
+    } catch {
+      continue;
+    }
+    for (const entry of scanEntries) {
+      if (entry === ".keep" || entry === ".gitkeep") continue;
+      if (!entry.endsWith(".tsx")) continue;
+      if (META_COMPANION_SUFFIXES.some(s => entry.endsWith(s))) continue;
+      if (META_SKIP_PATTERNS.some(re => re.test(entry))) continue;
+      const entryPath = join(scanDir, entry);
+      const entryStat = await stat(entryPath).catch(() => null);
+      if (!entryStat || !entryStat.isFile()) continue;
+      let source: string;
+      try {
+        source = await readFile(entryPath, "utf8");
+      } catch {
+        continue;
+      }
+      if (!META_RE.test(source)) {
+        const relPath = entryPath.startsWith(cwd + "/") ? entryPath.slice(cwd.length + 1) : entryPath;
+        metaMissing.push(relPath);
+        if (dryRun) {
+          info(`[dry-run] META-001: missing meta export: ${relPath}`);
+        } else {
+          info(`META-001: missing meta export: ${relPath}`);
+        }
+      }
+    }
+  }
+
   // ── Check pass ──────────────────────────────────────────────────────────────
   // Check scripts are installed into <project>/scripts/ by `sync`, not kept in
   // the pack distribution. Discover all check-*.ts files there at runtime so
@@ -336,9 +385,9 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string }): Pr
   }
 
   if (dryRun) {
-    info(`[dry-run] complete — ${companionsCreated.length} companion(s) would be created`);
+    info(`[dry-run] complete — ${companionsCreated.length} companion(s) would be created, ${metaMissing.length} meta export(s) missing`);
     process.exit(0);
   }
 
-  info(`reconform complete — ${companionsCreated.length} companion(s) created, ${allViolations.length} violation(s) reviewed`);
+  info(`reconform complete — ${companionsCreated.length} companion(s) created, ${metaMissing.length} meta export(s) missing, ${allViolations.length} violation(s) reviewed`);
 }

@@ -171,4 +171,98 @@ describe("reconform", () => {
     // dry-run prints violations it found without prompting
     expect(r.stdout).toMatch(/sentinel violation|TST-001/i);
   });
+
+  // ── Meta-export validation (issue #40) ─────────────────────────────────────
+
+  it("meta check: component missing export const meta → reported", async () => {
+    await scaffoldProject(dir);
+    // Component without meta export
+    await writeFile(
+      join(dir, "design-system", "atoms", "button.tsx"),
+      `export function Button() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/META-001/);
+    expect(r.stdout).toMatch(/button\.tsx/);
+  });
+
+  it("meta check: component with export const meta → not reported", async () => {
+    await scaffoldProject(dir);
+    await writeFile(
+      join(dir, "design-system", "atoms", "button.tsx"),
+      [
+        `import type { Meta } from "../types/meta";`,
+        `export const meta: Meta = {`,
+        `  kind: "atom",`,
+        `  examples: [{ name: "default", props: {} }],`,
+        `};`,
+        `export function Button() { return null; }`,
+        ``,
+      ].join("\n")
+    );
+
+    const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/META-001/);
+  });
+
+  it("meta check: companion files (.showcase.tsx, .test.tsx) exempt from meta requirement", async () => {
+    await scaffoldProject(dir);
+    // Main component has meta; companions don't (they shouldn't need to)
+    await writeFile(
+      join(dir, "design-system", "atoms", "badge.tsx"),
+      `export const meta = { kind: "atom", examples: [] };\nexport function Badge() { return null; }\n`
+    );
+    await writeFile(
+      join(dir, "design-system", "atoms", "badge.showcase.tsx"),
+      `export default function BadgeShowcase() { return null; }\n`
+    );
+    await writeFile(
+      join(dir, "design-system", "atoms", "badge.test.tsx"),
+      `import { describe, it } from "vitest";\ndescribe("Badge", () => { it("loads", () => {}); });\n`
+    );
+
+    const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // No META-001 for badge (main file has meta, companions are exempt)
+    expect(r.stdout).not.toMatch(/META-001/);
+  });
+
+  it("meta check: references dir scanned — reference file missing meta → reported", async () => {
+    await scaffoldProject(dir);
+    await mkdir(join(dir, "design-system", "references"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system", "references", "tokens.tsx"),
+      `export default function TokensPage() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/META-001/);
+    expect(r.stdout).toMatch(/tokens\.tsx/);
+  });
+
+  it("meta check: reference file with kind=reference meta → not reported", async () => {
+    await scaffoldProject(dir);
+    await mkdir(join(dir, "design-system", "references"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system", "references", "tokens.tsx"),
+      [
+        `import type { Meta } from "../types/meta";`,
+        `export const meta: Meta = {`,
+        `  kind: "reference",`,
+        `  title: "Design Tokens",`,
+        `  render: () => null,`,
+        `};`,
+        `export default function TokensPage() { return null; }`,
+        ``,
+      ].join("\n")
+    );
+
+    const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/META-001/);
+  });
 });
