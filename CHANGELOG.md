@@ -10,6 +10,43 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [0.6.0] — 2026-05-18
+
+First tagged release since v0.5.0. Introduces the additive-only migration model, release-hygiene infrastructure, showcase route overhaul, and real hook enforcement.
+
+### Pack changes
+- **New manifest field `deprecated_paths[]`** — declares paths prior pack versions wrote that should no longer exist; consumed by `reconcile` and `audit`.
+- **New CLI `claude-ds reconcile`** — prunes orphaned files at deprecated paths, surfaces CLAUDE.md collisions; `--dry-run` for inspection, `--force` for non-interactive (skips CLAUDE.md collisions which require manual resolution).
+- **Showcase generator overhaul** — output moved from `app/_design/` → `app/design/` (Next.js excludes underscore-prefixed folders from routing, so the prior gallery was unreachable). N per-component static routes collapsed to a single `[component]/page.tsx` dynamic route with `generateStaticParams`. Generated `app/design/layout.tsx` calls `notFound()` in production builds.
+- **Tier A hook (`pre-write-tsx.sh`) wired** — AESTH-001/002/003 enforce no inline styles, no raw hex, no raw spacing on app `.tsx` files. Tier B token hook (`pre-write-ds-tokens.sh`) added with TOK-001/002/003.
+- **`token-only.sh` removed** — folded into `pre-write-ds-tokens.sh`.
+- Adopt pre-flight warns on CLAUDE.md collision (does not block).
+- Audit walks `deprecated_paths` for orphans.
+
+### Tooling / release hygiene
+- `npm run build` now `chmod +x dist/cli.js`; `prepublishOnly` ensures publish reflects current source (fixes EACCES on `npm install -g claude-ds`).
+- `CHANGELOG.md` and `packs/next-react/MIGRATIONS.md` introduced.
+- `claude-ds version --check` compares pinned to installed and exits non-zero on drift.
+- `dist/` untracked from git (rebuilt on install).
+
+### Breaking for consumers
+- Consumers carrying any of these legacy paths should run `claude-ds reconcile`:
+  - root `contracts.md`, `exceptions.json`, `failure-log.md` (since v0.3.0)
+  - `.claude/skills/{badge-system,typography,design-review,icons}/SKILL.md` (since v0.3.0)
+  - `app/_design/**` (since v0.6.0)
+  - `.claude/hooks/token-only.sh` and its verify fixture (since v0.6.0)
+- Adopted projects need `claude-ds reconform` after upgrade to pick up the new showcase route shape.
+
+### Upgrade steps
+1. `pnpm update claude-ds@^0.6.0`
+2. `claude-ds reconcile` (interactive — prompts on CLAUDE.md collisions)
+3. `claude-ds reconform` to refresh showcase + hook content
+
+### Issues resolved
+#21, #25, #26, #28, #30, #32, #36, #37, #38
+
+---
+
 ## [0.5.6] — untagged npm publish
 
 ### Pack changes
