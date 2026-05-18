@@ -177,7 +177,7 @@
     },
     {
       "path": "scripts/build-manifest.ts",
-      "category": "seeded"
+      "category": "managed"
     },
     {
       "path": "scripts/check-states-coverage.ts",
