@@ -60,8 +60,6 @@
     { "path": ".claude/skills/aesthetic-principles/SKILL.md", "category": "seeded" },
     { "path": ".claude/skills/design-system/SKILL.md", "category": "seeded" },
     { "path": ".claude/skills/design-system/contracts.md", "category": "seeded" },
-    { "path": "tests/visual/.keep", "category": "seeded" },
-    { "path": "tests/visual/README.md", "category": "seeded" },
     { "path": "tests/a11y/.keep", "category": "seeded" },
     { "path": "tests/a11y/README.md", "category": "seeded" }
   ],
@@ -115,6 +113,21 @@
       "path": ".claude/hooks/token-only.sh.verify-fixture.json",
       "since_version": "v0.6.0",
       "reason": "Companion fixture for deleted token-only.sh (issue #21)"
+    },
+    {
+      "path": "tests/visual/.keep",
+      "since_version": "v0.6.0",
+      "reason": "Visual snapshot regression infrastructure deferred indefinitely; Claude reads /design route live instead (issue #39)"
+    },
+    {
+      "path": "tests/visual/README.md",
+      "since_version": "v0.6.0",
+      "reason": "Visual snapshot regression infrastructure deferred indefinitely; Claude reads /design route live instead (issue #39)"
+    },
+    {
+      "path": "tests/visual",
+      "since_version": "v0.6.0",
+      "reason": "Visual snapshot regression infrastructure deferred indefinitely; Claude reads /design route live instead (issue #39)"
     }
   ],
   "canonical_paths": [

@@ -36,7 +36,6 @@ Every component ships exactly:
 - `<Name>.tsx` — source
 - `<Name>.showcase.tsx` — browsable in `app/design/`
 - `<Name>.states.json` — drives `check-states-coverage.ts`
-- `<Name>.snapshot.png` — visual regression baseline
 - `<Name>.test.tsx` — Jest/Vitest unit test
 
 ## Drift Guard

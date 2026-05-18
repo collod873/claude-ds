@@ -25,7 +25,6 @@ interface ManifestComponent {
   path: string;
   has_showcase: boolean;
   has_states: boolean;
-  has_snapshot: boolean;
   has_test: boolean;
 }
 

@@ -8,6 +8,11 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Breaking for consumers
+- **`tests/visual/` removed from scaffold** (issue #39). Any existing project carrying `tests/visual/.keep` or `tests/visual/README.md` should delete the `tests/visual/` directory. Run `claude-ds reconcile` to have the tool prune it automatically.
+- **`has_snapshot` field removed from `design-system/manifest.json`** — any tooling that reads `manifest.json` and references `has_snapshot` will need updating.
+- **Component bundle is now 4 files** (`<Name>.tsx + .showcase.tsx + .states.json + .test.tsx`). `.snapshot.png` is no longer expected or generated.
+
 ---
 
 ## [0.6.1] — 2026-05-18

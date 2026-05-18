@@ -43,7 +43,6 @@ describe("build-manifest.ts", () => {
     expect(button.tier).toBe("atom");
     expect(button.has_states).toBe(true);
     expect(button.has_showcase).toBe(true);
-    expect(button.has_snapshot).toBe(false);
     expect(button.has_test).toBe(false);
   });
 
