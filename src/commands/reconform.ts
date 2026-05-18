@@ -192,7 +192,7 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string }): Pr
         }
 
         // Check if pack ships a dedicated generator for this companion type.
-        // The next-react pack ships generate-showcase.ts but it generates app/_design/
+        // The next-react pack ships generate-showcase.ts but it generates app/design/
         // route pages from manifest.json — NOT per-component .showcase.tsx files.
         // Until a per-component companion generator exists in the pack
         // (e.g. scripts/generate-showcase-companion.ts), the stub path is the main path.
