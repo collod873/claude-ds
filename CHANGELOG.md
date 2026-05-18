@@ -12,10 +12,10 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [0.6.1] — 2026-05-18
 
-### Fixed
-- **npm payload restricted to runtime artifacts.** The v0.6.0 publish attempt revealed `package.json` had no `files` whitelist, so `npm pack` was shipping 191 files / 668KB unpacked — including `.claude/plans/*.md`, `.claude/spec.md`, `.claude/state.md`, the full `src/` TypeScript source, and all `tests/` + `packs/next-react/tests/`. This exposed internal planning docs and bloated the install. Added a `files` whitelist (`dist/`, `packs/next-react/files/`, `packs/next-react/manifest.json`, `packs/next-react/MIGRATIONS.md`, `README.md`, `CHANGELOG.md`). Payload now 85 files / 47.5kB packed / 181kB unpacked.
+### Changed
+- **Added `files` whitelist to `package.json`** restricting tarball to runtime artifacts (`dist/`, `packs/next-react/files/`, manifest, MIGRATIONS, README, CHANGELOG). Kept for future-proofing — this is a private tool consumed locally via `npm link`, so no npm publish is performed. Payload now 85 files / 47.5kB packed.
 
-No functional changes — pure release-hygiene patch.
+No functional changes.
 
 ---
 
