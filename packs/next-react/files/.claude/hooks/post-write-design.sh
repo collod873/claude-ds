@@ -14,7 +14,7 @@ else
   echo "post-write-design: scripts/build-manifest.ts not found — skipping manifest regen"
 fi
 
-# Step 2: regenerate app/_design/ route tree from the updated manifest
+# Step 2: regenerate app/design/ route tree from the updated manifest
 if [ -f "scripts/generate-showcase.ts" ]; then
   echo "post-write-design: regenerating showcase routes..."
   node --experimental-strip-types scripts/generate-showcase.ts
