@@ -9,6 +9,13 @@ CLI that installs and syncs a shared design-system governance scaffold (hooks, c
 - Roadmap lives in GitHub issues. Check `gh issue list` before assuming what's next.
 - Commit delegated subagent work directly to `main`. No feature branches or worktrees unless I ask — the `agent-*` branches in git history are historical (slice/build era), not current policy.
 
-## Release gotcha
+## Local workflow
 
-`dist/` is committed — `npx` runs the repo as-is, no build step on the consumer side. Rebuild before tagging or you ship stale code.
+This repo is `npm link`-ed globally (`claude-ds` on PATH → `dist/cli.js`).
+Edits to `src/` require `npm run build` before the global CLI picks them up.
+`dist/` is gitignored; nothing in git distribution to worry about.
+
+(The README still mentions `npx github:collod873/claude-ds#vX.Y.Z` but that
+path is currently broken — no `prepare` script, no committed dist. Local
+use is the only supported path right now. Fix the npx flow when/if you
+want to share with someone else.)
