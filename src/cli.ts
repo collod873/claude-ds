@@ -17,8 +17,9 @@ program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`
 program
   .command("version")
   .option("--offline", "skip remote latest-tag lookup")
-  .action(async (opts: { offline?: boolean }) => {
-    await versionCmd({ offline: opts.offline });
+  .option("--check", "compare pinned version in .claude-ds.json to installed; exit non-zero if different")
+  .action(async (opts: { offline?: boolean; check?: boolean }) => {
+    await versionCmd({ offline: opts.offline, check: opts.check });
   });
 program
   .command("init")
