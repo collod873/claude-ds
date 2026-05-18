@@ -29,17 +29,20 @@ Read its body. The "Closure order" section is your worklist.
 For each unchecked item in order:
 
 1. **Read the issue** in full: `gh issue view <N> --repo collod873/claude-ds`.
-2. **Dispatch sonnet sub (background) with this prompt skeleton:**
+2. **Detect bundles.** Scan the body (and comments — `gh issue view <N> --comments`) for phrases that hard-pair another issue with this one: "bundled with #M", "must land same release as #M", "hard pair with #M", "READ FIRST" banners naming #M, "depends on #M (this commit)", etc. If found, treat #M as in-scope for the same commit. Pre-read it: `gh issue view <M> --repo collod873/claude-ds`. The bundle's acceptance criteria are additive. Pass the full bundle list to the subagent. A loose "depends on #M" line where #M is already closed is NOT a bundle — only forward-looking same-commit pairing counts.
+3. **Dispatch sonnet sub (background) with this prompt skeleton:**
 
-   > You're in `/Users/collinlodato/Claude Projects/claude-ds` on `main`. Implement GH issue #<N>. Read it with `gh issue view`. Also read `CLAUDE.md` at repo root.
+   > You're in `/Users/collinlodato/Claude Projects/claude-ds` on `main`. Implement GH issue(s) #<N>[, #<M>, ...]. Read each with `gh issue view`, including comments (`--comments`). Also read `CLAUDE.md` at repo root.
+   >
+   > **Bundle:** if more than one issue is listed above, they are a hard pair — land in one commit, satisfy all acceptance criteria together, do NOT split.
    >
    > **Constraints:**
-   > - Stay strictly in #<N> scope. Don't touch sibling issues in the same milestone.
+   > - Stay strictly in the listed issue(s) scope. Don't touch other siblings in the same milestone.
    > - Work on `main`. No feature branches. Post-commit hook auto-pushes.
    > - `dist/` is committed — rebuild before committing.
-   > - Quote each acceptance-criteria line from the issue and show the command output proving it.
-   > - **Hard-stop and report** if you hit a judgment call that affects sibling issues in the same milestone, or any ambiguity the issue doesn't resolve. Do NOT guess.
-   > - Budget ~15 min. If you're not done, stop and report partial state.
+   > - Quote each acceptance-criteria line from each issue and show the command output proving it.
+   > - **Hard-stop and report** if you hit a judgment call that affects sibling issues outside the bundle, or any ambiguity the issue(s) don't resolve. Do NOT guess.
+   > - Budget ~15 min per issue in the bundle. If you're not done, stop and report partial state.
    > - User prefs: terse, no emojis, evidence over assertions, no scope creep.
 
 3. **Same response, launch heartbeat watchdog:**
@@ -63,9 +66,9 @@ If any check fails → reopen subagent context via SendMessage with the specific
 
 When verification passes:
 
-1. `gh issue close <N> --repo collod873/claude-ds -c "<one-line summary>"`.
-2. Edit the meta issue body: strike the line through and append ✅. Use `gh issue view <META> --json body -q '.body'` → edit → `gh issue edit <META> --body-file`.
-3. Move to the next item.
+1. Close each issue in the bundle: `gh issue close <N> --repo collod873/claude-ds -c "<one-line summary>"`. For bundles, close all paired issues with a single shared summary referencing the joint commit.
+2. Edit the meta issue body: strike each closed line through and append ✅. Use `gh issue view <META> --json body -q '.body'` → edit → `gh issue edit <META> --body-file`. A bundled child further down the closure order is closed early — leave its line struck with a note like `~~#45~~ ✅ (bundled with #44)`.
+3. Move to the next unchecked item (skipping any that were already closed as part of an earlier bundle).
 
 ## 4. Hard stops (escalate to user, don't proceed)
 
