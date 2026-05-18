@@ -3,10 +3,10 @@ import { join, resolve, dirname, basename, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
-import { parseConfig } from "../lib/config.js";
 import { parseManifest } from "../lib/manifest.js";
 import { parseExceptions } from "../lib/exceptions.js";
 import { info, err } from "../lib/log.js";
+import { loadConfigWithMigration } from "../lib/paths.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -167,7 +167,8 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
   }
   let cfg;
   try {
-    cfg = parseConfig(await readFile(cfgPath, "utf8"));
+    // #47/#34 migration: backfill + persist app_dir / claude_md_target if missing (pre-v0.6 configs).
+    cfg = await loadConfigWithMigration(cwd, { interactive: process.stdin.isTTY === true });
   } catch (e) {
     err(`invalid .claude-ds.json: ${(e as Error).message}`);
     process.exit(2);

@@ -2,19 +2,20 @@ import { readFile, writeFile, stat, mkdir, chmod } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { parseConfig } from "../lib/config.js";
 import { parseManifest } from "../lib/manifest.js";
 import { diffFile } from "../lib/sync-diff.js";
 import { parseLsRemote } from "../lib/tags.js";
 import { info, err, confirm } from "../lib/log.js";
-import { resolveManifestPath } from "../lib/paths.js";
+import { loadConfigWithMigration, resolveManifestPath } from "../lib/paths.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
 export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
   if (!(await exists(join(cwd, ".claude-ds.json")))) { err(".claude-ds.json absent"); process.exit(2); }
-  const cfg = parseConfig(await readFile(join(cwd, ".claude-ds.json"), "utf8"));
+  // #47/#34 migration: backfill + persist app_dir / claude_md_target if missing (pre-v0.6 configs).
+  // sync respects TTY interactivity for the multi-candidate CLAUDE.md prompt — same convention as confirm().
+  const cfg = await loadConfigWithMigration(cwd, { interactive: process.stdin.isTTY === true });
 
   // Resolve repo root from this file's location (src/commands or dist/commands → up two levels)
   const here = dirname(fileURLToPath(import.meta.url));
