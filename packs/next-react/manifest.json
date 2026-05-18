@@ -9,72 +9,280 @@
     "dist/**"
   ],
   "files": [
-    { "path": ".claude/settings.json", "category": "hybrid", "format": "json" },
-    { "path": ".claude/hooks/atom-imports.sh", "category": "managed" },
-    { "path": ".claude/hooks/pre-write-ds-tokens.sh", "category": "managed" },
-    { "path": ".claude/hooks/lib/log-failure.sh", "category": "managed" },
-    { "path": ".claude/hooks/README.md", "category": "seeded" },
-    { "path": ".claude/hooks/pre-write-ds-states.sh", "category": "managed" },
-    { "path": ".claude/hooks/pre-write-ds-manifest.sh", "category": "managed" },
-    { "path": ".claude/hooks/pre-write-ds-similarity.sh", "category": "managed" },
-    { "path": ".claude/hooks/pre-write-tsx.sh", "category": "managed" },
-    { "path": ".claude/hooks/pre-commit-global.sh", "category": "managed" },
-    { "path": ".claude/hooks/pre-write-ds-exceptions.sh", "category": "managed" },
-    { "path": ".claude/hooks/pre-write-ds-tier-imports.sh", "category": "managed" },
-    { "path": ".claude/hooks/atom-imports.sh.verify-fixture.json", "category": "seeded" },
-    { "path": ".claude/hooks/pre-write-ds-tokens.sh.verify-fixture.json", "category": "seeded" },
-    { "path": ".claude/hooks/pre-write-ds-states.sh.verify-fixture.json", "category": "seeded" },
-    { "path": ".claude/hooks/pre-write-ds-manifest.sh.verify-fixture.json", "category": "seeded" },
-    { "path": ".claude/hooks/pre-write-tsx.sh.verify-fixture.json", "category": "seeded" },
-    { "path": ".claude/hooks/pre-write-ds-exceptions.sh.verify-fixture.json", "category": "seeded" },
-    { "path": ".claude/hooks/pre-write-ds-tier-imports.sh.verify-fixture.json", "category": "seeded" },
-    { "path": ".claude/hooks/pre-commit-global.sh.verify-fixture.json", "category": "seeded" },
-    { "path": ".claude/hooks/pre-write-ds-similarity.sh.verify-fixture.json", "category": "seeded" },
-    { "path": ".claude/hooks/regenerate-companions.sh.verify-fixture.json", "category": "seeded" },
-    { "path": "design-system/contracts.md", "category": "seeded" },
-    { "path": "design-system/tokens.json", "category": "seeded" },
-    { "path": "design-system/README.md", "category": "seeded" },
-    { "path": "design-system/CLAUDE.md", "category": "seeded" },
-    { "path": "design-system/atoms/.keep", "category": "seeded" },
-    { "path": "design-system/composites/.keep", "category": "seeded" },
-    { "path": "design-system/references/.keep", "category": "seeded" },
-    { "path": "design-system/types/meta.ts", "category": "seeded" },
-    { "path": "design-system/icons/.keep", "category": "seeded" },
-    { "path": "design-system/hooks/.keep", "category": "seeded" },
-    { "path": "design-system/utils/.keep", "category": "seeded" },
-    { "path": "commitlint.config.js", "category": "seeded" },
-    { "path": "CLAUDE.md", "category": "hybrid", "format": "markdown" },
-    { "path": "package.json", "category": "hybrid", "format": "json", "owned_keys": ["scripts"] },
-    { "path": "design-system/exceptions.json", "category": "seeded" },
-    { "path": "design-system/failure-log.md", "category": "seeded" },
-    { "path": "manifest.json", "category": "generated" },
-    { "path": "scripts/build-manifest.ts", "category": "seeded" },
-    { "path": "scripts/check-states-coverage.ts", "category": "seeded" },
-    { "path": "scripts/check-tier-imports.ts", "category": "seeded" },
-    { "path": "scripts/similarity-check.ts", "category": "seeded" },
-    { "path": "scripts/a11y-scan.ts", "category": "seeded" },
-    { "path": "scripts/check-principles-freshness.ts", "category": "seeded" },
-    { "path": "scripts/update-tokens.ts", "category": "seeded" },
-    { "path": "scripts/run-a11y.sh", "category": "managed" },
-    { "path": "scripts/check-hook-contract.sh", "category": "managed" },
-    { "path": "scripts/consistency-probe.sh", "category": "managed" },
-    { "path": "scripts/generate-showcase-companion.ts", "category": "managed" },
-    { "path": "scripts/check-design-system.sh", "category": "managed" },
-    { "path": "scripts/lib/ds-validators.sh", "category": "managed" },
-    { "path": ".claude/hooks/regenerate-companions.sh", "category": "managed" },
-    { "path": "design-system/_fixtures/.gitkeep", "category": "seeded" },
-    { "path": "design-system/_fixtures/README.md", "category": "seeded" },
-    { "path": ".claude/skills/aesthetic-principles/SKILL.md", "category": "seeded" },
-    { "path": ".claude/skills/design-system/SKILL.md", "category": "seeded" },
-    { "path": ".claude/skills/design-system/contracts.md", "category": "seeded" },
-    { "path": "tests/a11y/.keep", "category": "seeded" },
-    { "path": "tests/a11y/README.md", "category": "seeded" },
-    { "path": "app/design/page.tsx", "category": "managed" },
-    { "path": "app/design/layout.tsx", "category": "managed" },
-    { "path": "app/design/[...slug]/page.tsx", "category": "managed" },
-    { "path": "app/design/[...slug]/resolve.ts", "category": "managed" },
-    { "path": "design-system/references/tokens.tsx", "category": "seeded" },
-    { "path": "design-system/references/motion.tsx", "category": "seeded" }
+    {
+      "path": ".claude/settings.json",
+      "category": "hybrid",
+      "format": "json"
+    },
+    {
+      "path": ".claude/hooks/atom-imports.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-tokens.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/lib/log-failure.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/README.md",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-states.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-manifest.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-similarity.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/pre-write-tsx.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/pre-commit-global.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-exceptions.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-tier-imports.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/atom-imports.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-tokens.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-states.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-manifest.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/pre-write-tsx.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-exceptions.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-tier-imports.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/pre-commit-global.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-similarity.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/regenerate-companions.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/contracts.md",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/tokens.json",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/README.md",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/CLAUDE.md",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/atoms/.keep",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/composites/.keep",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/references/.keep",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/types/meta.ts",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/icons/.keep",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/hooks/.keep",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/utils/.keep",
+      "category": "seeded"
+    },
+    {
+      "path": "commitlint.config.js",
+      "category": "seeded"
+    },
+    {
+      "path": "CLAUDE.md",
+      "category": "hybrid",
+      "format": "markdown"
+    },
+    {
+      "path": "package.json",
+      "category": "hybrid",
+      "format": "json",
+      "owned_keys": [
+        "scripts"
+      ]
+    },
+    {
+      "path": "design-system/exceptions.json",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/failure-log.md",
+      "category": "seeded"
+    },
+    {
+      "path": "manifest.json",
+      "category": "generated"
+    },
+    {
+      "path": "design-system/manifest.generated.ts",
+      "category": "generated"
+    },
+    {
+      "path": "scripts/build-manifest.ts",
+      "category": "seeded"
+    },
+    {
+      "path": "scripts/check-states-coverage.ts",
+      "category": "seeded"
+    },
+    {
+      "path": "scripts/check-tier-imports.ts",
+      "category": "seeded"
+    },
+    {
+      "path": "scripts/similarity-check.ts",
+      "category": "seeded"
+    },
+    {
+      "path": "scripts/a11y-scan.ts",
+      "category": "seeded"
+    },
+    {
+      "path": "scripts/check-principles-freshness.ts",
+      "category": "seeded"
+    },
+    {
+      "path": "scripts/update-tokens.ts",
+      "category": "seeded"
+    },
+    {
+      "path": "scripts/run-a11y.sh",
+      "category": "managed"
+    },
+    {
+      "path": "scripts/check-hook-contract.sh",
+      "category": "managed"
+    },
+    {
+      "path": "scripts/consistency-probe.sh",
+      "category": "managed"
+    },
+    {
+      "path": "scripts/generate-showcase-companion.ts",
+      "category": "managed"
+    },
+    {
+      "path": "scripts/check-design-system.sh",
+      "category": "managed"
+    },
+    {
+      "path": "scripts/lib/ds-validators.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/regenerate-companions.sh",
+      "category": "managed"
+    },
+    {
+      "path": "design-system/_fixtures/.gitkeep",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/_fixtures/README.md",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/skills/aesthetic-principles/SKILL.md",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/skills/design-system/SKILL.md",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/skills/design-system/contracts.md",
+      "category": "seeded"
+    },
+    {
+      "path": "tests/a11y/.keep",
+      "category": "seeded"
+    },
+    {
+      "path": "tests/a11y/README.md",
+      "category": "seeded"
+    },
+    {
+      "path": "app/design/page.tsx",
+      "category": "managed"
+    },
+    {
+      "path": "app/design/layout.tsx",
+      "category": "managed"
+    },
+    {
+      "path": "app/design/[...slug]/page.tsx",
+      "category": "managed"
+    },
+    {
+      "path": "app/design/[...slug]/resolve.ts",
+      "category": "managed"
+    },
+    {
+      "path": "design-system/references/tokens.tsx",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/references/motion.tsx",
+      "category": "seeded"
+    }
   ],
   "deprecated_paths": [
     {

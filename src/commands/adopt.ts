@@ -20,6 +20,52 @@ async function getVersion(packageJsonPath: string): Promise<string> {
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
+/**
+ * Patch the consumer's tsconfig.json to add a compilerOptions.paths entry
+ * for "@/design-system/*" → ["../design-system/*"] so that src/app consumers
+ * can import pack-installed files under design-system/ via the @/ alias.
+ *
+ * Without this, @/* resolves to ./src/* but design-system/ lives at repo root,
+ * causing build errors on every /design route. (#52)
+ *
+ * Only runs when the consumer uses a src/app layout. Idempotent.
+ */
+async function patchTsconfigForSrcApp(cwd: string): Promise<void> {
+  const tsconfigPath = join(cwd, "tsconfig.json");
+  if (!await exists(tsconfigPath)) return; // no tsconfig to patch
+
+  let raw: string;
+  try {
+    raw = await readFile(tsconfigPath, "utf8");
+  } catch {
+    return;
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // tsconfig has comments or is malformed — skip silently to avoid breaking it
+    info("warning: could not parse tsconfig.json (comments?); skipping @/design-system/* path injection. Add manually: compilerOptions.paths[\"@/design-system/*\"] = [\"../design-system/*\"]");
+    return;
+  }
+
+  const compilerOptions = (parsed.compilerOptions ?? {}) as Record<string, unknown>;
+  const paths = (compilerOptions.paths ?? {}) as Record<string, string[]>;
+
+  // Already patched — idempotent.
+  if (paths["@/design-system/*"]) return;
+
+  paths["@/design-system/*"] = ["../design-system/*"];
+  compilerOptions.paths = paths;
+  parsed.compilerOptions = compilerOptions;
+
+  const firstIndented = raw.split("\n").find(l => l.startsWith(" ") || l.startsWith("\t"));
+  const indent = firstIndented && firstIndented.startsWith("\t") ? "\t" : 2;
+  await writeFile(tsconfigPath, JSON.stringify(parsed, null, indent) + "\n", "utf8");
+  info("patched tsconfig.json: added @/design-system/* path alias for src/app layout (#52)");
+}
+
 // Paths under these prefixes require the executable bit (relative to project root).
 function needsExecBit(relPath: string): boolean {
   return relPath.startsWith(".claude/hooks/") || relPath.startsWith("scripts/");
@@ -217,6 +263,16 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
       // Create a minimal stub at the chosen target. Header makes it clear who owns the file.
       await writeFile(targetAbs, `# Project\n\n## claude-ds\n${block}`, "utf8");
     }
+  }
+
+  // #52: src/app consumers have @/* → ./src/* in their tsconfig, so
+  // @/design-system/* resolves to ./src/design-system/* which doesn't exist
+  // (design-system/ always lives at repo root). Inject a path override that
+  // maps @/design-system/* → ../design-system/* (one level above src/).
+  // This makes both manifest.json and manifest.generated.ts imports work
+  // without patching the pack templates per-layout.
+  if (appDir === "src/app") {
+    await patchTsconfigForSrcApp(cwd);
   }
 
   const buildScriptPath = join(cwd, "scripts", "build-manifest.ts");

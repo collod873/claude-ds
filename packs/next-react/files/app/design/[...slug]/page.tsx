@@ -1,6 +1,7 @@
 import React from "react";
 import { notFound } from "next/navigation";
 import manifest from "@/design-system/manifest.json";
+import { showcases } from "@/design-system/manifest.generated";
 import { resolve, type Manifest } from "./resolve";
 
 interface PageProps {
@@ -12,8 +13,13 @@ export default async function ComponentShowcasePage({ params }: PageProps) {
   const entry = resolve(slug, manifest as Manifest);
   if (!entry) notFound();
 
-  const mod = (await import(`@/${entry.path_no_ext}.showcase`)) as { default: React.ComponentType };
-  const Showcase = mod.default;
+  // Use the statically-generated showcases map (relative imports inside
+  // manifest.generated.ts) instead of a dynamic @/ import. The dynamic
+  // import pattern broke src/app consumers because @/* resolves to ./src/*
+  // but design-system/ lives at repo root. (#52)
+  const showcaseKey = entry.path_no_ext.replace(/^design-system\//, "");
+  const Showcase = showcases[showcaseKey];
+  if (!Showcase) notFound();
 
   return (
     <main className="p-8">
