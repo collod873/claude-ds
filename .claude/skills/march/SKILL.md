@@ -18,7 +18,11 @@ You are driving a GitHub meta issue (a "closure index") to completion. Each chil
 If a meta issue number was passed as arg, use it. Otherwise:
 `gh issue list --repo collod873/claude-ds --search "META in:title" --state open` — pick the most recent.
 
-Read its body. The "Closure order" section is your worklist. Items marked `~~...~~ ✅` are done.
+Read its body. The "Closure order" section is your worklist.
+- Items marked `~~...~~ ✅` are done.
+- Items tagged `[AFK]` you handle autonomously.
+- Items tagged `[HITL]` you must NOT run — stop and ping Collin with the item's name and any rationale the line provides.
+- Items with no tag: treat as `[HITL]` (fail safe). Tell Collin so the index can be tagged explicitly.
 
 ## 1. Per-issue loop
 
@@ -68,7 +72,7 @@ When verification passes:
 Stop and ping Collin in plain text when:
 - Subagent reports cross-issue ambiguity or asks for a decision.
 - Verification fails twice on the same issue.
-- Next issue requires a real consumer project to test (anything user-visible at runtime — route rendering, env-var gating, integration migrations).
+- Next item is tagged `[HITL]` or untagged.
 - The meta issue body is in a state you don't understand.
 - Anything genuinely surprising.
 
