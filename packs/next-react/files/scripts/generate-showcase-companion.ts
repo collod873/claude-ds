@@ -301,7 +301,7 @@ function emitAtomCompositeShowcase(
   return [
     header,
     `import React from "react";`,
-    `import ${displayName} from "./${componentName}";`,
+    `import { ${displayName} } from "./${componentName}";`,
     ``,
     `export default function ${displayName}Showcase() {`,
     `  return (`,
