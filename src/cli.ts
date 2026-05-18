@@ -98,8 +98,11 @@ program
 program
   .command("reconform")
   .option("--dry-run", "report what would happen without mutating anything")
-  .action(async (opts: { dryRun?: boolean }) => {
-    await reconformCmd({ dryRun: opts.dryRun });
+  .option("--backfill-meta", "audit and backfill missing meta exports + run classification audit")
+  .option("--fix", "write meta stubs and move misclassified files (requires --backfill-meta)")
+  .option("--demote-composites", "also move composites with no DS imports back to atoms (requires --fix)")
+  .action(async (opts: { dryRun?: boolean; backfillMeta?: boolean; fix?: boolean; demoteComposites?: boolean }) => {
+    await reconformCmd({ dryRun: opts.dryRun, backfillMeta: opts.backfillMeta, fix: opts.fix, demoteComposites: opts.demoteComposites });
   });
 
 program

@@ -1,5 +1,5 @@
-import { readFile, writeFile, stat, readdir } from "node:fs/promises";
-import { join, resolve, dirname } from "node:path";
+import { readFile, writeFile, stat, readdir, rename } from "node:fs/promises";
+import { join, resolve, dirname, basename, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
@@ -84,9 +84,80 @@ function testStub(displayName: string, fileBase: string): string {
   ].join("\n");
 }
 
-export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string }): Promise<void> {
+// ── Title Case helper ─────────────────────────────────────────────────────────
+function toTitleCase(name: string): string {
+  return name
+    .split(/[-_]/)
+    .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+    .join(" ");
+}
+
+// ── Meta stub generators ──────────────────────────────────────────────────────
+function metaStubAtomComposite(kind: "atom" | "composite", hasCva: boolean): string {
+  if (hasCva) {
+    return `export const meta: Meta = { kind: "${kind}", examples: [], skip: [] };\n`;
+  }
+  return `export const meta: Meta = { kind: "${kind}", examples: [{ name: "default", props: {} }] };\n`;
+}
+
+function metaStubReference(title: string): string {
+  return [
+    `// TODO(claude-ds): replace stub render`,
+    `export const meta: Meta = { kind: "reference", title: ${JSON.stringify(title)}, render: () => null };`,
+    ``,
+  ].join("\n");
+}
+
+// ── Classification audit helpers ──────────────────────────────────────────────
+const DS_IMPORT_RE = /from\s+["'][^"']*@\/design-system\//;
+
+function fileImportsDsModule(source: string): boolean {
+  return DS_IMPORT_RE.test(source);
+}
+
+async function rewriteImportPaths(
+  projectRoot: string,
+  from: string,
+  to: string
+): Promise<string[]> {
+  // from/to are like "atoms/button" or "composites/button"
+  const fromPath = `@/design-system/${from}`;
+  const toPath = `@/design-system/${to}`;
+  const changed: string[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    let entries: string[];
+    try { entries = await readdir(dir); } catch { return; }
+    for (const entry of entries) {
+      const full = join(dir, entry);
+      const s = await stat(full).catch(() => null);
+      if (!s) continue;
+      if (s.isDirectory()) {
+        if (entry === "node_modules" || entry === ".git") continue;
+        await walk(full);
+      } else if (s.isFile() && (entry.endsWith(".ts") || entry.endsWith(".tsx") || entry.endsWith(".js") || entry.endsWith(".jsx"))) {
+        let content: string;
+        try { content = await readFile(full, "utf8"); } catch { continue; }
+        // Exact string match — no partial regex
+        if (content.includes(fromPath)) {
+          const updated = content.split(fromPath).join(toPath);
+          await writeFile(full, updated, "utf8");
+          changed.push(full);
+        }
+      }
+    }
+  }
+
+  await walk(projectRoot);
+  return changed;
+}
+
+export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backfillMeta?: boolean; fix?: boolean; demoteComposites?: boolean }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const dryRun = opts.dryRun ?? false;
+  const backfillMeta = opts.backfillMeta ?? false;
+  const fix = opts.fix ?? false;
+  const demoteComposites = opts.demoteComposites ?? false;
 
   // ── Precondition: config ────────────────────────────────────────────────────
   const cfgPath = join(cwd, ".claude-ds.json");
@@ -277,6 +348,145 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string }): Pr
     }
   }
 
+  // ── Backfill meta pass ─────────────────────────────────────────────────────
+  // Gated by --backfill-meta. Without --fix, reports only. With --fix, appends stubs.
+  let metaBackfilled = 0;
+  if (backfillMeta && metaMissing.length > 0) {
+    for (const relPath of metaMissing) {
+      const fullPath = join(cwd, relPath);
+      let source: string;
+      try { source = await readFile(fullPath, "utf8"); } catch { continue; }
+
+      // Determine kind from path
+      const isReference = relPath.includes("design-system/references/");
+      const isAtom = relPath.includes("design-system/atoms/");
+      const isComposite = relPath.includes("design-system/composites/");
+
+      let stub: string;
+      if (isReference) {
+        const componentName = basename(fullPath, ".tsx");
+        const title = toTitleCase(componentName);
+        stub = metaStubReference(title);
+      } else if (isAtom || isComposite) {
+        const kind: "atom" | "composite" = isAtom ? "atom" : "composite";
+        const hasCva = source.includes("cva(");
+        stub = metaStubAtomComposite(kind, hasCva);
+      } else {
+        continue;
+      }
+
+      if (fix) {
+        // Append meta export to end of file (after a blank line if file doesn't end with one)
+        const sep = source.endsWith("\n\n") ? "" : source.endsWith("\n") ? "\n" : "\n\n";
+        await writeFile(fullPath, source + sep + stub, "utf8");
+        info(`backfilled meta: ${relPath}`);
+        metaBackfilled++;
+      } else {
+        info(`[dry-run] would backfill meta: ${relPath}`);
+      }
+    }
+  }
+
+  // ── Classification audit ────────────────────────────────────────────────────
+  // Gated by --backfill-meta. atom = imports zero @/design-system/*; composite = imports ≥1.
+  interface ClassificationFinding {
+    file: string;
+    currentTier: "atom" | "composite";
+    shouldBe: "atom" | "composite";
+  }
+  const classificationFindings: ClassificationFinding[] = [];
+
+  if (backfillMeta) {
+    const AUDIT_TIERS: Array<{ dir: string; tier: "atom" | "composite" }> = [
+      { dir: join(cwd, "design-system", "atoms"), tier: "atom" },
+      { dir: join(cwd, "design-system", "composites"), tier: "composite" },
+    ];
+
+    for (const { dir: auditDir, tier: currentTier } of AUDIT_TIERS) {
+      if (!(await exists(auditDir))) continue;
+      let auditEntries: string[];
+      try { auditEntries = await readdir(auditDir); } catch { continue; }
+
+      for (const entry of auditEntries) {
+        if (!entry.endsWith(".tsx")) continue;
+        if (META_COMPANION_SUFFIXES.some(s => entry.endsWith(s))) continue;
+        if (META_SKIP_PATTERNS.some(re => re.test(entry))) continue;
+
+        const entryPath = join(auditDir, entry);
+        const entryStat = await stat(entryPath).catch(() => null);
+        if (!entryStat || !entryStat.isFile()) continue;
+
+        let source: string;
+        try { source = await readFile(entryPath, "utf8"); } catch { continue; }
+
+        const importsDsModule = fileImportsDsModule(source);
+        const shouldBe: "atom" | "composite" = importsDsModule ? "composite" : "atom";
+
+        if (shouldBe !== currentTier) {
+          // Composite→atom is only reported unless --demote-composites is set
+          if (currentTier === "composite" && shouldBe === "atom" && !demoteComposites) {
+            const relPath = entryPath.startsWith(cwd + "/") ? entryPath.slice(cwd.length + 1) : entryPath;
+            info(`CLASS-002 (report-only): ${relPath} — composite imports no @/design-system/* (possible mid-refactor; use --demote-composites to move)`);
+            continue;
+          }
+          classificationFindings.push({ file: entryPath, currentTier, shouldBe });
+        }
+      }
+    }
+
+    if (classificationFindings.length === 0) {
+      info("classification audit: no misclassified files found");
+    } else {
+      info(`classification audit: ${classificationFindings.length} misclassified file(s)`);
+      for (const f of classificationFindings) {
+        const relPath = f.file.startsWith(cwd + "/") ? f.file.slice(cwd.length + 1) : f.file;
+        info(`  CLASS-001: ${relPath} — is ${f.currentTier}, should be ${f.shouldBe}`);
+      }
+
+      if (fix) {
+        // Precondition: git status must be clean
+        const gitStatus = spawnSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+        if ((gitStatus.stdout ?? "").trim() !== "") {
+          err("commit or stash first — auto-move rewrites import paths across the project.");
+          process.exit(1);
+        }
+
+        const isGitRepo = spawnSync("git", ["rev-parse", "--git-dir"], { cwd, encoding: "utf8" }).status === 0;
+
+        for (const f of classificationFindings) {
+          const componentName = basename(f.file, ".tsx");
+          const srcTier = f.currentTier === "atom" ? "atoms" : "composites";
+          const dstTier = f.shouldBe === "atom" ? "atoms" : "composites";
+          const destFile = join(cwd, "design-system", dstTier, basename(f.file));
+
+          if (isGitRepo) {
+            const mvResult = spawnSync("git", ["mv", f.file, destFile], { cwd, encoding: "utf8" });
+            if (mvResult.status !== 0) {
+              err(`git mv failed for ${f.file}: ${mvResult.stderr}`);
+              continue;
+            }
+          } else {
+            await rename(f.file, destFile);
+          }
+
+          // Rewrite import paths across project
+          const fromImport = `design-system/${srcTier}/${componentName}`;
+          const toImport = `design-system/${dstTier}/${componentName}`;
+          const changed = await rewriteImportPaths(cwd, fromImport, toImport);
+          info(`moved ${f.currentTier}→${f.shouldBe}: ${basename(f.file)} (rewrote ${changed.length} import site(s))`);
+        }
+
+        // Typecheck after moves
+        const tscResult = spawnSync("npx", ["tsc", "--noEmit"], { cwd, encoding: "utf8", timeout: 120_000 });
+        if (tscResult.status !== 0) {
+          err(`tsc --noEmit failed after classification moves:\n${tscResult.stdout}\n${tscResult.stderr}`);
+          process.exit(1);
+        }
+        info("tsc --noEmit passed after classification moves");
+      }
+    }
+  }
+
   // ── Check pass ──────────────────────────────────────────────────────────────
   // Check scripts are installed into <project>/scripts/ by `sync`, not kept in
   // the pack distribution. Discover all check-*.ts files there at runtime so
@@ -385,9 +595,9 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string }): Pr
   }
 
   if (dryRun) {
-    info(`[dry-run] complete — ${companionsCreated.length} companion(s) would be created, ${metaMissing.length} meta export(s) missing`);
+    info(`[dry-run] complete — ${companionsCreated.length} companion(s) would be created, ${metaMissing.length} meta export(s) missing${backfillMeta ? `, ${classificationFindings.length} misclassified` : ""}`);
     process.exit(0);
   }
 
-  info(`reconform complete — ${companionsCreated.length} companion(s) created, ${metaMissing.length} meta export(s) missing, ${allViolations.length} violation(s) reviewed`);
+  info(`reconform complete — ${companionsCreated.length} companion(s) created, ${metaMissing.length} meta export(s) missing${backfillMeta ? `, ${metaBackfilled} meta backfilled, ${classificationFindings.length} misclassified` : ""}, ${allViolations.length} violation(s) reviewed`);
 }

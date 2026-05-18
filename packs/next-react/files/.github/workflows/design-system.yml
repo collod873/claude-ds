@@ -1,0 +1,30 @@
+# design-system.yml — CI workflow for design-system governance.
+# Copied into consumer projects on adoption. Catches meta drift and
+# misclassification on every PR before it merges.
+#
+# Trigger: push + PR to any branch.
+name: Design System
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  check:
+    name: Design System Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run design-system checks
+        run: bash scripts/check-design-system.sh

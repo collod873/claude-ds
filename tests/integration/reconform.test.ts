@@ -265,4 +265,136 @@ describe("reconform", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).not.toMatch(/META-001/);
   });
+
+  // ── --backfill-meta flag (issue #41) ───────────────────────────────────────
+
+  it("--backfill-meta --fix: appends meta stub to atom without cva", async () => {
+    await scaffoldProject(dir);
+    await writeFile(
+      join(dir, "design-system", "atoms", "button.tsx"),
+      `export function Button() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--backfill-meta", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const content = await readFile(join(dir, "design-system", "atoms", "button.tsx"), "utf8");
+    expect(content).toMatch(/export const meta/);
+    expect(content).toMatch(/kind:\s*"atom"/);
+    expect(content).toMatch(/examples/);
+    // No skip[] without cva
+    expect(content).not.toMatch(/skip:\s*\[\]/);
+  });
+
+  it("--backfill-meta --fix: appends meta stub with skip[] when cva present", async () => {
+    await scaffoldProject(dir);
+    await writeFile(
+      join(dir, "design-system", "atoms", "badge.tsx"),
+      `import { cva } from "class-variance-authority";\nconst badge = cva("b", {});\nexport function Badge() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--backfill-meta", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const content = await readFile(join(dir, "design-system", "atoms", "badge.tsx"), "utf8");
+    expect(content).toMatch(/export const meta/);
+    expect(content).toMatch(/kind:\s*"atom"/);
+    expect(content).toMatch(/skip/);
+  });
+
+  it("--backfill-meta --fix: reference file gets title + render:null stub", async () => {
+    await scaffoldProject(dir);
+    await mkdir(join(dir, "design-system", "references"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system", "references", "design-tokens.tsx"),
+      `export default function DesignTokensPage() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--backfill-meta", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const content = await readFile(join(dir, "design-system", "references", "design-tokens.tsx"), "utf8");
+    expect(content).toMatch(/export const meta/);
+    expect(content).toMatch(/kind:\s*"reference"/);
+    expect(content).toMatch(/title:\s*"Design Tokens"/);
+    expect(content).toMatch(/render:\s*\(\)\s*=>/);
+    expect(content).toMatch(/TODO\(claude-ds\)/);
+  });
+
+  it("--backfill-meta --fix: file already with meta is not touched", async () => {
+    await scaffoldProject(dir);
+    const originalContent = [
+      `import type { Meta } from "../types/meta";`,
+      `export const meta: Meta = { kind: "atom", examples: [{ name: "default", props: {} }] };`,
+      `export function Chip() { return null; }`,
+      ``,
+    ].join("\n");
+    await writeFile(join(dir, "design-system", "atoms", "chip.tsx"), originalContent);
+
+    const r = await runCli(["reconform", "--backfill-meta", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // File should be unchanged (no double-appending)
+    const content = await readFile(join(dir, "design-system", "atoms", "chip.tsx"), "utf8");
+    expect(content).toBe(originalContent);
+  });
+
+  it("--backfill-meta (no --fix): reports missing meta but does not write", async () => {
+    await scaffoldProject(dir);
+    await writeFile(
+      join(dir, "design-system", "atoms", "card.tsx"),
+      `export function Card() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--backfill-meta"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Should still report missing
+    expect(r.stdout).toMatch(/META-001/);
+    // But should not write stub (file unchanged)
+    const content = await readFile(join(dir, "design-system", "atoms", "card.tsx"), "utf8");
+    expect(content).not.toMatch(/export const meta/);
+  });
+
+  // ── Classification audit (issue #41) ──────────────────────────────────────
+
+  it("--backfill-meta: reports atom importing @/design-system/* as CLASS-001 misclassified", async () => {
+    await scaffoldProject(dir);
+    await writeFile(
+      join(dir, "design-system", "atoms", "combobox.tsx"),
+      `import { Button } from "@/design-system/atoms/button";\nexport function Combobox() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--backfill-meta"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/CLASS-001/);
+    expect(r.stdout).toMatch(/combobox/);
+    expect(r.stdout).toMatch(/atom.*composite|should be composite/i);
+  });
+
+  it("--backfill-meta: correctly classified atom (no DS imports) has no CLASS-001", async () => {
+    await scaffoldProject(dir);
+    await writeFile(
+      join(dir, "design-system", "atoms", "label.tsx"),
+      `export function Label({ text }: { text: string }) { return <span>{text}</span>; }\n`
+    );
+
+    const r = await runCli(["reconform", "--backfill-meta"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/CLASS-001/);
+  });
+
+  it("--backfill-meta: composite importing nothing gets CLASS-002 report-only (no auto-move without --demote-composites)", async () => {
+    await scaffoldProject(dir);
+    await writeFile(
+      join(dir, "design-system", "composites", "plain.tsx"),
+      `export function Plain() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--backfill-meta"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Report-only: should mention composite candidate
+    expect(r.stdout).toMatch(/CLASS-002/);
+    // But not CLASS-001 (no auto-move queued)
+    expect(r.stdout).not.toMatch(/CLASS-001.*plain|plain.*CLASS-001/i);
+  });
 });
