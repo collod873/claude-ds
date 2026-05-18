@@ -7,6 +7,12 @@ description: Drive a GitHub meta closure-index issue to completion. Dispatches o
 
 You are driving a GitHub meta issue (a "closure index") to completion. Each child issue gets one fresh sonnet subagent. You verify and close as you go. Run AFK; only stop for genuine HITL needs.
 
+## Quick start
+
+1. Find the meta closure index (§0) — or use the issue number Collin passed as arg.
+2. For each unchecked child issue in order: dispatch sonnet sub + watchdog (§1), verify (§2), close + tick the index (§3).
+3. Stop only on hard-stops (§4). Final summary on exit (§5).
+
 ## 0. Find the index
 
 If a meta issue number was passed as arg, use it. Otherwise:
@@ -24,11 +30,11 @@ For each unchecked item in order:
    > You're in `/Users/collinlodato/Claude Projects/claude-ds` on `main`. Implement GH issue #<N>. Read it with `gh issue view`. Also read `CLAUDE.md` at repo root.
    >
    > **Constraints:**
-   > - Stay strictly in #<N> scope. Don't touch other v0.6.0 issues.
+   > - Stay strictly in #<N> scope. Don't touch sibling issues in the same milestone.
    > - Work on `main`. No feature branches. Post-commit hook auto-pushes.
    > - `dist/` is committed — rebuild before committing.
    > - Quote each acceptance-criteria line from the issue and show the command output proving it.
-   > - **Hard-stop and report** if you hit a judgment call that affects another v0.6.0 issue, or any ambiguity the issue doesn't resolve. Do NOT guess.
+   > - **Hard-stop and report** if you hit a judgment call that affects sibling issues in the same milestone, or any ambiguity the issue doesn't resolve. Do NOT guess.
    > - Budget ~15 min. If you're not done, stop and report partial state.
    > - User prefs: terse, no emojis, evidence over assertions, no scope creep.
 
@@ -62,7 +68,7 @@ When verification passes:
 Stop and ping Collin in plain text when:
 - Subagent reports cross-issue ambiguity or asks for a decision.
 - Verification fails twice on the same issue.
-- Next issue requires a real consumer project to test (e.g., crewops migration step, `/design` route rendering, env-var gating in a live app).
+- Next issue requires a real consumer project to test (anything user-visible at runtime — route rendering, env-var gating, integration migrations).
 - The meta issue body is in a state you don't understand.
 - Anything genuinely surprising.
 
