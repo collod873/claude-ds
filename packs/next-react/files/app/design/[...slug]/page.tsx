@@ -1,4 +1,3 @@
-import React from "react";
 import { notFound } from "next/navigation";
 import manifest from "@/design-system/manifest.json";
 import { showcases } from "@/design-system/manifest.generated";

@@ -1,4 +1,3 @@
-import React from "react";
 import Link from "next/link";
 import manifest from "@/design-system/manifest.json";
 
