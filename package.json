@@ -1,10 +1,18 @@
 {
   "name": "claude-ds",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "bin": {
     "claude-ds": "dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "packs/next-react/files/",
+    "packs/next-react/manifest.json",
+    "packs/next-react/MIGRATIONS.md",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "build": "tsc -p . && chmod +x dist/cli.js",
     "prepublishOnly": "npm run build",
