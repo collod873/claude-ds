@@ -1,16 +1,22 @@
 #!/usr/bin/env node --experimental-strip-types
 /**
  * build-manifest.ts — Generates design-system/manifest.json.
- * Walks design-system/{atoms,composites,icons,hooks,utils}/ in cwd and emits
- * a JSON file enumerating every component bundle found.
+ * Walks design-system/{atoms,composites,references,icons,hooks,utils}/ in cwd
+ * and emits a JSON file enumerating every component bundle found.
  *
  * Shape:
- *   { generated: "<ISO>", components: [{ name, tier, path, has_showcase, has_states, has_test }] }
+ *   { generated: "<ISO>",
+ *     components: [{ name, tier, kind, path, path_no_ext, has_showcase, has_states, has_test }] }
+ *
+ * `kind` is parsed from `export const meta = { kind: "..." }` in each .tsx.
+ * When meta is missing or unparseable, kind is inferred from the directory
+ * (atoms→atom, composites→composite, references→reference) and a stderr
+ * warning is printed. Cleanup path is `reconform --backfill-meta`.
  *
  * Exit 0 success, 1 self-error.
  */
 
-import { readdirSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { readdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, basename, extname } from "node:path";
 
 const TIERS: Record<string, string> = {
@@ -18,15 +24,32 @@ const TIERS: Record<string, string> = {
   composites: "composite",
 };
 
-const SCAN_DIRS = ["atoms", "composites", "icons", "hooks", "utils"];
+type ComponentKind = "atom" | "composite" | "reference";
+
+const DIR_KIND: Record<string, ComponentKind> = {
+  atoms: "atom",
+  composites: "composite",
+  references: "reference",
+};
+
+const SCAN_DIRS = ["atoms", "composites", "references", "icons", "hooks", "utils"];
 
 interface ComponentEntry {
   name: string;
   tier: string;
+  kind?: ComponentKind;
   path: string;
+  path_no_ext: string;
   has_showcase: boolean;
   has_states: boolean;
   has_test: boolean;
+}
+
+function parseKind(source: string): ComponentKind | null {
+  const m = source.match(/export\s+const\s+meta[^=]*=\s*\{[^}]*kind\s*:\s*["']([^"']+)["']/);
+  if (!m) return null;
+  const k = m[1];
+  return k === "atom" || k === "composite" || k === "reference" ? k : null;
 }
 
 function scanDir(dsRoot: string, dirName: string): ComponentEntry[] {
@@ -41,6 +64,7 @@ function scanDir(dsRoot: string, dirName: string): ComponentEntry[] {
   }
 
   const tier = TIERS[dirName] ?? dirName;
+  const inferredKind = DIR_KIND[dirName];
   const tsxFiles = entries.filter(
     (f) => f.endsWith(".tsx") && !f.endsWith(".showcase.tsx") && !f.endsWith(".test.tsx")
   );
@@ -48,10 +72,33 @@ function scanDir(dsRoot: string, dirName: string): ComponentEntry[] {
   return tsxFiles.map((f) => {
     const name = basename(f, extname(f));
     const base = join(dir, name);
+    const path = `design-system/${dirName}/${f}`;
+    const path_no_ext = `design-system/${dirName}/${name}`;
+
+    let kind: ComponentKind | undefined;
+    if (inferredKind) {
+      let parsed: ComponentKind | null = null;
+      try {
+        parsed = parseKind(readFileSync(join(dir, f), "utf8"));
+      } catch {
+        parsed = null;
+      }
+      if (parsed) {
+        kind = parsed;
+      } else {
+        process.stderr.write(
+          `${path}:0: MFST-002: meta.kind missing or unparseable; inferring "${inferredKind}" from directory. Run reconform --backfill-meta to fix.\n`
+        );
+        kind = inferredKind;
+      }
+    }
+
     return {
       name,
       tier,
-      path: `design-system/${dirName}/${f}`,
+      ...(kind ? { kind } : {}),
+      path,
+      path_no_ext,
       has_showcase: existsSync(`${base}.showcase.tsx`),
       has_states: existsSync(`${base}.states.json`),
       has_test: existsSync(`${base}.test.tsx`),

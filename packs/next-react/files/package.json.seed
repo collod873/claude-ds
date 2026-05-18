@@ -12,8 +12,7 @@
     "ds:principles": "node --experimental-strip-types scripts/check-principles-freshness.ts",
     "ds:tokens": "node --experimental-strip-types scripts/update-tokens.ts",
     "ci:hook-contract": "bash scripts/check-hook-contract.sh",
-    "ci:consistency": "bash scripts/consistency-probe.sh",
-    "generate:showcase": "node --experimental-strip-types scripts/generate-showcase.ts"
+    "ci:consistency": "bash scripts/consistency-probe.sh"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",

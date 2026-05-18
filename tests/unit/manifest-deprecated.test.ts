@@ -61,7 +61,7 @@ describe("parseManifest — deprecated_paths", () => {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "packs", "next-react");
     const raw = await readFile(resolve(root, "manifest.json"), "utf8");
     const m = parseManifest(raw);
-    expect(m.deprecated_paths).toHaveLength(13);
+    expect(m.deprecated_paths).toHaveLength(16);
     const paths = m.deprecated_paths.map(d => d.path);
     expect(paths).toContain("contracts.md");
     expect(paths).toContain("exceptions.json");
@@ -76,5 +76,8 @@ describe("parseManifest — deprecated_paths", () => {
     expect(paths).toContain("tests/visual/.keep");
     expect(paths).toContain("tests/visual/README.md");
     expect(paths).toContain("tests/visual");
+    expect(paths).toContain(".claude/hooks/post-write-design.sh");
+    expect(paths).toContain(".claude/hooks/post-write-design.sh.verify-fixture.json");
+    expect(paths).toContain("scripts/generate-showcase.ts");
   });
 });

@@ -26,10 +26,10 @@ See [contracts.md](../../design-system/contracts.md) for:
 
 ## Key Invariants
 
-- `manifest.json` is generated — never hand-edit. Trust the diff from `post-write-design.sh`.
+- `manifest.json` is generated — never hand-edit. Trust the regen output from `regenerate-companions.sh`.
 - `tokens.json` is written only via `scripts/update-tokens.ts`.
 - Blocking violations must go through `lib/log-failure.sh`; raw `exit 2` is forbidden.
-- Hook order on `design-system/**`: exceptions → tokens → tier-imports → states → manifest → similarity → post-write.
+- Hook order on `design-system/**`: exceptions → tokens → tier-imports → states → manifest → similarity; PostToolUse: regenerate-companions.
 
 ## Bypass Policy
 

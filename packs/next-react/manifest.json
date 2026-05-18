@@ -17,7 +17,6 @@
     { "path": ".claude/hooks/pre-write-ds-states.sh", "category": "managed" },
     { "path": ".claude/hooks/pre-write-ds-manifest.sh", "category": "managed" },
     { "path": ".claude/hooks/pre-write-ds-similarity.sh", "category": "managed" },
-    { "path": ".claude/hooks/post-write-design.sh", "category": "managed" },
     { "path": ".claude/hooks/pre-write-tsx.sh", "category": "managed" },
     { "path": ".claude/hooks/pre-commit-global.sh", "category": "managed" },
     { "path": ".claude/hooks/pre-write-ds-exceptions.sh", "category": "managed" },
@@ -31,7 +30,6 @@
     { "path": ".claude/hooks/pre-write-ds-tier-imports.sh.verify-fixture.json", "category": "seeded" },
     { "path": ".claude/hooks/pre-commit-global.sh.verify-fixture.json", "category": "seeded" },
     { "path": ".claude/hooks/pre-write-ds-similarity.sh.verify-fixture.json", "category": "seeded" },
-    { "path": ".claude/hooks/post-write-design.sh.verify-fixture.json", "category": "seeded" },
     { "path": ".claude/hooks/regenerate-companions.sh.verify-fixture.json", "category": "seeded" },
     { "path": "design-system/contracts.md", "category": "seeded" },
     { "path": "design-system/tokens.json", "category": "seeded" },
@@ -59,7 +57,6 @@
     { "path": "scripts/update-tokens.ts", "category": "seeded" },
     { "path": "scripts/check-hook-contract.sh", "category": "managed" },
     { "path": "scripts/consistency-probe.sh", "category": "managed" },
-    { "path": "scripts/generate-showcase.ts", "category": "managed" },
     { "path": "scripts/generate-showcase-companion.ts", "category": "managed" },
     { "path": "scripts/check-design-system.sh", "category": "managed" },
     { "path": "scripts/lib/ds-validators.sh", "category": "managed" },
@@ -70,7 +67,13 @@
     { "path": ".claude/skills/design-system/SKILL.md", "category": "seeded" },
     { "path": ".claude/skills/design-system/contracts.md", "category": "seeded" },
     { "path": "tests/a11y/.keep", "category": "seeded" },
-    { "path": "tests/a11y/README.md", "category": "seeded" }
+    { "path": "tests/a11y/README.md", "category": "seeded" },
+    { "path": "app/design/page.tsx", "category": "managed" },
+    { "path": "app/design/layout.tsx", "category": "managed" },
+    { "path": "app/design/[...slug]/page.tsx", "category": "managed" },
+    { "path": "app/design/[...slug]/resolve.ts", "category": "managed" },
+    { "path": "design-system/references/tokens.tsx", "category": "seeded" },
+    { "path": "design-system/references/motion.tsx", "category": "seeded" }
   ],
   "deprecated_paths": [
     {
@@ -137,6 +140,21 @@
       "path": "tests/visual",
       "since_version": "v0.6.0",
       "reason": "Visual snapshot regression infrastructure deferred indefinitely; Claude reads /design route live instead (issue #39)"
+    },
+    {
+      "path": ".claude/hooks/post-write-design.sh",
+      "since_version": "v0.6.0",
+      "reason": "Manifest regen folded into regenerate-companions.sh; route generation retired in favor of static catch-all (issue #44)"
+    },
+    {
+      "path": ".claude/hooks/post-write-design.sh.verify-fixture.json",
+      "since_version": "v0.6.0",
+      "reason": "Companion fixture for deleted post-write-design.sh (issue #44)"
+    },
+    {
+      "path": "scripts/generate-showcase.ts",
+      "since_version": "v0.6.0",
+      "reason": "Per-component route generation replaced by manifest-driven catch-all under app/design/[...slug] (issue #44)"
     }
   ],
   "canonical_paths": [
@@ -158,6 +176,9 @@
     ".claude/hooks/pre-write-ds-states.sh",
     ".claude/hooks/pre-write-ds-manifest.sh",
     ".claude/hooks/pre-write-ds-similarity.sh",
-    ".claude/hooks/post-write-design.sh"
+    "app/design/page.tsx",
+    "app/design/layout.tsx",
+    "app/design/[...slug]/page.tsx",
+    "app/design/[...slug]/resolve.ts"
   ]
 }

@@ -190,8 +190,7 @@ describe("adopt", () => {
 
     const packScripts = [
       "ds:build-manifest", "ds:check-states", "ds:check-tiers", "ds:similarity",
-      "ds:a11y", "ds:principles", "ds:tokens", "ci:hook-contract", "ci:consistency",
-      "generate:showcase"
+      "ds:a11y", "ds:principles", "ds:tokens", "ci:hook-contract", "ci:consistency"
     ];
     for (const s of packScripts) {
       expect(pkg.scripts[s]).toBeDefined();
