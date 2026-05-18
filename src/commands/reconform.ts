@@ -109,7 +109,10 @@ function metaStubReference(title: string): string {
 }
 
 // ── Classification audit helpers ──────────────────────────────────────────────
-const DS_IMPORT_RE = /from\s+["'][^"']*@\/design-system\//;
+// Match `from "...@/design-system/..."` — but exclude `types/meta` (the Meta type
+// import is structural, not a real DS-module dependency, and would otherwise
+// promote every atom to composite the moment we backfill meta).
+const DS_IMPORT_RE = /from\s+["'][^"']*@\/design-system\/(?!types\/meta)/;
 
 function fileImportsDsModule(source: string): boolean {
   return DS_IMPORT_RE.test(source);
@@ -428,10 +431,56 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
       }
 
       if (fix) {
+        // Ensure `Meta` type import exists when the stub references it (atom/composite/reference all do).
+        // Skip injection if source already imports Meta in any form.
+        const hasMetaImport = /import\s+(?:type\s+)?\{[^}]*\bMeta\b[^}]*\}\s+from\s+["'][^"']*\/types\/meta["']/.test(source)
+          || /import\s+type\s+\{[^}]*\bMeta\b[^}]*\}\s+from\s+["'][^"']*\/types\/meta["']/.test(source);
+        let sourceWithImport = source;
+        if (!hasMetaImport) {
+          const importLine = `import type { Meta } from "@/design-system/types/meta";\n`;
+          // Insert after 'use client'/'use server' directive (if present) and any contiguous
+          // leading import block. Otherwise prepend.
+          const lines = source.split("\n");
+          let insertIdx = 0;
+          // Skip leading 'use client' / 'use server' directives + blank lines
+          while (insertIdx < lines.length) {
+            const t = lines[insertIdx].trim();
+            if (t === "" || /^["']use (client|server)["'];?$/.test(t)) {
+              insertIdx++;
+            } else {
+              break;
+            }
+          }
+          // Skip contiguous import statements (single-line and multi-line)
+          while (insertIdx < lines.length) {
+            const t = lines[insertIdx].trim();
+            if (t.startsWith("import ")) {
+              // Advance past the import; if it doesn't end with `;`, consume until it does
+              while (insertIdx < lines.length && !lines[insertIdx].trimEnd().endsWith(";")) {
+                insertIdx++;
+              }
+              insertIdx++; // consume the line with `;`
+            } else if (t === "") {
+              insertIdx++;
+            } else {
+              break;
+            }
+          }
+          // Trim trailing blanks we just walked past so the inserted import sits next to the block
+          // Walk back to find the end of the import block / directive
+          let backIdx = insertIdx;
+          while (backIdx > 0 && lines[backIdx - 1].trim() === "") backIdx--;
+          const head = lines.slice(0, backIdx).join("\n");
+          const tail = lines.slice(backIdx).join("\n");
+          // Build: head + newline + importLine + (blank line) + tail
+          const headPart = head === "" ? "" : head + "\n";
+          const tailPart = tail.startsWith("\n") ? tail : (tail ? "\n" + tail : "");
+          sourceWithImport = headPart + importLine + tailPart;
+        }
         // Append meta export to end of file (after a blank line if file doesn't end with one)
-        const sep = source.endsWith("\n\n") ? "" : source.endsWith("\n") ? "\n" : "\n\n";
-        await writeFile(fullPath, source + sep + stub, "utf8");
-        info(`backfilled meta: ${relPath}`);
+        const sep = sourceWithImport.endsWith("\n\n") ? "" : sourceWithImport.endsWith("\n") ? "\n" : "\n\n";
+        await writeFile(fullPath, sourceWithImport + sep + stub, "utf8");
+        info(`backfilled meta: ${relPath}${hasMetaImport ? "" : " (+ Meta import)"}`);
         metaBackfilled++;
       } else {
         info(`[dry-run] would backfill meta: ${relPath}`);
@@ -789,6 +838,11 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
                 message: `@generated header missing from ${relPath}`,
               });
               info(`GEN-001: missing @generated header: ${relPath}`);
+              if (fix) {
+                // Regenerate from meta — the existing stub content is replaced wholesale.
+                await writeFile(showcasePath, expectedShowcase, "utf8");
+                info(`GEN-001 fixed: regenerated ${relPath}`);
+              }
             } else if (expectedShowcase !== showcaseContent) {
               // GEN-002: drift check — regenerate in-memory and compare
               const relPath = showcasePath.startsWith(cwd + "/") ? showcasePath.slice(cwd.length + 1) : showcasePath;
@@ -828,6 +882,10 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
                 message: `__generated marker missing from ${relPath}`,
               });
               info(`GEN-001: missing __generated marker: ${relPath}`);
+              if (fix) {
+                await writeFile(statesPath, expectedStates, "utf8");
+                info(`GEN-001 fixed: regenerated ${relPath}`);
+              }
             } else if (expectedStates !== statesContent) {
               // GEN-002: drift check
               const relPath = statesPath.startsWith(cwd + "/") ? statesPath.slice(cwd.length + 1) : statesPath;
@@ -918,14 +976,49 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
       cur = [];
     }
 
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    // When stdin is piped (non-TTY), readline.question() resolves the first answer
+    // but subsequent questions race the EOF and exit prematurely (#49). Detect
+    // non-TTY and consume the entire stdin upfront as a line buffer.
+    const isTTY = process.stdin.isTTY === true;
+
+    type Asker = (prompt: string) => Promise<string>;
+    let ask: Asker;
+    let closeAsker: () => void;
+
+    if (isTTY) {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      ask = (prompt: string) => rl.question(prompt);
+      closeAsker = () => rl.close();
+    } else {
+      // Slurp full stdin, then hand out lines one at a time.
+      const chunks: Buffer[] = [];
+      await new Promise<void>((resolve) => {
+        process.stdin.on("data", (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+        process.stdin.on("end", () => resolve());
+        process.stdin.on("error", () => resolve());
+        // If stdin was never opened (no pipe), end fires immediately on resume.
+        process.stdin.resume();
+      });
+      const buffered = Buffer.concat(chunks).toString("utf8");
+      // Split on \n; drop the trailing empty element produced by a final newline
+      const lines = buffered.split("\n");
+      if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+      let cursor = 0;
+      ask = async (prompt: string) => {
+        process.stdout.write(prompt);
+        const v = cursor < lines.length ? lines[cursor++] : "";
+        process.stdout.write(v + "\n");
+        return v;
+      };
+      closeAsker = () => {};
+    }
 
     for (const v of allViolations) {
       process.stdout.write(`\nViolation: [${v.ruleId}] ${v.file}\n  ${v.message}\n`);
-      const choice = (await rl.question("[F]ix now / [R]egister exception / [S]kip: ")).trim().toUpperCase();
+      const choice = (await ask("[F]ix now / [R]egister exception / [S]kip: ")).trim().toUpperCase();
 
       if (choice.startsWith("R")) {
-        const reason = (await rl.question("Reason: ")).trim();
+        const reason = (await ask("Reason: ")).trim();
         if (!reason) {
           info("  skipped (no reason provided)");
           continue;
@@ -941,7 +1034,7 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
       }
     }
 
-    rl.close();
+    closeAsker();
 
     await writeFile(exPath, JSON.stringify({ exceptions: cur }, null, 2) + "\n", "utf8");
     info(`exceptions.json updated (${cur.length} total)`);

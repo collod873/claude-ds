@@ -383,6 +383,208 @@ describe("reconform", () => {
     expect(r.stdout).not.toMatch(/CLASS-001/);
   });
 
+  // ── #48 / #49 / #50 / GEN-001 regressions ─────────────────────────────────
+
+  it("#48: --backfill-meta --fix injects `import type { Meta }` when absent + appends export", async () => {
+    await scaffoldProject(dir);
+    const original = `"use client";\n\nimport { useState } from "react";\n\nexport function Accordion() { return null; }\n`;
+    await writeFile(join(dir, "design-system", "atoms", "accordion.tsx"), original);
+
+    const r = await runCli(["reconform", "--backfill-meta", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const content = await readFile(join(dir, "design-system", "atoms", "accordion.tsx"), "utf8");
+    // Both must exist
+    expect(content).toMatch(/import type \{ Meta \} from "@\/design-system\/types\/meta"/);
+    expect(content).toMatch(/export const meta:\s*Meta\s*=/);
+    // 'use client' must remain at top (line 1)
+    expect(content.split("\n")[0]).toBe(`"use client";`);
+    // Existing `useState` import preserved
+    expect(content).toMatch(/import \{ useState \} from "react"/);
+    // Meta import sits in the import block (before the function)
+    const importIdx = content.indexOf("import type { Meta }");
+    const fnIdx = content.indexOf("export function Accordion");
+    expect(importIdx).toBeGreaterThan(0);
+    expect(importIdx).toBeLessThan(fnIdx);
+  });
+
+  it("#48: --backfill-meta --fix does NOT duplicate Meta import when source already has it", async () => {
+    await scaffoldProject(dir);
+    // File missing `meta` export but already importing Meta type (typed elsewhere or anticipated)
+    const original = [
+      `import type { Meta } from "@/design-system/types/meta";`,
+      `// note: this file is mid-migration — Meta import staged ahead of export`,
+      `export function Button() { return null; }`,
+      ``,
+    ].join("\n");
+    await writeFile(join(dir, "design-system", "atoms", "button.tsx"), original);
+
+    const r = await runCli(["reconform", "--backfill-meta", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const content = await readFile(join(dir, "design-system", "atoms", "button.tsx"), "utf8");
+    const imports = content.match(/import type \{ Meta \}/g) ?? [];
+    expect(imports.length).toBe(1);
+    expect(content).toMatch(/export const meta:\s*Meta\s*=/);
+  });
+
+  it("#48: backfilled file passes tsc --noEmit (real compile)", async () => {
+    // Build a minimal tsc-able fixture: tsconfig + types/meta.ts + component.
+    await scaffoldProject(dir);
+    await mkdir(join(dir, "design-system", "types"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system", "types", "meta.ts"),
+      `export type Meta = { kind: "atom" | "composite" | "reference"; [k: string]: unknown };\n`
+    );
+    await writeFile(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          target: "ES2022", module: "ESNext", moduleResolution: "Bundler",
+          strict: true, esModuleInterop: true, skipLibCheck: true,
+          noEmit: true, baseUrl: ".",
+          paths: { "@/design-system/*": ["design-system/*"] },
+        },
+        // Only the component file we backfilled + the Meta type it imports.
+        // Companion .showcase.tsx / .test.tsx require react/vitest which are
+        // out-of-scope for this fixture.
+        include: ["design-system/atoms/card.tsx", "design-system/types/meta.ts"],
+      }, null, 2)
+    );
+    await writeFile(
+      join(dir, "design-system", "atoms", "card.tsx"),
+      `export function Card() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--backfill-meta", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const after = await readFile(join(dir, "design-system", "atoms", "card.tsx"), "utf8");
+    expect(after).toMatch(/import type \{ Meta \}/);
+    expect(after).toMatch(/export const meta:\s*Meta/);
+
+    // Run tsc against the fixture. Resolve the project's tsc directly (no npx —
+    // npx inside a fresh tmp dir tries to fetch from npm).
+    const { spawnSync } = await import("node:child_process");
+    const { fileURLToPath } = await import("node:url");
+    const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
+    const tscBin = join(projectRoot, "node_modules", ".bin", "tsc");
+    const tsc = spawnSync(tscBin, ["--noEmit", "-p", "tsconfig.json"], {
+      cwd: dir, encoding: "utf8", timeout: 60_000,
+    });
+    if (tsc.status !== 0) {
+      // Surface diagnostics to make CI failures actionable
+      throw new Error(`tsc failed:\n${tsc.stdout}\n${tsc.stderr}`);
+    }
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+
+  it("#50: dry-run meta-missing count equals --fix mutation count on identical input", async () => {
+    await scaffoldProject(dir);
+    // Multiple components, none with meta. Includes a mix of plain, "use client", and cva variants.
+    await writeFile(
+      join(dir, "design-system", "atoms", "alpha.tsx"),
+      `export function Alpha() { return null; }\n`
+    );
+    await writeFile(
+      join(dir, "design-system", "atoms", "beta.tsx"),
+      `"use client";\nexport function Beta() { return null; }\n`
+    );
+    await writeFile(
+      join(dir, "design-system", "atoms", "gamma.tsx"),
+      `import { cva } from "class-variance-authority";\nconst g = cva("g", {});\nexport function Gamma() { return null; }\n`
+    );
+
+    // Snapshot pre-state
+    const before = await Promise.all(
+      ["alpha", "beta", "gamma"].map(n => readFile(join(dir, "design-system", "atoms", `${n}.tsx`), "utf8"))
+    );
+
+    const dry = await runCli(["reconform", "--backfill-meta", "--dry-run"], { cwd: dir });
+    expect(dry.code).toBe(0);
+    const dryMatch = dry.stdout.match(/(\d+) meta export\(s\) missing/);
+    expect(dryMatch).not.toBeNull();
+    const dryCount = parseInt(dryMatch![1], 10);
+    expect(dryCount).toBe(3);
+
+    // Verify dry-run did not mutate the files
+    for (let i = 0; i < 3; i++) {
+      const cur = await readFile(join(dir, "design-system", "atoms", `${["alpha","beta","gamma"][i]}.tsx`), "utf8");
+      expect(cur).toBe(before[i]);
+    }
+
+    const fix = await runCli(["reconform", "--backfill-meta", "--fix"], { cwd: dir });
+    expect(fix.code).toBe(0);
+    // Count actual mutations (files now containing `export const meta`)
+    let mutated = 0;
+    for (const n of ["alpha", "beta", "gamma"]) {
+      const c = await readFile(join(dir, "design-system", "atoms", `${n}.tsx`), "utf8");
+      if (/export const meta/.test(c)) mutated++;
+    }
+    expect(mutated).toBe(dryCount);
+  });
+
+  it("#49: bulk-piped R\\n<reason>\\n cycles register exception per violation", async () => {
+    await scaffoldProject(dir);
+    await mkdir(join(dir, "scripts"), { recursive: true });
+    // A check script that emits 3 violations
+    const checkScript = [
+      `process.stderr.write("design-system/atoms/a.tsx:1: TST-001: violation 1\\n");`,
+      `process.stderr.write("design-system/atoms/b.tsx:1: TST-001: violation 2\\n");`,
+      `process.stderr.write("design-system/atoms/c.tsx:1: TST-001: violation 3\\n");`,
+      `process.exit(2);`,
+    ].join("\n");
+    await writeFile(join(dir, "scripts", "check-multi.ts"), checkScript);
+
+    // Pipe 3 cycles of R + reason
+    const stdin = "R\nbulk migration backlog\nR\nbulk migration backlog\nR\nbulk migration backlog\n";
+    const r = await runCli(["reconform"], { cwd: dir, stdin });
+    expect(r.code).toBe(0);
+
+    const exContent = await readFile(join(dir, "design-system", "exceptions.json"), "utf8");
+    const parsed = JSON.parse(exContent);
+    const tstExceptions = parsed.exceptions.filter((e: { rule_id: string }) => e.rule_id === "TST-001");
+    expect(tstExceptions.length).toBe(3);
+    const files = tstExceptions.map((e: { file: string }) => e.file).sort();
+    expect(files).toEqual([
+      "design-system/atoms/a.tsx",
+      "design-system/atoms/b.tsx",
+      "design-system/atoms/c.tsx",
+    ]);
+  });
+
+  it("GEN-001: --fix regenerates .showcase.tsx missing @generated header (issue #51 investigation)", async () => {
+    await scaffoldProject(dir);
+    // Atom with meta — so the generator will produce output for it
+    await writeFile(
+      join(dir, "design-system", "atoms", "tag.tsx"),
+      [
+        `import type { Meta } from "@/design-system/types/meta";`,
+        `export const meta: Meta = { kind: "atom", examples: [{ name: "default", props: {} }] };`,
+        `export function Tag() { return null; }`,
+        ``,
+      ].join("\n")
+    );
+    // Stub showcase missing the @generated header
+    const stubShowcase = `// hand-written stub\nexport default function TagShowcase() { return null; }\n`;
+    await writeFile(join(dir, "design-system", "atoms", "tag.showcase.tsx"), stubShowcase);
+    // Stub states missing __generated marker
+    await writeFile(join(dir, "design-system", "atoms", "tag.states.json"), `[]\n`);
+    // empty test stub so we don't hit other paths
+    await writeFile(join(dir, "design-system", "atoms", "tag.test.tsx"), `// stub\n`);
+
+    const r = await runCli(["reconform", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const after = await readFile(join(dir, "design-system", "atoms", "tag.showcase.tsx"), "utf8");
+    expect(after.startsWith("// @generated by claude-ds")).toBe(true);
+    expect(after).not.toBe(stubShowcase);
+
+    const afterStates = await readFile(join(dir, "design-system", "atoms", "tag.states.json"), "utf8");
+    const parsed = JSON.parse(afterStates);
+    expect(parsed.__generated).toMatch(/@generated by claude-ds/);
+  });
+
   it("--backfill-meta: composite importing nothing gets CLASS-002 report-only (no auto-move without --demote-composites)", async () => {
     await scaffoldProject(dir);
     await writeFile(
