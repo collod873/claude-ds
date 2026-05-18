@@ -6,14 +6,13 @@
 
 ## Per-component bundle
 
-Every component — atom or composite — ships as a five-file bundle (per `design-system-scaffold.md`):
+Every component — atom or composite — ships as a four-file bundle (per `design-system-scaffold.md`):
 
 ```
 <Name>.tsx
 <Name>.showcase.tsx
 <Name>.states.json
-<Name>.snapshot.png
 <Name>.test.tsx
 ```
 
-No component is considered complete until all five files are present. The showcase generator (Slice H) and hook contracts (Slice D) assume this shape.
+No component is considered complete until all four files are present. The showcase generator and hook contracts assume this shape.

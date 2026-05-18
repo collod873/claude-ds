@@ -5,7 +5,7 @@
  * a JSON file enumerating every component bundle found.
  *
  * Shape:
- *   { generated: "<ISO>", components: [{ name, tier, path, has_showcase, has_states, has_snapshot, has_test }] }
+ *   { generated: "<ISO>", components: [{ name, tier, path, has_showcase, has_states, has_test }] }
  *
  * Exit 0 success, 1 self-error.
  */
@@ -26,7 +26,6 @@ interface ComponentEntry {
   path: string;
   has_showcase: boolean;
   has_states: boolean;
-  has_snapshot: boolean;
   has_test: boolean;
 }
 
@@ -55,7 +54,6 @@ function scanDir(dsRoot: string, dirName: string): ComponentEntry[] {
       path: `design-system/${dirName}/${f}`,
       has_showcase: existsSync(`${base}.showcase.tsx`),
       has_states: existsSync(`${base}.states.json`),
-      has_snapshot: existsSync(`${base}.snapshot.png`),
       has_test: existsSync(`${base}.test.tsx`),
     };
   });

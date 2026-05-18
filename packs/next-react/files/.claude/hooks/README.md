@@ -10,7 +10,7 @@ Tier B (`design-system/**`) hooks run in this order per scaffold authority:
 4. `pre-write-ds-states.sh` — STATE-*
 5. `pre-write-ds-manifest.sh` — MAN-*
 6. `pre-write-ds-similarity.sh` — SIM-*
-7. `post-write-design.sh` — manifest regen + snapshot
+7. `post-write-design.sh` — manifest regen, emit diff to stdout
 
 Tier A hooks (`pre-write-tsx.sh`, `pre-commit-global.sh`) fire on all `*.tsx` outside `design-system/**`.
 

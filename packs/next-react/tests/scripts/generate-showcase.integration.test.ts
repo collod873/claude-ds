@@ -43,7 +43,6 @@ async function writeManifest(
     path: string;
     has_showcase: boolean;
     has_states: boolean;
-    has_snapshot: boolean;
     has_test: boolean;
   }>
 ): Promise<void> {
@@ -87,7 +86,6 @@ describe("generate-showcase.ts [integration]", () => {
         path: "design-system/atoms/Button.tsx",
         has_showcase: true,
         has_states: true,
-        has_snapshot: false,
         has_test: false,
       },
     ]);
@@ -147,7 +145,6 @@ describe("generate-showcase.ts [integration]", () => {
         path: "design-system/atoms/Badge.tsx",
         has_showcase: true,
         has_states: true,
-        has_snapshot: false,
         has_test: false,
       },
     ]);
@@ -186,7 +183,6 @@ describe("generate-showcase.ts [integration]", () => {
         path: "design-system/atoms/Card.tsx",
         has_showcase: true,
         has_states: false,
-        has_snapshot: false,
         has_test: false,
       },
       {
@@ -195,7 +191,6 @@ describe("generate-showcase.ts [integration]", () => {
         path: "design-system/composites/Alert.tsx",
         has_showcase: false,
         has_states: false,
-        has_snapshot: false,
         has_test: false,
       },
     ]);
@@ -224,9 +219,9 @@ describe("generate-showcase.ts [integration]", () => {
     await seedBundle(dir, "Bar");
     await seedBundle(dir, "Baz");
     await writeManifest(dir, [
-      { name: "Foo", tier: "atom", path: "design-system/atoms/Foo.tsx", has_showcase: true, has_states: true, has_snapshot: false, has_test: false },
-      { name: "Bar", tier: "atom", path: "design-system/atoms/Bar.tsx", has_showcase: true, has_states: false, has_snapshot: false, has_test: false },
-      { name: "Baz", tier: "composite", path: "design-system/composites/Baz.tsx", has_showcase: false, has_states: false, has_snapshot: false, has_test: false },
+      { name: "Foo", tier: "atom", path: "design-system/atoms/Foo.tsx", has_showcase: true, has_states: true, has_test: false },
+      { name: "Bar", tier: "atom", path: "design-system/atoms/Bar.tsx", has_showcase: true, has_states: false, has_test: false },
+      { name: "Baz", tier: "composite", path: "design-system/composites/Baz.tsx", has_showcase: false, has_states: false, has_test: false },
     ]);
 
     const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
@@ -258,7 +253,6 @@ describe("generate-showcase.ts [integration]", () => {
         path: "design-system/atoms/Chip.tsx",
         has_showcase: false,
         has_states: false,
-        has_snapshot: false,
         has_test: false,
       },
     ]);
@@ -370,7 +364,6 @@ describe("generate-showcase.ts [integration]", () => {
         path: "design-system/atoms/icon-button.tsx",
         has_showcase: true,
         has_states: true,
-        has_snapshot: false,
         has_test: false,
       },
     ]);
@@ -406,7 +399,6 @@ describe("generate-showcase.ts [integration]", () => {
         path: "design-system/atoms/Avatar.tsx",
         has_showcase: false,
         has_states: false,
-        has_snapshot: false,
         has_test: false,
       },
     ]);
