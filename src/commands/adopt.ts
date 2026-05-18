@@ -86,6 +86,24 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     process.exit(2);
   }
 
+  // Pre-flight: warn when pack would write root CLAUDE.md but .claude/CLAUDE.md already exists.
+  // Both files end up loaded by Claude Code and produce a "split-brain" context — surface it now.
+  const rootClaude = join(cwd, "CLAUDE.md");
+  const dotClaudeMd = join(cwd, ".claude", "CLAUDE.md");
+  const claudeMdCollision = manifest.files.some(f => f.path === "CLAUDE.md") &&
+    await exists(dotClaudeMd) &&
+    !(await exists(rootClaude));
+  if (claudeMdCollision) {
+    process.stderr.write([
+      "",
+      "warning: CLAUDE.md collision detected",
+      "  .claude/CLAUDE.md already exists in this project.",
+      "  Adopting will also create a root CLAUDE.md (pack hybrid file).",
+      "  Both are loaded by Claude Code — run `claude-ds reconcile` after adopt to resolve.",
+      "",
+    ].join("\n") + "\n");
+  }
+
   if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${pack}, WARN mode) here?`))) { info("aborted"); return; }
 
   const overwrites: OverwriteRecord[] = [];

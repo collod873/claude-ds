@@ -23,5 +23,22 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
     const here = await exists(join(cwd, f.path));
     info(`${here ? "present" : "missing"}: ${f.path} (${f.category})`);
   }
+
+  // Deprecated-path scan: report any files on disk that should no longer exist.
+  // This catches orphans left by prior pack versions — the "lookalike at deprecated path" check
+  // from #26. We skip the lookalike.ts short-circuit here by checking deprecated paths directly
+  // rather than going through detectLookalikes (which returns present:true, lookalike:null for
+  // canonical paths that exist, never inspecting deprecated-path neighbours).
+  let orphanCount = 0;
+  for (const d of manifest.deprecated_paths) {
+    if (await exists(join(cwd, d.path))) {
+      info(`orphan (deprecated since ${d.since_version}): ${d.path} — ${d.reason}`);
+      orphanCount++;
+    }
+  }
+  if (orphanCount > 0) {
+    info(`${orphanCount} deprecated-path orphan(s) found — run \`claude-ds reconcile\` to remove`);
+  }
+
   if (opts.suggestRemovals) info("--suggest-removals: (heuristic) no ad-hoc removals detected at v1");
 }

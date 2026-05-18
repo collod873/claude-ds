@@ -11,6 +11,7 @@ import { syncCmd } from "./commands/sync.js";
 import { doctorCmd } from "./commands/doctor.js";
 import { migrateLayoutCmd } from "./commands/migrate-layout.js";
 import { reconformCmd } from "./commands/reconform.js";
+import { reconcileCmd } from "./commands/reconcile.js";
 
 const program = new Command();
 program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`, "-V");
@@ -98,6 +99,14 @@ program
   .option("--dry-run", "report what would happen without mutating anything")
   .action(async (opts: { dryRun?: boolean }) => {
     await reconformCmd({ dryRun: opts.dryRun });
+  });
+
+program
+  .command("reconcile")
+  .option("--dry-run", "report orphans and collisions without deleting anything")
+  .option("--force", "delete all findings without prompting")
+  .action(async (opts: { dryRun?: boolean; force?: boolean }) => {
+    await reconcileCmd({ dryRun: opts.dryRun, force: opts.force });
   });
 
 program.parseAsync(process.argv).catch((e: unknown) => {
