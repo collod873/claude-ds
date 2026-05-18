@@ -8,6 +8,7 @@ import { mergeJsonKeys } from "../lib/json-merge.js";
 import { info, err, confirm } from "../lib/log.js";
 import { detectLookalikes } from "../lib/lookalike.js";
 import { detectPackageManager, runCmd } from "../lib/package-manager.js";
+import { detectAppDir, detectClaudeMdCandidates, DEFAULT_CLAUDE_MD_TARGET, resolveManifestPath } from "../lib/paths.js";
 
 const execFile = promisify(execFileCb);
 
@@ -86,22 +87,36 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     process.exit(2);
   }
 
-  // Pre-flight: warn when pack would write root CLAUDE.md but .claude/CLAUDE.md already exists.
-  // Both files end up loaded by Claude Code and produce a "split-brain" context — surface it now.
-  const rootClaude = join(cwd, "CLAUDE.md");
-  const dotClaudeMd = join(cwd, ".claude", "CLAUDE.md");
-  const claudeMdCollision = manifest.files.some(f => f.path === "CLAUDE.md") &&
-    await exists(dotClaudeMd) &&
-    !(await exists(rootClaude));
-  if (claudeMdCollision) {
-    process.stderr.write([
-      "",
-      "warning: CLAUDE.md collision detected",
-      "  .claude/CLAUDE.md already exists in this project.",
-      "  Adopting will also create a root CLAUDE.md (pack hybrid file).",
-      "  Both are loaded by Claude Code — run `claude-ds reconcile` after adopt to resolve.",
-      "",
-    ].join("\n") + "\n");
+  // #47: detect Next.js app router root. src/app/ is officially supported; manifest stays
+  // canonical (uses "app/") and the CLI rewrites the prefix at every I/O boundary.
+  const appDir = await detectAppDir(cwd);
+
+  // #34: pick where the managed pointer block goes. NEVER auto-create root CLAUDE.md.
+  // Priority when --yes (or only one candidate exists):
+  //   1. existing .claude/CLAUDE.md   (preferred — Claude Code auto-loads, no root pollution)
+  //   2. existing ./CLAUDE.md         (user-authored; inject at bottom)
+  //   3. existing docs/CLAUDE.md
+  //   4. fall back to default (.claude/CLAUDE.md, create stub)
+  const candidates = await detectClaudeMdCandidates(cwd);
+  let claudeMdTarget: string;
+  if (candidates.length === 0) {
+    claudeMdTarget = DEFAULT_CLAUDE_MD_TARGET;
+  } else if (candidates.length === 1) {
+    claudeMdTarget = candidates[0];
+  } else if (opts.yes) {
+    // Prefer .claude/ over root over docs (matches the "least intrusive" policy in #34).
+    claudeMdTarget = candidates.find(c => c === ".claude/CLAUDE.md")
+      ?? candidates.find(c => c === "CLAUDE.md")
+      ?? candidates[0];
+  } else {
+    process.stdout.write(`\nMultiple CLAUDE.md files found — choose where the managed pointer block lives:\n`);
+    candidates.forEach((c, i) => process.stdout.write(`  ${i + 1}. ${c}\n`));
+    const { createInterface } = await import("node:readline/promises");
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const ans = (await rl.question(`Pick [1-${candidates.length}]: `)).trim();
+    rl.close();
+    const idx = Number.parseInt(ans, 10) - 1;
+    claudeMdTarget = (idx >= 0 && idx < candidates.length) ? candidates[idx] : candidates[0];
   }
 
   if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${pack}, WARN mode) here?`))) { info("aborted"); return; }
@@ -110,8 +125,13 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
 
   for (const f of manifest.files) {
     if (f.category === "generated") continue;
-    const srcName = f.path === "package.json" ? "package.json.seed" : f.path === "CLAUDE.md" ? "CLAUDE.md.fragment" : f.path;
-    const dest = resolve(cwd, f.path);
+    // #34: CLAUDE.md is no longer written through the normal manifest loop — it goes
+    // through a dedicated injection path (below) so it lands at claude_md_target, never root.
+    if (f.path === "CLAUDE.md") continue;
+    const srcName = f.path === "package.json" ? "package.json.seed" : f.path;
+    // #47: rewrite app/... paths through the detected app_dir (manifest stays canonical).
+    const writePath = resolveManifestPath(f.path, appDir);
+    const dest = resolve(cwd, writePath);
     const cwdResolved = resolve(cwd);
     if (dest !== cwdResolved && !dest.startsWith(cwdResolved + "/")) {
       err(`manifest path escapes project root: ${f.path}`);
@@ -179,6 +199,26 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     process.stdout.write(lines.join("\n") + "\n");
   }
 
+  // #34: inject the managed pointer block into claudeMdTarget. Never write root unless that's the target.
+  const claudeMdEntry = manifest.files.find(f => f.path === "CLAUDE.md");
+  if (claudeMdEntry) {
+    const fragment = await readFile(join(packDir, "files", "CLAUDE.md.fragment"), "utf8");
+    const block = `<!-- >>> claude-ds managed >>> -->\n${fragment}\n<!-- <<< claude-ds managed <<< -->\n`;
+    const targetAbs = resolve(cwd, claudeMdTarget);
+    await mkdir(dirname(targetAbs), { recursive: true });
+    if (await exists(targetAbs)) {
+      const cur = await readFile(targetAbs, "utf8");
+      // If the block is already present (idempotent re-adopt), skip rewriting.
+      if (!cur.includes("<!-- >>> claude-ds managed >>> -->")) {
+        const sep = cur.endsWith("\n") ? "" : "\n";
+        await writeFile(targetAbs, `${cur}${sep}\n## claude-ds\n${block}`, "utf8");
+      }
+    } else {
+      // Create a minimal stub at the chosen target. Header makes it clear who owns the file.
+      await writeFile(targetAbs, `# Project\n\n## claude-ds\n${block}`, "utf8");
+    }
+  }
+
   const buildScriptPath = join(cwd, "scripts", "build-manifest.ts");
   const manifestPath = join(cwd, "design-system", "manifest.json");
   if (await exists(buildScriptPath) && !(await exists(manifestPath))) {
@@ -197,6 +237,9 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   const version = await getVersion(join(repoRoot, "package.json"));
   const cfg: Record<string, unknown> = { version: `v${version}`, pack, mode: "warn", enforce_threshold: 10, removed: [] };
   if (flagGlobs.length > 0) cfg.lookalike_ignore = flagGlobs;
+  // #47/#34: persist detected layout so sync/audit/reconform use the same locations.
+  cfg.app_dir = appDir;
+  cfg.claude_md_target = claudeMdTarget;
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
   const pm = await detectPackageManager(cwd);
   info(`adopted claude-ds (${pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);

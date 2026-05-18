@@ -94,7 +94,12 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
 
   // ── Scan ───────────────────────────────────────────────────────────────────
   const deprecatedFindings = await scanDeprecated(cwd, manifest.deprecated_paths);
-  const collisionFindings = await scanClaudeMdCollision(cwd);
+  // #34: collision check only applies when the configured target IS root. When the
+  // target is non-root (.claude/CLAUDE.md or docs/CLAUDE.md), the root file is handled
+  // by `reconform`'s migration path — not a "collision".
+  const collisionFindings = cfg.claude_md_target === "CLAUDE.md"
+    ? await scanClaudeMdCollision(cwd)
+    : [];
   const allFindings = [...deprecatedFindings, ...collisionFindings];
 
   if (allFindings.length === 0) {

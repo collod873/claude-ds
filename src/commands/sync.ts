@@ -7,6 +7,7 @@ import { parseManifest } from "../lib/manifest.js";
 import { diffFile } from "../lib/sync-diff.js";
 import { parseLsRemote } from "../lib/tags.js";
 import { info, err, confirm } from "../lib/log.js";
+import { resolveManifestPath } from "../lib/paths.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -34,13 +35,19 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
   }
 
   const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
-  const actions: Array<{ path: string; upstream: string; verdict: ReturnType<typeof diffFile> }> = [];
+  const actions: Array<{ path: string; writePath: string; upstream: string; verdict: ReturnType<typeof diffFile> }> = [];
   for (const f of manifest.files) {
     if (f.category === "generated") continue;
     if (cfg.removed.includes(f.path)) continue;
 
+    // #47: rewrite app/... → <app_dir>/... at I/O boundary.
+    // #34: route CLAUDE.md to the configured target (default "CLAUDE.md" for back-compat).
+    const writePath = f.path === "CLAUDE.md"
+      ? cfg.claude_md_target
+      : resolveManifestPath(f.path, cfg.app_dir);
+
     // Path-traversal guard: reject any manifest entry that escapes cwd
-    const dest = join(cwd, f.path);
+    const dest = join(cwd, writePath);
     const rel = relative(cwd, dest);
     if (rel.startsWith("..") || rel === "") { err(`path traversal rejected: ${f.path}`); process.exit(2); }
 
@@ -57,10 +64,13 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
     const prev: string | null = null;
     const current = (await exists(dest)) ? await readFile(dest, "utf8") : null;
     const verdict = diffFile({ category: f.category, format: f.format, owned_keys: f.owned_keys }, { prev, upstream, current });
-    actions.push({ path: f.path, upstream, verdict });
+    actions.push({ path: f.path, writePath, upstream, verdict });
     // #18c: distinguish new files (create:) from content-changed files (rewrite:)
     const displayAction = (verdict.action === "rewrite" && current === null) ? "create" : verdict.action;
-    info(`${displayAction}: ${f.path} — ${verdict.reason}`);
+    // Log canonical path when it equals the write path; otherwise show both so consumers
+    // see where pack content actually landed (e.g. "app/design/... → src/app/design/...").
+    const displayPath = (writePath === f.path) ? f.path : `${f.path} → ${writePath}`;
+    info(`${displayAction}: ${displayPath} — ${verdict.reason}`);
   }
   // #18d: summarise whether .claude-ds.json config keys (aside from version) will change
   {
@@ -75,16 +85,17 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
   }
   if (!(await confirm("Apply the above?"))) { info("aborted"); return; }
   for (const a of actions) {
-    const dest = join(cwd, a.path);
+    const dest = join(cwd, a.writePath);
     if (a.verdict.action === "rewrite") {
       await mkdir(dirname(dest), { recursive: true });
       const content = a.verdict.newContent ?? a.upstream;
       await writeFile(dest, content, "utf8");
       // #15: hook and script files must be executable
-      if (a.path.startsWith(".claude/hooks/") || a.path.startsWith("scripts/")) await chmod(dest, 0o755);
+      if (a.writePath.startsWith(".claude/hooks/") || a.writePath.startsWith("scripts/")) await chmod(dest, 0o755);
     } else if (a.verdict.action === "rewrite-region") {
+      await mkdir(dirname(dest), { recursive: true });
       await writeFile(dest, a.verdict.newContent, "utf8");
-      if (a.path.startsWith(".claude/hooks/") || a.path.startsWith("scripts/")) await chmod(dest, 0o755);
+      if (a.writePath.startsWith(".claude/hooks/") || a.writePath.startsWith("scripts/")) await chmod(dest, 0o755);
     } else if (a.verdict.action === "abort") {
       err(`skipped (abort): ${a.path} — ${a.verdict.reason}`);
     }

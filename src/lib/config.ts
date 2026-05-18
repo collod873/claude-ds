@@ -2,8 +2,17 @@ export class ConfigError extends Error {}
 export interface Config {
   version: string; pack: string; mode: "warn" | "block";
   enforce_threshold: number; removed: string[]; lookalike_ignore: string[];
+  /** Where Next.js app router lives in this project. Manifest stays canonical (`app/...`);
+   *  CLI rewrites the `app/` prefix to this dir at every I/O boundary. */
+  app_dir: string;
+  /** Where the claude-ds managed pointer block lives. Set at adopt time after detecting
+   *  existing CLAUDE.md files. Never defaults to root unless the user already had one there. */
+  claude_md_target: string;
 }
-const ALLOWED = new Set(["version","pack","mode","enforce_threshold","removed","lookalike_ignore"]);
+const ALLOWED = new Set([
+  "version","pack","mode","enforce_threshold","removed","lookalike_ignore",
+  "app_dir","claude_md_target",
+]);
 const VERSION_RE = /^v\d+\.\d+\.\d+$/;
 export function parseConfig(raw: string): Config {
   let obj: unknown;
@@ -20,5 +29,16 @@ export function parseConfig(raw: string): Config {
   if (!Array.isArray(removed) || removed.some((x) => typeof x !== "string")) throw new ConfigError(`removed must be string[]`);
   const lookalike_ignore = o.lookalike_ignore === undefined ? [] : o.lookalike_ignore;
   if (!Array.isArray(lookalike_ignore) || lookalike_ignore.some((x) => typeof x !== "string")) throw new ConfigError(`lookalike_ignore must be string[]`);
-  return { version: o.version, pack: o.pack, mode: o.mode, enforce_threshold, removed: removed as string[], lookalike_ignore: lookalike_ignore as string[] };
+  // Back-compat: pre-v0.6 configs lack app_dir / claude_md_target. Defaults preserve old behavior:
+  //   - app_dir="app"            → original hardcoded prefix
+  //   - claude_md_target="CLAUDE.md" → root, where pre-#34 adopt always wrote
+  const app_dir = o.app_dir === undefined ? "app" : o.app_dir;
+  if (typeof app_dir !== "string" || app_dir.length === 0) throw new ConfigError(`app_dir must be non-empty string`);
+  const claude_md_target = o.claude_md_target === undefined ? "CLAUDE.md" : o.claude_md_target;
+  if (typeof claude_md_target !== "string" || claude_md_target.length === 0) throw new ConfigError(`claude_md_target must be non-empty string`);
+  return {
+    version: o.version, pack: o.pack, mode: o.mode, enforce_threshold,
+    removed: removed as string[], lookalike_ignore: lookalike_ignore as string[],
+    app_dir, claude_md_target,
+  };
 }

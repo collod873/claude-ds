@@ -47,8 +47,9 @@ describe("CLAUDE.md hybrid+markdown sync (fragment marker bug)", () => {
     expect(r.code).toBe(0);
     // Must NOT have aborted on CLAUDE.md
     expect(r.stdout).not.toMatch(/abort:.*CLAUDE\.md/);
-    // Must report the marker region as in sync
-    expect(r.stdout).toMatch(/skip: CLAUDE\.md — marker region in sync/);
+    // Must report the marker region as in sync (#34: CLAUDE.md now lands at .claude/CLAUDE.md
+    // by default, so the log line shows the canonical → resolved path mapping).
+    expect(r.stdout).toMatch(/skip: CLAUDE\.md.* — marker region in sync/);
   });
 });
 

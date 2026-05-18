@@ -171,24 +171,46 @@ describe("audit — deprecated-path orphan reporting", () => {
   });
 });
 
-describe("adopt — CLAUDE.md collision pre-flight", () => {
+describe("adopt — CLAUDE.md target selection (#34)", () => {
   let dir: string;
   beforeEach(async () => { dir = await freshTmpDir(); });
   afterEach(async () => { await cleanup(dir); });
 
-  it("warns when .claude/CLAUDE.md exists and pack will also write root CLAUDE.md", async () => {
+  it("when .claude/CLAUDE.md pre-exists, adopt injects there and does NOT write root CLAUDE.md", async () => {
     await mkdir(join(dir, ".claude"), { recursive: true });
     await writeFile(join(dir, ".claude/CLAUDE.md"), "# Real project context\n");
 
     const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0); // adopt still succeeds — this is a warning, not a block
-    expect(r.stderr).toContain("CLAUDE.md collision");
-    expect(r.stderr).toContain("reconcile");
+    expect(r.code).toBe(0);
+    // Root CLAUDE.md must NOT have been created
+    await expect(stat(join(dir, "CLAUDE.md"))).rejects.toThrow();
+    // .claude/CLAUDE.md preserved and managed block injected
+    const dotMd = await readFile(join(dir, ".claude/CLAUDE.md"), "utf8");
+    expect(dotMd).toContain("# Real project context");
+    expect(dotMd).toContain("<!-- >>> claude-ds managed >>> -->");
+    // config records the target
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.claude_md_target).toBe(".claude/CLAUDE.md");
   });
 
-  it("no collision warning when .claude/CLAUDE.md is absent", async () => {
+  it("when no CLAUDE.md exists, adopt creates .claude/CLAUDE.md stub (NEVER root)", async () => {
     const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stderr).not.toContain("CLAUDE.md collision");
+    await expect(stat(join(dir, "CLAUDE.md"))).rejects.toThrow();
+    const dotMd = await readFile(join(dir, ".claude/CLAUDE.md"), "utf8");
+    expect(dotMd).toContain("<!-- >>> claude-ds managed >>> -->");
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.claude_md_target).toBe(".claude/CLAUDE.md");
+  });
+
+  it("when only root CLAUDE.md pre-exists, adopt injects at root and preserves user content", async () => {
+    await writeFile(join(dir, "CLAUDE.md"), "# My project\n\nUser-authored content.\n");
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const rootMd = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(rootMd).toContain("User-authored content");
+    expect(rootMd).toContain("<!-- >>> claude-ds managed >>> -->");
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.claude_md_target).toBe("CLAUDE.md");
   });
 });

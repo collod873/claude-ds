@@ -268,4 +268,34 @@ describe("adopt", () => {
     const scriptStat = await stat(join(dir, "scripts/check-hook-contract.sh"));
     expect(scriptStat.mode & 0o111).not.toBe(0);
   });
+
+  // #47: src/app/ layout detection — write to src/app/design/, never app/design/
+  it("#47 detects src/app/ and writes route files there; never to root-level app/", async () => {
+    await mkdir(join(dir, "src", "app"), { recursive: true });
+    await writeFile(join(dir, "src", "app", "layout.tsx"), "export default function Layout({children}:{children:React.ReactNode}){return children;}");
+
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // Config records the detected app_dir
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.app_dir).toBe("src/app");
+
+    // Route files land under src/app/, not app/
+    await stat(join(dir, "src/app/design/page.tsx"));
+    await stat(join(dir, "src/app/design/layout.tsx"));
+    await stat(join(dir, "src/app/design/[...slug]/page.tsx"));
+    await stat(join(dir, "src/app/design/[...slug]/resolve.ts"));
+
+    // Root-level app/ must NOT have been created
+    await expect(stat(join(dir, "app/design/page.tsx"))).rejects.toThrow();
+  });
+
+  it("#47 defaults to app_dir='app' when src/app/ is absent (back-compat)", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.app_dir).toBe("app");
+    await stat(join(dir, "app/design/page.tsx"));
+  });
 });
