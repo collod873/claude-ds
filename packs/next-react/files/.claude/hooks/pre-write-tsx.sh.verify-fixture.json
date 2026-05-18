@@ -2,7 +2,49 @@
   "pass": {
     "arg": "src/MyComponent.tsx",
     "setup": [
-      { "path": "src/MyComponent.tsx", "content": "export function MyComponent() {\n  return <div>Hello</div>;\n}\n" }
+      {
+        "path": "src/MyComponent.tsx",
+        "content": "import { tokens } from '@/design-system/tokens';\nexport function MyComponent() {\n  return <div className=\"p-4 text-primary\">Hello</div>;\n}\n"
+      }
+    ]
+  },
+  "fail_aesth_001": {
+    "arg": "src/BadInlineStyle.tsx",
+    "expected_exit": 2,
+    "setup": [
+      {
+        "path": "src/BadInlineStyle.tsx",
+        "content": "export function BadInlineStyle() {\n  return <div style={{ color: 'red' }}>No inline styles</div>;\n}\n"
+      }
+    ]
+  },
+  "fail_aesth_002": {
+    "arg": "src/BadHexColor.tsx",
+    "expected_exit": 2,
+    "setup": [
+      {
+        "path": "src/BadHexColor.tsx",
+        "content": "export function BadHexColor() {\n  const color = '#ff0000';\n  return <div className={color}>No raw hex</div>;\n}\n"
+      }
+    ]
+  },
+  "fail_aesth_003": {
+    "arg": "src/BadSpacing.tsx",
+    "expected_exit": 2,
+    "setup": [
+      {
+        "path": "src/BadSpacing.tsx",
+        "content": "export function BadSpacing() {\n  return <div className=\"p-[12px] mt-[8px]\">No raw spacing</div>;\n}\n"
+      }
+    ]
+  },
+  "skip_design_system": {
+    "arg": "design-system/atoms/Token.tsx",
+    "setup": [
+      {
+        "path": "design-system/atoms/Token.tsx",
+        "content": "export function Token() {\n  return <div style={{ color: '#fff' }}>DS file skipped</div>;\n}\n"
+      }
     ]
   }
 }

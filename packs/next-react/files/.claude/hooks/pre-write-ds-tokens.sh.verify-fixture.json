@@ -1,0 +1,69 @@
+{
+  "pass": {
+    "arg": "design-system/atoms/Button.tsx",
+    "setup": [
+      {
+        "path": "design-system/atoms/Button.tsx",
+        "content": "import { tokens } from '../tokens';\nexport const Button = () => (\n  <button className=\"p-space-2 text-primary font-heading\">Click</button>\n);\n"
+      }
+    ]
+  },
+  "skip_tokens_json": {
+    "arg": "design-system/tokens.json",
+    "setup": [
+      {
+        "path": "design-system/tokens.json",
+        "content": "{ \"primary\": \"#0070f3\", \"space-2\": \"8px\" }\n"
+      }
+    ]
+  },
+  "skip_app_file": {
+    "arg": "src/app/page.tsx",
+    "setup": [
+      {
+        "path": "src/app/page.tsx",
+        "content": "export default function Page() { return <div style={{ color: '#fff' }} />; }\n"
+      }
+    ]
+  },
+  "fail_tok_001_hex": {
+    "arg": "design-system/atoms/Badge.tsx",
+    "expected_exit": 2,
+    "setup": [
+      {
+        "path": "design-system/atoms/Badge.tsx",
+        "content": "export const Badge = () => (\n  <span style={{ color: '#e53e3e' }}>New</span>\n);\n"
+      }
+    ]
+  },
+  "fail_tok_001_rgb": {
+    "arg": "design-system/atoms/Card.tsx",
+    "expected_exit": 2,
+    "setup": [
+      {
+        "path": "design-system/atoms/Card.tsx",
+        "content": "export const Card = () => (\n  <div style={{ background: 'rgba(0,0,0,0.5)' }}>Content</div>\n);\n"
+      }
+    ]
+  },
+  "fail_tok_002": {
+    "arg": "design-system/composites/Header.tsx",
+    "expected_exit": 2,
+    "setup": [
+      {
+        "path": "design-system/composites/Header.tsx",
+        "content": "export const Header = () => (\n  <header className=\"p-[16px] gap-[8px]\">Title</header>\n);\n"
+      }
+    ]
+  },
+  "fail_tok_003": {
+    "arg": "design-system/atoms/Heading.tsx",
+    "expected_exit": 2,
+    "setup": [
+      {
+        "path": "design-system/atoms/Heading.tsx",
+        "content": "export const Heading = () => (\n  <h1 className=\"text-[24px] font-[700]\">Title</h1>\n);\n"
+      }
+    ]
+  }
+}

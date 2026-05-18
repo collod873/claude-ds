@@ -19,13 +19,13 @@ describe("next-react hooks (fixture)", () => {
     const r = runHook("atom-imports.sh", "atoms-ok/atom.tsx");
     expect(r.code).toBe(0);
   });
-  it("token-only: blocks raw hex color", () => {
-    const r = runHook("token-only.sh", "tokens-bad/atom.tsx");
+  it("pre-write-ds-tokens: blocks raw hex color in design-system file (TOK-001)", () => {
+    const r = runHook("pre-write-ds-tokens.sh", "ds-tokens-bad/design-system/atoms/atom.tsx");
     expect(r.code).toBe(2);
-    expect(r.stderr).toMatch(/token-only/);
+    expect(r.stderr).toMatch(/TOK-001/);
   });
-  it("token-only: allows token-only color", () => {
-    const r = runHook("token-only.sh", "tokens-ok/atom.tsx");
+  it("pre-write-ds-tokens: allows token-only design-system file", () => {
+    const r = runHook("pre-write-ds-tokens.sh", "ds-tokens-ok/design-system/atoms/atom.tsx");
     expect(r.code).toBe(0);
   });
 
@@ -51,8 +51,8 @@ describe("next-react hooks (fixture)", () => {
     expect(r.code).toBe(0);
   });
 
-  // TSX-* tests (Tier A scope-gate stub — both cases exit 0 in stub mode)
-  it("pre-write-tsx: allows .tsx outside design-system/ (in-scope, stub mode)", () => {
+  // TSX-* tests (Tier A scope-gate — AESTH-001/002/003 enforcement)
+  it("pre-write-tsx: allows clean .tsx outside design-system/ (no violations)", () => {
     const r = runHook("pre-write-tsx.sh", "tsx-app-scope/MyComponent.tsx");
     expect(r.code).toBe(0);
   });
