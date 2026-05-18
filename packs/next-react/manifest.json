@@ -100,6 +100,21 @@
       "path": ".claude/skills/icons/SKILL.md",
       "since_version": "v0.3.0",
       "reason": "Tier-C skill removed from scaffold; only aesthetic-principles and design-system are required (issue #22)"
+    },
+    {
+      "path": "app/_design",
+      "since_version": "v0.6.0",
+      "reason": "Next.js excludes underscore-prefixed folders from routing; renamed to app/design/ (issue #36)"
+    },
+    {
+      "path": ".claude/hooks/token-only.sh",
+      "since_version": "v0.6.0",
+      "reason": "Folded into pre-write-ds-tokens.sh which covers TOK-001 (hex) plus TOK-002/003 (spacing, fonts) (issue #21)"
+    },
+    {
+      "path": ".claude/hooks/token-only.sh.verify-fixture.json",
+      "since_version": "v0.6.0",
+      "reason": "Companion fixture for deleted token-only.sh (issue #21)"
     }
   ],
   "canonical_paths": [

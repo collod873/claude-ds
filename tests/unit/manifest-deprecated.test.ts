@@ -54,14 +54,14 @@ describe("parseManifest — deprecated_paths", () => {
     }))).toThrow(ManifestError);
   });
 
-  it("next-react pack manifest parses without error and includes 7 deprecated_paths", async () => {
+  it("next-react pack manifest parses without error and includes deprecated_paths", async () => {
     const { readFile } = await import("node:fs/promises");
     const { resolve, dirname } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
     const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "packs", "next-react");
     const raw = await readFile(resolve(root, "manifest.json"), "utf8");
     const m = parseManifest(raw);
-    expect(m.deprecated_paths).toHaveLength(7);
+    expect(m.deprecated_paths).toHaveLength(10);
     const paths = m.deprecated_paths.map(d => d.path);
     expect(paths).toContain("contracts.md");
     expect(paths).toContain("exceptions.json");
@@ -70,5 +70,8 @@ describe("parseManifest — deprecated_paths", () => {
     expect(paths).toContain(".claude/skills/typography/SKILL.md");
     expect(paths).toContain(".claude/skills/design-review/SKILL.md");
     expect(paths).toContain(".claude/skills/icons/SKILL.md");
+    expect(paths).toContain("app/_design");
+    expect(paths).toContain(".claude/hooks/token-only.sh");
+    expect(paths).toContain(".claude/hooks/token-only.sh.verify-fixture.json");
   });
 });
