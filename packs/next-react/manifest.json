@@ -55,6 +55,7 @@
     { "path": "scripts/a11y-scan.ts", "category": "seeded" },
     { "path": "scripts/check-principles-freshness.ts", "category": "seeded" },
     { "path": "scripts/update-tokens.ts", "category": "seeded" },
+    { "path": "scripts/run-a11y.sh", "category": "managed" },
     { "path": "scripts/check-hook-contract.sh", "category": "managed" },
     { "path": "scripts/consistency-probe.sh", "category": "managed" },
     { "path": "scripts/generate-showcase-companion.ts", "category": "managed" },

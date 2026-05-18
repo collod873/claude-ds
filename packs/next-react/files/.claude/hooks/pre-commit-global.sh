@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse / Bash matcher: fires before any bash command.
 # Only acts on `git commit` invocations; skips all others.
-# Enforces commitlint if installed.
-# TODO: post-Slice F, add axe scan on changed .tsx files
+# Enforces commitlint + runs axe-core WCAG AA scan on changed design-system components.
 
 cmd="${CLAUDE_BASH_COMMAND:-${1:-}}"
 
@@ -48,6 +47,28 @@ if ! commitlint --edit "$commit_msg_file" 2>/tmp/commitlint_err.txt; then
   echo "${cmd}:0: COMMIT-001: ${hint}" >&2
   bash .claude/hooks/lib/log-failure.sh "COMMIT-001" "$cmd" "0" "$hint" || true
   exit 2
+fi
+
+# Axe-core WCAG AA scan on changed design-system components.
+# Finds .tsx files staged under design-system/components/, maps to component names,
+# skips any changed .tsx outside the showcase manifest with a warning.
+changed_components=""
+while IFS= read -r f; do
+  # Only care about .tsx under design-system/components/
+  if [[ "$f" == design-system/components/*.tsx ]]; then
+    # Derive component name: basename without extension
+    name="${f##*/}"
+    name="${name%.tsx}"
+    changed_components="${changed_components}${name} "
+  elif [[ "$f" == *.tsx ]]; then
+    echo "a11y-scan: WARNING — ${f} is outside design-system/components/, skipping axe scan." >&2
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
+
+if [ -n "$changed_components" ]; then
+  # Trim trailing space, split into args
+  # shellcheck disable=SC2086
+  bash scripts/run-a11y.sh $changed_components
 fi
 
 exit 0

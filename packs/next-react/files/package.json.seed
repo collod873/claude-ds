@@ -15,7 +15,9 @@
     "ci:consistency": "bash scripts/consistency-probe.sh"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.9.0",
     "@commitlint/cli": "^19.0.0",
-    "@commitlint/config-conventional": "^19.0.0"
+    "@commitlint/config-conventional": "^19.0.0",
+    "playwright": "^1.44.0"
   }
 }
