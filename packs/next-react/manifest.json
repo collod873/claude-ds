@@ -276,6 +276,10 @@
       "category": "managed"
     },
     {
+      "path": "app/design/_showcase-boundary.tsx",
+      "category": "managed"
+    },
+    {
       "path": "app/design/_filter.tsx",
       "category": "managed"
     },
@@ -407,6 +411,7 @@
     ".claude/hooks/pre-write-ds-similarity.sh",
     "app/design/page.tsx",
     "app/design/layout.tsx",
+    "app/design/_showcase-boundary.tsx",
     "app/design/_filter.tsx",
     "app/design/_theme-toggle.tsx",
     "app/design/[...slug]/page.tsx",

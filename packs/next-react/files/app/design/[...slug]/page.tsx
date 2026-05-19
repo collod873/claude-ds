@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import manifest from "@/design-system/manifest.json";
 import { showcases } from "@/design-system/manifest.generated";
 import { resolve, type Manifest } from "./resolve";
+import { ShowcaseBoundary } from "../_showcase-boundary";
 
 interface PageProps {
   params: Promise<{ slug: string[] }>;
@@ -30,7 +31,9 @@ export default async function ComponentShowcasePage({ params }: PageProps) {
         ← Design system
       </Link>
       <h1 className="text-2xl font-bold mb-6">{entry.name}</h1>
-      <Showcase />
+      <ShowcaseBoundary componentName={entry.name}>
+        <Showcase />
+      </ShowcaseBoundary>
     </main>
   );
 }

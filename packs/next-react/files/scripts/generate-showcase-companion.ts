@@ -329,6 +329,21 @@ function cvaCartesian(config: CvaConfig, skip: string[]): Array<{ name: string; 
     .filter((c) => !skip.includes(c.name));
 }
 
+// ── stub-meta detection ───────────────────────────────────────────────────────
+
+/**
+ * Returns true when meta.examples is the default stub: exactly one entry with
+ * name === "default" and empty props. Combined with no CVA expansion, this
+ * means the generator has nothing useful to render — emit a placeholder card
+ * instead of crashing on missing required props.
+ */
+function isStubMeta(examples: Example[], cvaConfig: CvaConfig | null): boolean {
+  if (cvaConfig !== null) return false; // CVA expansion will produce real combos
+  if (examples.length !== 1) return false;
+  const only = examples[0];
+  return only.name === "default" && Object.keys(only.props).length === 0;
+}
+
 // ── showcase emitters ─────────────────────────────────────────────────────────
 
 /**
@@ -369,6 +384,29 @@ function emitAtomCompositeShowcase(
     const expanded = cvaCartesian(cvaConfig, skip);
     const existingNames = new Set(meta.examples.map((e) => e.name));
     cvaExamples = expanded.filter((ce) => !existingNames.has(ce.name));
+  }
+
+  // Stub-meta: default stub with no CVA expansion → placeholder card, no component render.
+  if (isStubMeta(meta.examples, cvaConfig)) {
+    return [
+      header,
+      `import React from "react";`,
+      ``,
+      `export default function ${displayName}Showcase() {`,
+      `  return (`,
+      `    <main className="p-8">`,
+      `      <h1 className="text-2xl font-bold mb-6">${displayName}</h1>`,
+      `      <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 p-6 text-sm text-muted-foreground">`,
+      `        No examples defined. Backfill{" "}`,
+      `        <code className="rounded bg-muted px-1">meta.examples</code> in{" "}`,
+      `        <code className="rounded bg-muted px-1">design-system/&lt;tier&gt;/${componentName}.tsx</code>`,
+      `        {" "}to render this component.`,
+      `      </div>`,
+      `    </main>`,
+      `  );`,
+      `}`,
+      ``,
+    ].join("\n");
   }
 
   // ── Explicit "Examples" section ──────────────────────────────────────────

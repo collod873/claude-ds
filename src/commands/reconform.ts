@@ -735,6 +735,13 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
       return displayName;
     }
 
+    function genIsStubMeta(examples: Array<{ name: string; props: Record<string, unknown> }>, cvaConfig: { variants: Record<string, string[]> } | null): boolean {
+      if (cvaConfig !== null) return false;
+      if (examples.length !== 1) return false;
+      const only = examples[0];
+      return only.name === "default" && Object.keys(only.props).length === 0;
+    }
+
     function genRegenShowcaseTsx(componentName: string, source: string, sourceName: string): string | null {
       const kindMatch = source.match(/export\s+const\s+meta[^=]*=\s*\{[^}]*kind\s*:\s*["']([^"']+)["']/);
       if (!kindMatch) return null;
@@ -774,6 +781,29 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
       const examples = genParseExamples(source);
       const skip = genParseSkip(source);
       const cvaConfig = genParseCva(source);
+
+      // Stub-meta: default stub with no CVA expansion → placeholder card, no component render.
+      if (genIsStubMeta(examples, cvaConfig)) {
+        return [
+          header,
+          `import React from "react";`,
+          ``,
+          `export default function ${displayName}Showcase() {`,
+          `  return (`,
+          `    <main className="p-8">`,
+          `      <h1 className="text-2xl font-bold mb-6">${displayName}</h1>`,
+          `      <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 p-6 text-sm text-muted-foreground">`,
+          `        No examples defined. Backfill{" "}`,
+          `        <code className="rounded bg-muted px-1">meta.examples</code> in{" "}`,
+          `        <code className="rounded bg-muted px-1">design-system/&lt;tier&gt;/${componentName}.tsx</code>`,
+          `        {" "}to render this component.`,
+          `      </div>`,
+          `    </main>`,
+          `  );`,
+          `}`,
+          ``,
+        ].join("\n");
+      }
 
       // Explicit examples from meta.examples
       const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = [...examples];
