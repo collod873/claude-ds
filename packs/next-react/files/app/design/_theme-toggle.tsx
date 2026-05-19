@@ -1,62 +1,34 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTheme } from "next-themes";
 
 /**
- * Prefers next-themes `useTheme` when available.
- * Falls back to toggling the `dark` class on <html> directly.
+ * Theme toggle for the design gallery.
+ * Uses next-themes `useTheme` — the consumer must have next-themes installed
+ * (claude-ds assumes next-themes is present since it is a peer requirement of
+ * common UI toolkits like shadcn-ui and is widely adopted in Next.js projects).
  */
 export function ThemeToggle() {
-  // Try to use next-themes dynamically so the file works in consumers without it
+  const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  const [isDark, setIsDark] = useState(false);
 
-  // next-themes hook — resolved at runtime
-  let nextThemesTheme: string | undefined;
-  let nextThemesSetTheme: ((t: string) => void) | undefined;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const nt = require("next-themes");
-    // Only call hooks at the top level — but we're inside a component so this is safe.
-    // However, conditional require is fine here because the hook call itself is
-    // unconditional within the component render path (same hook call order every render).
-    // If next-themes is absent the require will throw and we fall through to the DOM path.
-    const { useTheme } = nt as { useTheme: () => { theme?: string; setTheme: (t: string) => void } };
-    const { theme, setTheme } = useTheme();
-    nextThemesTheme = theme;
-    nextThemesSetTheme = setTheme;
-  } catch {
-    // next-themes not available — use DOM fallback below
-  }
-
+  // Avoid hydration mismatch — only render the icon after mount
   useEffect(() => {
     setMounted(true);
-    if (nextThemesTheme !== undefined) {
-      setIsDark(nextThemesTheme === "dark");
-    } else {
-      setIsDark(document.documentElement.classList.contains("dark"));
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nextThemesTheme]);
+  }, []);
 
   if (!mounted) {
-    // Avoid hydration mismatch — render a placeholder with same dimensions
+    // Same dimensions as the real button so layout does not shift
     return <div className="size-8" aria-hidden />;
   }
 
-  function toggle() {
-    const next = isDark ? "light" : "dark";
-    if (nextThemesSetTheme) {
-      nextThemesSetTheme(next);
-    } else {
-      document.documentElement.classList.toggle("dark", next === "dark");
-    }
-    setIsDark(next === "dark");
-  }
+  const isDark = resolvedTheme === "dark";
 
   return (
     <button
-      onClick={toggle}
+      type="button"
+      onClick={() => setTheme(isDark ? "light" : "dark")}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
       className="inline-flex size-8 items-center justify-center rounded-md text-sm hover:bg-muted transition-colors"
     >
