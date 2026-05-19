@@ -107,4 +107,58 @@ describe("doctor", () => {
     expect(r.stdout).not.toContain(".vercel/README.txt");
     expect(r.code).toBe(0);
   });
+
+  // #23: root-dupe detection
+  it("flags all 3 root-level dupes when canonical design-system/ copies also exist (identical content)", async () => {
+    // Post-adopt state: .claude-ds.json present, canonicals present, AND root orphans present
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
+    }, null, 2) + "\n");
+
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    // Identical content — safe to delete root
+    await writeFile(join(dir, "contracts.md"), "# Design Contracts\n");
+    await writeFile(join(dir, "design-system/contracts.md"), "# Design Contracts\n");
+    await writeFile(join(dir, "exceptions.json"), '{"exceptions":[]}\n');
+    await writeFile(join(dir, "design-system/exceptions.json"), '{"exceptions":[]}\n');
+    await writeFile(join(dir, "failure-log.md"), "# Failure Log\n");
+    await writeFile(join(dir, "design-system/failure-log.md"), "# Failure Log\n");
+
+    const r = await runCli(["doctor", "--pack", "next-react"], { cwd: dir });
+
+    // Must flag all 3 root dupes
+    expect(r.stdout).toContain("contracts.md");
+    expect(r.stdout).toContain("exceptions.json");
+    expect(r.stdout).toContain("failure-log.md");
+    expect(r.stdout).toContain("Root-level duplicates");
+    // Must exit 1 (root dupes are a finding)
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/reconcile/);
+  });
+
+  it("flags root dupes with content-differs note when root content differs from canonical (#23)", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
+    }, null, 2) + "\n");
+
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    // Differing content — merge required
+    await writeFile(join(dir, "contracts.md"), "# Design Contracts (live root, more content)\n");
+    await writeFile(join(dir, "design-system/contracts.md"), "# Design Contracts (scaffold stub)\n");
+
+    const r = await runCli(["doctor", "--pack", "next-react"], { cwd: dir });
+
+    expect(r.stdout).toContain("contracts.md");
+    expect(r.stdout).toContain("merge required");
+    expect(r.code).toBe(1);
+  });
+
+  it("clean post-adopt tree with no root dupes exits 0 (regression: #23 must not false-positive)", async () => {
+    const adoptResult = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adoptResult.code).toBe(0);
+    // Adopt never creates root-level contracts.md etc, so no dupes
+    const r = await runCli(["doctor"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toContain("Root-level duplicates");
+  });
 });

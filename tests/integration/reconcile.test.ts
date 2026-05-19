@@ -142,6 +142,76 @@ describe("reconcile", () => {
   });
 });
 
+describe("reconcile — root-dupe handling (#23)", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  async function setupRootDupes(differing: boolean): Promise<void> {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
+    }, null, 2) + "\n");
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    const rootContent = differing ? "# Contracts (live root, more content)\n" : "# Same content\n";
+    const canonicalContent = differing ? "# Contracts (scaffold stub)\n" : "# Same content\n";
+    await writeFile(join(dir, "contracts.md"), rootContent);
+    await writeFile(join(dir, "design-system/contracts.md"), canonicalContent);
+    await writeFile(join(dir, "exceptions.json"), '{"exceptions":[]}\n');
+    await writeFile(join(dir, "design-system/exceptions.json"), '{"exceptions":[]}\n');
+    await writeFile(join(dir, "failure-log.md"), "# Failure Log\n");
+    await writeFile(join(dir, "design-system/failure-log.md"), "# Failure Log\n");
+  }
+
+  it("--dry-run surfaces 3 root dupes (identical content) without deleting", async () => {
+    await setupRootDupes(false);
+    const r = await runCli(["reconcile", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("contracts.md");
+    expect(r.stdout).toContain("exceptions.json");
+    expect(r.stdout).toContain("failure-log.md");
+    // Nothing deleted
+    expect(await exists(join(dir, "contracts.md"))).toBe(true);
+    expect(await exists(join(dir, "exceptions.json"))).toBe(true);
+    expect(await exists(join(dir, "failure-log.md"))).toBe(true);
+    // Canonicals untouched
+    expect(await exists(join(dir, "design-system/contracts.md"))).toBe(true);
+  });
+
+  it("--force deletes identical root dupes, canonical preserved", async () => {
+    await setupRootDupes(false);
+    const r = await runCli(["reconcile", "--force"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Root copies removed
+    expect(await exists(join(dir, "contracts.md"))).toBe(false);
+    expect(await exists(join(dir, "exceptions.json"))).toBe(false);
+    expect(await exists(join(dir, "failure-log.md"))).toBe(false);
+    // Canonicals preserved
+    expect(await exists(join(dir, "design-system/contracts.md"))).toBe(true);
+    expect(await exists(join(dir, "design-system/exceptions.json"))).toBe(true);
+    expect(await exists(join(dir, "design-system/failure-log.md"))).toBe(true);
+  });
+
+  it("--force deletes root dupe even when content differs (canonical wins)", async () => {
+    await setupRootDupes(true);
+    const r = await runCli(["reconcile", "--force"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Root copy removed despite differing content
+    expect(await exists(join(dir, "contracts.md"))).toBe(false);
+    // Canonical preserved (not overwritten)
+    const canonicalContent = await readFile(join(dir, "design-system/contracts.md"), "utf8");
+    expect(canonicalContent).toContain("scaffold stub");
+  });
+
+  it("--dry-run notes content-differs when root and canonical differ", async () => {
+    await setupRootDupes(true);
+    const r = await runCli(["reconcile", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Should mention the content difference somewhere in output
+    expect(r.stdout).toMatch(/content differs|merge/i);
+    expect(r.stdout).toContain("contracts.md");
+  });
+});
+
 describe("audit — deprecated-path orphan reporting", () => {
   let dir: string;
   beforeEach(async () => { dir = await freshTmpDir(); });

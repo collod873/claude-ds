@@ -1,4 +1,4 @@
-import { readFile, stat, unlink } from "node:fs/promises";
+import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest, DeprecatedPath } from "../lib/manifest.js";
@@ -56,6 +56,45 @@ export async function scanClaudeMdCollision(cwd: string): Promise<ReconcileFindi
   return findings;
 }
 
+export interface RootDupeFinding {
+  kind: "root-dupe";
+  rootPath: string;        // e.g. "contracts.md"
+  canonicalPath: string;   // e.g. "design-system/contracts.md"
+  contentDiffers: boolean; // true when root and canonical have different content
+}
+
+/**
+ * Scan for deprecated root-level files that also have a canonical design-system/ copy.
+ * These are "lookalike dupes" — the root copy pre-dates adopt; adopt wrote the canonical
+ * but left the root in place.
+ *
+ * Returns findings without mutating the filesystem (pure scan).
+ */
+export async function scanRootDupes(
+  cwd: string,
+  deprecatedPaths: DeprecatedPath[]
+): Promise<RootDupeFinding[]> {
+  const findings: RootDupeFinding[] = [];
+  for (const d of deprecatedPaths) {
+    const rootFull = join(cwd, d.path);
+    if (!(await exists(rootFull))) continue;
+
+    // Derive canonical path: deprecated root files map to design-system/<filename>
+    const filename = d.path.replace(/^.*\//, ""); // basename
+    const canonicalPath = `design-system/${filename}`;
+    const canonicalFull = join(cwd, canonicalPath);
+    if (!(await exists(canonicalFull))) continue;
+
+    // Both exist — compare content
+    const rootContent = await readFile(rootFull, "utf8");
+    const canonicalContent = await readFile(canonicalFull, "utf8");
+    const contentDiffers = rootContent.trim() !== canonicalContent.trim();
+
+    findings.push({ kind: "root-dupe", rootPath: d.path, canonicalPath, contentDiffers });
+  }
+  return findings;
+}
+
 export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cwd?: string }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const dryRun = opts.dryRun ?? false;
@@ -100,25 +139,46 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   const collisionFindings = cfg.claude_md_target === "CLAUDE.md"
     ? await scanClaudeMdCollision(cwd)
     : [];
+  // #23: root-dupe scan — deprecated root files where canonical design-system/ copy also exists
+  const rootDupeFindings = await scanRootDupes(cwd, manifest.deprecated_paths);
+  const rootDupePaths = new Set(rootDupeFindings.map(f => f.rootPath));
   const allFindings = [...deprecatedFindings, ...collisionFindings];
 
-  if (allFindings.length === 0) {
+  if (allFindings.length === 0 && rootDupeFindings.length === 0) {
     info("reconcile: no orphans or collisions found — tree is clean");
     return;
   }
 
   // ── Report ─────────────────────────────────────────────────────────────────
+  // Build a lookup map for root-dupe findings to annotate deprecated orphan lines
+  const rootDupeMap = new Map(rootDupeFindings.map(f => [f.rootPath, f]));
   const lines: string[] = ["", "reconcile: found the following issues:", ""];
   for (const f of allFindings) {
     const tag = f.kind === "collision" ? "[collision]" : "[orphan]  ";
     lines.push(`  ${tag}  ${f.path}`);
     lines.push(`             ${f.detail}`);
+    // Annotate deprecated orphans that are also root-dupes (#23)
+    const dupe = rootDupeMap.get(f.path);
+    if (dupe) {
+      const note = dupe.contentDiffers
+        ? `content differs from ${dupe.canonicalPath} — merge required before deleting root`
+        : `content identical to ${dupe.canonicalPath} — safe to delete root`;
+      lines.push(`             [root-dupe] ${note}`);
+    }
+  }
+  // Report root-dupes that aren't already in deprecated findings (edge case)
+  for (const f of rootDupeFindings) {
+    if (!deprecatedFindings.some(d => d.path === f.rootPath)) {
+      const differs = f.contentDiffers ? " [content differs — merge required]" : " [identical to canonical]";
+      lines.push(`  [root-dupe]  ${f.rootPath} → ${f.canonicalPath}${differs}`);
+    }
   }
   lines.push("");
   process.stdout.write(lines.join("\n") + "\n");
 
   if (dryRun) {
-    info(`[dry-run] ${allFindings.length} issue(s) found — no files modified`);
+    const total = allFindings.length + rootDupeFindings.filter(f => !deprecatedFindings.some(d => d.path === f.rootPath)).length;
+    info(`[dry-run] ${total} issue(s) found — no files modified`);
     process.exit(0);
   }
 
@@ -148,13 +208,75 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     }
   }
 
-  // ── Remediate deprecated orphans ──────────────────────────────────────────
+  // ── Remediate root dupes (content-differs path) ───────────────────────────
+  // Root dupes that are content-identical are handled by the normal deprecated-path
+  // deletion below. Dupes where content differs need merge-or-skip handling first.
   let deleted = 0;
   let skipped = 0;
 
+  for (const f of rootDupeFindings) {
+    if (!f.contentDiffers) continue; // identical — handled by deprecated delete below
+    if (!isTTY && !force) {
+      // Non-TTY, non-force: can't prompt, bail out
+      info(`warning: ${f.rootPath} content differs from ${f.canonicalPath} — run \`reconcile\` interactively to merge, or pass --force to delete root`);
+      skipped++;
+      continue;
+    }
+    if (force) {
+      // --force: delete root copy unconditionally (canonical wins); user content in root is stale
+      try {
+        await unlink(join(cwd, f.rootPath));
+        info(`deleted: ${f.rootPath} (canonical ${f.canonicalPath} kept; content differed — pass --merge-root to overwrite canonical instead)`);
+        deleted++;
+      } catch (e) {
+        info(`warning: could not delete ${f.rootPath}: ${(e as Error).message}`);
+        skipped++;
+      }
+      continue;
+    }
+    // Interactive: offer merge root→canonical then delete root
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    process.stdout.write(`\nRoot dupe with different content: ${f.rootPath}\n`);
+    process.stdout.write(`  Canonical: ${f.canonicalPath}\n`);
+    process.stdout.write(`  (a) merge root → canonical (overwrites canonical with root content), then delete root\n`);
+    process.stdout.write(`  (b) keep canonical as-is, delete root\n`);
+    process.stdout.write(`  (c) skip — resolve manually\n`);
+    const ans = (await rl.question(`Choose [a/b/c]: `)).trim().toLowerCase();
+    rl.close();
+    if (ans === "a") {
+      try {
+        const rootContent = await readFile(join(cwd, f.rootPath), "utf8");
+        await writeFile(join(cwd, f.canonicalPath), rootContent, "utf8");
+        await unlink(join(cwd, f.rootPath));
+        info(`merged: ${f.rootPath} → ${f.canonicalPath}, root deleted`);
+        deleted++;
+      } catch (e) {
+        info(`warning: could not merge ${f.rootPath}: ${(e as Error).message}`);
+        skipped++;
+      }
+    } else if (ans === "b") {
+      try {
+        await unlink(join(cwd, f.rootPath));
+        info(`deleted: ${f.rootPath} (canonical kept)`);
+        deleted++;
+      } catch (e) {
+        info(`warning: could not delete ${f.rootPath}: ${(e as Error).message}`);
+        skipped++;
+      }
+    } else {
+      info(`skipped: ${f.rootPath} — resolve manually`);
+      skipped++;
+    }
+  }
+
+  // ── Remediate deprecated orphans ──────────────────────────────────────────
+  // Skip any root-dupe paths that were already handled (merged or skipped) above.
   const toDelete = (force || isTTY) ? deprecatedList : [];
   for (const f of toDelete) {
+    // Skip root-dupes that differ in content — handled above (merged, deleted, or skipped)
+    if (rootDupePaths.has(f.path) && rootDupeFindings.find(r => r.rootPath === f.path)?.contentDiffers) continue;
     const full = join(cwd, f.path);
+    if (!(await exists(full))) continue; // already deleted in merge step
     try {
       await unlink(full);
       info(`deleted: ${f.path}`);

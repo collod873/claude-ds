@@ -10,6 +10,7 @@ import { loadConfigWithMigration } from "../lib/paths.js";
 import { parseExceptions, openCount } from "../lib/exceptions.js";
 import { detectLookalikes, Finding } from "../lib/lookalike.js";
 import { detectPackageManager, PackageManager } from "../lib/package-manager.js";
+import { scanRootDupes, RootDupeFinding } from "./reconcile.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -25,6 +26,7 @@ interface DoctorResult {
   canonical: Finding[];
   drift?: DriftResult;
   packageManager: PackageManager;
+  rootDupes?: RootDupeFinding[];
 }
 
 function renderMarkdown(result: DoctorResult): string {
@@ -99,6 +101,17 @@ function renderMarkdown(result: DoctorResult): string {
     if (result.drift) {
       lines.push(`### Exceptions: ${result.drift.open_exceptions} open\n`);
     }
+  }
+
+  // Root-dupe section — applies to both modes when dupes are detected (#23)
+  if (result.rootDupes && result.rootDupes.length > 0) {
+    lines.push("### Root-level duplicates of canonical design-system/ files\n");
+    lines.push("These files existed before `adopt` and were not removed. Run `reconcile` to resolve.\n");
+    for (const d of result.rootDupes) {
+      const note = d.contentDiffers ? "(content differs — merge required)" : "(content identical — safe to delete root)";
+      lines.push(`- [ ] \`${d.rootPath}\` duplicates \`${d.canonicalPath}\` ${note}`);
+    }
+    lines.push("");
   }
 
   return lines.join("\n");
@@ -304,6 +317,9 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
   const findings = await detectLookalikes(cwd, canonicalPaths, ignoreGlobs);
   const pm = await detectPackageManager(cwd);
 
+  // #23: scan for root-level dupes of canonical design-system/ files
+  const rootDupes = await scanRootDupes(cwd, manifest.deprecated_paths);
+
   const isPostAdopt = await exists(configPath);
 
   let result: DoctorResult;
@@ -341,6 +357,7 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
         open_exceptions: openExceptions,
       },
       packageManager: pm,
+      rootDupes: rootDupes.length > 0 ? rootDupes : undefined,
     };
 
     // Suppress unused variable warning
@@ -350,6 +367,7 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
       mode: "pre-adopt",
       canonical: findings,
       packageManager: pm,
+      rootDupes: rootDupes.length > 0 ? rootDupes : undefined,
     };
   }
 
@@ -359,13 +377,17 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
 
   process.stdout.write(output);
 
-  // Exit 1 if any findings: lookalikes present or (post-adopt) managed files missing
+  // Exit 1 if any findings: lookalikes present, managed files missing, or root dupes detected (#23)
   const hasLookalikes = findings.some(f => !f.present && f.lookalike !== null);
   const hasMissingManaged = result.drift && result.drift.missing.length > 0;
+  const hasRootDupes = rootDupes.length > 0;
 
-  if (hasLookalikes || hasMissingManaged) {
+  if (hasLookalikes || hasMissingManaged || hasRootDupes) {
     if (hasLookalikes) {
       process.stderr.write("If these matches are false positives, re-run with --ignore '<glob>,<glob>'\n");
+    }
+    if (hasRootDupes) {
+      process.stderr.write("Root-level duplicates detected — run `reconcile` to resolve\n");
     }
     process.exit(1);
   }
