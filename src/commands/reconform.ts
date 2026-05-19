@@ -658,11 +658,26 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
       const variantRe = /(\w+)\s*:\s*\{([^}]*)\}/g;
       let m: RegExpExecArray | null;
       while ((m = variantRe.exec(stripped)) !== null) {
+        const variantName = m[1];
+        const strippedValuesBlock = m[2];
+
+        // Also collect quoted keys (e.g. "icon-sm": ...) from original block
+        const origVariantRe = new RegExp(`(?:^|[{,\\s])${variantName}\\s*:\\s*\\{([^}]*)\\}`);
+        const origMatch = block.match(origVariantRe);
+        const origValuesBlock = origMatch ? origMatch[1] : strippedValuesBlock;
+
         const keys: string[] = [];
         const keyRe = /(\w+)\s*:/g;
         let km: RegExpExecArray | null;
-        while ((km = keyRe.exec(m[2])) !== null) keys.push(km[1]);
-        if (keys.length > 0) result[m[1]] = keys;
+        while ((km = keyRe.exec(strippedValuesBlock)) !== null) keys.push(km[1]);
+
+        const quotedKeyRe = /["']([^"']+)["']\s*:/g;
+        let qm: RegExpExecArray | null;
+        while ((qm = quotedKeyRe.exec(origValuesBlock)) !== null) {
+          if (!keys.includes(qm[1])) keys.push(qm[1]);
+        }
+
+        if (keys.length > 0) result[variantName] = keys;
       }
       return result;
     }

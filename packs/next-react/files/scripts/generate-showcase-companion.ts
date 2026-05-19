@@ -230,19 +230,38 @@ function extractVariantKeys(variantsBlock: string, _source: string): Record<stri
   // inside class value strings are not mistaken for variant keys.
   const stripped = stripStringLiterals(variantsBlock);
 
-  // Match each variant key and its value object
+  // Match each variant key and its value object (unquoted variant names only after stripping)
   const variantRe = /(\w+)\s*:\s*\{([^}]*)\}/g;
   let m: RegExpExecArray | null;
   while ((m = variantRe.exec(stripped)) !== null) {
     const variantName = m[1];
-    const valuesBlock = m[2];
-    // Extract value keys (e.g. sm, md, lg from { sm: "...", md: "...", lg: "..." })
+    const strippedValuesBlock = m[2];
+
+    // For value keys we need BOTH unquoted identifiers (from stripped block) AND
+    // quoted identifiers like "icon-sm" (which were removed by stripping).
+    // Locate the original values block for this variant name.
+    const origVariantRe = new RegExp(`(?:^|[{,\\s])${variantName}\\s*:\\s*\\{([^}]*)\\}`);
+    const origMatch = variantsBlock.match(origVariantRe);
+    const origValuesBlock = origMatch ? origMatch[1] : strippedValuesBlock;
+
     const valueKeys: string[] = [];
+
+    // Unquoted keys from the stripped block (no Tailwind modifier leakage)
     const keyRe = /(\w+)\s*:/g;
     let km: RegExpExecArray | null;
-    while ((km = keyRe.exec(valuesBlock)) !== null) {
+    while ((km = keyRe.exec(strippedValuesBlock)) !== null) {
       valueKeys.push(km[1]);
     }
+
+    // Quoted keys from the original block (e.g. "icon-sm": ..., 'icon-lg': ...)
+    const quotedKeyRe = /["']([^"']+)["']\s*:/g;
+    let qm: RegExpExecArray | null;
+    while ((qm = quotedKeyRe.exec(origValuesBlock)) !== null) {
+      if (!valueKeys.includes(qm[1])) {
+        valueKeys.push(qm[1]);
+      }
+    }
+
     if (valueKeys.length > 0) {
       result[variantName] = valueKeys;
     }
