@@ -318,4 +318,6 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
   const pm = await detectPackageManager(cwd);
   info(`adopted claude-ds (${pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);
+  info(`CI scripts installed. Run: ${runCmd(pm, "ci:hook-contract")} and ${runCmd(pm, "ci:consistency")}`);
+  info(`A starter GitHub Actions workflow was seeded at .github/workflows/claude-ds-governance.yml (delete if not on GH Actions). See docs/ci-wiring.md for details.`);
 }

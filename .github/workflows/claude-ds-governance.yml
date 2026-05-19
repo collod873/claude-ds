@@ -1,0 +1,23 @@
+name: claude-ds governance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Gates the pack's own hook scripts.
+# Scripts live at packs/next-react/files/scripts/ (no adopted consumer scripts/ at repo root).
+# check-hook-contract.sh scans .claude/hooks/ — this repo has none, so it exits 0 cleanly.
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Hook-contract check
+        run: bash packs/next-react/files/scripts/check-hook-contract.sh
+
+      - name: Consistency probe
+        run: bash packs/next-react/files/scripts/consistency-probe.sh

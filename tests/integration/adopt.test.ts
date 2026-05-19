@@ -298,4 +298,37 @@ describe("adopt", () => {
     expect(cfg.app_dir).toBe("app");
     await stat(join(dir, "app/design/page.tsx"));
   });
+
+  // #31: CI wiring — post-step message
+  it("#31 adopt output includes ci:hook-contract and ci:consistency script names", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("ci:hook-contract");
+    expect(r.stdout).toContain("ci:consistency");
+    expect(r.stdout).toContain("docs/ci-wiring.md");
+  });
+
+  // #31: pack manifest lists the workflow file
+  it("#31 pack manifest lists .github/workflows/claude-ds-governance.yml", async () => {
+    const { fileURLToPath } = await import("node:url");
+    const { resolve: res, dirname: dn } = await import("node:path");
+    const manifestRaw = await readFile(
+      res(dn(fileURLToPath(import.meta.url)), "..", "..", "packs", "next-react", "manifest.json"),
+      "utf8"
+    );
+    const manifest = JSON.parse(manifestRaw);
+    const entry = manifest.files.find((f: { path: string }) => f.path === ".github/workflows/claude-ds-governance.yml");
+    expect(entry).toBeDefined();
+    expect(entry.category).toBe("seeded");
+  });
+
+  // #31: workflow file ships on adopt (seeded into target)
+  it("#31 adopt seeds .github/workflows/claude-ds-governance.yml into target", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    await stat(join(dir, ".github/workflows/claude-ds-governance.yml"));
+    const content = await readFile(join(dir, ".github/workflows/claude-ds-governance.yml"), "utf8");
+    expect(content).toContain("ci:hook-contract");
+    expect(content).toContain("ci:consistency");
+  });
 });

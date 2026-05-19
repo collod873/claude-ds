@@ -1,0 +1,24 @@
+name: claude-ds governance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Delete this file if you are not on GitHub Actions.
+# The scripts (scripts/check-hook-contract.sh, scripts/consistency-probe.sh) still
+# work locally: pnpm run ci:hook-contract && pnpm run ci:consistency
+# See docs/ci-wiring.md for details and alternative workflow examples.
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Hook-contract check
+        run: pnpm run ci:hook-contract
+
+      - name: Consistency probe
+        run: pnpm run ci:consistency

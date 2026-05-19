@@ -290,6 +290,10 @@
     {
       "path": "design-system/references/motion.tsx",
       "category": "seeded"
+    },
+    {
+      "path": ".github/workflows/claude-ds-governance.yml",
+      "category": "seeded"
     }
   ],
   "deprecated_paths": [
