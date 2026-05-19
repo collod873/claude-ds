@@ -57,6 +57,24 @@ function write(filePath: string, content: string): void {
 }
 
 /**
+ * Detect whether a source file has a default export.
+ * Strips line/block comments and string literals first to avoid false positives
+ * from "export default" appearing in comments or string values.
+ */
+function hasDefaultExport(source: string): boolean {
+  // Strip block comments
+  let stripped = source.replace(/\/\*[\s\S]*?\*\//g, "");
+  // Strip line comments
+  stripped = stripped.replace(/\/\/[^\n]*/g, "");
+  // Strip string literals
+  stripped = stripped
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/`(?:[^`\\]|\\.)*`/g, "``");
+  return /^\s*export\s+default\s+/m.test(stripped);
+}
+
+/**
  * Strip all string literals (double-quoted, single-quoted, template literals)
  * from a block of source text. Used before scanning for CVA variant keys so
  * that Tailwind modifier prefixes like `hover:`, `focus:`, `aria-expanded:`
@@ -444,10 +462,14 @@ function emitAtomCompositeShowcase(
       ? [explicitSection, cvaSection].filter(Boolean).join("\n")
       : `      <p className="text-muted-foreground">No examples defined.</p>`;
 
+  const importLine = hasDefaultExport(source)
+    ? `import ${displayName} from "./${componentName}";`
+    : `import { ${displayName} } from "./${componentName}";`;
+
   return [
     header,
     `import React from "react";`,
-    `import ${displayName} from "./${componentName}";`,
+    importLine,
     ``,
     `export default function ${displayName}Showcase() {`,
     `  return (`,

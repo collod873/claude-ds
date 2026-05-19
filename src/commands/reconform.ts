@@ -649,6 +649,13 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
       return result;
     }
 
+    function genHasDefaultExport(source: string): boolean {
+      let stripped = source.replace(/\/\*[\s\S]*?\*\//g, "");
+      stripped = stripped.replace(/\/\/[^\n]*/g, "");
+      stripped = genStripStringLiterals(stripped);
+      return /^\s*export\s+default\s+/m.test(stripped);
+    }
+
     function genExtractVariantKeys(block: string): Record<string, string[]> {
       const result: Record<string, string[]> = {};
       // Strip string literals before scanning so Tailwind modifier prefixes
@@ -850,10 +857,14 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
         ? [explicitSection, cvaSection].filter(Boolean).join("\n")
         : `      <p className="text-muted-foreground">No examples defined.</p>`;
 
+      const importLine = genHasDefaultExport(source)
+        ? `import ${displayName} from "./${componentName}";`
+        : `import { ${displayName} } from "./${componentName}";`;
+
       return [
         header,
         `import React from "react";`,
-        `import ${displayName} from "./${componentName}";`,
+        importLine,
         ``,
         `export default function ${displayName}Showcase() {`,
         `  return (`,
