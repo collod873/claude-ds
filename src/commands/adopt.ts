@@ -167,6 +167,25 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
 
   if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${pack}, WARN mode) here?`))) { info("aborted"); return; }
 
+  // Run user's pre-existing build-manifest.ts (if any) BEFORE pack files overwrite it.
+  // This allows a failing script to be detected as non-fatal before the pack's version lands.
+  {
+    const buildScriptPath = join(cwd, "scripts", "build-manifest.ts");
+    const manifestPath = join(cwd, "design-system", "manifest.json");
+    if (await exists(buildScriptPath) && !(await exists(manifestPath))) {
+      try {
+        await execFile("node", ["--experimental-strip-types", buildScriptPath], {
+          cwd,
+          timeout: 30_000,
+        });
+        info("bootstrapped design-system/manifest.json");
+      } catch (e: unknown) {
+        const exitCode = (e as { code?: number }).code ?? "?";
+        info(`warning: build-manifest failed (exit ${exitCode}), manifest.json not created. Run manually: node --experimental-strip-types scripts/build-manifest.ts`);
+      }
+    }
+  }
+
   const overwrites: OverwriteRecord[] = [];
 
   for (const f of manifest.files) {
