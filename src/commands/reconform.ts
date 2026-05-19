@@ -843,8 +843,10 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
                 message: `@generated header missing from ${relPath}`,
               });
               info(`GEN-001: missing @generated header: ${relPath}`);
-              if (fix) {
-                // Regenerate from meta — the existing stub content is replaced wholesale.
+              // Always auto-fix GEN-001/GEN-002 — regenerated files must be up-to-date
+              // before the STATE-001 / other-violation check-script pass runs, so that
+              // state files populated by generation don't trigger spurious prompts (#51).
+              if (!dryRun) {
                 await writeFile(showcasePath, expectedShowcase, "utf8");
                 info(`GEN-001 fixed: regenerated ${relPath}`);
               }
@@ -857,7 +859,8 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
                 message: `${relPath} differs from regeneration — hand-edit detected`,
               });
               info(`GEN-002: drift detected: ${relPath}`);
-              if (fix) {
+              // Always auto-fix: see GEN-001 comment above (#51).
+              if (!dryRun) {
                 await writeFile(showcasePath, expectedShowcase, "utf8");
                 info(`GEN-002 fixed: regenerated ${relPath}`);
               }
@@ -887,7 +890,10 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
                 message: `__generated marker missing from ${relPath}`,
               });
               info(`GEN-001: missing __generated marker: ${relPath}`);
-              if (fix) {
+              // Always auto-fix GEN-001/GEN-002 before the check-script pass (#51):
+              // regenerated .states.json content makes STATE-001 a non-issue for
+              // files that would otherwise look empty to the check scripts.
+              if (!dryRun) {
                 await writeFile(statesPath, expectedStates, "utf8");
                 info(`GEN-001 fixed: regenerated ${relPath}`);
               }
@@ -900,7 +906,8 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
                 message: `${relPath} differs from regeneration — hand-edit detected`,
               });
               info(`GEN-002: drift detected: ${relPath}`);
-              if (fix) {
+              // Always auto-fix: see GEN-001 comment above (#51).
+              if (!dryRun) {
                 await writeFile(statesPath, expectedStates, "utf8");
                 info(`GEN-002 fixed: regenerated ${relPath}`);
               }
@@ -911,10 +918,12 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
     }
 
     if (genViolations.length > 0) {
-      info(`integrity check: ${genViolations.length} violation(s) — re-run with --fix to repair, or run generate-showcase-companion.ts`);
+      // GEN-001/GEN-002 violations are always auto-fixed in-place (unless --dry-run).
+      // The message records what was detected; non-zero exit is skipped when fixes were applied.
+      info(`integrity check: ${genViolations.length} violation(s) detected and auto-repaired (run with --dry-run to preview without writing)`);
       // GEN violations are reported and cause non-zero exit — they do NOT go through
       // the interactive exception flow (they cannot be "excepted" — fix them or regenerate).
-      if (!fix) {
+      if (dryRun) {
         for (const v of genViolations) {
           process.stderr.write(`${v.file}:0: ${v.ruleId}: ${v.message}\n`);
         }
@@ -1071,9 +1080,10 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
 
   info(`reconform complete — ${companionsCreated.length} companion(s) created, ${metaMissing.length} meta export(s) missing${backfillMeta ? `, ${metaBackfilled} meta backfilled, ${classificationFindings.length} misclassified` : ""}, ${allViolations.length} violation(s) reviewed`);
 
-  // GEN violations cause non-zero exit after all other work is done.
-  // With --fix they were already repaired inline.
-  if (genViolations.length > 0 && !fix) {
+  // GEN violations are always auto-repaired in-place (not just with --fix).
+  // Non-zero exit only in dry-run mode where no writes occurred — caller must
+  // re-run without --dry-run or inspect the listed violations.
+  if (genViolations.length > 0 && dryRun) {
     process.exit(2);
   }
 }
