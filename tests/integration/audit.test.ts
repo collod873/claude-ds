@@ -36,4 +36,44 @@ describe("audit", () => {
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/--pack required/);
   });
+
+  // #29: unexpected-file detection under managed roots
+
+  it("flags a file under managed root that is not in the manifest", async () => {
+    // Seed a skill dir not in the manifest (simulates Crewops pre-adopt extras)
+    await mkdir(join(dir, ".claude/skills/badge-system"), { recursive: true });
+    await writeFile(join(dir, ".claude/skills/badge-system/SKILL.md"), "# badge-system");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/unexpected: \.claude\/skills\/badge-system\/SKILL\.md/);
+    expect(r.stdout).toMatch(/may be user-authored extension/);
+  });
+
+  it("suppresses unexpected file when path matches lookalike_ignore in .claude-ds.json", async () => {
+    // Seed the same unexpected file…
+    await mkdir(join(dir, ".claude/skills/badge-system"), { recursive: true });
+    await writeFile(join(dir, ".claude/skills/badge-system/SKILL.md"), "# badge-system");
+    // …but suppress it via project config
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({
+        version: "v0.0.0",
+        pack: "next-react",
+        mode: "warn",
+        lookalike_ignore: [".claude/skills/badge-system/**"],
+      }),
+    );
+    const r = await runCli(["audit"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/unexpected: \.claude\/skills\/badge-system/);
+  });
+
+  it("reports clean (no unexpected lines) when managed roots contain only manifest files", async () => {
+    // Seed exactly one manifest-listed file
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/contracts.md"), "# contracts");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/unexpected:/);
+  });
 });
