@@ -7,6 +7,7 @@ import { diffFile } from "../lib/sync-diff.js";
 import { parseLsRemote } from "../lib/tags.js";
 import { info, err, confirm } from "../lib/log.js";
 import { loadConfigWithMigration, resolveManifestPath } from "../lib/paths.js";
+import { detectFormatter, runFormatter } from "../lib/formatter.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -85,6 +86,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
     }
   }
   if (!(await confirm("Apply the above?"))) { info("aborted"); return; }
+  const rewrittenPaths: string[] = [];
   for (const a of actions) {
     const dest = join(cwd, a.writePath);
     if (a.verdict.action === "rewrite") {
@@ -93,13 +95,20 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
       await writeFile(dest, content, "utf8");
       // #15: hook and script files must be executable
       if (a.writePath.startsWith(".claude/hooks/") || a.writePath.startsWith("scripts/")) await chmod(dest, 0o755);
+      rewrittenPaths.push(a.writePath);
     } else if (a.verdict.action === "rewrite-region") {
       await mkdir(dirname(dest), { recursive: true });
       await writeFile(dest, a.verdict.newContent, "utf8");
       if (a.writePath.startsWith(".claude/hooks/") || a.writePath.startsWith("scripts/")) await chmod(dest, 0o755);
+      rewrittenPaths.push(a.writePath);
     } else if (a.verdict.action === "abort") {
       err(`skipped (abort): ${a.path} — ${a.verdict.reason}`);
     }
+  }
+  // #54: format rewritten files with the consumer's formatter (biome or prettier) if detected.
+  const formatter = await detectFormatter(cwd);
+  if (formatter && rewrittenPaths.length > 0) {
+    await runFormatter(formatter, rewrittenPaths, cwd);
   }
   cfg.version = target;
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
