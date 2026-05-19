@@ -56,6 +56,38 @@ function write(filePath: string, content: string): void {
   writeFileSync(filePath, content, "utf8");
 }
 
+/**
+ * Strip all string literals (double-quoted, single-quoted, template literals)
+ * from a block of source text. Used before scanning for CVA variant keys so
+ * that Tailwind modifier prefixes like `hover:`, `focus:`, `aria-expanded:`
+ * inside class strings are not mistaken for variant names.
+ */
+function stripStringLiterals(text: string): string {
+  // Replace double-quoted strings
+  let result = text.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  // Replace single-quoted strings
+  result = result.replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  // Replace template literals (simple, non-nested)
+  result = result.replace(/`(?:[^`\\]|\\.)*`/g, "``");
+  return result;
+}
+
+/**
+ * Generate a human-readable label from a combo key like "intent=primary_size=sm".
+ * Output: "Primary · sm"  (title-case first axis value, keep remaining as-is)
+ */
+function prettyLabel(comboKey: string): string {
+  return comboKey
+    .split("_")
+    .map((part) => {
+      const eqIdx = part.indexOf("=");
+      const value = eqIdx >= 0 ? part.slice(eqIdx + 1) : part;
+      // Title-case the first character
+      return value.charAt(0).toUpperCase() + value.slice(1);
+    })
+    .join(" · ");
+}
+
 // ── meta parsing ──────────────────────────────────────────────────────────────
 
 interface Example {
@@ -194,10 +226,14 @@ function parseCva(source: string): CvaConfig | null {
 
 function extractVariantKeys(variantsBlock: string, _source: string): Record<string, string[]> {
   const result: Record<string, string[]> = {};
+  // Strip string literals first so Tailwind modifier prefixes (hover:, focus:, etc.)
+  // inside class value strings are not mistaken for variant keys.
+  const stripped = stripStringLiterals(variantsBlock);
+
   // Match each variant key and its value object
   const variantRe = /(\w+)\s*:\s*\{([^}]*)\}/g;
   let m: RegExpExecArray | null;
-  while ((m = variantRe.exec(variantsBlock)) !== null) {
+  while ((m = variantRe.exec(stripped)) !== null) {
     const variantName = m[1];
     const valuesBlock = m[2];
     // Extract value keys (e.g. sm, md, lg from { sm: "...", md: "...", lg: "..." })
@@ -258,6 +294,24 @@ function cvaCartesian(config: CvaConfig, skip: string[]): Array<{ name: string; 
 
 // ── showcase emitters ─────────────────────────────────────────────────────────
 
+/**
+ * Determine if a size value name refers to an icon-only button slot.
+ * Used to decide whether to inject text children.
+ */
+function isIconSize(sizeValue: string): boolean {
+  return sizeValue.includes("icon");
+}
+
+/**
+ * Build the children prop string for an auto-generated CVA combo.
+ * Icon sizes get no children; everything else gets the display name as text.
+ */
+function autoChildren(props: Record<string, string>, displayName: string): string {
+  const sizeVal = props["size"] ?? "";
+  if (isIconSize(sizeVal)) return "";
+  return displayName;
+}
+
 function emitAtomCompositeShowcase(
   componentName: string,
   displayName: string,
@@ -268,40 +322,108 @@ function emitAtomCompositeShowcase(
   const header = showcaseHeader(sourceName);
   const skip = meta.skip ?? [];
 
-  // Base examples from meta.examples
-  const allExamples: Array<{ name: string; props: Record<string, unknown> }> = [...meta.examples];
+  // Explicit examples from meta.examples (authoritative — no children fallback applied)
+  const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = [...meta.examples];
 
   // CVA auto-expansion
   const cvaConfig = parseCva(source);
+  let cvaExamples: Array<{ name: string; props: Record<string, string> }> = [];
   if (cvaConfig) {
-    const cvaExamples = cvaCartesian(cvaConfig, skip);
-    // Add CVA examples that aren't already covered by explicit examples
+    const expanded = cvaCartesian(cvaConfig, skip);
     const existingNames = new Set(meta.examples.map((e) => e.name));
-    for (const ce of cvaExamples) {
-      if (!existingNames.has(ce.name)) {
-        allExamples.push({ name: ce.name, props: ce.props });
-      }
-    }
+    cvaExamples = expanded.filter((ce) => !existingNames.has(ce.name));
   }
 
-  // Render example blocks
-  const exampleBlocks = allExamples
-    .map((ex) => {
-      const propsStr = Object.entries(ex.props)
-        .map(([k, v]) => {
-          if (typeof v === "string") return `${k}="${v}"`;
-          if (typeof v === "boolean") return v ? k : `${k}={false}`;
-          return `${k}={${JSON.stringify(v)}}`;
-        })
-        .join(" ");
-      return [
-        `      <section>`,
-        `        <h3 className="text-sm font-medium mb-2">${ex.name}</h3>`,
-        `        <${displayName}${propsStr ? " " + propsStr : ""} />`,
-        `      </section>`,
-      ].join("\n");
-    })
-    .join("\n");
+  // ── Explicit "Examples" section ──────────────────────────────────────────
+  let explicitSection = "";
+  if (explicitExamples.length > 0) {
+    const blocks = explicitExamples
+      .map((ex) => {
+        const propsStr = Object.entries(ex.props)
+          .map(([k, v]) => {
+            if (typeof v === "string") return `${k}="${v}"`;
+            if (typeof v === "boolean") return v ? k : `${k}={false}`;
+            return `${k}={${JSON.stringify(v)}}`;
+          })
+          .join(" ");
+        return [
+          `        <div className="flex flex-col items-start gap-1">`,
+          `          <${displayName}${propsStr ? " " + propsStr : ""} />`,
+          `          <span className="text-xs text-muted-foreground">${ex.name}</span>`,
+          `        </div>`,
+        ].join("\n");
+      })
+      .join("\n");
+    explicitSection = [
+      `      <section className="mb-10">`,
+      `        <h2 className="text-xl font-semibold mb-4">Examples</h2>`,
+      `        <div className="flex flex-wrap items-end gap-3">`,
+      blocks,
+      `        </div>`,
+      `      </section>`,
+    ].join("\n");
+  }
+
+  // ── CVA variant grid grouped by first axis ───────────────────────────────
+  let cvaSection = "";
+  if (cvaExamples.length > 0 && cvaConfig) {
+    const variantNames = Object.keys(cvaConfig.variants);
+    const primaryAxis = variantNames[0]; // e.g. "intent"
+    const primaryValues = cvaConfig.variants[primaryAxis];
+
+    const groupSections = primaryValues
+      .map((primaryVal) => {
+        const groupCombos = cvaExamples.filter((ce) => ce.props[primaryAxis] === primaryVal);
+        if (groupCombos.length === 0) return null;
+
+        const groupLabel = primaryVal.charAt(0).toUpperCase() + primaryVal.slice(1);
+
+        const buttonBlocks = groupCombos
+          .map((ce) => {
+            const propsStr = Object.entries(ce.props)
+              .map(([k, v]) => `${k}="${v}"`)
+              .join(" ");
+            // Children fallback for auto-generated combos
+            const children = autoChildren(ce.props, displayName);
+            // Secondary axis label (everything except the primary axis)
+            const secondaryLabel = Object.entries(ce.props)
+              .filter(([k]) => k !== primaryAxis)
+              .map(([, v]) => v)
+              .join(", ");
+            return [
+              `          <div className="flex flex-col items-start gap-1">`,
+              `            <${displayName}${propsStr ? " " + propsStr : ""}${children ? `>${children}</${displayName}>` : " />"}`,
+              `            <span className="text-xs text-muted-foreground">${secondaryLabel || primaryVal}</span>`,
+              `          </div>`,
+            ].join("\n");
+          })
+          .filter(Boolean)
+          .join("\n");
+
+        return [
+          `        <section className="mb-6">`,
+          `          <h2 className="text-lg font-semibold mb-3">${groupLabel}</h2>`,
+          `          <div className="flex flex-wrap items-end gap-3">`,
+          buttonBlocks,
+          `          </div>`,
+          `        </section>`,
+        ].join("\n");
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    cvaSection = [
+      `      <section className="mb-10">`,
+      `        <h2 className="text-xl font-semibold mb-4">Variants</h2>`,
+      groupSections,
+      `      </section>`,
+    ].join("\n");
+  }
+
+  const body =
+    explicitSection || cvaSection
+      ? [explicitSection, cvaSection].filter(Boolean).join("\n")
+      : `      <p className="text-muted-foreground">No examples defined.</p>`;
 
   return [
     header,
@@ -312,7 +434,7 @@ function emitAtomCompositeShowcase(
     `  return (`,
     `    <main className="p-8">`,
     `      <h1 className="text-2xl font-bold mb-6">${displayName}</h1>`,
-    exampleBlocks || `      <p className="text-muted-foreground">No examples defined.</p>`,
+    body,
     `    </main>`,
     `  );`,
     `}`,
@@ -338,7 +460,7 @@ function emitReferenceShowcase(
     `  return (`,
     `    <main className="p-8">`,
     `      <h1 className="text-2xl font-bold mb-6">${meta.title}</h1>`,
-    `      <div>{content as React.ReactNode}</div>`,
+    `      <div className="prose prose-neutral dark:prose-invert max-w-none">{content as React.ReactNode}</div>`,
     `    </main>`,
     `  );`,
     `}`,

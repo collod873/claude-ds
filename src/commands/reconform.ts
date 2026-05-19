@@ -642,11 +642,22 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
       } catch { return []; }
     }
 
+    function genStripStringLiterals(text: string): string {
+      let result = text.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+      result = result.replace(/'(?:[^'\\]|\\.)*'/g, "''");
+      result = result.replace(/`(?:[^`\\]|\\.)*`/g, "``");
+      return result;
+    }
+
     function genExtractVariantKeys(block: string): Record<string, string[]> {
       const result: Record<string, string[]> = {};
+      // Strip string literals before scanning so Tailwind modifier prefixes
+      // (hover:, active:, aria-expanded:, etc.) inside class strings are not
+      // mistaken for variant keys.
+      const stripped = genStripStringLiterals(block);
       const variantRe = /(\w+)\s*:\s*\{([^}]*)\}/g;
       let m: RegExpExecArray | null;
-      while ((m = variantRe.exec(block)) !== null) {
+      while ((m = variantRe.exec(stripped)) !== null) {
         const keys: string[] = [];
         const keyRe = /(\w+)\s*:/g;
         let km: RegExpExecArray | null;
@@ -692,6 +703,16 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
         .filter(c => !skip.includes(c.name));
     }
 
+    function genIsIconSize(sizeValue: string): boolean {
+      return sizeValue.includes("icon");
+    }
+
+    function genAutoChildren(props: Record<string, string>, displayName: string): string {
+      const sizeVal = props["size"] ?? "";
+      if (genIsIconSize(sizeVal)) return "";
+      return displayName;
+    }
+
     function genRegenShowcaseTsx(componentName: string, source: string, sourceName: string): string | null {
       const kindMatch = source.match(/export\s+const\s+meta[^=]*=\s*\{[^}]*kind\s*:\s*["']([^"']+)["']/);
       if (!kindMatch) return null;
@@ -719,7 +740,7 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
           `  return (`,
           `    <main className="p-8">`,
           `      <h1 className="text-2xl font-bold mb-6">${title}</h1>`,
-          `      <div>{content as React.ReactNode}</div>`,
+          `      <div className="prose prose-neutral dark:prose-invert max-w-none">{content as React.ReactNode}</div>`,
           `    </main>`,
           `  );`,
           `}`,
@@ -730,29 +751,89 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
       // atom | composite
       const examples = genParseExamples(source);
       const skip = genParseSkip(source);
-      const allExamples: Array<{ name: string; props: Record<string, unknown> }> = [...examples];
       const cvaConfig = genParseCva(source);
+
+      // Explicit examples from meta.examples
+      const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = [...examples];
+
+      // CVA auto-expansion
+      let cvaExamples: Array<{ name: string; props: Record<string, string> }> = [];
       if (cvaConfig) {
-        const cvaExamples = genCvaCartesian(cvaConfig, skip);
+        const expanded = genCvaCartesian(cvaConfig, skip);
         const existingNames = new Set(examples.map(e => e.name));
-        for (const ce of cvaExamples) {
-          if (!existingNames.has(ce.name)) allExamples.push(ce);
-        }
+        cvaExamples = expanded.filter(ce => !existingNames.has(ce.name));
       }
 
-      const exampleBlocks = allExamples.map(ex => {
-        const propsStr = Object.entries(ex.props).map(([k, v]) => {
-          if (typeof v === "string") return `${k}="${v}"`;
-          if (typeof v === "boolean") return v ? k : `${k}={false}`;
-          return `${k}={${JSON.stringify(v)}}`;
-        }).join(" ");
-        return [
-          `      <section>`,
-          `        <h3 className="text-sm font-medium mb-2">${ex.name}</h3>`,
-          `        <${displayName}${propsStr ? " " + propsStr : ""} />`,
+      // Explicit "Examples" section
+      let explicitSection = "";
+      if (explicitExamples.length > 0) {
+        const blocks = explicitExamples.map(ex => {
+          const propsStr = Object.entries(ex.props).map(([k, v]) => {
+            if (typeof v === "string") return `${k}="${v}"`;
+            if (typeof v === "boolean") return v ? k : `${k}={false}`;
+            return `${k}={${JSON.stringify(v)}}`;
+          }).join(" ");
+          return [
+            `        <div className="flex flex-col items-start gap-1">`,
+            `          <${displayName}${propsStr ? " " + propsStr : ""} />`,
+            `          <span className="text-xs text-muted-foreground">${ex.name}</span>`,
+            `        </div>`,
+          ].join("\n");
+        }).join("\n");
+        explicitSection = [
+          `      <section className="mb-10">`,
+          `        <h2 className="text-xl font-semibold mb-4">Examples</h2>`,
+          `        <div className="flex flex-wrap items-end gap-3">`,
+          blocks,
+          `        </div>`,
           `      </section>`,
         ].join("\n");
-      }).join("\n");
+      }
+
+      // CVA variant grid grouped by first axis
+      let cvaSection = "";
+      if (cvaExamples.length > 0 && cvaConfig) {
+        const variantNames = Object.keys(cvaConfig.variants);
+        const primaryAxis = variantNames[0];
+        const primaryValues = cvaConfig.variants[primaryAxis];
+
+        const groupSections = primaryValues.map(primaryVal => {
+          const groupCombos = cvaExamples.filter(ce => ce.props[primaryAxis] === primaryVal);
+          if (groupCombos.length === 0) return null;
+          const groupLabel = primaryVal.charAt(0).toUpperCase() + primaryVal.slice(1);
+          const buttonBlocks = groupCombos.map(ce => {
+            const propsStr = Object.entries(ce.props).map(([k, v]) => `${k}="${v}"`).join(" ");
+            const children = genAutoChildren(ce.props, displayName);
+            const secondaryLabel = Object.entries(ce.props).filter(([k]) => k !== primaryAxis).map(([, v]) => v).join(", ");
+            return [
+              `          <div className="flex flex-col items-start gap-1">`,
+              `            <${displayName}${propsStr ? " " + propsStr : ""}${children ? `>${children}</${displayName}>` : " />"}`,
+              `            <span className="text-xs text-muted-foreground">${secondaryLabel || primaryVal}</span>`,
+              `          </div>`,
+            ].join("\n");
+          }).filter(Boolean).join("\n");
+
+          return [
+            `        <section className="mb-6">`,
+            `          <h2 className="text-lg font-semibold mb-3">${groupLabel}</h2>`,
+            `          <div className="flex flex-wrap items-end gap-3">`,
+            buttonBlocks,
+            `          </div>`,
+            `        </section>`,
+          ].join("\n");
+        }).filter(Boolean).join("\n");
+
+        cvaSection = [
+          `      <section className="mb-10">`,
+          `        <h2 className="text-xl font-semibold mb-4">Variants</h2>`,
+          groupSections,
+          `      </section>`,
+        ].join("\n");
+      }
+
+      const body = explicitSection || cvaSection
+        ? [explicitSection, cvaSection].filter(Boolean).join("\n")
+        : `      <p className="text-muted-foreground">No examples defined.</p>`;
 
       return [
         header,
@@ -763,7 +844,7 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
         `  return (`,
         `    <main className="p-8">`,
         `      <h1 className="text-2xl font-bold mb-6">${displayName}</h1>`,
-        exampleBlocks || `      <p className="text-muted-foreground">No examples defined.</p>`,
+        body,
         `    </main>`,
         `  );`,
         `}`,

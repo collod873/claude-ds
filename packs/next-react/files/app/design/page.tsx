@@ -1,5 +1,5 @@
-import Link from "next/link";
 import manifest from "@/design-system/manifest.json";
+import { DesignFilter } from "./_filter";
 
 type Kind = "atom" | "composite" | "reference";
 
@@ -8,12 +8,6 @@ interface Entry {
   kind?: Kind;
   tier: string;
 }
-
-const SECTION_FOR_KIND: Record<Kind, string> = {
-  atom: "atoms",
-  composite: "composites",
-  reference: "references",
-};
 
 function groupByKind(entries: Entry[]): Record<Kind, Entry[]> {
   const groups: Record<Kind, Entry[]> = { atom: [], composite: [], reference: [] };
@@ -27,33 +21,17 @@ function groupByKind(entries: Entry[]): Record<Kind, Entry[]> {
   return groups;
 }
 
-function Section({ title, kind, entries }: { title: string; kind: Kind; entries: Entry[] }) {
-  if (entries.length === 0) return null;
-  const section = SECTION_FOR_KIND[kind];
-  return (
-    <section className="mb-8">
-      <h2 className="text-lg font-semibold mb-2">{title}</h2>
-      <ul className="space-y-1">
-        {entries.map((e) => (
-          <li key={e.name}>
-            <Link href={`/design/${section}/${e.name}`} className="underline">
-              {e.name}
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
 export default function DesignIndexPage() {
   const groups = groupByKind((manifest as { components: Entry[] }).components);
   return (
-    <main className="p-8">
-      <h1 className="text-2xl font-bold mb-6">Design System</h1>
-      <Section title="Atoms" kind="atom" entries={groups.atom} />
-      <Section title="Composites" kind="composite" entries={groups.composite} />
-      <Section title="References" kind="reference" entries={groups.reference} />
+    <main className="mx-auto max-w-5xl px-6 py-10">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold">Design System</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Atoms, composites, and reference pages for this project's design language.
+        </p>
+      </div>
+      <DesignFilter groups={groups} />
     </main>
   );
 }

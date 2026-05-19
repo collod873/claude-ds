@@ -105,14 +105,23 @@ describe("generate-showcase-companion.ts [integration]", () => {
 
     const content = await readFile(showcasePath, "utf8");
     // Should contain CVA-expanded examples: size × tone = 3×2 = 6 combos, minus 1 skip = 5
-    // Check some expected combos are present
-    expect(content).toContain("size=sm_tone=primary");
-    expect(content).toContain("size=md_tone=primary");
-    expect(content).toContain("size=lg_tone=primary");
-    expect(content).toContain("size=sm_tone=danger");
-    expect(content).toContain("size=md_tone=danger");
-    // Skipped combo must NOT be present
-    expect(content).not.toContain("size=lg_tone=danger");
+    // New grouped structure: primary axis (size) rendered as group headings,
+    // secondary axis values appear as labels under each button.
+    // Group headings (title-cased primary values)
+    expect(content).toContain("Sm");
+    expect(content).toContain("Md");
+    expect(content).toContain("Lg");
+    // Secondary axis labels appear as spans
+    expect(content).toContain("primary");
+    expect(content).toContain("danger");
+    // Skipped combo (size=lg, tone=danger) must NOT produce that tone label under Lg group
+    // The Lg group should have primary but not danger
+    const lgGroupIdx = content.indexOf(">Lg<");
+    const nextGroupIdx = content.indexOf("<section", lgGroupIdx + 1);
+    const lgSection = lgGroupIdx >= 0
+      ? content.slice(lgGroupIdx, nextGroupIdx > lgGroupIdx ? nextGroupIdx : undefined)
+      : "";
+    expect(lgSection).not.toContain(">danger<");
   });
 
   it("states.json for CVA component contains correct number of states (cross-product minus skip)", async () => {
@@ -200,6 +209,167 @@ describe("generate-showcase-companion.ts [integration]", () => {
 
     const content = await readFile(join(dsDir, "button.showcase.tsx"), "utf8");
     expect(content).toContain("Source: button.tsx meta block.");
+  });
+
+  // ── string-literal stripping (Bug 1) ──────────────────────────────────────
+
+  it("CVA parser does not emit bogus Tailwind-modifier variant values (hover, active, etc.)", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    // Component with Tailwind modifier strings inside CVA variant values
+    await writeFile(
+      join(dsDir, "button.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const buttonVariants = cva("base", {`,
+        `  variants: {`,
+        `    intent: {`,
+        `      primary: ["bg-primary text-primary-foreground", "hover:bg-primary/80", "active:bg-primary/70 active:translate-y-px", "aria-expanded:bg-primary/80"].join(" "),`,
+        `      secondary: ["bg-secondary text-secondary-foreground", "hover:bg-border"].join(" "),`,
+        `    },`,
+        `    size: {`,
+        `      sm: "h-7 gap-1 px-2.5 text-sm",`,
+        `      default: "h-8 gap-1.5 px-3 text-sm",`,
+        `    },`,
+        `  },`,
+        `  defaultVariants: { intent: "primary", size: "default" },`,
+        `});`,
+        `export function Button({ intent, size, ...props }: any) { return <button {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [], skip: [] };`,
+      ].join("\n")
+    );
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+
+    const content = await readFile(join(dsDir, "button.showcase.tsx"), "utf8");
+    // Must NOT contain bogus modifier-derived variant values
+    expect(content).not.toContain('intent="hover"');
+    expect(content).not.toContain('intent="active"');
+    expect(content).not.toContain('intent="focus"');
+    expect(content).not.toContain('intent="aria"');
+    // Must contain exactly the 2 real intent groups and 2 real sizes
+    expect(content).toContain(">Primary<");
+    expect(content).toContain(">Secondary<");
+  });
+
+  // ── children fallback (Bug 2) ─────────────────────────────────────────────
+
+  it("auto-generated non-icon combos get displayName as children", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "btn.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const v = cva("b", {`,
+        `  variants: {`,
+        `    intent: { primary: "p", secondary: "s" },`,
+        `    size: { sm: "sm", icon: "ic" },`,
+        `  },`,
+        `  defaultVariants: { intent: "primary", size: "sm" },`,
+        `});`,
+        `export function Btn(props: any) { return <button {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [], skip: [] };`,
+      ].join("\n")
+    );
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(join(dsDir, "btn.showcase.tsx"), "utf8");
+    // Non-icon size (sm) combos should have text children "Btn"
+    expect(content).toContain(">Btn<");
+    // Icon size combos should be self-closing (no children)
+    expect(content).toContain('size="icon"');
+    // Icon buttons should NOT have text children injected
+    const iconComboIdx = content.indexOf('size="icon"');
+    const afterIcon = content.slice(iconComboIdx, iconComboIdx + 80);
+    expect(afterIcon).not.toContain(">Btn<");
+  });
+
+  // ── pretty label (Bug 3) ──────────────────────────────────────────────────
+
+  it("grouped section headings use title-case, not underscore-joined debug keys", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "badge.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const v = cva("b", {`,
+        `  variants: {`,
+        `    tone: { primary: "p", danger: "d" },`,
+        `    size: { sm: "s", lg: "l" },`,
+        `  },`,
+        `  defaultVariants: { tone: "primary", size: "sm" },`,
+        `});`,
+        `export function Badge(props: any) { return <span {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [], skip: [] };`,
+      ].join("\n")
+    );
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(join(dsDir, "badge.showcase.tsx"), "utf8");
+    // Group headings must be title-cased primary values
+    expect(content).toContain(">Primary<");
+    expect(content).toContain(">Danger<");
+    // Must NOT contain raw underscore combo keys as headings
+    expect(content).not.toContain(">tone=primary_size=sm<");
+    expect(content).not.toContain(">tone=danger_size=lg<");
+  });
+
+  // ── grouped CVA structure (Bug 4) ─────────────────────────────────────────
+
+  it("CVA combos are grouped by first axis with secondary axis as row", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "chip.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const v = cva("c", {`,
+        `  variants: {`,
+        `    color: { red: "r", blue: "b" },`,
+        `    size: { sm: "s", lg: "l" },`,
+        `  },`,
+        `  defaultVariants: { color: "red", size: "sm" },`,
+        `});`,
+        `export function Chip(props: any) { return <div {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [], skip: [] };`,
+      ].join("\n")
+    );
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(join(dsDir, "chip.showcase.tsx"), "utf8");
+    // Should render a Variants section
+    expect(content).toContain("Variants");
+    // Each primary value gets its own section heading
+    expect(content).toContain(">Red<");
+    expect(content).toContain(">Blue<");
+    // Buttons within each group are in a flex-wrap row
+    expect(content).toContain("flex flex-wrap items-end gap-3");
+  });
+
+  // ── reference prose wrap (Bug 5) ─────────────────────────────────────────
+
+  it("reference showcase wraps content in prose div", async () => {
+    const refDir = join(dir, "design-system", "references");
+    await mkdir(refDir, { recursive: true });
+    copyFixture(FIXTURE_REF, dir, "design-system/references/tokens-page.tsx");
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(join(refDir, "tokens-page.showcase.tsx"), "utf8");
+    expect(content).toContain('className="prose prose-neutral dark:prose-invert max-w-none"');
   });
 });
 

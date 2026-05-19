@@ -1,5 +1,7 @@
 import type React from "react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ThemeToggle } from "./_theme-toggle";
 
 /**
  * 3-tier gating for the /design route.
@@ -14,5 +16,15 @@ export default async function DesignGalleryLayout({ children }: { children: Reac
 
   // Tier 3: project auth goes here. See design-system/CLAUDE.md for the recommended pattern.
 
-  return <>{children}</>;
+  return (
+    <>
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/80 px-6 py-3 backdrop-blur">
+        <Link href="/design" className="text-sm font-semibold tracking-tight">
+          Design System
+        </Link>
+        <ThemeToggle />
+      </header>
+      {children}
+    </>
+  );
 }

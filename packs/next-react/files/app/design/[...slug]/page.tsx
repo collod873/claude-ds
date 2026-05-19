@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import manifest from "@/design-system/manifest.json";
 import { showcases } from "@/design-system/manifest.generated";
@@ -22,6 +23,12 @@ export default async function ComponentShowcasePage({ params }: PageProps) {
 
   return (
     <main className="p-8">
+      <Link
+        href="/design"
+        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        ← Design system
+      </Link>
       <h1 className="text-2xl font-bold mb-6">{entry.name}</h1>
       <Showcase />
     </main>
