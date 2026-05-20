@@ -44,3 +44,32 @@ No path moves. `reconform` subcommand added; no migration action required.
 No path moves. `generate-showcase.ts` classification changed `seeded` → `managed`; future `reconcile` runs will track it as a managed file.
 
 Run `claude-ds reconform` to refresh showcase stubs with current generator output.
+
+---
+
+## v0.6.1 → v0.7.0
+
+No path moves. Two consumer-facing changes:
+
+1. **`@ts-nocheck` removed from generated `.showcase.tsx`.** Consumer must backfill realistic prop values in each `meta.examples[].props` so the generated showcase typechecks against the component's actual prop types. Without backfill, `tsc` will surface real errors instead of silently passing. (Crewops tracks this as #3.)
+
+2. **`Meta.states` is now an optional field** (additive). Consumers may declare:
+   ```ts
+   states?: {
+     loading?:  { name: string; props: Record<string, unknown> };
+     longText?: { name: string; props: Record<string, unknown> };
+     empty?:    { name: string; props: Record<string, unknown> }; // composites only
+   }
+   ```
+   Each declared state produces a labeled row in the showcase. Omitting `states` leaves the showcase unchanged from prior behavior.
+
+3. **Optional usage-analyzer hook.** If a consumer creates `scripts/analyze-component-usage.ts` exporting a default function with signature
+   ```ts
+   (srcFiles: string[]) => Map<componentName, {
+     literal: Map<prop, Map<value, count>>;
+     dynamicProps: Set<prop>;
+   }>
+   ```
+   the generator will load it and render ✓ used / ⚠ dynamic-only / ✗ unused tags per CVA variant. If the file is absent, the tag column is omitted (no failure mode).
+
+Run `claude-ds sync` to pull the updated generator, then `claude-ds reconform` (or the `regenerate-companions` hook) to refresh showcases.

@@ -15,6 +15,25 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [0.7.0] — 2026-05-20
+
+Showcase generator gains a full-variant matrix, declarative state rows, and a pluggable usage-analyzer; `@ts-nocheck` removed from generated output. Issue #60.
+
+### Pack changes
+- Generator: full CVA-variant matrix rendered (every cross-product combo, minus `skip[]`).
+- Generator: `meta.states.{loading,longText,empty}` section emission — declarative rows for loading / long-text / empty-state (empty is composites-only).
+- Generator: pluggable usage-analyzer hook at `scripts/analyze-component-usage.ts` — if present, called with discovered app source paths; return value drives ✓ used / ⚠ dynamic-only / ✗ unused tags per variant. Absent file → tag column omitted (no failure).
+- Generator: `@ts-nocheck` removed from showcase header. Generated showcases now expect to typecheck against real component prop types; consumer must backfill `meta.examples` props to satisfy `Pick<Props, ...>` (tracked downstream as crewops#3).
+- `Meta.states` field added (additive) — `loading?`, `longText?`, `empty?` of shape `{ name, props }`. Existing metas without `states` continue to work unchanged.
+
+### Tooling
+- Generator entry point is now async to support dynamic-import of the analyzer module.
+
+### Folded-in
+- Closes crewops#2 (revert `@ts-nocheck`); the re-sync half is the consumer's responsibility downstream.
+
+---
+
 ## [0.6.1] — 2026-05-18
 
 ### Changed

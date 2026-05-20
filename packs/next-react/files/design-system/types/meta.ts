@@ -16,6 +16,22 @@ export interface Example {
 }
 
 /**
+ * State spec for special-condition rows (loading, long-text overflow, empty).
+ * Generator emits a labeled row for each declared state.
+ */
+export interface ExampleSpec {
+  name: string;
+  props: Record<string, unknown>;
+}
+
+/** Optional state-section declarations consumed by generate-showcase-companion. */
+export interface MetaStates {
+  loading?: ExampleSpec;
+  longText?: ExampleSpec;
+  empty?: ExampleSpec;
+}
+
+/**
  * Discriminated union by `kind`.
  *
  * "atom" | "composite" — component with CVA-expandable examples.
@@ -30,6 +46,8 @@ export type Meta =
       examples: Example[];
       /** CVA variant combos to suppress in auto-expansion. */
       skip?: string[];
+      /** Optional state-section specs (loading, long-text, empty). Additive. */
+      states?: MetaStates;
     }
   | {
       kind: "reference";

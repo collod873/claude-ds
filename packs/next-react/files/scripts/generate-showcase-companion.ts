@@ -108,11 +108,23 @@ interface Example {
   props: Record<string, unknown>;
 }
 
+interface StateSpec {
+  name: string;
+  props: Record<string, unknown>;
+}
+
+interface MetaStates {
+  loading?: StateSpec;
+  longText?: StateSpec;
+  empty?: StateSpec;
+}
+
 interface MetaAtomComposite {
   kind: "atom" | "composite";
   fixtures?: Record<string, unknown>;
   examples: Example[];
   skip?: string[];
+  states?: MetaStates;
 }
 
 interface MetaReference {
@@ -143,10 +155,59 @@ function parseMeta(source: string): ParsedMeta | null {
     return { kind: "reference", title };
   }
 
-  // atom | composite — extract examples[] and skip[]
+  // atom | composite — extract examples[], skip[], and states
   const examples = parseExamples(source);
   const skip = parseSkip(source);
-  return { kind, examples, skip };
+  const states = parseStates(source);
+  return { kind, examples, skip, states };
+}
+
+function parseStates(source: string): MetaStates | undefined {
+  // Find the states object inside meta. Match `states: { ... }` allowing nested braces.
+  const idx = source.search(/\bstates\s*:\s*\{/);
+  if (idx < 0) return undefined;
+  const openIdx = source.indexOf("{", idx);
+  let depth = 0;
+  let endIdx = -1;
+  for (let i = openIdx; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        endIdx = i;
+        break;
+      }
+    }
+  }
+  if (endIdx < 0) return undefined;
+  const block = source.slice(openIdx, endIdx + 1);
+  try {
+    const sanitized = block
+      .replace(/\/\/[^\n]*/g, "")
+      .replace(/,\s*([\]}])/g, "$1")
+      .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')
+      .replace(/:\s*undefined\b/g, ": null")
+      .replace(/:\s*'([^']*)'/g, ':"$1"');
+    const parsed = JSON.parse(sanitized) as Record<string, unknown>;
+    const out: MetaStates = {};
+    for (const key of ["loading", "longText", "empty"] as const) {
+      const v = parsed[key];
+      if (v && typeof v === "object") {
+        const spec = v as Record<string, unknown>;
+        out[key] = {
+          name: typeof spec.name === "string" ? spec.name : key,
+          props:
+            typeof spec.props === "object" && spec.props !== null
+              ? (spec.props as Record<string, unknown>)
+              : {},
+        };
+      }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseExamples(source: string): Example[] {
@@ -359,12 +420,74 @@ function autoChildren(props: Record<string, string>, displayName: string): strin
   return displayName;
 }
 
+interface UsageInfo {
+  literal: Map<string, Map<string, number>>;
+  dynamicProps: Set<string>;
+}
+type UsageMap = Map<string, UsageInfo>;
+
+function usageTagFor(
+  usage: UsageInfo | undefined,
+  prop: string,
+  value: string
+): "used" | "dynamic" | "unused" | null {
+  if (!usage) return null;
+  const litProp = usage.literal.get(prop);
+  if (litProp && litProp.has(value) && (litProp.get(value) ?? 0) > 0) return "used";
+  if (usage.dynamicProps.has(prop)) return "dynamic";
+  return "unused";
+}
+
+function renderUsageTag(tag: "used" | "dynamic" | "unused" | null): string {
+  if (tag === null) return "";
+  if (tag === "used") return ` <span title="used in app" className="text-xs">✓</span>`;
+  if (tag === "dynamic") return ` <span title="dynamic prop only" className="text-xs">⚠</span>`;
+  return ` <span title="not used in app" className="text-xs">✗</span>`;
+}
+
+function renderPropsAttr(props: Record<string, unknown>): string {
+  return Object.entries(props)
+    .map(([k, v]) => {
+      if (typeof v === "string") return `${k}="${v}"`;
+      if (typeof v === "boolean") return v ? k : `${k}={false}`;
+      if (v === null) return `${k}={null}`;
+      return `${k}={${JSON.stringify(v)}}`;
+    })
+    .join(" ");
+}
+
+function emitStateRow(
+  displayName: string,
+  label: string,
+  spec: StateSpec,
+  hasDefault: boolean
+): string {
+  const propsStr = renderPropsAttr(spec.props);
+  const children = typeof spec.props["children"] === "string"
+    ? "" // children already in props
+    : "";
+  const tagOpen = `<${displayName}${propsStr ? " " + propsStr : ""}${children ? `>${children}</${displayName}>` : " />"}`;
+  void hasDefault;
+  return [
+    `        <section className="mb-6">`,
+    `          <h2 className="text-lg font-semibold mb-3">${label}</h2>`,
+    `          <div className="flex flex-wrap items-end gap-3">`,
+    `            <div className="flex flex-col items-start gap-1">`,
+    `              ${tagOpen}`,
+    `              <span className="text-xs text-muted-foreground">${spec.name}</span>`,
+    `            </div>`,
+    `          </div>`,
+    `        </section>`,
+  ].join("\n");
+}
+
 function emitAtomCompositeShowcase(
   componentName: string,
   displayName: string,
   meta: MetaAtomComposite,
   source: string,
-  sourceName: string
+  sourceName: string,
+  usage?: UsageInfo
 ): string {
   const header = showcaseHeader(sourceName);
   const skip = meta.skip ?? [];
@@ -460,10 +583,22 @@ function emitAtomCompositeShowcase(
               .filter(([k]) => k !== primaryAxis)
               .map(([, v]) => v)
               .join(", ");
+            // Usage tag for this combo (worst tag across its prop axes wins:
+            // unused > dynamic > used). Only emitted if usage map is present.
+            let tagHtml = "";
+            if (usage) {
+              let worst: "used" | "dynamic" | "unused" = "used";
+              for (const [k, v] of Object.entries(ce.props)) {
+                const t = usageTagFor(usage, k, v) ?? "unused";
+                if (t === "unused") worst = "unused";
+                else if (t === "dynamic" && worst !== "unused") worst = "dynamic";
+              }
+              tagHtml = renderUsageTag(worst);
+            }
             return [
               `          <div className="flex flex-col items-start gap-1">`,
               `            <${displayName}${propsStr ? " " + propsStr : ""}${children ? `>${children}</${displayName}>` : " />"}`,
-              `            <span className="text-xs text-muted-foreground">${secondaryLabel || primaryVal}</span>`,
+              `            <span className="text-xs text-muted-foreground">${secondaryLabel || primaryVal}${tagHtml}</span>`,
               `          </div>`,
             ].join("\n");
           })
@@ -490,9 +625,29 @@ function emitAtomCompositeShowcase(
     ].join("\n");
   }
 
+  // ── State sections (loading, longText, empty) ───────────────────────────
+  const stateSections: string[] = [];
+  if (meta.states?.loading) {
+    stateSections.push(emitStateRow(displayName, "Loading", meta.states.loading, false));
+  }
+  if (meta.states?.longText) {
+    stateSections.push(emitStateRow(displayName, "Long text", meta.states.longText, false));
+  }
+  if (meta.kind === "composite" && meta.states?.empty) {
+    stateSections.push(emitStateRow(displayName, "Empty", meta.states.empty, false));
+  }
+  const statesSection = stateSections.length > 0
+    ? [
+        `      <section className="mb-10">`,
+        `        <h2 className="text-xl font-semibold mb-4">States</h2>`,
+        stateSections.join("\n"),
+        `      </section>`,
+      ].join("\n")
+    : "";
+
   const body =
-    explicitSection || cvaSection
-      ? [explicitSection, cvaSection].filter(Boolean).join("\n")
+    explicitSection || cvaSection || statesSection
+      ? [explicitSection, cvaSection, statesSection].filter(Boolean).join("\n")
       : `      <p className="text-muted-foreground">No examples defined.</p>`;
 
   const importLine = hasDefaultExport(source)
@@ -556,8 +711,67 @@ function emitStatesJson(
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-function main(): void {
+async function loadUsageMap(cwd: string): Promise<UsageMap | null> {
+  const analyzerPath = join(cwd, "scripts", "analyze-component-usage.ts");
+  if (!existsSync(analyzerPath)) return null;
+  // Collect candidate app source files: .ts / .tsx under app/, src/, components/, lib/
+  const roots = ["app", "src", "components", "lib"];
+  const files: string[] = [];
+  function walk(dir: string): void {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e === "node_modules" || e.startsWith(".")) continue;
+      const p = join(dir, e);
+      let st;
+      try {
+        st = statSync(p, { throwIfNoEntry: false });
+      } catch {
+        continue;
+      }
+      if (!st) continue;
+      if (st.isDirectory()) walk(p);
+      else if (st.isFile() && (e.endsWith(".tsx") || e.endsWith(".ts")) && !e.endsWith(".d.ts")) {
+        files.push(p);
+      }
+    }
+  }
+  for (const r of roots) {
+    const rp = join(cwd, r);
+    if (existsSync(rp)) walk(rp);
+  }
+  try {
+    const mod = await import(analyzerPath);
+    const fn = mod.default;
+    if (typeof fn !== "function") {
+      process.stderr.write(
+        `analyze-component-usage.ts: default export is not a function — skipping usage tags\n`
+      );
+      return null;
+    }
+    const result = await fn(files);
+    if (!(result instanceof Map)) {
+      process.stderr.write(
+        `analyze-component-usage.ts: did not return a Map — skipping usage tags\n`
+      );
+      return null;
+    }
+    return result as UsageMap;
+  } catch (err) {
+    process.stderr.write(
+      `analyze-component-usage.ts: failed to load (${(err as Error).message}) — skipping usage tags\n`
+    );
+    return null;
+  }
+}
+
+async function main(): Promise<void> {
   const cwd = process.cwd();
+  const usageMap = await loadUsageMap(cwd);
 
   const TIERS = ["atoms", "composites", "references"] as const;
   const COMPANION_SUFFIXES = [".showcase.tsx", ".states.json", ".test.tsx", ".stories.tsx"];
@@ -632,7 +846,8 @@ function main(): void {
             }
           }
         }
-        showcaseContent = emitAtomCompositeShowcase(componentName, displayName, meta, source, sourceName);
+        const usage = usageMap?.get(displayName) ?? usageMap?.get(componentName);
+        showcaseContent = emitAtomCompositeShowcase(componentName, displayName, meta, source, sourceName, usage);
       }
 
       const statesContent = emitStatesJson(allExamples, sourceName);
@@ -650,4 +865,7 @@ function main(): void {
   );
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`generate-showcase-companion: ${(err as Error).message}\n`);
+  process.exit(1);
+});

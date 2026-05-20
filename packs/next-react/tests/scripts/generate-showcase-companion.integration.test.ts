@@ -707,3 +707,133 @@ describe("error boundary and stub-meta placeholder", () => {
     expect(content).not.toContain("No examples defined");
   });
 });
+
+// ── v0.7.0 hand-off contract: full-variant matrix + states + analyzer hook ──
+
+describe("v0.7.0 hand-off contract (issue #60)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fresh();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /** Set up a Crewops-shaped fixture: one CVA atom with states + optional analyzer. */
+  async function seedCrewopsFixture(opts: { withAnalyzer: boolean }): Promise<string> {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "button.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const v = cva("b", {`,
+        `  variants: {`,
+        `    intent: { primary: "p", secondary: "s", destructive: "d" },`,
+        `    size: { sm: "s", md: "m", lg: "l" },`,
+        `  },`,
+        `  defaultVariants: { intent: "primary", size: "md" },`,
+        `});`,
+        `export function Button(props: any) { return <button {...props} />; }`,
+        `export const meta = {`,
+        `  kind: "atom",`,
+        `  examples: [{ name: "default", props: { children: "Click" } }],`,
+        `  skip: [],`,
+        `  states: {`,
+        `    loading: { name: "loading-default", props: { loading: true, children: "Loading" } },`,
+        `    longText: { name: "long-text", props: { children: "A very long label that wraps" } },`,
+        `  },`,
+        `};`,
+      ].join("\n")
+    );
+    if (opts.withAnalyzer) {
+      const scriptsDir = join(dir, "scripts");
+      await mkdir(scriptsDir, { recursive: true });
+      // Stub analyzer: returns one literal hit for Button intent=primary, marks size dynamic.
+      await writeFile(
+        join(scriptsDir, "analyze-component-usage.ts"),
+        [
+          `export default async function analyze(_files: string[]) {`,
+          `  const m = new Map();`,
+          `  const literal = new Map();`,
+          `  const intent = new Map();`,
+          `  intent.set("primary", 3);`,
+          `  literal.set("intent", intent);`,
+          `  m.set("Button", { literal, dynamicProps: new Set(["size"]) });`,
+          `  return m;`,
+          `}`,
+        ].join("\n")
+      );
+      // Add an app file so the analyzer has something to scan
+      const appDir = join(dir, "app");
+      await mkdir(appDir, { recursive: true });
+      await writeFile(join(appDir, "page.tsx"), `export default function P() { return null; }\n`);
+    }
+    return join(dsDir, "button.showcase.tsx");
+  }
+
+  it("(a) generated showcase has no @ts-nocheck", async () => {
+    const showcasePath = await seedCrewopsFixture({ withAnalyzer: false });
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    const content = await readFile(showcasePath, "utf8");
+    expect(content).not.toContain("@ts-nocheck");
+  });
+
+  it("(b) full CVA variant matrix rendered (3 intents × 3 sizes = 9 combos)", async () => {
+    const showcasePath = await seedCrewopsFixture({ withAnalyzer: false });
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const content = await readFile(showcasePath, "utf8");
+    // All 3 primary-axis (intent) groups present as headings
+    expect(content).toContain(">Primary<");
+    expect(content).toContain(">Secondary<");
+    expect(content).toContain(">Destructive<");
+    // All 9 cross-product combos present in states.json
+    const states = JSON.parse(
+      await readFile(join(dir, "design-system", "atoms", "button.states.json"), "utf8")
+    );
+    // 1 explicit + 9 CVA combos = 10
+    expect(states.states.length).toBeGreaterThanOrEqual(9);
+  });
+
+  it("(c) meta.states.loading produces a Loading row in output", async () => {
+    const showcasePath = await seedCrewopsFixture({ withAnalyzer: false });
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const content = await readFile(showcasePath, "utf8");
+    expect(content).toContain(">States<");
+    expect(content).toContain(">Loading<");
+    expect(content).toContain("loading-default");
+    expect(content).toContain("loading");
+    // longText row also present
+    expect(content).toContain(">Long text<");
+    expect(content).toContain("long-text");
+  });
+
+  it("(d) with stub analyzer present, tag column appears in output", async () => {
+    const showcasePath = await seedCrewopsFixture({ withAnalyzer: true });
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    const content = await readFile(showcasePath, "utf8");
+    // At least one usage tag glyph must appear (used/dynamic/unused)
+    const hasTag = content.includes("✓") || content.includes("⚠") || content.includes("✗");
+    expect(hasTag).toBe(true);
+  });
+
+  it("(d-neg) without analyzer file, no tag glyphs are emitted", async () => {
+    const showcasePath = await seedCrewopsFixture({ withAnalyzer: false });
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const content = await readFile(showcasePath, "utf8");
+    expect(content).not.toContain("✓");
+    expect(content).not.toContain("⚠");
+    expect(content).not.toContain("✗");
+  });
+});
