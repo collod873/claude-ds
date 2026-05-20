@@ -1,4 +1,11 @@
 {
+  "managed_roots": [
+    { "root": ".claude/skills/", "strict": true },
+    { "root": ".claude/hooks/", "strict": true },
+    { "root": "design-system/", "strict": true },
+    { "root": "design-system/atoms/", "strict": false },
+    { "root": "design-system/composites/", "strict": false }
+  ],
   "lookalike_ignore": [
     ".next/**",
     ".vercel/**",

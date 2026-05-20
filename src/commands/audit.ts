@@ -29,24 +29,47 @@ async function walkDir(base: string, rel: string): Promise<string[]> {
   return results;
 }
 
-/** Managed roots that the scaffold owns — anything else present here is unexpected. */
-const MANAGED_ROOTS = [".claude/skills/", ".claude/hooks/", "design-system/"];
+/**
+ * Fallback managed roots used when the manifest does not declare managed_roots.
+ * All are strict (closed set) — matches pre-#57 behavior.
+ */
+const FALLBACK_MANAGED_ROOTS = [
+  { root: ".claude/skills/", strict: true },
+  { root: ".claude/hooks/", strict: true },
+  { root: "design-system/", strict: true },
+];
 
 /**
  * Scan managed roots and return file paths (relative to cwd) that are not in the
  * manifest file list and not suppressed by an ignore glob.
+ *
+ * Per-root strictness (#57): roots marked strict:false are open for user growth —
+ * files under those roots are never flagged as unexpected.
  */
 async function findUnexpectedFiles(
   cwd: string,
   manifestPaths: Set<string>,
   ignoreGlobs: string[],
+  managedRoots: { root: string; strict: boolean }[],
 ): Promise<string[]> {
+  const roots = managedRoots.length > 0 ? managedRoots : FALLBACK_MANAGED_ROOTS;
+
+  // Build a set of open root prefixes so strict roots can skip files that fall under them.
+  const openPrefixes = roots
+    .filter(r => !r.strict)
+    .map(r => r.root.endsWith("/") ? r.root : `${r.root}/`);
+
   const unexpected: string[] = [];
-  for (const root of MANAGED_ROOTS) {
+  for (const { root, strict } of roots) {
+    // Open roots allow user growth — never flag unexpected files here.
+    if (!strict) continue;
+
     // root has trailing slash; strip it for walkDir
     const rootDir = root.endsWith("/") ? root.slice(0, -1) : root;
     const files = await walkDir(cwd, rootDir);
     for (const f of files) {
+      // Skip files that fall under a non-strict (open) sub-root.
+      if (openPrefixes.some(prefix => f.startsWith(prefix))) continue;
       if (manifestPaths.has(f)) continue;
       // Check against ignore globs (same engine as lookalike.ts)
       const suppressed = ignoreGlobs.length > 0 && picomatch(ignoreGlobs, { dot: true })(f);
@@ -106,10 +129,11 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
     info(`${orphanCount} deprecated-path orphan(s) found — run \`claude-ds reconcile\` to remove`);
   }
 
-  // #29: unexpected-file scan — enumerate files under managed roots and flag anything
-  // not in the manifest. Strict mode is default (no flag).
+  // #29/#57: unexpected-file scan — enumerate files under managed roots and flag anything
+  // not in the manifest. Per-root strictness: strict roots flag extras; open roots allow
+  // user growth (e.g. design-system/atoms/, design-system/composites/).
   const manifestFilePaths = new Set(manifest.files.map(f => f.path));
-  const unexpectedFiles = await findUnexpectedFiles(cwd, manifestFilePaths, unexpectedIgnoreGlobs);
+  const unexpectedFiles = await findUnexpectedFiles(cwd, manifestFilePaths, unexpectedIgnoreGlobs, manifest.managed_roots);
   let unexpectedCount = 0;
   for (const f of unexpectedFiles) {
     info(`unexpected: ${f} — not in manifest (may be user-authored extension, pre-adopt orphan, or drift)`);

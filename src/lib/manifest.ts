@@ -4,17 +4,25 @@ export type Format = "markdown" | "shell" | "json";
 export interface ManifestEntry { path: string; category: Category; format?: Format; owned_keys?: string[]; }
 /** A path written by a prior pack version that should no longer exist in consumer repos. */
 export interface DeprecatedPath { path: string; since_version: string; reason: string; }
+/**
+ * A directory root that the scaffold manages.
+ * strict=true: closed set — flag any file not in the manifest.
+ * strict=false: open for user growth — never flag unexpected files here.
+ */
+export interface ManagedRoot { root: string; strict: boolean; }
 export interface Manifest {
   files: ManifestEntry[];
   canonical_paths: string[];
   lookalike_ignore: string[];
   /** Paths that prior pack versions seeded/managed but are now obsolete. `reconcile` surfaces these. */
   deprecated_paths: DeprecatedPath[];
+  /** Per-root strictness policy. Strict roots flag extra files; open roots allow user growth. */
+  managed_roots: ManagedRoot[];
 }
 const CATS = new Set<Category>(["managed","seeded","generated","hybrid"]);
 const FMTS = new Set<Format>(["markdown","shell","json"]);
 export function parseManifest(raw: string): Manifest {
-  const o = JSON.parse(raw) as { files?: unknown; canonical_paths?: unknown; lookalike_ignore?: unknown; deprecated_paths?: unknown };
+  const o = JSON.parse(raw) as { files?: unknown; canonical_paths?: unknown; lookalike_ignore?: unknown; deprecated_paths?: unknown; managed_roots?: unknown };
   if (!Array.isArray(o.files)) throw new ManifestError("files: array required");
   const out: ManifestEntry[] = [];
   for (const e of o.files as Record<string, unknown>[]) {
@@ -43,5 +51,13 @@ export function parseManifest(raw: string): Manifest {
       deprecated_paths.push({ path: d.path, since_version: d.since_version, reason: d.reason });
     }
   }
-  return { files: out, canonical_paths, lookalike_ignore, deprecated_paths };
+  const managed_roots: ManagedRoot[] = [];
+  if (Array.isArray(o.managed_roots)) {
+    for (const r of o.managed_roots as Record<string, unknown>[]) {
+      if (typeof r.root !== "string") throw new ManifestError("managed_roots entry missing root");
+      if (typeof r.strict !== "boolean") throw new ManifestError(`managed_roots[${r.root}]: strict (boolean) required`);
+      managed_roots.push({ root: r.root, strict: r.strict });
+    }
+  }
+  return { files: out, canonical_paths, lookalike_ignore, deprecated_paths, managed_roots };
 }

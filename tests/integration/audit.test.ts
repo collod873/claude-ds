@@ -76,4 +76,31 @@ describe("audit", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).not.toMatch(/unexpected:/);
   });
+
+  // #57: per-root strictness — open roots (atoms, composites) must not flag user content
+  it("does NOT flag user-authored atoms as unexpected (open root)", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(join(dir, "design-system/atoms/switch.tsx"), "export {}");
+    await writeFile(join(dir, "design-system/atoms/table.tsx"), "export {}");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/unexpected: design-system\/atoms\/switch\.tsx/);
+    expect(r.stdout).not.toMatch(/unexpected: design-system\/atoms\/table\.tsx/);
+  });
+
+  it("does NOT flag user-authored composites as unexpected (open root)", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(join(dir, "design-system/composites/data-table.tsx"), "export {}");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/unexpected: design-system\/composites\/data-table\.tsx/);
+  });
+
+  it("still flags unexpected files under strict roots (.claude/skills)", async () => {
+    await mkdir(join(dir, ".claude/skills/badge-system"), { recursive: true });
+    await writeFile(join(dir, ".claude/skills/badge-system/SKILL.md"), "# badge-system");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/unexpected: \.claude\/skills\/badge-system\/SKILL\.md/);
+  });
 });
