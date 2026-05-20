@@ -911,6 +911,65 @@ describe("AST-based meta extractor (A3)", () => {
     expect(showcaseContent).not.toContain("No examples defined");
   });
 
+  // ── carries refs + use-client (data-table style composite) ─────────────────
+
+  const FIXTURE_CARRIES_REFS = resolve(
+    "packs/next-react/tests/fixtures/showcase-companion-carries-refs"
+  );
+
+  it("mirrors 'use client' from the source onto the generated showcase", async () => {
+    copyFixture(FIXTURE_CARRIES_REFS, dir, "design-system/composites/data-table.tsx");
+    copyFixture(FIXTURE_CARRIES_REFS, dir, "design-system/_fixtures/job-fixtures.ts");
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+
+    const content = await readFile(
+      join(dir, "design-system/composites/data-table.showcase.tsx"),
+      "utf8"
+    );
+    expect(content.startsWith('"use client";')).toBe(true);
+  });
+
+  it("carries import for value identifiers referenced inside inlined arrow bodies", async () => {
+    copyFixture(FIXTURE_CARRIES_REFS, dir, "design-system/composites/data-table.tsx");
+    copyFixture(FIXTURE_CARRIES_REFS, dir, "design-system/_fixtures/job-fixtures.ts");
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(
+      join(dir, "design-system/composites/data-table.showcase.tsx"),
+      "utf8"
+    );
+    // The cell arrow `(j) => JOB_STATUS_LABEL[j.status]` was inlined as part
+    // of jobColumns; the generator must add an import for JOB_STATUS_LABEL
+    // from the same relative path the source used.
+    expect(content).toContain("JOB_STATUS_LABEL");
+    expect(content).toMatch(
+      /import\s*\{[^}]*JOB_STATUS_LABEL[^}]*\}\s*from\s*"\.\.\/_fixtures\/job-fixtures"/
+    );
+  });
+
+  it("emits a const declaration for source-local identifiers referenced in unevaluated expressions (jobColumns.map)", async () => {
+    copyFixture(FIXTURE_CARRIES_REFS, dir, "design-system/composites/data-table.tsx");
+    copyFixture(FIXTURE_CARRIES_REFS, dir, "design-system/_fixtures/job-fixtures.ts");
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(
+      join(dir, "design-system/composites/data-table.showcase.tsx"),
+      "utf8"
+    );
+    // The `sortable` example uses `jobColumns.map(c => ...)` which we keep as
+    // raw source. `jobColumns` is local to data-table.tsx (not exported), so
+    // it must be inlined as a const at the top of the showcase.
+    expect(content).toMatch(/const\s+jobColumns\s*=/);
+    expect(content).toContain("jobColumns.map");
+  });
+
   it("does not emit 'No examples defined' when functions are present in props", async () => {
     const dsDir = join(dir, "design-system", "atoms");
     await mkdir(dsDir, { recursive: true });

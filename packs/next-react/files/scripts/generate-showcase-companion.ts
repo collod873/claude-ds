@@ -180,6 +180,19 @@ function isFnMarker(v: unknown): v is FnMarker {
   return typeof v === "object" && v !== null && "__fn" in v && typeof (v as FnMarker).__fn === "string";
 }
 
+/**
+ * A reference that must be carried from the source file into the generated
+ * showcase because a captured FnMarker (arrow body, .map() call, conditional, etc.)
+ * references it as a free identifier.
+ *
+ * - "import": re-emit the same import in the showcase (paths are identical
+ *   because showcase sits beside the source).
+ * - "local": inline the resolved value as a `const` at the top of the showcase.
+ */
+type CarriedRef =
+  | { kind: "import"; localName: string; exportedName: string; rawSpec: string }
+  | { kind: "local"; name: string; serialized: string };
+
 /** Resolve `@/` import prefixes using tsconfig.json paths, falling back to `./src`. */
 function resolveAtPrefix(importPath: string, consumerRoot: string): string {
   try {
@@ -217,11 +230,20 @@ function astNodeToValue(
   node: ts.Node,
   sourceFile: ts.SourceFile,
   localScope: Map<string, ts.Node>,
-  importScope: Map<string, { filePath: string; exportName: string }>,
+  importScope: Map<string, { filePath: string; exportName: string; rawSpec: string }>,
   consumerRoot: string,
+  carried: Map<string, CarriedRef>,
   depth = 0
 ): unknown {
   if (depth > 10) return null; // guard against deep cycles
+
+  // Helper: capture an AST sub-tree as a raw-source FnMarker AND collect any
+  // free identifiers it references so the showcase can carry imports/locals.
+  const emitFn = (n: ts.Node): FnMarker => {
+    const raw = sourceFile.text.slice(n.getStart(sourceFile), n.end).trim();
+    collectRefsFromNode(n, sourceFile, localScope, importScope, new Set(), carried, consumerRoot);
+    return { __fn: raw };
+  };
 
   if (ts.isStringLiteral(node)) return node.text;
   if (ts.isNumericLiteral(node)) return Number(node.text);
@@ -241,19 +263,18 @@ function astNodeToValue(
 
   // Arrow functions / function expressions → capture as source text
   if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-    const raw = sourceFile.text.slice(node.getStart(sourceFile), node.end).trim();
-    return { __fn: raw } satisfies FnMarker;
+    return emitFn(node);
   }
 
   // Identifier — resolve from local scope or import scope
   if (ts.isIdentifier(node)) {
     const name = node.text;
     if (localScope.has(name)) {
-      return astNodeToValue(localScope.get(name)!, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+      return astNodeToValue(localScope.get(name)!, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1);
     }
     if (importScope.has(name)) {
       const imp = importScope.get(name)!;
-      return resolveImportedValue(imp.filePath, imp.exportName, consumerRoot, depth + 1);
+      return resolveImportedValue(imp.filePath, imp.exportName, consumerRoot, carried, depth + 1);
     }
     // unknown identifier — skip with warning
     process.stderr.write(
@@ -268,7 +289,7 @@ function astNodeToValue(
     for (const el of node.elements) {
       if (ts.isSpreadElement(el)) {
         // Try to expand spread by evaluating the expression
-        const spread = astNodeToValue(el.expression, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+        const spread = astNodeToValue(el.expression, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1);
         if (Array.isArray(spread)) {
           result.push(...spread);
           continue;
@@ -279,7 +300,7 @@ function astNodeToValue(
         );
         continue;
       }
-      result.push(astNodeToValue(el, sourceFile, localScope, importScope, consumerRoot, depth + 1));
+      result.push(astNodeToValue(el, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1));
     }
     return result;
   }
@@ -300,12 +321,12 @@ function astNodeToValue(
           );
           continue;
         }
-        result[key] = astNodeToValue(prop.initializer, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+        result[key] = astNodeToValue(prop.initializer, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1);
       } else if (ts.isShorthandPropertyAssignment(prop)) {
         const name = prop.name.text;
-        result[name] = astNodeToValue(prop.name, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+        result[name] = astNodeToValue(prop.name, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1);
       } else if (ts.isSpreadAssignment(prop)) {
-        const spread = astNodeToValue(prop.expression, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+        const spread = astNodeToValue(prop.expression, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1);
         if (typeof spread === "object" && spread !== null && !Array.isArray(spread) && !isFnMarker(spread)) {
           Object.assign(result, spread);
         } else {
@@ -316,8 +337,7 @@ function astNodeToValue(
       } else if (ts.isMethodDeclaration(prop) || ts.isGetAccessorDeclaration(prop)) {
         const key = ts.isIdentifier(prop.name) ? prop.name.text : null;
         if (key) {
-          const raw = sourceFile.text.slice(prop.getStart(sourceFile), prop.end).trim();
-          result[key] = { __fn: raw } satisfies FnMarker;
+          result[key] = emitFn(prop);
         }
       }
     }
@@ -331,29 +351,26 @@ function astNodeToValue(
     if (ts.isPropertyAccessExpression(expr)) {
       const objNode = expr.expression;
       const method = expr.name.text;
-      const obj = astNodeToValue(objNode, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+      const obj = astNodeToValue(objNode, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1);
       if (Array.isArray(obj)) {
         if (method === "slice" && node.arguments.length <= 2) {
-          const args = node.arguments.map((a) => astNodeToValue(a, sourceFile, localScope, importScope, consumerRoot, depth + 1)) as number[];
+          const args = node.arguments.map((a) => astNodeToValue(a, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1)) as number[];
           return obj.slice(args[0], args[1]);
         }
         if (method === "map" && node.arguments.length === 1) {
           const mapper = node.arguments[0];
           if (ts.isArrowFunction(mapper) || ts.isFunctionExpression(mapper)) {
             // Can't evaluate the mapper in a JS-free context; emit raw call as fn marker
-            const raw = sourceFile.text.slice(node.getStart(sourceFile), node.end).trim();
-            return { __fn: raw } satisfies FnMarker;
+            return emitFn(node);
           }
         }
         if (method === "concat" && node.arguments.length > 0) {
-          const raw = sourceFile.text.slice(node.getStart(sourceFile), node.end).trim();
-          return { __fn: raw } satisfies FnMarker;
+          return emitFn(node);
         }
       }
     }
     // fallback: emit as a function marker (raw call expression)
-    const raw = sourceFile.text.slice(node.getStart(sourceFile), node.end).trim();
-    return { __fn: raw } satisfies FnMarker;
+    return emitFn(node);
   }
 
   // Binary expressions, conditional, etc. — emit as fn marker
@@ -362,18 +379,17 @@ function astNodeToValue(
     ts.isConditionalExpression(node) ||
     ts.isPrefixUnaryExpression(node)
   ) {
-    const raw = sourceFile.text.slice(node.getStart(sourceFile), node.end).trim();
-    return { __fn: raw } satisfies FnMarker;
+    return emitFn(node);
   }
 
   // AsExpression (type cast) — unwrap and recurse
   if (ts.isAsExpression(node)) {
-    return astNodeToValue(node.expression, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+    return astNodeToValue(node.expression, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1);
   }
 
   // ParenthesizedExpression — unwrap
   if (ts.isParenthesizedExpression(node)) {
-    return astNodeToValue(node.expression, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+    return astNodeToValue(node.expression, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1);
   }
 
   // Anything else — warn and drop
@@ -383,11 +399,20 @@ function astNodeToValue(
   return null;
 }
 
-/** Resolve a named export from an imported file (single-hop). */
+/**
+ * Resolve a named export from an imported file (single-hop).
+ *
+ * Note: `carried` belongs to the META file's scope, not this imported file's.
+ * If an FnMarker captured from an imported file references identifiers, those
+ * references resolve in the imported file's import graph — not the meta file's.
+ * We do not currently follow them (cross-file ref carry is out of scope); the
+ * existing "unresolved identifier" warning surfaces these cases.
+ */
 function resolveImportedValue(
   filePath: string,
   exportName: string,
   consumerRoot: string,
+  carried: Map<string, CarriedRef>,
   depth: number
 ): unknown {
   if (!existsSync(filePath)) return null;
@@ -404,7 +429,7 @@ function resolveImportedValue(
     if (ts.isVariableStatement(stmt)) {
       for (const decl of stmt.declarationList.declarations) {
         if (ts.isIdentifier(decl.name) && decl.name.text === exportName && decl.initializer) {
-          return astNodeToValue(decl.initializer, sf, scope, importScope, consumerRoot, depth + 1);
+          return astNodeToValue(decl.initializer, sf, scope, importScope, consumerRoot, carried, depth + 1);
         }
       }
     }
@@ -413,13 +438,141 @@ function resolveImportedValue(
         if (spec.name.text === exportName) {
           const localName = spec.propertyName?.text ?? spec.name.text;
           if (scope.has(localName)) {
-            return astNodeToValue(scope.get(localName)!, sf, scope, importScope, consumerRoot, depth + 1);
+            return astNodeToValue(scope.get(localName)!, sf, scope, importScope, consumerRoot, carried, depth + 1);
           }
         }
       }
     }
   }
   return null;
+}
+
+/**
+ * Walk an AST sub-tree and collect free identifier references that need to be
+ * carried into the generated showcase. Called whenever we capture an arrow,
+ * function, call expression, or other unevaluated expression as an FnMarker.
+ *
+ * `bound` is the set of names introduced by enclosing function parameters and
+ * inner `const`/`let` declarations — these are skipped.
+ *
+ * Recursion: for local refs, we resolve the initializer via astNodeToValue so
+ * its value is serialized AND any nested FnMarkers inside the local also get
+ * their refs collected (carried recursively).
+ */
+function collectRefsFromNode(
+  node: ts.Node,
+  sourceFile: ts.SourceFile,
+  localScope: Map<string, ts.Node>,
+  importScope: Map<string, { filePath: string; exportName: string; rawSpec: string }>,
+  bound: Set<string>,
+  carried: Map<string, CarriedRef>,
+  consumerRoot: string
+): void {
+  // Identifier — candidate reference
+  if (ts.isIdentifier(node)) {
+    const name = node.text;
+    if (bound.has(name) || carried.has(name)) return;
+    // React is implicitly imported by the showcase, JSX globals don't need carry
+    if (name === "React" || name === "undefined" || name === "null") return;
+    if (importScope.has(name)) {
+      const imp = importScope.get(name)!;
+      carried.set(name, {
+        kind: "import",
+        localName: name,
+        exportedName: imp.exportName,
+        rawSpec: imp.rawSpec,
+      });
+      return;
+    }
+    if (localScope.has(name)) {
+      // Reserve the slot before recursing so cycles terminate.
+      carried.set(name, { kind: "local", name, serialized: "null" });
+      const initNode = localScope.get(name)!;
+      const value = astNodeToValue(initNode, sourceFile, localScope, importScope, consumerRoot, carried);
+      carried.set(name, { kind: "local", name, serialized: serializeJSValue(value) });
+      return;
+    }
+    return;
+  }
+
+  // Skip identifier on the RHS of a non-computed property access (`.foo`)
+  if (ts.isPropertyAccessExpression(node)) {
+    collectRefsFromNode(node.expression, sourceFile, localScope, importScope, bound, carried, consumerRoot);
+    return;
+  }
+
+  // Functions: extend bound with parameter names
+  if (
+    ts.isArrowFunction(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isFunctionDeclaration(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node)
+  ) {
+    const innerBound = new Set(bound);
+    for (const p of node.parameters) collectBindingNames(p.name, innerBound);
+    if (node.body) {
+      collectRefsFromNode(node.body, sourceFile, localScope, importScope, innerBound, carried, consumerRoot);
+    }
+    return;
+  }
+
+  // Object literal: keys are not references, but values are.
+  if (ts.isObjectLiteralExpression(node)) {
+    for (const prop of node.properties) {
+      if (ts.isPropertyAssignment(prop)) {
+        if (prop.name && ts.isComputedPropertyName(prop.name)) {
+          collectRefsFromNode(prop.name.expression, sourceFile, localScope, importScope, bound, carried, consumerRoot);
+        }
+        collectRefsFromNode(prop.initializer, sourceFile, localScope, importScope, bound, carried, consumerRoot);
+      } else if (ts.isShorthandPropertyAssignment(prop)) {
+        collectRefsFromNode(prop.name, sourceFile, localScope, importScope, bound, carried, consumerRoot);
+      } else if (ts.isSpreadAssignment(prop)) {
+        collectRefsFromNode(prop.expression, sourceFile, localScope, importScope, bound, carried, consumerRoot);
+      } else {
+        // method / get / set — re-enter the function path
+        collectRefsFromNode(prop, sourceFile, localScope, importScope, bound, carried, consumerRoot);
+      }
+    }
+    return;
+  }
+
+  // Block / source file: variable declarations bind names within
+  if (ts.isBlock(node) || ts.isSourceFile(node)) {
+    const innerBound = new Set(bound);
+    ts.forEachChild(node, (child) => {
+      if (ts.isVariableStatement(child)) {
+        for (const decl of child.declarationList.declarations) {
+          collectBindingNames(decl.name, innerBound);
+        }
+      } else if (ts.isFunctionDeclaration(child) && child.name) {
+        innerBound.add(child.name.text);
+      }
+    });
+    ts.forEachChild(node, (child) => {
+      collectRefsFromNode(child, sourceFile, localScope, importScope, innerBound, carried, consumerRoot);
+    });
+    return;
+  }
+
+  // Default: recurse into children
+  ts.forEachChild(node, (child) => {
+    collectRefsFromNode(child, sourceFile, localScope, importScope, bound, carried, consumerRoot);
+  });
+}
+
+/** Collect identifier names from a binding pattern (`{a, b: {c}}`, `[x, ...rest]`, plain `x`). */
+function collectBindingNames(name: ts.BindingName, set: Set<string>): void {
+  if (ts.isIdentifier(name)) {
+    set.add(name.text);
+    return;
+  }
+  if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+    for (const el of name.elements) {
+      if (ts.isBindingElement(el)) collectBindingNames(el.name, set);
+    }
+  }
 }
 
 /** Build local variable scope + import scope maps from a source file. */
@@ -429,10 +582,10 @@ function buildScopes(
   consumerRoot: string
 ): {
   localScope: Map<string, ts.Node>;
-  importScope: Map<string, { filePath: string; exportName: string }>;
+  importScope: Map<string, { filePath: string; exportName: string; rawSpec: string }>;
 } {
   const localScope = new Map<string, ts.Node>();
-  const importScope = new Map<string, { filePath: string; exportName: string }>();
+  const importScope = new Map<string, { filePath: string; exportName: string; rawSpec: string }>();
 
   for (const stmt of sf.statements) {
     // Variable declarations: const foo = ...
@@ -474,7 +627,7 @@ function buildScopes(
           const exportedName = spec.propertyName?.text ?? spec.name.text;
           // Only register value imports (skip `type` imports)
           if (!spec.isTypeOnly && !clause.isTypeOnly) {
-            importScope.set(localName, { filePath: found, exportName: exportedName });
+            importScope.set(localName, { filePath: found, exportName: exportedName, rawSpec });
           }
         }
       }
@@ -492,7 +645,11 @@ function buildScopes(
  * Functions are captured as `{ __fn: "<source text>" }` markers so the
  * JSX serializer can emit them as raw JS expressions.
  */
-function extractMetaFromAST(filePath: string): ParsedMeta | null {
+function extractMetaFromAST(filePath: string): {
+  meta: ParsedMeta;
+  carried: Map<string, CarriedRef>;
+  useClient: boolean;
+} | null {
   if (!ts) return null; // typescript not available — fall back to regex parseMeta
 
   let source: string;
@@ -505,6 +662,8 @@ function extractMetaFromAST(filePath: string): ParsedMeta | null {
   const sf = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const consumerRoot = findConsumerRoot(dirname(filePath));
   const { localScope, importScope } = buildScopes(sf, dirname(filePath), consumerRoot);
+  const carried = new Map<string, CarriedRef>();
+  const useClient = hasUseClientDirective(source);
 
   // Find `export const meta = { ... }` or `export const meta: Meta = { ... }`
   let metaInit: ts.ObjectLiteralExpression | null = null;
@@ -524,12 +683,16 @@ function extractMetaFromAST(filePath: string): ParsedMeta | null {
 
   if (!metaInit) return null;
 
-  const metaObj = astNodeToValue(metaInit, sf, localScope, importScope, consumerRoot) as Record<string, unknown> | null;
+  const metaObj = astNodeToValue(metaInit, sf, localScope, importScope, consumerRoot, carried) as Record<string, unknown> | null;
   if (!metaObj || typeof metaObj !== "object") return null;
 
   const kind = metaObj.kind as "atom" | "composite" | "reference" | undefined;
   if (kind === "reference") {
-    return { kind: "reference", title: typeof metaObj.title === "string" ? metaObj.title : "Reference" };
+    return {
+      meta: { kind: "reference", title: typeof metaObj.title === "string" ? metaObj.title : "Reference" },
+      carried,
+      useClient,
+    };
   }
   if (kind !== "atom" && kind !== "composite") return null;
 
@@ -564,7 +727,33 @@ function extractMetaFromAST(filePath: string): ParsedMeta | null {
     if (Object.keys(out).length > 0) states = out;
   }
 
-  return { kind, examples, skip, states };
+  return { meta: { kind, examples, skip, states }, carried, useClient };
+}
+
+/**
+ * Detect a `"use client"` (or `'use client'`) directive at the top of the source,
+ * ignoring leading whitespace, BOM, and leading comments.
+ */
+function hasUseClientDirective(source: string): boolean {
+  let s = source.replace(/^﻿/, "");
+  // Strip leading whitespace + comments
+  // Bounded loop avoids unbounded scanning on pathological input.
+  for (let i = 0; i < 200; i++) {
+    s = s.replace(/^\s+/, "");
+    if (s.startsWith("//")) {
+      const nl = s.indexOf("\n");
+      s = nl < 0 ? "" : s.slice(nl + 1);
+      continue;
+    }
+    if (s.startsWith("/*")) {
+      const end = s.indexOf("*/");
+      if (end < 0) break;
+      s = s.slice(end + 2);
+      continue;
+    }
+    break;
+  }
+  return /^["']use client["'];?/.test(s);
 }
 
 /** Walk up from a dir to find a package.json, returning that dir as consumer root. */
@@ -972,13 +1161,47 @@ function emitStateRow(
   ].join("\n");
 }
 
+/**
+ * Render carried refs as a block of source text to inject at the top of the
+ * showcase: grouped imports by raw spec + `const` declarations for each local.
+ * Order: imports first, then locals (so locals can reference imports).
+ */
+function renderCarriedRefs(carried: Map<string, CarriedRef>): string {
+  if (carried.size === 0) return "";
+  const importsBySpec = new Map<string, { plain: Set<string>; aliased: Map<string, string> }>();
+  const locals: string[] = [];
+  for (const ref of carried.values()) {
+    if (ref.kind === "import") {
+      let group = importsBySpec.get(ref.rawSpec);
+      if (!group) {
+        group = { plain: new Set(), aliased: new Map() };
+        importsBySpec.set(ref.rawSpec, group);
+      }
+      if (ref.localName === ref.exportedName) group.plain.add(ref.localName);
+      else group.aliased.set(ref.localName, ref.exportedName);
+    } else {
+      locals.push(`const ${ref.name} = ${ref.serialized};`);
+    }
+  }
+  const importLines: string[] = [];
+  for (const [spec, group] of importsBySpec.entries()) {
+    const parts: string[] = [];
+    for (const n of group.plain) parts.push(n);
+    for (const [local, exported] of group.aliased.entries()) parts.push(`${exported} as ${local}`);
+    importLines.push(`import { ${parts.join(", ")} } from "${spec}";`);
+  }
+  return [...importLines, ...locals].join("\n");
+}
+
 function emitAtomCompositeShowcase(
   componentName: string,
   displayName: string,
   meta: MetaAtomComposite,
   source: string,
   sourceName: string,
-  usage?: UsageInfo
+  usage?: UsageInfo,
+  carried?: Map<string, CarriedRef>,
+  useClient?: boolean
 ): string {
   const header = showcaseHeader(sourceName);
   const skip = meta.skip ?? [];
@@ -995,10 +1218,12 @@ function emitAtomCompositeShowcase(
     cvaExamples = expanded.filter((ce) => !existingNames.has(ce.name));
   }
 
+  const useClientLine = useClient ? `"use client";\n` : "";
+
   // Stub-meta: default stub with no CVA expansion → placeholder card, no component render.
   if (isStubMeta(meta.examples, cvaConfig)) {
     return [
-      header,
+      useClientLine + header,
       `import React from "react";`,
       ``,
       `export default function ${displayName}Showcase() {`,
@@ -1139,10 +1364,13 @@ function emitAtomCompositeShowcase(
     ? `import ${displayName} from "./${componentName}";`
     : `import { ${displayName} } from "./${componentName}";`;
 
+  const carriedBlock = carried ? renderCarriedRefs(carried) : "";
+
   return [
-    header,
+    useClientLine + header,
     `import React from "react";`,
     importLine,
+    ...(carriedBlock ? [carriedBlock] : []),
     ``,
     `export default function ${displayName}Showcase() {`,
     `  return (`,
@@ -1160,11 +1388,13 @@ function emitReferenceShowcase(
   componentName: string,
   displayName: string,
   meta: MetaReference,
-  sourceName: string
+  sourceName: string,
+  useClient?: boolean
 ): string {
   const header = showcaseHeader(sourceName);
+  const useClientLine = useClient ? `"use client";\n` : "";
   return [
-    header,
+    useClientLine + header,
     `import React from "react";`,
     `import { meta } from "./${componentName}";`,
     ``,
@@ -1299,7 +1529,10 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const meta = extractMetaFromAST(entryPath) ?? parseMeta(source);
+      const astExtract = extractMetaFromAST(entryPath);
+      const meta: ParsedMeta | null = astExtract ? astExtract.meta : parseMeta(source);
+      const carried = astExtract?.carried;
+      const useClient = astExtract?.useClient ?? false;
       if (!meta) {
         process.stderr.write(
           `${entryPath}:0: GEN-000: no meta export found — skipping companion generation\n`
@@ -1315,7 +1548,7 @@ async function main(): Promise<void> {
       let allExamples: Array<{ name: string; props: Record<string, unknown> }>;
 
       if (meta.kind === "reference") {
-        showcaseContent = emitReferenceShowcase(componentName, displayName, meta, sourceName);
+        showcaseContent = emitReferenceShowcase(componentName, displayName, meta, sourceName, useClient);
         allExamples = [];
       } else {
         // Compute full example list (explicit + CVA cross-product) for states.json
@@ -1332,7 +1565,7 @@ async function main(): Promise<void> {
           }
         }
         const usage = usageMap?.get(displayName) ?? usageMap?.get(componentName);
-        showcaseContent = emitAtomCompositeShowcase(componentName, displayName, meta, source, sourceName, usage);
+        showcaseContent = emitAtomCompositeShowcase(componentName, displayName, meta, source, sourceName, usage, carried, useClient);
       }
 
       const statesContent = emitStatesJson(allExamples, sourceName);

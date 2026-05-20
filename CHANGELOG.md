@@ -8,6 +8,10 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Generator (showcase-companion)
+- **Carries free identifiers referenced inside inlined expressions.** When a meta example serialized into the showcase contains an arrow body, conditional, or `.map(...)` that references a value identifier from the source file — either a relative/`@/` import or a source-local `const` — the generator now re-emits the import (preserving the original specifier) or inlines the local as a `const` at the top of the showcase. Fixes runtime `ReferenceError: <name> is not defined` for composites that use shared `_fixtures/` modules or call methods on source-local arrays.
+- **Mirrors the `"use client"` pragma.** If the source begins with `"use client"`, the generated `.showcase.tsx` now starts with the same directive. Required for any composite that passes function-valued props (cells, handlers) to a client component — without it the showcase becomes an RSC and React throws on function-prop boundary crossing.
+
 ### Breaking for consumers
 - **`tests/visual/` removed from scaffold** (issue #39). Any existing project carrying `tests/visual/.keep` or `tests/visual/README.md` should delete the `tests/visual/` directory. Run `claude-ds reconcile` to have the tool prune it automatically.
 - **`has_snapshot` field removed from `design-system/manifest.json`** — any tooling that reads `manifest.json` and references `has_snapshot` will need updating.
