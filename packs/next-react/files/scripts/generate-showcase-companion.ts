@@ -19,8 +19,39 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { join, dirname, basename } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join, dirname, basename, resolve as resolvePath } from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+
+// ── typescript loader (optional — falls back to regex parseMeta if absent) ────
+// Resolved at runtime from the script's own location so it works when the
+// script is copied into consumer projects that may lack "typescript" in
+// their own node_modules. We walk up from the script directory looking for
+// a resolvable "typescript" package.
+let ts: typeof import("typescript") | null = null;
+(function loadTypescript() {
+  // Try each candidate directory from script location upward
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  let dir = scriptDir;
+  for (let i = 0; i < 12; i++) {
+    try {
+      const req = createRequire(join(dir, "package.json"));
+      ts = req("typescript") as typeof import("typescript");
+      return;
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  // Last resort: absolute require (works if typescript is in PATH's node_modules)
+  try {
+    const req = createRequire(import.meta.url);
+    ts = req("typescript") as typeof import("typescript");
+  } catch {
+    // ts stays null; extractMetaFromAST will return null and regex fallback takes over
+  }
+})();
 
 // ── header constants ──────────────────────────────────────────────────────────
 
@@ -135,53 +166,375 @@ interface MetaReference {
 
 type ParsedMeta = MetaAtomComposite | MetaReference;
 
-/**
- * Dynamic-import based meta loader. Uses `tsx/esm/api` to load the .tsx source
- * file as a real ES module and pull the `meta` export as a live JS value —
- * preserving functions, JSX, and nested objects that the regex/JSON path
- * silently dropped (issue #61). Returns null if tsx is unavailable; callers
- * fall back to `parseMeta(source)`.
- */
-async function loadMetaFromFile(filePath: string): Promise<ParsedMeta | null> {
-  let tsImport: ((spec: string, parent: string) => Promise<unknown>) | null = null;
-  try {
-    const mod = (await import("tsx/esm/api")) as { tsImport?: typeof tsImport };
-    tsImport = mod.tsImport ?? null;
-  } catch {
-    return null;
-  }
-  if (!tsImport) return null;
+// ── AST-based meta extractor (A3) ────────────────────────────────────────────
 
-  let mod: Record<string, unknown>;
+/**
+ * Marker for function source text extracted via AST. The JSX serializer
+ * recognises this and emits the raw source inside `{...}` instead of
+ * JSON-encoding a string.
+ */
+interface FnMarker {
+  __fn: string;
+}
+function isFnMarker(v: unknown): v is FnMarker {
+  return typeof v === "object" && v !== null && "__fn" in v && typeof (v as FnMarker).__fn === "string";
+}
+
+/** Resolve `@/` import prefixes using tsconfig.json paths, falling back to `./src`. */
+function resolveAtPrefix(importPath: string, consumerRoot: string): string {
   try {
-    mod = (await tsImport(pathToFileURL(filePath).href, import.meta.url)) as Record<string, unknown>;
-  } catch (err) {
+    const tsconfigPath = join(consumerRoot, "tsconfig.json");
+    if (existsSync(tsconfigPath)) {
+      const raw = JSON.parse(readFileSync(tsconfigPath, "utf8")) as {
+        compilerOptions?: { paths?: Record<string, string[]> };
+      };
+      const paths = raw.compilerOptions?.paths ?? {};
+      // Sort longest pattern first so more-specific prefixes (e.g. "@/design-system/*")
+      // beat shorter ones (e.g. "@/*") when both would match.
+      const sortedEntries = Object.entries(paths).sort(([a], [b]) => b.length - a.length);
+      for (const [pattern, targets] of sortedEntries) {
+        const prefix = pattern.replace(/\/\*$/, "/");
+        if (importPath.startsWith(prefix) && targets[0]) {
+          const mapped = targets[0].replace(/\/\*$/, "/").replace(/^\.\//, "");
+          return importPath.replace(prefix, mapped + "/").replace(/\/+/g, "/");
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  // Default: @/ → ./src/
+  return importPath.replace(/^@\//, "src/");
+}
+
+/**
+ * Translate a TS AST node into a plain-JS value suitable for the JSX emitter.
+ * Functions become `{ __fn: "<source text>" }` markers.
+ * Identifier references are resolved by walking `localScope` first, then
+ * single-hop importing from sibling files.
+ */
+function astNodeToValue(
+  node: ts.Node,
+  sourceFile: ts.SourceFile,
+  localScope: Map<string, ts.Node>,
+  importScope: Map<string, { filePath: string; exportName: string }>,
+  consumerRoot: string,
+  depth = 0
+): unknown {
+  if (depth > 10) return null; // guard against deep cycles
+
+  if (ts.isStringLiteral(node)) return node.text;
+  if (ts.isNumericLiteral(node)) return Number(node.text);
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (node.kind === ts.SyntaxKind.NullKeyword) return null;
+  if (node.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
+
+  // Template literals — only plain (no substitutions) → string
+  if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isTemplateExpression(node)) {
     process.stderr.write(
-      `generate-showcase-companion: tsImport failed for ${filePath} (${(err as Error).message}) — falling back to regex parse\n`
+      `generate-showcase-companion [AST]: template literal with substitutions — dropping example\n`
     );
     return null;
   }
 
-  // tsx + esbuild may load .tsx as ESM (named exports) or as CJS-wrapped
-  // (only `default` and `module.exports` keys are visible). When the consumer
-  // package is CJS (no "type": "module" in its package.json) the named `meta`
-  // export only surfaces via the CJS-wrapper objects. Probe all three.
-  const namedMeta = mod.meta;
-  const defaultExport = mod.default as Record<string, unknown> | undefined;
-  const moduleExports = (mod as Record<string, unknown>)["module.exports"] as Record<string, unknown> | undefined;
-  const meta = (namedMeta
-    ?? defaultExport?.meta
-    ?? moduleExports?.meta) as Record<string, unknown> | undefined;
-  if (!meta || typeof meta !== "object") return null;
+  // Arrow functions / function expressions → capture as source text
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+    const raw = sourceFile.text.slice(node.getStart(sourceFile), node.end).trim();
+    return { __fn: raw } satisfies FnMarker;
+  }
 
-  const kind = meta.kind as "atom" | "composite" | "reference" | undefined;
+  // Identifier — resolve from local scope or import scope
+  if (ts.isIdentifier(node)) {
+    const name = node.text;
+    if (localScope.has(name)) {
+      return astNodeToValue(localScope.get(name)!, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+    }
+    if (importScope.has(name)) {
+      const imp = importScope.get(name)!;
+      return resolveImportedValue(imp.filePath, imp.exportName, consumerRoot, depth + 1);
+    }
+    // unknown identifier — skip with warning
+    process.stderr.write(
+      `generate-showcase-companion [AST]: unresolved identifier "${name}" — dropping value\n`
+    );
+    return null;
+  }
+
+  // Array literal
+  if (ts.isArrayLiteralExpression(node)) {
+    const result: unknown[] = [];
+    for (const el of node.elements) {
+      if (ts.isSpreadElement(el)) {
+        // Try to expand spread by evaluating the expression
+        const spread = astNodeToValue(el.expression, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+        if (Array.isArray(spread)) {
+          result.push(...spread);
+          continue;
+        }
+        // Non-array spread (e.g. fn marker from .map()) — emit as fn marker for whole array
+        process.stderr.write(
+          `generate-showcase-companion [AST]: spread element in array could not be expanded — skipping\n`
+        );
+        continue;
+      }
+      result.push(astNodeToValue(el, sourceFile, localScope, importScope, consumerRoot, depth + 1));
+    }
+    return result;
+  }
+
+  // Object literal
+  if (ts.isObjectLiteralExpression(node)) {
+    const result: Record<string, unknown> = {};
+    for (const prop of node.properties) {
+      if (ts.isPropertyAssignment(prop)) {
+        const key = ts.isStringLiteral(prop.name)
+          ? prop.name.text
+          : ts.isIdentifier(prop.name)
+          ? prop.name.text
+          : null;
+        if (key === null) {
+          process.stderr.write(
+            `generate-showcase-companion [AST]: computed property key — skipping\n`
+          );
+          continue;
+        }
+        result[key] = astNodeToValue(prop.initializer, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+      } else if (ts.isShorthandPropertyAssignment(prop)) {
+        const name = prop.name.text;
+        result[name] = astNodeToValue(prop.name, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+      } else if (ts.isSpreadAssignment(prop)) {
+        const spread = astNodeToValue(prop.expression, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+        if (typeof spread === "object" && spread !== null && !Array.isArray(spread) && !isFnMarker(spread)) {
+          Object.assign(result, spread);
+        } else {
+          process.stderr.write(
+            `generate-showcase-companion [AST]: spread in object — skipping\n`
+          );
+        }
+      } else if (ts.isMethodDeclaration(prop) || ts.isGetAccessorDeclaration(prop)) {
+        const key = ts.isIdentifier(prop.name) ? prop.name.text : null;
+        if (key) {
+          const raw = sourceFile.text.slice(prop.getStart(sourceFile), prop.end).trim();
+          result[key] = { __fn: raw } satisfies FnMarker;
+        }
+      }
+    }
+    return result;
+  }
+
+  // Call expressions — e.g. `jobColumns.map(...)` or `acmeJobs.slice(...)`
+  if (ts.isCallExpression(node)) {
+    // Try to evaluate simple identifier.method() calls for known array methods
+    const expr = node.expression;
+    if (ts.isPropertyAccessExpression(expr)) {
+      const objNode = expr.expression;
+      const method = expr.name.text;
+      const obj = astNodeToValue(objNode, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+      if (Array.isArray(obj)) {
+        if (method === "slice" && node.arguments.length <= 2) {
+          const args = node.arguments.map((a) => astNodeToValue(a, sourceFile, localScope, importScope, consumerRoot, depth + 1)) as number[];
+          return obj.slice(args[0], args[1]);
+        }
+        if (method === "map" && node.arguments.length === 1) {
+          const mapper = node.arguments[0];
+          if (ts.isArrowFunction(mapper) || ts.isFunctionExpression(mapper)) {
+            // Can't evaluate the mapper in a JS-free context; emit raw call as fn marker
+            const raw = sourceFile.text.slice(node.getStart(sourceFile), node.end).trim();
+            return { __fn: raw } satisfies FnMarker;
+          }
+        }
+        if (method === "concat" && node.arguments.length > 0) {
+          const raw = sourceFile.text.slice(node.getStart(sourceFile), node.end).trim();
+          return { __fn: raw } satisfies FnMarker;
+        }
+      }
+    }
+    // fallback: emit as a function marker (raw call expression)
+    const raw = sourceFile.text.slice(node.getStart(sourceFile), node.end).trim();
+    return { __fn: raw } satisfies FnMarker;
+  }
+
+  // Binary expressions, conditional, etc. — emit as fn marker
+  if (
+    ts.isBinaryExpression(node) ||
+    ts.isConditionalExpression(node) ||
+    ts.isPrefixUnaryExpression(node)
+  ) {
+    const raw = sourceFile.text.slice(node.getStart(sourceFile), node.end).trim();
+    return { __fn: raw } satisfies FnMarker;
+  }
+
+  // AsExpression (type cast) — unwrap and recurse
+  if (ts.isAsExpression(node)) {
+    return astNodeToValue(node.expression, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+  }
+
+  // ParenthesizedExpression — unwrap
+  if (ts.isParenthesizedExpression(node)) {
+    return astNodeToValue(node.expression, sourceFile, localScope, importScope, consumerRoot, depth + 1);
+  }
+
+  // Anything else — warn and drop
+  process.stderr.write(
+    `generate-showcase-companion [AST]: unhandled node kind ${ts.SyntaxKind[node.kind]} — dropping value\n`
+  );
+  return null;
+}
+
+/** Resolve a named export from an imported file (single-hop). */
+function resolveImportedValue(
+  filePath: string,
+  exportName: string,
+  consumerRoot: string,
+  depth: number
+): unknown {
+  if (!existsSync(filePath)) return null;
+  let src: string;
+  try {
+    src = readFileSync(filePath, "utf8");
+  } catch {
+    return null;
+  }
+  const sf = ts.createSourceFile(filePath, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const { localScope: scope, importScope } = buildScopes(sf, dirname(filePath), consumerRoot);
+
+  for (const stmt of sf.statements) {
+    if (ts.isVariableStatement(stmt)) {
+      for (const decl of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name) && decl.name.text === exportName && decl.initializer) {
+          return astNodeToValue(decl.initializer, sf, scope, importScope, consumerRoot, depth + 1);
+        }
+      }
+    }
+    if (ts.isExportDeclaration(stmt) && stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
+      for (const spec of stmt.exportClause.elements) {
+        if (spec.name.text === exportName) {
+          const localName = spec.propertyName?.text ?? spec.name.text;
+          if (scope.has(localName)) {
+            return astNodeToValue(scope.get(localName)!, sf, scope, importScope, consumerRoot, depth + 1);
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Build local variable scope + import scope maps from a source file. */
+function buildScopes(
+  sf: ts.SourceFile,
+  dir: string,
+  consumerRoot: string
+): {
+  localScope: Map<string, ts.Node>;
+  importScope: Map<string, { filePath: string; exportName: string }>;
+} {
+  const localScope = new Map<string, ts.Node>();
+  const importScope = new Map<string, { filePath: string; exportName: string }>();
+
+  for (const stmt of sf.statements) {
+    // Variable declarations: const foo = ...
+    if (ts.isVariableStatement(stmt)) {
+      for (const decl of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name) && decl.initializer) {
+          localScope.set(decl.name.text, decl.initializer);
+        }
+      }
+    }
+    // Import declarations: import { x, y } from "./path"
+    if (ts.isImportDeclaration(stmt) && ts.isStringLiteral(stmt.moduleSpecifier)) {
+      const rawSpec = stmt.moduleSpecifier.text;
+      // Only handle relative imports and @/ alias
+      if (!rawSpec.startsWith(".") && !rawSpec.startsWith("@/")) continue;
+
+      let resolved = rawSpec;
+      if (rawSpec.startsWith("@/")) {
+        resolved = resolveAtPrefix(rawSpec, consumerRoot);
+        // Make absolute from consumerRoot
+        if (!resolvePath(resolved).startsWith("/")) {
+          resolved = join(consumerRoot, resolved);
+        }
+      } else {
+        resolved = join(dir, resolved);
+      }
+
+      // Try extensions
+      const candidates = [resolved, resolved + ".ts", resolved + ".tsx", resolved + "/index.ts", resolved + "/index.tsx"];
+      const found = candidates.find((c) => existsSync(c));
+      if (!found) continue;
+
+      const clause = stmt.importClause;
+      if (!clause) continue;
+      const bindings = clause.namedBindings;
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const spec of bindings.elements) {
+          const localName = spec.name.text;
+          const exportedName = spec.propertyName?.text ?? spec.name.text;
+          // Only register value imports (skip `type` imports)
+          if (!spec.isTypeOnly && !clause.isTypeOnly) {
+            importScope.set(localName, { filePath: found, exportName: exportedName });
+          }
+        }
+      }
+    }
+  }
+
+  return { localScope, importScope };
+}
+
+/**
+ * AST-based meta extractor (option A3). Parses the .tsx source file with
+ * `ts.createSourceFile()` — no module loading, no CJS/ESM bridge issues.
+ * Works in any consumer regardless of `"type"` in their package.json.
+ *
+ * Functions are captured as `{ __fn: "<source text>" }` markers so the
+ * JSX serializer can emit them as raw JS expressions.
+ */
+function extractMetaFromAST(filePath: string): ParsedMeta | null {
+  if (!ts) return null; // typescript not available — fall back to regex parseMeta
+
+  let source: string;
+  try {
+    source = readFileSync(filePath, "utf8");
+  } catch {
+    return null;
+  }
+
+  const sf = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const consumerRoot = findConsumerRoot(dirname(filePath));
+  const { localScope, importScope } = buildScopes(sf, dirname(filePath), consumerRoot);
+
+  // Find `export const meta = { ... }` or `export const meta: Meta = { ... }`
+  let metaInit: ts.ObjectLiteralExpression | null = null;
+  for (const stmt of sf.statements) {
+    if (!ts.isVariableStatement(stmt)) continue;
+    const hasExport = stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+    if (!hasExport) continue;
+    for (const decl of stmt.declarationList.declarations) {
+      if (!ts.isIdentifier(decl.name) || decl.name.text !== "meta") continue;
+      if (decl.initializer && ts.isObjectLiteralExpression(decl.initializer)) {
+        metaInit = decl.initializer;
+        break;
+      }
+    }
+    if (metaInit) break;
+  }
+
+  if (!metaInit) return null;
+
+  const metaObj = astNodeToValue(metaInit, sf, localScope, importScope, consumerRoot) as Record<string, unknown> | null;
+  if (!metaObj || typeof metaObj !== "object") return null;
+
+  const kind = metaObj.kind as "atom" | "composite" | "reference" | undefined;
   if (kind === "reference") {
-    return { kind: "reference", title: typeof meta.title === "string" ? meta.title : "Reference" };
+    return { kind: "reference", title: typeof metaObj.title === "string" ? metaObj.title : "Reference" };
   }
   if (kind !== "atom" && kind !== "composite") return null;
 
-  const examples: Example[] = Array.isArray(meta.examples)
-    ? (meta.examples as unknown[]).map((e) => {
+  const examples: Example[] = Array.isArray(metaObj.examples)
+    ? (metaObj.examples as unknown[]).map((e) => {
         const obj = (e ?? {}) as Record<string, unknown>;
         return {
           name: typeof obj.name === "string" ? obj.name : "unnamed",
@@ -190,11 +543,13 @@ async function loadMetaFromFile(filePath: string): Promise<ParsedMeta | null> {
       })
     : [];
 
-  const skip: string[] = Array.isArray(meta.skip) ? (meta.skip as unknown[]).filter((s): s is string => typeof s === "string") : [];
+  const skip: string[] = Array.isArray(metaObj.skip)
+    ? (metaObj.skip as unknown[]).filter((s): s is string => typeof s === "string")
+    : [];
 
   let states: MetaStates | undefined;
-  if (meta.states && typeof meta.states === "object") {
-    const s = meta.states as Record<string, unknown>;
+  if (metaObj.states && typeof metaObj.states === "object") {
+    const s = metaObj.states as Record<string, unknown>;
     const out: MetaStates = {};
     for (const key of ["loading", "longText", "empty"] as const) {
       const v = s[key];
@@ -210,6 +565,18 @@ async function loadMetaFromFile(filePath: string): Promise<ParsedMeta | null> {
   }
 
   return { kind, examples, skip, states };
+}
+
+/** Walk up from a dir to find a package.json, returning that dir as consumer root. */
+function findConsumerRoot(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(join(dir, "package.json"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return startDir;
 }
 
 /**
@@ -526,13 +893,11 @@ function renderUsageTag(tag: "used" | "dynamic" | "unused" | null): string {
 /**
  * Recursively serialize a JS value into a valid JS expression string for
  * embedding inside a JSX `={...}` attribute brace. Unlike JSON.stringify
- * this preserves functions (via Function.prototype.toString) and nested
- * functions inside arrays/objects — required for composites like DataTable
- * whose meta carries `rowKey: (row) => string` and `columns[].cell` (#61).
+ * this preserves functions captured via AST extraction as `{ __fn: "..." }`
+ * markers (issue #61 cycle 2 — AST-based extraction).
  *
  * React elements (objects with $$typeof) are emitted as `null` with a
- * comment — meta should keep header JSX out of the value tree; if a
- * consumer needs JSX in meta, add a render escape-hatch downstream.
+ * comment — meta should keep header JSX out of the value tree.
  */
 function serializeJSValue(v: unknown): string {
   if (v === null) return "null";
@@ -541,6 +906,8 @@ function serializeJSValue(v: unknown): string {
   if (typeof v === "number") return Number.isFinite(v) ? String(v) : "null";
   if (typeof v === "boolean") return v ? "true" : "false";
   if (typeof v === "function") return `(${(v as () => unknown).toString()})`;
+  // AST function marker — emit raw source text
+  if (isFnMarker(v)) return v.__fn;
   if (Array.isArray(v)) {
     return `[${v.map((x) => serializeJSValue(x)).join(", ")}]`;
   }
@@ -558,11 +925,23 @@ function serializeJSValue(v: unknown): string {
   return "null";
 }
 
+/** Returns true if the value (or any nested value) contains an FnMarker. */
+function containsFnMarker(v: unknown): boolean {
+  if (isFnMarker(v)) return true;
+  if (Array.isArray(v)) return v.some(containsFnMarker);
+  if (typeof v === "object" && v !== null) {
+    return Object.values(v as Record<string, unknown>).some(containsFnMarker);
+  }
+  return false;
+}
+
 function renderPropsAttr(props: Record<string, unknown>): string {
   return Object.entries(props)
     .map(([k, v]) => {
-      if (typeof v === "string") return `${k}=${JSON.stringify(v)}`;
+      // Plain string with no fn markers → use JSON.stringify shorthand
+      if (typeof v === "string" && !containsFnMarker(v)) return `${k}=${JSON.stringify(v)}`;
       if (typeof v === "boolean") return v ? k : `${k}={false}`;
+      // Use serializeJSValue which handles FnMarker at any nesting depth
       return `${k}={${serializeJSValue(v)}}`;
     })
     .join(" ");
@@ -920,7 +1299,7 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const meta = (await loadMetaFromFile(entryPath)) ?? parseMeta(source);
+      const meta = extractMetaFromAST(entryPath) ?? parseMeta(source);
       if (!meta) {
         process.stderr.write(
           `${entryPath}:0: GEN-000: no meta export found — skipping companion generation\n`

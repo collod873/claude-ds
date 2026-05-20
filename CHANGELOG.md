@@ -15,6 +15,28 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [0.7.3] — 2026-05-20
+
+Replaces the broken `tsImport`/`tsx/esm/api` approach with an AST-based meta extractor (option A3, issue #61 cycle 2). Fixes showcase generation for all consumers regardless of `"type"` in package.json.
+
+### Pack changes
+- **Generator: `loadMetaFromFile` (tsImport) deleted entirely.** Replaced by `extractMetaFromAST` which parses `.tsx` source files via `ts.createSourceFile()` and walks the AST — no module loading, no CJS/ESM bridge issues.
+- **AST extractor capabilities:** handles `StringLiteral`, `NumericLiteral`, `BooleanLiteral`, `NullKeyword`, `ArrayLiteralExpression`, `ObjectLiteralExpression`. Arrow functions / function expressions → captured as `{ __fn: "<source text>" }` markers. Identifier references → resolved from local variable declarations. Import-bound identifiers → single-hop import resolver with `@/` tsconfig path support (longest-prefix-first matching). Spread elements in arrays expanded where possible. Call expressions on resolved arrays (`.slice`) executed.
+- **JSX serializer updated:** `serializeJSValue` recognises `FnMarker` and emits raw function source text inside `{...}`. `containsFnMarker` helper ensures nested functions at any depth use JS-expression syntax.
+- **`typescript` moved from devDependencies to dependencies.** The generator resolves it at runtime by walking up from the script file's location, so it works in consumer projects that don't have `typescript` themselves — and gracefully falls back to regex `parseMeta` if not found anywhere.
+- **Integration test added:** `ast-extractor-fixture` covers arrow functions referencing local consts, imports from a sibling fixture file, nested objects with function properties, and a `states` block.
+
+### Why the AST approach beats tsImport
+`tsImport` fails in any consumer without `"type": "module"` in their `package.json` — Node's CJS→ESM bridge bypasses tsx's loader hook and dies on the first TS/JSX token. The AST extractor never loads the file as a module; it reads source text and translates the object literal structure directly. Zero dynamic import, zero CJS/ESM ambiguity.
+
+### Crewops end-to-end result
+92/92 components processed, zero `tsImport failed` warnings. `data-table.showcase.tsx` renders 6 example sections + 2 states (Empty, Long text) with all `cell` functions and `rowKey` emitted verbatim and `acmeJobs`/`longCustomerNameJob` fixture data fully inlined.
+
+### Consumer impact
+No action required. The generated `.showcase.tsx` files are re-generated on the next hook fire or manual run. Function-valued props that previously fell back to regex parse (producing stub/empty output) will now generate correctly.
+
+---
+
 ## [0.7.2] — 2026-05-20
 
 Showcase generator can now express function-valued meta props. Closes #61 — unblocks Crewops#3 Step 6 (DataTable pilot).
