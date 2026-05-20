@@ -135,7 +135,7 @@
     },
     {
       "path": "design-system/types/meta.ts",
-      "category": "seeded"
+      "category": "managed"
     },
     {
       "path": "design-system/icons/.keep",

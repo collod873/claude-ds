@@ -15,6 +15,15 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [0.7.1] — 2026-05-20
+
+Recategorize `design-system/types/meta.ts` from `seeded` to `managed` so existing consumers receive the v0.7.0 `states?: MetaStates` field addition on next `claude-ds sync`. Seeded files are never re-touched after first write, which silently stranded consumers on the old Meta shape and broke the Crewops#3 step-3 contract.
+
+### Fixed
+- `claude-ds sync` now propagates updates to `design-system/types/meta.ts` (previously skipped as seeded). Hand-edits abort cleanly per the managed-file contract.
+
+---
+
 ## [0.7.0] — 2026-05-20
 
 Showcase generator gains a full-variant matrix, declarative state rows, and a pluggable usage-analyzer; `@ts-nocheck` removed from generated output. Issue #60.
