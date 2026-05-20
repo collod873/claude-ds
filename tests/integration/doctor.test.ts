@@ -161,4 +161,57 @@ describe("doctor", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).not.toContain("Root-level duplicates");
   });
+
+  // #58: doctor must honor src/ redirect (Next.js src/app layout)
+  it("src/app layout post-adopt: does NOT report app/design/* as missing (regression #58)", async () => {
+    // Simulate a Next.js project using src/app/ convention, post-adopt with app_dir=src/app
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v0.6.0", pack: "next-react", mode: "warn", app_dir: "src/app", claude_md_target: ".claude/CLAUDE.md" }, null, 2) + "\n",
+    );
+
+    // Seed the app/design/* files at their src/app/ resolved locations
+    const designDir = join(dir, "src", "app", "design");
+    await mkdir(join(designDir, "[...slug]"), { recursive: true });
+    await writeFile(join(designDir, "page.tsx"), "export default function Page() { return null; }");
+    await writeFile(join(designDir, "layout.tsx"), "export default function Layout({ children }: { children: React.ReactNode }) { return children; }");
+    await writeFile(join(designDir, "_showcase-boundary.tsx"), "export {}");
+    await writeFile(join(designDir, "_filter.tsx"), "export {}");
+    await writeFile(join(designDir, "_theme-toggle.tsx"), "export {}");
+    await writeFile(join(designDir, "[...slug]", "page.tsx"), "export default function SlugPage() { return null; }");
+    await writeFile(join(designDir, "[...slug]", "resolve.ts"), "export {}");
+
+    const r = await runCli(["doctor", "--pack", "next-react"], { cwd: dir });
+
+    // app/design/* paths must NOT appear as missing (files are at src/app/design/*)
+    expect(r.stdout).not.toContain("app/design/page.tsx` — not present");
+    expect(r.stdout).not.toContain("app/design/layout.tsx` — not present");
+    expect(r.stdout).not.toContain("app/design/[...slug]/page.tsx` — not present");
+    expect(r.stdout).not.toContain("app/design/[...slug]/resolve.ts` — not present");
+    // No nonsensical lookalike pairs from failed path resolution
+    expect(r.stdout).not.toMatch(/`app\/design\/.*` missing — lookalike/);
+  });
+
+  // #58: pre-adopt variant — doctor must detect src/app layout even without .claude-ds.json
+  it("src/app layout pre-adopt: does NOT report app/design/* as missing or with lookalikes (regression #58)", async () => {
+    // No .claude-ds.json — doctor auto-detects src/app
+    const designDir = join(dir, "src", "app", "design");
+    await mkdir(join(designDir, "[...slug]"), { recursive: true });
+    await writeFile(join(designDir, "page.tsx"), "export default function Page() { return null; }");
+    await writeFile(join(designDir, "layout.tsx"), "export default function Layout({ children }: { children: React.ReactNode }) { return children; }");
+    await writeFile(join(designDir, "_showcase-boundary.tsx"), "export {}");
+    await writeFile(join(designDir, "_filter.tsx"), "export {}");
+    await writeFile(join(designDir, "_theme-toggle.tsx"), "export {}");
+    await writeFile(join(designDir, "[...slug]", "page.tsx"), "export default function SlugPage() { return null; }");
+    await writeFile(join(designDir, "[...slug]", "resolve.ts"), "export {}");
+
+    const r = await runCli(["doctor", "--pack", "next-react"], { cwd: dir });
+
+    // app/design/* files present under src/app — must NOT appear as not-present or generate lookalikes
+    expect(r.stdout).not.toContain("app/design/page.tsx` — not present");
+    expect(r.stdout).not.toContain("app/design/layout.tsx` — not present");
+    expect(r.stdout).not.toContain("app/design/[...slug]/page.tsx` — not present");
+    expect(r.stdout).not.toContain("app/design/[...slug]/resolve.ts` — not present");
+    expect(r.stdout).not.toMatch(/`app\/design\/.*` missing — lookalike/);
+  });
 });

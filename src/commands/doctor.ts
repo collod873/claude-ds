@@ -6,7 +6,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { parseManifest } from "../lib/manifest.js";
 import { parseConfig } from "../lib/config.js";
-import { loadConfigWithMigration } from "../lib/paths.js";
+import { loadConfigWithMigration, resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { parseExceptions, openCount } from "../lib/exceptions.js";
 import { detectLookalikes, Finding } from "../lib/lookalike.js";
 import { detectPackageManager, PackageManager } from "../lib/package-manager.js";
@@ -297,24 +297,45 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
 
   const manifestRaw = await readFile(join(packDir, "manifest.json"), "utf8");
   const manifest = parseManifest(manifestRaw);
-  const canonicalPaths = manifest.canonical_paths;
 
   // Load ignore globs from on-disk config (if present), then merge with --ignore flag globs.
   // Order: pack defaults < project config < --ignore flag (project/flag extend, not replace).
   const configPath = join(cwd, ".claude-ds.json");
   let configIgnore: string[] = [];
+  let appDir: string = "app";
   if (await exists(configPath)) {
     try {
       const cfg = parseConfig(await readFile(configPath, "utf8"));
       configIgnore = cfg.lookalike_ignore;
+      appDir = cfg.app_dir;
     } catch {
       // parseConfig will error properly later; don't block doctor on it here
     }
+  } else {
+    // Pre-adopt: detect src/ layout so doctor doesn't false-positive on src/app projects (#58)
+    appDir = await detectAppDir(cwd);
   }
+
+  // Resolve canonical paths through app_dir for the fs existence check (#58).
+  // app/* → <app_dir>/* so src/app projects don't false-positive.
+  // We pass resolved paths to detectLookalikes, then remap Finding.canonical back
+  // to the original manifest path for display (output stays grep-friendly with app/).
+  const resolvedToManifest = new Map<string, string>();
+  const resolvedCanonicalPaths = manifest.canonical_paths.map(p => {
+    const resolved = resolveManifestPath(p, appDir);
+    resolvedToManifest.set(resolved, p);
+    return resolved;
+  });
+
   const flagGlobs = opts.ignore ? opts.ignore.split(",").map(g => g.trim()).filter(Boolean) : [];
   const ignoreGlobs = [...manifest.lookalike_ignore, ...configIgnore, ...flagGlobs];
 
-  const findings = await detectLookalikes(cwd, canonicalPaths, ignoreGlobs);
+  const rawFindings = await detectLookalikes(cwd, resolvedCanonicalPaths, ignoreGlobs);
+  // Remap resolved paths back to manifest-canonical display paths.
+  const findings = rawFindings.map(f => ({
+    ...f,
+    canonical: resolvedToManifest.get(f.canonical) ?? f.canonical,
+  }));
   const pm = await detectPackageManager(cwd);
 
   // #23: scan for root-level dupes of canonical design-system/ files
@@ -340,13 +361,14 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
       }
     }
 
-    // Check which managed files are missing
-    const managedPaths = manifest.files
-      .filter(f => f.category === "managed")
-      .map(f => f.path);
+    // Check which managed files are missing.
+    // Resolve through app_dir so src/app projects (#58) don't false-positive.
+    // Store the manifest path for display; check the resolved path on disk.
+    const managedFiles = manifest.files.filter(f => f.category === "managed");
     const missingManaged: string[] = [];
-    for (const p of managedPaths) {
-      if (!(await exists(join(cwd, p)))) missingManaged.push(p);
+    for (const f of managedFiles) {
+      const resolvedPath = resolveManifestPath(f.path, appDir);
+      if (!(await exists(join(cwd, resolvedPath)))) missingManaged.push(f.path);
     }
 
     result = {
