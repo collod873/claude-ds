@@ -15,6 +15,24 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [0.7.2] — 2026-05-20
+
+Showcase generator can now express function-valued meta props. Closes #61 — unblocks Crewops#3 Step 6 (DataTable pilot).
+
+### Pack changes
+- Generator: meta is now loaded via dynamic `tsImport` from `tsx/esm/api` instead of regex + `JSON.parse`. Functions in meta (`rowKey`, `columns[].cell`, etc.) survive as real JS values.
+- Generator: prop emit replaced with a recursive JS-value serializer that handles strings, booleans, numbers, null, arrays, plain objects, and functions (via `Function.prototype.toString`). Nested functions inside arrays/objects are preserved. React elements inside meta (rare) are emitted as `null` with an explanatory comment.
+- Generator: when `tsx/esm/api` is unavailable or `tsImport` throws (e.g. a source file's transitive imports crash at module-load in a Node context), the generator falls back to the existing regex/JSON path and logs a warning to stderr.
+
+### Why the dynamic-import path
+The JSON-only ceiling silently dropped function props, so any composite whose required props were functions (DataTable being the canonical case) fell through to the stub placeholder. Option A in #61 (tsx-runtime eval) is the only fix that doesn't keep producing new blockers as composites get richer.
+
+### Consumer impact
+- Consumers must have `tsx` installed (Crewops already does — it's how the generator is run today).
+- No meta-syntax changes. Existing scalar-only metas continue to render identically.
+
+---
+
 ## [0.7.1] — 2026-05-20
 
 Recategorize `design-system/types/meta.ts` from `seeded` to `managed` so existing consumers receive the v0.7.0 `states?: MetaStates` field addition on next `claude-ds sync`. Seeded files are never re-touched after first write, which silently stranded consumers on the old Meta shape and broke the Crewops#3 step-3 contract.

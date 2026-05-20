@@ -20,6 +20,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
+import { pathToFileURL } from "node:url";
 
 // ── header constants ──────────────────────────────────────────────────────────
 
@@ -135,10 +136,87 @@ interface MetaReference {
 type ParsedMeta = MetaAtomComposite | MetaReference;
 
 /**
- * Regex-based meta extraction from source.
- * Finds `export const meta = { ... }` and evaluates the shape.
- * This is intentionally simple — works for JSON-compatible meta values.
- * Dynamic import would require esbuild/tsx runtime in the consumer which we cannot guarantee.
+ * Dynamic-import based meta loader. Uses `tsx/esm/api` to load the .tsx source
+ * file as a real ES module and pull the `meta` export as a live JS value —
+ * preserving functions, JSX, and nested objects that the regex/JSON path
+ * silently dropped (issue #61). Returns null if tsx is unavailable; callers
+ * fall back to `parseMeta(source)`.
+ */
+async function loadMetaFromFile(filePath: string): Promise<ParsedMeta | null> {
+  let tsImport: ((spec: string, parent: string) => Promise<unknown>) | null = null;
+  try {
+    const mod = (await import("tsx/esm/api")) as { tsImport?: typeof tsImport };
+    tsImport = mod.tsImport ?? null;
+  } catch {
+    return null;
+  }
+  if (!tsImport) return null;
+
+  let mod: Record<string, unknown>;
+  try {
+    mod = (await tsImport(pathToFileURL(filePath).href, import.meta.url)) as Record<string, unknown>;
+  } catch (err) {
+    process.stderr.write(
+      `generate-showcase-companion: tsImport failed for ${filePath} (${(err as Error).message}) — falling back to regex parse\n`
+    );
+    return null;
+  }
+
+  // tsx + esbuild may load .tsx as ESM (named exports) or as CJS-wrapped
+  // (only `default` and `module.exports` keys are visible). When the consumer
+  // package is CJS (no "type": "module" in its package.json) the named `meta`
+  // export only surfaces via the CJS-wrapper objects. Probe all three.
+  const namedMeta = mod.meta;
+  const defaultExport = mod.default as Record<string, unknown> | undefined;
+  const moduleExports = (mod as Record<string, unknown>)["module.exports"] as Record<string, unknown> | undefined;
+  const meta = (namedMeta
+    ?? defaultExport?.meta
+    ?? moduleExports?.meta) as Record<string, unknown> | undefined;
+  if (!meta || typeof meta !== "object") return null;
+
+  const kind = meta.kind as "atom" | "composite" | "reference" | undefined;
+  if (kind === "reference") {
+    return { kind: "reference", title: typeof meta.title === "string" ? meta.title : "Reference" };
+  }
+  if (kind !== "atom" && kind !== "composite") return null;
+
+  const examples: Example[] = Array.isArray(meta.examples)
+    ? (meta.examples as unknown[]).map((e) => {
+        const obj = (e ?? {}) as Record<string, unknown>;
+        return {
+          name: typeof obj.name === "string" ? obj.name : "unnamed",
+          props: (obj.props && typeof obj.props === "object" ? obj.props : {}) as Record<string, unknown>,
+        };
+      })
+    : [];
+
+  const skip: string[] = Array.isArray(meta.skip) ? (meta.skip as unknown[]).filter((s): s is string => typeof s === "string") : [];
+
+  let states: MetaStates | undefined;
+  if (meta.states && typeof meta.states === "object") {
+    const s = meta.states as Record<string, unknown>;
+    const out: MetaStates = {};
+    for (const key of ["loading", "longText", "empty"] as const) {
+      const v = s[key];
+      if (v && typeof v === "object") {
+        const spec = v as Record<string, unknown>;
+        out[key] = {
+          name: typeof spec.name === "string" ? spec.name : key,
+          props: (spec.props && typeof spec.props === "object" ? spec.props : {}) as Record<string, unknown>,
+        };
+      }
+    }
+    if (Object.keys(out).length > 0) states = out;
+  }
+
+  return { kind, examples, skip, states };
+}
+
+/**
+ * Regex-based meta extraction from source. Fallback for when `tsx/esm/api`
+ * is unavailable or fails to import the source (e.g. module-level side
+ * effects from `next/navigation` or similar). Works for JSON-compatible
+ * meta values only — functions and JSX in meta are dropped.
  */
 function parseMeta(source: string): ParsedMeta | null {
   // Find 'export const meta' and grab the kind
@@ -445,13 +523,47 @@ function renderUsageTag(tag: "used" | "dynamic" | "unused" | null): string {
   return ` <span title="not used in app" className="text-xs">✗</span>`;
 }
 
+/**
+ * Recursively serialize a JS value into a valid JS expression string for
+ * embedding inside a JSX `={...}` attribute brace. Unlike JSON.stringify
+ * this preserves functions (via Function.prototype.toString) and nested
+ * functions inside arrays/objects — required for composites like DataTable
+ * whose meta carries `rowKey: (row) => string` and `columns[].cell` (#61).
+ *
+ * React elements (objects with $$typeof) are emitted as `null` with a
+ * comment — meta should keep header JSX out of the value tree; if a
+ * consumer needs JSX in meta, add a render escape-hatch downstream.
+ */
+function serializeJSValue(v: unknown): string {
+  if (v === null) return "null";
+  if (v === undefined) return "undefined";
+  if (typeof v === "string") return JSON.stringify(v);
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : "null";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "function") return `(${(v as () => unknown).toString()})`;
+  if (Array.isArray(v)) {
+    return `[${v.map((x) => serializeJSValue(x)).join(", ")}]`;
+  }
+  if (typeof v === "object") {
+    const obj = v as Record<string | symbol, unknown>;
+    if ((obj as { $$typeof?: symbol }).$$typeof) {
+      return "null /* React element in meta — not serializable; use a render escape-hatch */";
+    }
+    const entries = Object.entries(obj).map(([k, val]) => {
+      const keyStr = /^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k);
+      return `${keyStr}: ${serializeJSValue(val)}`;
+    });
+    return `{ ${entries.join(", ")} }`;
+  }
+  return "null";
+}
+
 function renderPropsAttr(props: Record<string, unknown>): string {
   return Object.entries(props)
     .map(([k, v]) => {
-      if (typeof v === "string") return `${k}="${v}"`;
+      if (typeof v === "string") return `${k}=${JSON.stringify(v)}`;
       if (typeof v === "boolean") return v ? k : `${k}={false}`;
-      if (v === null) return `${k}={null}`;
-      return `${k}={${JSON.stringify(v)}}`;
+      return `${k}={${serializeJSValue(v)}}`;
     })
     .join(" ");
 }
@@ -532,13 +644,7 @@ function emitAtomCompositeShowcase(
   if (explicitExamples.length > 0) {
     const blocks = explicitExamples
       .map((ex) => {
-        const propsStr = Object.entries(ex.props)
-          .map(([k, v]) => {
-            if (typeof v === "string") return `${k}="${v}"`;
-            if (typeof v === "boolean") return v ? k : `${k}={false}`;
-            return `${k}={${JSON.stringify(v)}}`;
-          })
-          .join(" ");
+        const propsStr = renderPropsAttr(ex.props);
         return [
           `        <div className="flex flex-col items-start gap-1">`,
           `          <${displayName}${propsStr ? " " + propsStr : ""} />`,
@@ -814,7 +920,7 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const meta = parseMeta(source);
+      const meta = (await loadMetaFromFile(entryPath)) ?? parseMeta(source);
       if (!meta) {
         process.stderr.write(
           `${entryPath}:0: GEN-000: no meta export found — skipping companion generation\n`
