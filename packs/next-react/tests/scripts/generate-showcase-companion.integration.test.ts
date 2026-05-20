@@ -199,6 +199,30 @@ describe("generate-showcase-companion.ts [integration]", () => {
     expect(r.status).toBe(0);
   });
 
+  // ── no @ts-nocheck ────────────────────────────────────────────────────────
+
+  it("generated .showcase.tsx does not contain @ts-nocheck", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    copyFixture(FIXTURE_ATOM, dir, "design-system/atoms/button.tsx");
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(join(dsDir, "button.showcase.tsx"), "utf8");
+    expect(content).not.toContain("@ts-nocheck");
+  });
+
+  it("CVA-expanded .showcase.tsx does not contain @ts-nocheck", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    copyFixture(FIXTURE_CVA, dir, "design-system/atoms/badge.tsx");
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(join(dsDir, "badge.showcase.tsx"), "utf8");
+    expect(content).not.toContain("@ts-nocheck");
+  });
+
   // ── header format ──────────────────────────────────────────────────────────
 
   it("header in .showcase.tsx includes the source filename", async () => {
