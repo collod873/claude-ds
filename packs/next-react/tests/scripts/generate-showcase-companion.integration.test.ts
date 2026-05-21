@@ -864,6 +864,174 @@ describe("v0.7.0 hand-off contract (issue #60)", () => {
   });
 });
 
+// ── v0.7.8 showcase format finalization (issue #65) ──────────────────────────
+
+describe("v0.7.8 showcase format finalization (issue #65)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fresh();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /** Seed an atom whose CVA matches a name from explicit examples (overlap intent). */
+  async function seedButtonWithIconAndStates(opts: { withAnalyzer: boolean }): Promise<string> {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "button.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const v = cva("b", {`,
+        `  variants: {`,
+        `    intent: { primary: "p", secondary: "s" },`,
+        `    size: { sm: "sm", md: "md", icon: "ic", "icon-sm": "ics" },`,
+        `  },`,
+        `  defaultVariants: { intent: "primary", size: "md" },`,
+        `});`,
+        `export function Button(props: any) { return <button {...props} />; }`,
+        `export const meta = {`,
+        `  kind: "atom",`,
+        `  examples: [{ name: "intent=primary_size=md", props: { children: "Click" } }],`,
+        `  skip: [],`,
+        `  states: {`,
+        `    disabled: { name: "disabled", props: { children: "Disabled" } },`,
+        `    hover:    { name: "hover",    props: { children: "Hover" } },`,
+        `    focus:    { name: "focus",    props: { children: "Focus" } },`,
+        `    pressed:  { name: "pressed",  props: { children: "Pressed" } },`,
+        `    expanded: { name: "expanded", props: { children: "Expanded" } },`,
+        `    invalid:  { name: "invalid",  props: { children: "Invalid" } },`,
+        `  },`,
+        `};`,
+      ].join("\n")
+    );
+    if (opts.withAnalyzer) {
+      const scriptsDir = join(dir, "scripts");
+      await mkdir(scriptsDir, { recursive: true });
+      await writeFile(
+        join(scriptsDir, "analyze-component-usage.ts"),
+        [
+          `export default async function analyze(_files: string[]) {`,
+          `  const m = new Map();`,
+          `  const literal = new Map();`,
+          `  const intent = new Map();`,
+          // primary is in CVA → goes to Used row.
+          `  intent.set("primary", 8);`,
+          // "ghost" is NOT in CVA → goes to Unknown row.
+          `  intent.set("ghost", 2);`,
+          `  literal.set("intent", intent);`,
+          `  m.set("Button", { literal, dynamicProps: new Set() });`,
+          `  return m;`,
+          `}`,
+        ].join("\n")
+      );
+      const appDir = join(dir, "app");
+      await mkdir(appDir, { recursive: true });
+      await writeFile(join(appDir, "page.tsx"), `export default function P() { return null; }\n`);
+    }
+    return join(dsDir, "button.showcase.tsx");
+  }
+
+  it("(#1) Variants grid renders the full CVA matrix even when names overlap with Examples", async () => {
+    const showcasePath = await seedButtonWithIconAndStates({ withAnalyzer: false });
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    const content = await readFile(showcasePath, "utf8");
+    // explicit example name collides with intent=primary, size=md; the combo must
+    // still render in the Variants grid (no dedup).
+    const variantsIdx = content.indexOf(">Variants<");
+    expect(variantsIdx).toBeGreaterThan(-1);
+    const variantsBlock = content.slice(variantsIdx);
+    expect(variantsBlock).toContain('intent="primary" size="md"');
+    expect(variantsBlock).toContain('intent="secondary" size="md"');
+  });
+
+  it("(#2) icon* size cells inject the lucide Square placeholder", async () => {
+    const showcasePath = await seedButtonWithIconAndStates({ withAnalyzer: false });
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const content = await readFile(showcasePath, "utf8");
+    // Square import is emitted from lucide-react
+    expect(content).toContain('import { Square } from "lucide-react";');
+    // Square is rendered inside both icon and icon-sm cells
+    expect(content).toMatch(/size="icon"[\s\S]*?<Square/);
+    expect(content).toMatch(/size="icon-sm"[\s\S]*?<Square/);
+  });
+
+  it("(#3) per-cell ✓/⚠/✗ tags are dropped from the Variants grid", async () => {
+    const showcasePath = await seedButtonWithIconAndStates({ withAnalyzer: true });
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const content = await readFile(showcasePath, "utf8");
+    // The variant grid never carries glyph spans on per-cell labels.
+    const variantsIdx = content.indexOf(">Variants<");
+    const usageIdx = content.indexOf(">Usage<");
+    expect(variantsIdx).toBeGreaterThan(-1);
+    expect(usageIdx).toBeGreaterThan(-1);
+    const variantsBlock = content.slice(variantsIdx);
+    // glyphs may live only in the Usage block (which sits above Variants)
+    expect(variantsBlock).not.toContain("✓");
+    expect(variantsBlock).not.toContain("✗");
+    expect(variantsBlock).not.toContain("⚠");
+    // sanity: Usage block sits above Variants
+    expect(usageIdx).toBeLessThan(variantsIdx);
+  });
+
+  it("(#3) Usage block renders ✓ Used (in CVA) and ✗ Unknown (not in CVA) rows", async () => {
+    const showcasePath = await seedButtonWithIconAndStates({ withAnalyzer: true });
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const content = await readFile(showcasePath, "utf8");
+    expect(content).toContain(">Usage<");
+    // ✓ Used: intent=primary (8) — value is in CVA
+    expect(content).toMatch(/✓[\s\S]*?Used[\s\S]*?intent="primary" \(8\)/);
+    // ✗ Unknown: intent=ghost (2) — value NOT in CVA
+    expect(content).toMatch(/✗[\s\S]*?Unknown at callsites[\s\S]*?intent="ghost" \(2\)/);
+    // Dead-in-CVA row is deferred — no ⚠ row in default config
+    expect(content).not.toContain("⚠");
+  });
+
+  it("(#4) States section renders a row per declared state with force mechanism", async () => {
+    const showcasePath = await seedButtonWithIconAndStates({ withAnalyzer: false });
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const content = await readFile(showcasePath, "utf8");
+    // Section heading present
+    expect(content).toContain(">States<");
+    // Disabled row uses the disabled attribute
+    expect(content).toMatch(/>Disabled<[\s\S]*?disabled[\s\S]*?>Disabled</);
+    // Hover row wraps in .force-hover
+    expect(content).toMatch(/>Hover<[\s\S]*?force-hover/);
+    // Focus row wraps in .force-focus
+    expect(content).toMatch(/>Focus<[\s\S]*?force-focus/);
+    // aria-* attributes on pressed / expanded / invalid
+    expect(content).toMatch(/>Pressed<[\s\S]*?aria-pressed="true"/);
+    expect(content).toMatch(/>Expanded<[\s\S]*?aria-expanded="true"/);
+    expect(content).toMatch(/>Invalid<[\s\S]*?aria-invalid="true"/);
+  });
+
+  it("(#4) no States section emitted when meta.states declares no rows", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "tag.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const v = cva("t", { variants: { tone: { neutral: "n" } } });`,
+        `export function Tag(props: any) { return <span {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }] };`,
+      ].join("\n")
+    );
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const content = await readFile(join(dsDir, "tag.showcase.tsx"), "utf8");
+    expect(content).not.toContain(">States<");
+  });
+});
+
 // ── AST-based meta extractor integration tests (issue #61 cycle 2) ───────────
 
 const FIXTURE_AST_EXTRACTOR = resolve("packs/next-react/tests/fixtures/ast-extractor-fixture");

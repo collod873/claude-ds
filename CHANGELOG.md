@@ -15,6 +15,22 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [0.7.8] — 2026-05-21
+
+Showcase format finalization after the Crewops Button pilot HITL review. Five bundled changes so the pilot resyncs once before Step 8 fan-out across 88 components. Issue #65.
+
+### Pack changes
+- **Variants grid renders the full CVA matrix.** Dedup against `meta.examples` is gone — Examples is the curated cut, Variants is the exhaustive proof; overlap is intentional. Readers can now compare `primary sm` next to `secondary sm` in the same row.
+- **Icon-size cells inject a lucide `Square` placeholder.** Any auto-generated combo whose `size` value starts with `icon` (e.g. `icon`, `icon-sm`, `icon-lg`) gets `<Square aria-hidden className="h-4 w-4" />` as children when none are supplied. Showcase auto-imports `Square` from `lucide-react` only when at least one icon cell needs it.
+- **Per-cell ✓/⚠/✗ tags dropped; Usage block lifted to top of page.** The Variants grid no longer carries glyph spans per cell. The analyzer's literal-callsite output drives a `Usage` section above Examples with two rows: ✓ Used (values in CVA, with counts) and ✗ Unknown at callsites (values passed in app that the CVA does not declare). The ⚠ Dead-in-CVA row is deferred behind a future config flag — false-positive trap while consumer apps are mostly unbuilt.
+- **Forced-state rows.** `meta.states` now supports `disabled`, `hover`, `focus`, `pressed`, `expanded`, `invalid` in addition to `loading`, `longText`, `empty`. The generator renders one row per declared state, forcing the state via either a wrapper class (`.force-hover`, `.force-focus`) or an attribute (`disabled`, `aria-pressed`, `aria-expanded`, `aria-invalid`). Component CSS must opt in to wrapper-class forcing with a `:where(.force-X, :X)` selector.
+- **`Meta.states` type extended.** `design-system/types/meta.ts` documents each new state name with inline TSDoc explaining when to declare it. Enables the Crewops authoring rule "if the component has hover styling, declare `states.hover`".
+
+### Consumer migration
+No file moves. Consumers should add `states.disabled` / `states.hover` / `states.focus` / etc. to component meta blocks where interactive surfaces exist, and rewrite hover/focus rules to `:where(.force-hover, :hover)` so the forced rows render visibly.
+
+---
+
 ## [0.7.4] — 2026-05-20
 
 Two showcase-generator gaps surfaced by the Crewops DataTable pilot. Without these, every composite that uses shared `_fixtures/` modules or is marked `"use client"` needs the same manual patch after each regen.

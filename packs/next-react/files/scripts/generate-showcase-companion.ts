@@ -159,7 +159,38 @@ interface MetaStates {
   loading?: StateSpec;
   longText?: StateSpec;
   empty?: StateSpec;
+  disabled?: StateSpec;
+  hover?: StateSpec;
+  focus?: StateSpec;
+  pressed?: StateSpec;
+  expanded?: StateSpec;
+  invalid?: StateSpec;
 }
+
+const STATE_KEYS = [
+  "loading",
+  "longText",
+  "empty",
+  "disabled",
+  "hover",
+  "focus",
+  "pressed",
+  "expanded",
+  "invalid",
+] as const;
+type StateKey = (typeof STATE_KEYS)[number];
+
+const STATE_LABELS: Record<StateKey, string> = {
+  loading: "Loading",
+  longText: "Long text",
+  empty: "Empty",
+  disabled: "Disabled",
+  hover: "Hover",
+  focus: "Focus",
+  pressed: "Pressed",
+  expanded: "Expanded",
+  invalid: "Invalid",
+};
 
 interface MetaAtomComposite {
   kind: "atom" | "composite";
@@ -846,7 +877,7 @@ function extractMetaFromAST(filePath: string): {
   if (metaObj.states && typeof metaObj.states === "object") {
     const s = metaObj.states as Record<string, unknown>;
     const out: MetaStates = {};
-    for (const key of ["loading", "longText", "empty"] as const) {
+    for (const key of STATE_KEYS) {
       const v = s[key];
       if (v && typeof v === "object") {
         const spec = v as Record<string, unknown>;
@@ -957,7 +988,7 @@ function parseStates(source: string): MetaStates | undefined {
       .replace(/:\s*'([^']*)'/g, ':"$1"');
     const parsed = JSON.parse(sanitized) as Record<string, unknown>;
     const out: MetaStates = {};
-    for (const key of ["loading", "longText", "empty"] as const) {
+    for (const key of STATE_KEYS) {
       const v = parsed[key];
       if (v && typeof v === "object") {
         const spec = v as Record<string, unknown>;
@@ -1186,20 +1217,27 @@ function isStubMeta(examples: Example[], cvaConfig: CvaConfig | null): boolean {
 // ── showcase emitters ─────────────────────────────────────────────────────────
 
 /**
- * Determine if a size value name refers to an icon-only button slot.
- * Used to decide whether to inject text children.
+ * Determine if a size value name refers to an icon-only slot.
+ * Names starting with "icon" (e.g. "icon", "icon-sm", "icon-lg") qualify.
  */
 function isIconSize(sizeValue: string): boolean {
-  return sizeValue.includes("icon");
+  return sizeValue.startsWith("icon");
 }
 
 /**
- * Build the children prop string for an auto-generated CVA combo.
- * Icon sizes get no children; everything else gets the display name as text.
+ * Build the JSX children string for an auto-generated CVA combo. Returns one of:
+ *   - "" — no children (self-close); used when explicit children are passed via props
+ *   - `<Square aria-hidden="true" className="h-4 w-4" />` — icon-only sizes
+ *   - the displayName as a text node — text-bearing sizes
+ *
+ * When the icon placeholder is emitted, `lucide-react` `Square` must be imported
+ * by the showcase; emitAtomCompositeShowcase tracks this and emits the import
+ * conditionally.
  */
 function autoChildren(props: Record<string, string>, displayName: string): string {
+  if ("children" in props) return ""; // explicit children present
   const sizeVal = props["size"] ?? "";
-  if (isIconSize(sizeVal)) return "";
+  if (isIconSize(sizeVal)) return `<Square aria-hidden="true" className="h-4 w-4" />`;
   return displayName;
 }
 
@@ -1208,25 +1246,6 @@ interface UsageInfo {
   dynamicProps: Set<string>;
 }
 type UsageMap = Map<string, UsageInfo>;
-
-function usageTagFor(
-  usage: UsageInfo | undefined,
-  prop: string,
-  value: string
-): "used" | "dynamic" | "unused" | null {
-  if (!usage) return null;
-  const litProp = usage.literal.get(prop);
-  if (litProp && litProp.has(value) && (litProp.get(value) ?? 0) > 0) return "used";
-  if (usage.dynamicProps.has(prop)) return "dynamic";
-  return "unused";
-}
-
-function renderUsageTag(tag: "used" | "dynamic" | "unused" | null): string {
-  if (tag === null) return "";
-  if (tag === "used") return ` <span title="used in app" className="text-xs">✓</span>`;
-  if (tag === "dynamic") return ` <span title="dynamic prop only" className="text-xs">⚠</span>`;
-  return ` <span title="not used in app" className="text-xs">✗</span>`;
-}
 
 /**
  * Recursively serialize a JS value into a valid JS expression string for
@@ -1285,29 +1304,92 @@ function renderPropsAttr(props: Record<string, unknown>): string {
     .join(" ");
 }
 
+/**
+ * Force-state mechanism per declared state key:
+ *  - wrapperClass: emit a `<div className="...">` around the cell
+ *  - attrInject:   merge an attribute into the component's props before rendering
+ */
+const FORCE_WRAPPER: Partial<Record<StateKey, string>> = {
+  hover: "force-hover",
+  focus: "force-focus",
+};
+
+const FORCE_ATTR: Partial<Record<StateKey, Record<string, unknown>>> = {
+  disabled: { disabled: true },
+  pressed: { "aria-pressed": "true" },
+  expanded: { "aria-expanded": "true" },
+  invalid: { "aria-invalid": "true" },
+};
+
 function emitStateRow(
   displayName: string,
-  label: string,
-  spec: StateSpec,
-  hasDefault: boolean
+  stateKey: StateKey,
+  spec: StateSpec
 ): string {
-  const propsStr = renderPropsAttr(spec.props);
-  const children = typeof spec.props["children"] === "string"
-    ? "" // children already in props
-    : "";
-  const tagOpen = `<${displayName}${propsStr ? " " + propsStr : ""}${children ? `>${children}</${displayName}>` : " />"}`;
-  void hasDefault;
+  const label = STATE_LABELS[stateKey];
+  const merged: Record<string, unknown> = { ...(FORCE_ATTR[stateKey] ?? {}), ...spec.props };
+  // Render a string `children` as a JSX text child rather than as an attribute,
+  // so the showcase visibly shows the label text inside the component.
+  const childrenVal = merged["children"];
+  const renderAsChild = typeof childrenVal === "string";
+  if (renderAsChild) delete merged["children"];
+  const propsStr = renderPropsAttr(merged);
+  const tag = renderAsChild
+    ? `<${displayName}${propsStr ? " " + propsStr : ""}>${childrenVal}</${displayName}>`
+    : `<${displayName}${propsStr ? " " + propsStr : ""} />`;
+  const wrapper = FORCE_WRAPPER[stateKey];
+  const cell = wrapper
+    ? `<div className="${wrapper}">${tag}</div>`
+    : tag;
   return [
     `        <section className="mb-6">`,
     `          <h2 className="text-lg font-semibold mb-3">${label}</h2>`,
     `          <div className="flex flex-wrap items-end gap-3">`,
     `            <div className="flex flex-col items-start gap-1">`,
-    `              ${tagOpen}`,
+    `              ${cell}`,
     `              <span className="text-xs text-muted-foreground">${spec.name}</span>`,
     `            </div>`,
     `          </div>`,
     `        </section>`,
   ].join("\n");
+}
+
+/**
+ * Build the top-of-page Usage block from analyzer output cross-referenced with
+ * the component's CVA config. Two rows:
+ *   ✓ Used — (prop, value) pairs found in callsites that exist in the CVA, with counts
+ *   ✗ Unknown at callsites — (prop, value) pairs found in callsites that the CVA does not declare
+ *
+ * Returns "" when no analyzer was registered for the component or when both rows
+ * would be empty.
+ */
+function emitUsageBlock(usage: UsageInfo | undefined, cvaConfig: CvaConfig | null): string {
+  if (!usage) return "";
+  const used: string[] = [];
+  const unknown: string[] = [];
+  for (const [prop, valueMap] of usage.literal.entries()) {
+    const cvaValues = cvaConfig?.variants[prop] ?? null;
+    for (const [value, count] of valueMap.entries()) {
+      if (count <= 0) continue;
+      const label = `${prop}="${value}" (${count})`;
+      if (cvaValues && cvaValues.includes(value)) used.push(label);
+      else unknown.push(label);
+    }
+  }
+  if (used.length === 0 && unknown.length === 0) return "";
+  const usedRow = used.length > 0
+    ? `        <div className="flex flex-wrap items-baseline gap-2 text-sm"><span aria-hidden="true">✓</span><span className="font-medium">Used</span><span className="text-muted-foreground">${used.join(" · ")}</span></div>`
+    : "";
+  const unknownRow = unknown.length > 0
+    ? `        <div className="flex flex-wrap items-baseline gap-2 text-sm"><span aria-hidden="true">✗</span><span className="font-medium">Unknown at callsites</span><span className="text-muted-foreground">${unknown.join(" · ")}</span></div>`
+    : "";
+  return [
+    `      <section className="mb-8 rounded-md border border-border bg-muted/30 p-4">`,
+    `        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2">Usage</h2>`,
+    usedRow,
+    unknownRow,
+    `      </section>`,
+  ].filter(Boolean).join("\n");
 }
 
 /**
@@ -1376,13 +1458,12 @@ function emitAtomCompositeShowcase(
   // Explicit examples from meta.examples (authoritative — no children fallback applied)
   const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = [...meta.examples];
 
-  // CVA auto-expansion
+  // CVA auto-expansion. v0.7.8: do NOT dedup against explicit examples — Variants
+  // is the exhaustive proof grid; overlap with Examples is intentional.
   const cvaConfig = parseCva(source);
   let cvaExamples: Array<{ name: string; props: Record<string, string> }> = [];
   if (cvaConfig) {
-    const expanded = cvaCartesian(cvaConfig, skip);
-    const existingNames = new Set(meta.examples.map((e) => e.name));
-    cvaExamples = expanded.filter((ce) => !existingNames.has(ce.name));
+    cvaExamples = cvaCartesian(cvaConfig, skip);
   }
 
   const useClientLine = useClient ? `"use client";\n` : "";
@@ -1453,29 +1534,18 @@ function emitAtomCompositeShowcase(
             const propsStr = Object.entries(ce.props)
               .map(([k, v]) => `${k}="${v}"`)
               .join(" ");
-            // Children fallback for auto-generated combos
+            // Children fallback for auto-generated combos. Icon sizes get a
+            // lucide Square placeholder; text sizes get the displayName.
             const children = autoChildren(ce.props, displayName);
             // Secondary axis label (everything except the primary axis)
             const secondaryLabel = Object.entries(ce.props)
               .filter(([k]) => k !== primaryAxis)
               .map(([, v]) => v)
               .join(", ");
-            // Usage tag for this combo (worst tag across its prop axes wins:
-            // unused > dynamic > used). Only emitted if usage map is present.
-            let tagHtml = "";
-            if (usage) {
-              let worst: "used" | "dynamic" | "unused" = "used";
-              for (const [k, v] of Object.entries(ce.props)) {
-                const t = usageTagFor(usage, k, v) ?? "unused";
-                if (t === "unused") worst = "unused";
-                else if (t === "dynamic" && worst !== "unused") worst = "dynamic";
-              }
-              tagHtml = renderUsageTag(worst);
-            }
             return [
               `          <div className="flex flex-col items-start gap-1">`,
               `            <${displayName}${propsStr ? " " + propsStr : ""}${children ? `>${children}</${displayName}>` : " />"}`,
-              `            <span className="text-xs text-muted-foreground">${secondaryLabel || primaryVal}${tagHtml}</span>`,
+              `            <span className="text-xs text-muted-foreground">${secondaryLabel || primaryVal}</span>`,
               `          </div>`,
             ].join("\n");
           })
@@ -1502,16 +1572,14 @@ function emitAtomCompositeShowcase(
     ].join("\n");
   }
 
-  // ── State sections (loading, longText, empty) ───────────────────────────
+  // ── State sections — one row per declared state, in canonical order ─────
   const stateSections: string[] = [];
-  if (meta.states?.loading) {
-    stateSections.push(emitStateRow(displayName, "Loading", meta.states.loading, false));
-  }
-  if (meta.states?.longText) {
-    stateSections.push(emitStateRow(displayName, "Long text", meta.states.longText, false));
-  }
-  if (meta.kind === "composite" && meta.states?.empty) {
-    stateSections.push(emitStateRow(displayName, "Empty", meta.states.empty, false));
+  for (const key of STATE_KEYS) {
+    // `empty` is only meaningful for composites
+    if (key === "empty" && meta.kind !== "composite") continue;
+    const spec = meta.states?.[key];
+    if (!spec) continue;
+    stateSections.push(emitStateRow(displayName, key, spec));
   }
   const statesSection = stateSections.length > 0
     ? [
@@ -1522,20 +1590,31 @@ function emitAtomCompositeShowcase(
       ].join("\n")
     : "";
 
+  // ── Top-of-page Usage block (analyzer-driven) ───────────────────────────
+  const usageSection = emitUsageBlock(usage, cvaConfig);
+
   const body =
-    explicitSection || cvaSection || statesSection
-      ? [explicitSection, cvaSection, statesSection].filter(Boolean).join("\n")
+    usageSection || explicitSection || cvaSection || statesSection
+      ? [usageSection, explicitSection, cvaSection, statesSection].filter(Boolean).join("\n")
       : `      <p className="text-muted-foreground">No examples defined.</p>`;
 
   const importLine = hasDefaultExport(source)
     ? `import ${displayName} from "./${componentName}";`
     : `import { ${displayName} } from "./${componentName}";`;
 
+  // Square placeholder is injected for any icon-size cell without explicit children.
+  const needsSquareImport = cvaExamples.some((ce) => {
+    if ("children" in ce.props) return false;
+    return isIconSize(ce.props["size"] ?? "");
+  });
+  const squareImportLine = needsSquareImport ? `import { Square } from "lucide-react";` : "";
+
   const carriedBlock = carried ? renderCarriedRefs(carried) : "";
 
   return [
     useClientLine + header,
     `import React from "react";`,
+    ...(squareImportLine ? [squareImportLine] : []),
     importLine,
     ...(carriedBlock ? [carriedBlock] : []),
     ``,

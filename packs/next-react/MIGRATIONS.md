@@ -47,6 +47,23 @@ Run `claude-ds reconform` to refresh showcase stubs with current generator outpu
 
 ---
 
+## v0.7.7 → v0.7.8
+
+Showcase format finalization (issue #65). No path moves. Five generator changes:
+
+1. **Variants grid renders the full CVA matrix.** No dedup against `meta.examples`. Overlap is intentional — Examples is curated, Variants is exhaustive.
+2. **`size: icon*` cells get a lucide `Square` placeholder** when no `children` is supplied. The showcase auto-imports `Square` from `lucide-react`. Consumer must have `lucide-react` installed for any atom with `icon`-prefixed CVA sizes.
+3. **Per-cell ✓/⚠/✗ tags are gone**, replaced by a top-of-page `Usage` block with two rows:
+   - `✓ Used` — values in the analyzer's `literal` map that exist in the CVA, with counts
+   - `✗ Unknown at callsites` — values in `literal` that the CVA does not declare
+   The `⚠ Dead in CVA` row is deferred behind a future config flag (defaults off; flip on once the consumer app is ~80% built).
+4. **`meta.states` supports new state names:** `disabled`, `hover`, `focus`, `pressed`, `expanded`, `invalid`. Each declared state renders one row in the States section, forced via either a wrapper class (`.force-hover` / `.force-focus`) or an attribute (`disabled` / `aria-pressed="true"` / `aria-expanded="true"` / `aria-invalid="true"`). For wrapper-class states to render visibly, the component's CSS must opt in: rewrite `hover:` / `focus-visible:` rules to `:where(.force-hover, :hover)` / `:where(.force-focus, :focus-visible)`.
+5. **`Meta.states` type adds documented fields** for each new state name. TSDoc explains the force mechanism per name.
+
+Run `claude-ds sync` then `claude-ds reconform` (or the `regenerate-companions` hook) to refresh showcases.
+
+---
+
 ## v0.6.1 → v0.7.0
 
 No path moves. Two consumer-facing changes:
