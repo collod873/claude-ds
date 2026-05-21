@@ -917,6 +917,17 @@ interface CvaConfig {
 /**
  * Parse cva() call from source to extract variant keys and values.
  * Pattern: cva(base, { variants: { size: { sm: "...", md: "..." }, tone: { ... } }, defaultVariants: { ... } })
+ *
+ * LATENT BUG (multi-CVA files): the broad-fallback regex in this function and
+ * extractVariantKeys() spans across cva() call boundaries in source files that
+ * contain more than one cva() call (e.g. badge.tsx with badgeVariants and
+ * dotVariants). This causes variant axes from the second CVA to bleed into the
+ * first, producing malformed <Component variants="..."> JSX. The stub-signal
+ * short-circuit in isStubMeta() (examples.length === 0) masks this for every
+ * current consumer because those files all carry empty examples arrays. The
+ * correct repair — rewriting parseCva as an AST pass returning
+ * Map<cvaVarName, CvaConfig> paired with per-component JSX-body walking — is
+ * deferred to the per-component CVA-targeting follow-up issue.
  */
 function parseCva(source: string): CvaConfig | null {
   if (!source.includes("cva(")) return null;
@@ -1038,12 +1049,18 @@ function cvaCartesian(config: CvaConfig, skip: string[]): Array<{ name: string; 
 // ── stub-meta detection ───────────────────────────────────────────────────────
 
 /**
- * Returns true when meta.examples is the default stub: exactly one entry with
- * name === "default" and empty props. Combined with no CVA expansion, this
- * means the generator has nothing useful to render — emit a placeholder card
- * instead of crashing on missing required props.
+ * Returns true when meta.examples signals "not showcased yet".
+ *
+ * Two cases:
+ *  1. examples.length === 0 — explicit empty array is an authoritative stub
+ *     signal regardless of whether CVA is present. Multi-CVA files with empty
+ *     examples must emit a placeholder, not auto-expand (which produces malformed
+ *     JSX when the broad-fallback regex spans cva boundaries).
+ *  2. examples.length === 1, name === "default", empty props, AND no CVA — the
+ *     original default-stub convention; still honoured for backward compat.
  */
 function isStubMeta(examples: Example[], cvaConfig: CvaConfig | null): boolean {
+  if (examples.length === 0) return true; // explicit empty array wins unconditionally
   if (cvaConfig !== null) return false; // CVA expansion will produce real combos
   if (examples.length !== 1) return false;
   const only = examples[0];

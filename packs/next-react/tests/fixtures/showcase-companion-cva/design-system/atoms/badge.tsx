@@ -20,6 +20,7 @@ export function Badge({ size, tone }: BadgeProps) {
 
 export const meta = {
   kind: "atom",
-  examples: [],
+  // Single default-stub entry with CVA present — generator expands CVA cross-product.
+  examples: [{ name: "default", props: {} }],
   skip: ["size=lg_tone=danger"],
 };
