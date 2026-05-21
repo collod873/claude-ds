@@ -998,6 +998,24 @@ describe("AST-based meta extractor (A3)", () => {
     expect(content).toContain("jobColumns.map");
   });
 
+  it("re-emits `import type` for types declared in the source component module", async () => {
+    // DataTableColumn is `export interface` in data-table.tsx (not imported from
+    // anywhere). When jobColumns carries its `: DataTableColumn<JobFixture>[]`
+    // annotation, the showcase must add `import type { DataTableColumn } from "./data-table"`.
+    copyFixture(FIXTURE_CARRIES_REFS, dir, "design-system/composites/data-table.tsx");
+    copyFixture(FIXTURE_CARRIES_REFS, dir, "design-system/_fixtures/job-fixtures.ts");
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(
+      join(dir, "design-system/composites/data-table.showcase.tsx"),
+      "utf8"
+    );
+    expect(content).toMatch(
+      /import\s+type\s*\{[^}]*DataTableColumn[^}]*\}\s*from\s*"\.\/data-table"/
+    );
+  });
+
   it("does not emit 'No examples defined' when functions are present in props", async () => {
     const dsDir = join(dir, "design-system", "atoms");
     await mkdir(dsDir, { recursive: true });

@@ -703,6 +703,19 @@ function buildScopes(
   // when walking type-annotation positions.
   const typeImportScope = new Map<string, { exportName: string; rawSpec: string }>();
 
+  // Types declared in the source file itself are reachable from the showcase via
+  // `./<basename>` (the same module the runtime component is imported from). Pre-seed
+  // typeImportScope so the existing carry path emits an `import type` line for them.
+  // Without this, a hoisted local like `const cols: DataTableColumn<…>[] = …` carries
+  // its rawSource into the showcase but the `DataTableColumn` annotation cannot resolve.
+  const sourceBasename = basename(sf.fileName).replace(/\.(tsx|ts)$/, "");
+  const localTypeSpec = `./${sourceBasename}`;
+  for (const stmt of sf.statements) {
+    if ((ts.isTypeAliasDeclaration(stmt) || ts.isInterfaceDeclaration(stmt)) && stmt.name) {
+      typeImportScope.set(stmt.name.text, { exportName: stmt.name.text, rawSpec: localTypeSpec });
+    }
+  }
+
   for (const stmt of sf.statements) {
     // Variable declarations: const foo = ...
     if (ts.isVariableStatement(stmt)) {
