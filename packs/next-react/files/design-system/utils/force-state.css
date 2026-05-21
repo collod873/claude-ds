@@ -1,0 +1,27 @@
+/*
+ * force-state.css — Tailwind v4 variant overrides for forced-state showcase cells.
+ *
+ * The design-gallery renders forced-state rows by wrapping a component in a
+ * `.force-hover` / `.force-focus` / `.force-pressed` / `.force-expanded` /
+ * `.force-invalid` div. Without this file, those wrappers do nothing because
+ * Tailwind's built-in `hover:` variant only fires on real pointer hover.
+ *
+ * This file extends four built-in variants so that:
+ *   - `hover:X`          also matches when an ancestor has class `.force-hover`
+ *   - `focus-visible:X`  also matches when an ancestor has class `.force-focus`
+ *   - `aria-pressed:X`   also matches when an ancestor has class `.force-pressed`
+ *   - `aria-expanded:X`  also matches when an ancestor has class `.force-expanded`
+ *   - `aria-invalid:X`   also matches when an ancestor has class `.force-invalid`
+ *
+ * Consumer setup (one line in globals.css):
+ *   @import "@/design-system/utils/force-state.css";
+ *
+ * No component edits required — existing `hover:bg-primary/80` etc. pick up the
+ * forced-state selector automatically once this file is imported.
+ */
+
+@custom-variant hover (&:hover, .force-hover &);
+@custom-variant focus-visible (&:focus-visible, .force-focus &);
+@custom-variant aria-pressed (&[aria-pressed=true], .force-pressed &);
+@custom-variant aria-expanded (&[aria-expanded=true], .force-expanded &);
+@custom-variant aria-invalid (&[aria-invalid=true], .force-invalid &);

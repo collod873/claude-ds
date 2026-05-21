@@ -150,6 +150,10 @@
       "category": "seeded"
     },
     {
+      "path": "design-system/utils/force-state.css",
+      "category": "managed"
+    },
+    {
       "path": "commitlint.config.js",
       "category": "seeded"
     },
@@ -407,6 +411,7 @@
     "design-system/icons",
     "design-system/hooks",
     "design-system/utils",
+    "design-system/utils/force-state.css",
     "design-system/README.md",
     "design-system/exceptions.json",
     "design-system/failure-log.md",

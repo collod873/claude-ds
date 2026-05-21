@@ -439,6 +439,18 @@ function astNodeToValue(
     return astNodeToValue(node.expression, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1, typeImportScope);
   }
 
+  // JSX elements (<Foo />, <Foo>...</Foo>) — emit as raw source FnMarker so the
+  // showcase can splice them as JSX expressions. Identifiers inside the JSX
+  // (tag names, imported components like <Send />) get collected into carried so
+  // the showcase emits the necessary imports.
+  if (
+    ts.isJsxElement(node) ||
+    ts.isJsxSelfClosingElement(node) ||
+    ts.isJsxFragment(node)
+  ) {
+    return emitFn(node);
+  }
+
   // Anything else — warn and drop
   process.stderr.write(
     `generate-showcase-companion [AST]: unhandled node kind ${ts.SyntaxKind[node.kind]} — dropping value\n`
@@ -1355,25 +1367,73 @@ function emitStateRow(
 }
 
 /**
+ * Levenshtein-1 distance check: returns true when `a` and `b` differ by exactly
+ * one single-character insertion, deletion, or substitution. Used to detect
+ * API-drift props (e.g. `variant` when the CVA key is `intent`).
+ */
+function isLevenshtein1(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  if (a === b) return false;
+  if (a.length === b.length) {
+    // Substitution
+    let diffs = 0;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i] && ++diffs > 1) return false;
+    }
+    return diffs === 1;
+  }
+  // Insertion / deletion — ensure shorter is `s`, longer is `l`
+  const [s, l] = a.length < b.length ? [a, b] : [b, a];
+  let si = 0;
+  let li = 0;
+  let skipped = false;
+  while (si < s.length && li < l.length) {
+    if (s[si] !== l[li]) {
+      if (skipped) return false;
+      skipped = true;
+      li++;
+    } else {
+      si++;
+      li++;
+    }
+  }
+  return true;
+}
+
+/**
  * Build the top-of-page Usage block from analyzer output cross-referenced with
  * the component's CVA config. Two rows:
  *   ✓ Used — (prop, value) pairs found in callsites that exist in the CVA, with counts
- *   ✗ Unknown at callsites — (prop, value) pairs found in callsites that the CVA does not declare
+ *   ✗ Unknown at callsites — prop names that exactly match or are Levenshtein-1 close
+ *     to a CVA variant name but carry a value the CVA doesn't declare. HTML attributes
+ *     (className, type, aria-*, data-*, title, etc.) and non-CVA props are excluded.
  *
  * Returns "" when no analyzer was registered for the component or when both rows
  * would be empty.
  */
 function emitUsageBlock(usage: UsageInfo | undefined, cvaConfig: CvaConfig | null): string {
   if (!usage) return "";
+  const cvaVariantNames = cvaConfig ? Object.keys(cvaConfig.variants) : [];
   const used: string[] = [];
   const unknown: string[] = [];
   for (const [prop, valueMap] of usage.literal.entries()) {
     const cvaValues = cvaConfig?.variants[prop] ?? null;
+    // A prop qualifies for the Unknown row only when its name is either:
+    //   (a) an exact CVA variant name but carries a value outside that variant's enum, OR
+    //   (b) Levenshtein-1 distance from a CVA variant name (API-drift detection)
+    // This excludes className, type, aria-*, data-*, title, and other HTML pass-throughs.
+    const isExactCvaVariant = cvaValues !== null;
+    const isNearCvaVariant = !isExactCvaVariant && cvaVariantNames.some((v) => isLevenshtein1(prop, v));
     for (const [value, count] of valueMap.entries()) {
       if (count <= 0) continue;
       const label = `${prop}="${value}" (${count})`;
-      if (cvaValues && cvaValues.includes(value)) used.push(label);
-      else unknown.push(label);
+      if (isExactCvaVariant && cvaValues!.includes(value)) {
+        used.push(label);
+      } else if (isExactCvaVariant || isNearCvaVariant) {
+        // Exact variant name with a value outside the enum, OR a near-miss variant name
+        unknown.push(label);
+      }
+      // else: not a CVA variant at all — skip (HTML passthrough / unrelated prop)
     }
   }
   if (used.length === 0 && unknown.length === 0) return "";
@@ -1663,9 +1723,19 @@ function emitStatesJson(
   sourceName: string
 ): string {
   const markerValue = generatedMarkerValue(sourceName);
+  // JSX values (FnMarkers) cannot be JSON-serialized — strip them so states.json
+  // stays valid JSON. The showcase reads JSX-bearing props directly from the TS
+  // source via AST, so the JSON copy omitting them is safe.
+  const stripJsx = (props: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(props)) {
+      if (!containsFnMarker(v)) out[k] = v;
+    }
+    return out;
+  };
   const obj = {
     [GENERATED_MARKER_KEY]: markerValue,
-    states: examples.map((ex) => ({ label: ex.name, props: ex.props })),
+    states: examples.map((ex) => ({ label: ex.name, props: stripJsx(ex.props) })),
   };
   return JSON.stringify(obj, null, 2) + "\n";
 }
