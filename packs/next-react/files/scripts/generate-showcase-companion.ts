@@ -768,11 +768,31 @@ function buildScopes(
         }
       }
     }
-    // Import declarations: import { x, y } from "./path"
+    // Import declarations: import { x, y } from "./path" or from "bare-pkg"
     if (ts.isImportDeclaration(stmt) && ts.isStringLiteral(stmt.moduleSpecifier)) {
       const rawSpec = stmt.moduleSpecifier.text;
-      // Only handle relative imports and @/ alias
-      if (!rawSpec.startsWith(".") && !rawSpec.startsWith("@/")) continue;
+      const isBareSpecifier = !rawSpec.startsWith(".") && !rawSpec.startsWith("@/");
+
+      // Bare-specifier imports (e.g. "lucide-react", "react"): register in importScope
+      // with filePath="" so collectRefsFromNode can carry them into the showcase import
+      // block. resolveImportedValue short-circuits on non-existent paths (harmless).
+      if (isBareSpecifier) {
+        const clause = stmt.importClause;
+        if (!clause) continue;
+        const bindings = clause.namedBindings;
+        if (bindings && ts.isNamedImports(bindings)) {
+          for (const spec of bindings.elements) {
+            const localName = spec.name.text;
+            const exportedName = spec.propertyName?.text ?? spec.name.text;
+            if (spec.isTypeOnly || clause.isTypeOnly) {
+              typeImportScope.set(localName, { exportName: exportedName, rawSpec });
+            } else {
+              importScope.set(localName, { filePath: "", exportName: exportedName, rawSpec });
+            }
+          }
+        }
+        continue;
+      }
 
       let resolved = rawSpec;
       if (rawSpec.startsWith("@/")) {
