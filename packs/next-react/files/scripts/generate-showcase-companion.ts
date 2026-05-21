@@ -22,13 +22,14 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { join, dirname, basename, resolve as resolvePath } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import type * as TS from "typescript";
 
 // ── typescript loader (optional — falls back to regex parseMeta if absent) ────
 // Resolved at runtime from the script's own location so it works when the
 // script is copied into consumer projects that may lack "typescript" in
 // their own node_modules. We walk up from the script directory looking for
 // a resolvable "typescript" package.
-let ts: typeof import("typescript") | null = null;
+let tsRuntime: typeof TS | null = null;
 (function loadTypescript() {
   // Try each candidate directory from script location upward
   const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -36,7 +37,7 @@ let ts: typeof import("typescript") | null = null;
   for (let i = 0; i < 12; i++) {
     try {
       const req = createRequire(join(dir, "package.json"));
-      ts = req("typescript") as typeof import("typescript");
+      tsRuntime = req("typescript") as typeof TS;
       return;
     } catch {
       const parent = dirname(dir);
@@ -47,11 +48,20 @@ let ts: typeof import("typescript") | null = null;
   // Last resort: absolute require (works if typescript is in PATH's node_modules)
   try {
     const req = createRequire(import.meta.url);
-    ts = req("typescript") as typeof import("typescript");
+    tsRuntime = req("typescript") as typeof TS;
   } catch {
-    // ts stays null; extractMetaFromAST will return null and regex fallback takes over
+    // tsRuntime stays null; extractMetaFromAST will return null and regex fallback takes over
   }
 })();
+
+// Non-null accessor for AST functions. They are only reachable when tsRuntime
+// loaded successfully (extractMetaFromAST guards with `if (!tsRuntime) return null`
+// before any AST helper runs), so this throw is defensive — present to satisfy
+// the type checker, not expected to fire at runtime.
+function getTS(): typeof TS {
+  if (!tsRuntime) throw new Error("typescript not resolvable — AST path unavailable");
+  return tsRuntime;
+}
 
 // ── header constants ──────────────────────────────────────────────────────────
 
@@ -227,19 +237,20 @@ function resolveAtPrefix(importPath: string, consumerRoot: string): string {
  * single-hop importing from sibling files.
  */
 function astNodeToValue(
-  node: ts.Node,
-  sourceFile: ts.SourceFile,
-  localScope: Map<string, ts.Node>,
+  node: TS.Node,
+  sourceFile: TS.SourceFile,
+  localScope: Map<string, TS.Node>,
   importScope: Map<string, { filePath: string; exportName: string; rawSpec: string }>,
   consumerRoot: string,
   carried: Map<string, CarriedRef>,
   depth = 0
 ): unknown {
   if (depth > 10) return null; // guard against deep cycles
+  const ts = getTS();
 
   // Helper: capture an AST sub-tree as a raw-source FnMarker AND collect any
   // free identifiers it references so the showcase can carry imports/locals.
-  const emitFn = (n: ts.Node): FnMarker => {
+  const emitFn = (n: TS.Node): FnMarker => {
     const raw = sourceFile.text.slice(n.getStart(sourceFile), n.end).trim();
     collectRefsFromNode(n, sourceFile, localScope, importScope, new Set(), carried, consumerRoot);
     return { __fn: raw };
@@ -415,6 +426,7 @@ function resolveImportedValue(
   carried: Map<string, CarriedRef>,
   depth: number
 ): unknown {
+  const ts = getTS();
   if (!existsSync(filePath)) return null;
   let src: string;
   try {
@@ -460,14 +472,15 @@ function resolveImportedValue(
  * their refs collected (carried recursively).
  */
 function collectRefsFromNode(
-  node: ts.Node,
-  sourceFile: ts.SourceFile,
-  localScope: Map<string, ts.Node>,
+  node: TS.Node,
+  sourceFile: TS.SourceFile,
+  localScope: Map<string, TS.Node>,
   importScope: Map<string, { filePath: string; exportName: string; rawSpec: string }>,
   bound: Set<string>,
   carried: Map<string, CarriedRef>,
   consumerRoot: string
 ): void {
+  const ts = getTS();
   // Identifier — candidate reference
   if (ts.isIdentifier(node)) {
     const name = node.text;
@@ -563,7 +576,8 @@ function collectRefsFromNode(
 }
 
 /** Collect identifier names from a binding pattern (`{a, b: {c}}`, `[x, ...rest]`, plain `x`). */
-function collectBindingNames(name: ts.BindingName, set: Set<string>): void {
+function collectBindingNames(name: TS.BindingName, set: Set<string>): void {
+  const ts = getTS();
   if (ts.isIdentifier(name)) {
     set.add(name.text);
     return;
@@ -577,14 +591,15 @@ function collectBindingNames(name: ts.BindingName, set: Set<string>): void {
 
 /** Build local variable scope + import scope maps from a source file. */
 function buildScopes(
-  sf: ts.SourceFile,
+  sf: TS.SourceFile,
   dir: string,
   consumerRoot: string
 ): {
-  localScope: Map<string, ts.Node>;
+  localScope: Map<string, TS.Node>;
   importScope: Map<string, { filePath: string; exportName: string; rawSpec: string }>;
 } {
-  const localScope = new Map<string, ts.Node>();
+  const ts = getTS();
+  const localScope = new Map<string, TS.Node>();
   const importScope = new Map<string, { filePath: string; exportName: string; rawSpec: string }>();
 
   for (const stmt of sf.statements) {
@@ -650,7 +665,8 @@ function extractMetaFromAST(filePath: string): {
   carried: Map<string, CarriedRef>;
   useClient: boolean;
 } | null {
-  if (!ts) return null; // typescript not available — fall back to regex parseMeta
+  if (!tsRuntime) return null; // typescript not available — fall back to regex parseMeta
+  const ts = tsRuntime;
 
   let source: string;
   try {
@@ -666,7 +682,7 @@ function extractMetaFromAST(filePath: string): {
   const useClient = hasUseClientDirective(source);
 
   // Find `export const meta = { ... }` or `export const meta: Meta = { ... }`
-  let metaInit: ts.ObjectLiteralExpression | null = null;
+  let metaInit: TS.ObjectLiteralExpression | null = null;
   for (const stmt of sf.statements) {
     if (!ts.isVariableStatement(stmt)) continue;
     const hasExport = stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
