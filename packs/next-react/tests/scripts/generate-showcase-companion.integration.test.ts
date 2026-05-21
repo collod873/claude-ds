@@ -992,7 +992,9 @@ describe("AST-based meta extractor (A3)", () => {
     // The `sortable` example uses `jobColumns.map(c => ...)` which we keep as
     // raw source. `jobColumns` is local to data-table.tsx (not exported), so
     // it must be inlined as a const at the top of the showcase.
-    expect(content).toMatch(/const\s+jobColumns\s*=/);
+    // (Cluster 2: rawSource preserves the type annotation, so `=` may be
+    //  preceded by `: DataTableColumn<…>[]` — match just the name.)
+    expect(content).toMatch(/const\s+jobColumns\b/);
     expect(content).toContain("jobColumns.map");
   });
 
@@ -1010,5 +1012,54 @@ describe("AST-based meta extractor (A3)", () => {
     expect(content).toContain("default");
     expect(content).toContain("loading");
     expect(content).toContain("with-transform");
+  });
+
+  // ── type-import carry (Cluster 2) ───────────────────────────────────────────
+
+  const FIXTURE_TYPE_IMPORT_CARRY = resolve(
+    "packs/next-react/tests/fixtures/showcase-companion-type-import-carry"
+  );
+
+  it("re-emits `import type` for type-only imports referenced in example callbacks", async () => {
+    copyFixture(FIXTURE_TYPE_IMPORT_CARRY, dir, "design-system/atoms/filter-button.tsx");
+    copyFixture(FIXTURE_TYPE_IMPORT_CARRY, dir, "design-system/_fixtures/handler-types.ts");
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(
+      join(dir, "design-system/atoms/filter-button.showcase.tsx"),
+      "utf8"
+    );
+    // The `(item: Foo) => ...` callback references Foo which is `import type`.
+    // The generator must re-emit it as `import type { Foo }`.
+    expect(content).toMatch(/import\s+type\s*\{[^}]*Foo[^}]*\}\s*from/);
+    // The annotation itself must survive in the inlined callback
+    expect(content).toContain(": Foo");
+  });
+
+  // ── typed-local inline (Cluster 2) ─────────────────────────────────────────
+
+  const FIXTURE_TYPED_LOCAL_INLINE = resolve(
+    "packs/next-react/tests/fixtures/showcase-companion-typed-local-inline"
+  );
+
+  it("inlines typed local const with annotation preserved and carries transitive type-import", async () => {
+    copyFixture(FIXTURE_TYPED_LOCAL_INLINE, dir, "design-system/composites/item-list.tsx");
+    copyFixture(FIXTURE_TYPED_LOCAL_INLINE, dir, "design-system/_fixtures/item-types.ts");
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(
+      join(dir, "design-system/composites/item-list.showcase.tsx"),
+      "utf8"
+    );
+    // The const `itemColumns: ItemColumn<Item>[]` annotation must survive — rawSource
+    // preserves the TS type annotation rather than stripping it to a serialized value.
+    expect(content).toMatch(/const\s+itemColumns\s*:/);
+    // Arrow-fn params inside the local (render: (row) => ...) must not be stripped
+    expect(content).toContain("itemColumns");
+    // `Item` is a type-only import transitively referenced via the annotation on
+    // itemColumns. It must be carried as `import type`.
+    expect(content).toMatch(/import\s+type\s*\{[^}]*Item[^}]*\}\s*from/);
   });
 });
