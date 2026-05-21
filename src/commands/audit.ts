@@ -5,6 +5,7 @@ import { parseManifest } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
 import { info, err } from "../lib/log.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
+import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
@@ -83,22 +84,27 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
   const cwd = opts.cwd ?? process.cwd();
   let pack = opts.pack;
   let cfg: Config | null = null;
+  let packDir: string;
+  let manifest;
+  const cfgPath = join(cwd, ".claude-ds.json");
   if (!pack) {
-    const cfgPath = join(cwd, ".claude-ds.json");
     if (!(await exists(cfgPath))) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
-    cfg = parseConfig(await readFile(cfgPath, "utf8"));
+    const ctx = await loadProject(cwd);
+    cfg = ctx.cfg;
     pack = cfg.pack;
+    packDir = ctx.packDir;
+    manifest = ctx.manifest;
   } else {
-    const cfgPath = join(cwd, ".claude-ds.json");
+    // --pack override: parse config if present (best-effort), resolve packDir from --pack.
     if (await exists(cfgPath)) {
       try { cfg = parseConfig(await readFile(cfgPath, "utf8")); } catch { cfg = null; }
     }
+    packDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../packs", pack);
+    manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
   }
   // #47/#34: honor app_dir + claude_md_target when checking presence.
   const appDir = cfg?.app_dir ?? await detectAppDir(cwd);
   const claudeMdTarget = cfg?.claude_md_target ?? "CLAUDE.md";
-  const packDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../packs", pack);
-  const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
 
   // Build the set of suppression globs: manifest-level + project config lookalike_ignore
   const configIgnore: string[] = cfg?.lookalike_ignore ?? [];

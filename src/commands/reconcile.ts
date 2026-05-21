@@ -1,5 +1,5 @@
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
-import { join, dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest, DeprecatedPath } from "../lib/manifest.js";
 import { parseConfig } from "../lib/config.js";
@@ -106,6 +106,10 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     err(".claude-ds.json absent — run `adopt` first");
     process.exit(2);
   }
+  // Intentionally use parseConfig (not loadProject) here: reconcile's CLAUDE.md collision
+  // detection turns on cfg.claude_md_target === "CLAUDE.md" (the parseConfig default),
+  // and loadConfigWithMigration would rewrite that field on pre-v0.6 configs — masking
+  // the collision the command is meant to surface.
   let cfg;
   try {
     cfg = parseConfig(await readFile(cfgPath, "utf8"));

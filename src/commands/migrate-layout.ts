@@ -21,6 +21,8 @@ export async function migrateLayoutCmd(opts: {
   const cwd = opts.cwd ?? process.cwd();
   let pack = opts.pack;
   if (!pack) {
+    // Intentionally use parseConfig (not loadProject) here: migrate-layout requires a clean
+    // working tree, and loadConfigWithMigration would mutate .claude-ds.json on pre-v0.6 configs.
     const cfgPath = join(cwd, ".claude-ds.json");
     if (!(await exists(cfgPath))) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
     const cfg = parseConfig(await readFile(cfgPath, "utf8"));

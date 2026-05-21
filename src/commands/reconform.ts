@@ -1,12 +1,10 @@
 import { readFile, writeFile, stat, readdir, rename, unlink } from "node:fs/promises";
-import { join, resolve, dirname, basename, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, dirname, basename, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
-import { parseManifest } from "../lib/manifest.js";
 import { parseExceptions } from "../lib/exceptions.js";
 import { info, err } from "../lib/log.js";
-import { loadConfigWithMigration } from "../lib/paths.js";
+import { loadProject } from "../lib/project.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -168,14 +166,14 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
     err(".claude-ds.json absent — run `adopt` or `init` first");
     process.exit(2);
   }
-  let cfg;
+  let ctx;
   try {
-    // #47/#34 migration: backfill + persist app_dir / claude_md_target if missing (pre-v0.6 configs).
-    cfg = await loadConfigWithMigration(cwd, { interactive: process.stdin.isTTY === true });
+    ctx = await loadProject(cwd);
   } catch (e) {
     err(`invalid .claude-ds.json: ${(e as Error).message}`);
     process.exit(2);
   }
+  const cfg = ctx.cfg;
 
   // ── #34 migration: move managed CLAUDE.md block out of root into claude_md_target ──
   // Idempotent: only runs when target != root AND root contains a managed block.
@@ -229,21 +227,8 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
   }
 
   // ── Precondition: pack manifest ─────────────────────────────────────────────
-  const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = resolve(here, "..", "..");
-  const packDir = join(repoRoot, "packs", cfg.pack);
-  const manifestPath = join(packDir, "manifest.json");
-  if (!(await exists(manifestPath))) {
-    err(`pack manifest not found: ${manifestPath}`);
-    process.exit(2);
-  }
-  try {
-    parseManifest(await readFile(manifestPath, "utf8"));
-  } catch (e) {
-    err(`invalid pack manifest: ${(e as Error).message}`);
-    process.exit(2);
-  }
-
+  // loadProject already parsed the manifest; pack dir comes from ctx.
+  const packDir = ctx.packDir;
   const packScriptsDir = join(packDir, "scripts");
 
   // ── Walk scaffold dirs ──────────────────────────────────────────────────────

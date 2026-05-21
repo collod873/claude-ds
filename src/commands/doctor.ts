@@ -6,7 +6,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { parseManifest } from "../lib/manifest.js";
 import { parseConfig } from "../lib/config.js";
-import { loadConfigWithMigration, resolveManifestPath, detectAppDir } from "../lib/paths.js";
+import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
+import { loadProject } from "../lib/project.js";
 import { parseExceptions, openCount } from "../lib/exceptions.js";
 import { detectLookalikes, Finding } from "../lib/lookalike.js";
 import { detectPackageManager, PackageManager } from "../lib/package-manager.js";
@@ -347,8 +348,9 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
 
   if (isPostAdopt) {
     // Post-adopt: check drift (missing managed files + exception count)
-    // #47/#34 migration: backfill + persist app_dir / claude_md_target if missing (pre-v0.6 configs).
-    const cfg = await loadConfigWithMigration(cwd, { interactive: process.stdin.isTTY === true });
+    // loadProject handles the #47/#34 backfill + persist of app_dir / claude_md_target.
+    const ctx = await loadProject(cwd);
+    const cfg = ctx.cfg;
     let openExceptions = 0;
     const exceptionsPath = join(cwd, "design-system/exceptions.json");
     if (await exists(exceptionsPath)) {

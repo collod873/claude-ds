@@ -6,37 +6,32 @@ import { parseManifest } from "../lib/manifest.js";
 import { diffFile } from "../lib/sync-diff.js";
 import { parseLsRemote } from "../lib/tags.js";
 import { info, err, confirm } from "../lib/log.js";
-import { loadConfigWithMigration, resolveManifestPath } from "../lib/paths.js";
+import { resolveManifestPath } from "../lib/paths.js";
+import { loadProject } from "../lib/project.js";
 import { detectFormatter, runFormatter } from "../lib/formatter.js";
-
-async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
 export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
-  if (!(await exists(join(cwd, ".claude-ds.json")))) { err(".claude-ds.json absent"); process.exit(2); }
-  // #47/#34 migration: backfill + persist app_dir / claude_md_target if missing (pre-v0.6 configs).
-  // sync respects TTY interactivity for the multi-candidate CLAUDE.md prompt — same convention as confirm().
-  const cfg = await loadConfigWithMigration(cwd, { interactive: process.stdin.isTTY === true });
+  try { await stat(join(cwd, ".claude-ds.json")); } catch { err(".claude-ds.json absent"); process.exit(2); }
+  const ctx = await loadProject(cwd);
+  const cfg = ctx.cfg;
 
-  // Resolve repo root from this file's location (src/commands or dist/commands → up two levels)
-  const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = resolve(here, "..", "..");
-
-  let packDir: string;
+  let packDir: string = ctx.packDir;
+  let manifest = ctx.manifest;
   let target: string;
   if (opts.offlineFixture) {
     // Relative fixture paths are resolved from repo root (same as how pack names work in init)
+    const here = dirname(fileURLToPath(import.meta.url));
+    const repoRoot = resolve(here, "..", "..");
     packDir = resolve(repoRoot, opts.offlineFixture);
     target = cfg.version;
+    manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
   } else {
     const r = spawnSync("git", ["ls-remote", "--tags", "https://github.com/collod873/claude-ds"], { encoding: "utf8" });
     if (r.status !== 0) { err("network: cannot reach upstream"); process.exit(2); }
     const tags = parseLsRemote(r.stdout);
     target = tags[tags.length - 1] ?? cfg.version;
-    packDir = join(repoRoot, "packs", cfg.pack);
   }
-
-  const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
   const actions: Array<{ path: string; writePath: string; upstream: string; verdict: ReturnType<typeof diffFile> }> = [];
   for (const f of manifest.files) {
     if (f.category === "generated") continue;
@@ -64,7 +59,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
     // v1 gap: no prior-snapshot cache — use prev=null so managed files without a known
     // prior state are treated as "upstream wins" rather than false-abort on hand-edit detection.
     const prev: string | null = null;
-    const current = (await exists(dest)) ? await readFile(dest, "utf8") : null;
+    const current = (await ctx.exists(dest)) ? await readFile(dest, "utf8") : null;
     const verdict = diffFile({ category: f.category, format: f.format, owned_keys: f.owned_keys }, { prev, upstream, current });
     actions.push({ path: f.path, writePath, upstream, verdict });
     // #18c: distinguish new files (create:) from content-changed files (rewrite:)
@@ -110,7 +105,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
   if (formatter && rewrittenPaths.length > 0) {
     await runFormatter(formatter, rewrittenPaths, cwd);
   }
-  cfg.version = target;
-  await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
+  const nextCfg = { ...cfg, version: target };
+  await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(nextCfg, null, 2) + "\n", "utf8");
   info(`sync complete → ${target}`);
 }
