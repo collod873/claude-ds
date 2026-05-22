@@ -52,6 +52,21 @@ export interface MetaStates {
   expanded?: ExampleSpec;
   /** Invalid row — generator adds `aria-invalid="true"`. */
   invalid?: ExampleSpec;
+  /**
+   * Error row — for boundary atoms that render a fallback when a thrown
+   * error is caught. Props spread as-is; the component is responsible for
+   * surfacing its fallback render (typically by supplying `children` that
+   * throw, paired with a fallback prop). Generator emits a labeled row with
+   * no special attribute injection.
+   */
+  error?: ExampleSpec;
+  /**
+   * Stacked row — for transient feedback atoms (Toaster) that surface
+   * multiple items at once. Props spread as-is; the component renders the
+   * stack via children/fixtures. Generator emits a labeled row with no
+   * special attribute injection.
+   */
+  stacked?: ExampleSpec;
 }
 
 /**

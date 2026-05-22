@@ -841,6 +841,43 @@ describe("v0.7.0 hand-off contract (issue #60)", () => {
     expect(content).toContain("long-text");
   });
 
+  it("(c2) meta.states.error and meta.states.stacked produce labeled rows with no special attribute injection", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "toaster.tsx"),
+      [
+        `import React from "react";`,
+        `export function Toaster(props: any) { return <div {...props} />; }`,
+        `export const meta = {`,
+        `  kind: "atom",`,
+        `  examples: [{ name: "default", props: { children: "Toast" } }],`,
+        `  skip: [],`,
+        `  states: {`,
+        `    error:   { name: "error-boundary", props: { children: "Error fallback" } },`,
+        `    stacked: { name: "stacked-items",  props: { children: "Item 1" } },`,
+        `  },`,
+        `};`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    const showcasePath = join(dsDir, "toaster.showcase.tsx");
+    const content = await readFile(showcasePath, "utf8");
+    // Both labeled rows must appear
+    expect(content).toContain(">Error<");
+    expect(content).toContain("error-boundary");
+    expect(content).toContain(">Stacked<");
+    expect(content).toContain("stacked-items");
+    // Neither row should inject special attributes (no aria-*, no disabled)
+    // The generator emits the props as-is — confirm no force-wrapper divs for these keys
+    expect(content).not.toContain('className="force-error"');
+    expect(content).not.toContain('className="force-stacked"');
+  });
+
   it("(d) with stub analyzer present, tag column appears in output", async () => {
     const showcasePath = await seedCrewopsFixture({ withAnalyzer: true });
     const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {

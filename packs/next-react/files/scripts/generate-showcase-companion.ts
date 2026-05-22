@@ -166,6 +166,8 @@ interface MetaStates {
   pressed?: StateSpec;
   expanded?: StateSpec;
   invalid?: StateSpec;
+  error?: StateSpec;
+  stacked?: StateSpec;
 }
 
 const STATE_KEYS = [
@@ -178,6 +180,8 @@ const STATE_KEYS = [
   "pressed",
   "expanded",
   "invalid",
+  "error",
+  "stacked",
 ] as const;
 type StateKey = (typeof STATE_KEYS)[number];
 
@@ -191,6 +195,8 @@ const STATE_LABELS: Record<StateKey, string> = {
   pressed: "Pressed",
   expanded: "Expanded",
   invalid: "Invalid",
+  error: "Error",
+  stacked: "Stacked",
 };
 
 interface MetaAtomComposite {
