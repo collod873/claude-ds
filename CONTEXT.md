@@ -38,13 +38,17 @@ for consumer growth.
 
 ### Showcase
 The browsable page at `app/design/` in a consumer project that renders every coded
-atom and composite with its `meta.examples` variants. Its job is **visual catalog +
-self-audit**: see what's actually coded, spot issues, identify stale or missing variants.
-Generated from each `<Name>.tsx`'s `meta` export by `regenerate-companions.sh`
-(PostToolUse hook) into `<Name>.showcase.tsx` companions.
+atom and composite with its `meta.examples` variants. Its job is **anti-drift mirror**:
+a derived view whose single source of truth is the component file itself (`meta.examples`
++ CVA cross-product). Regenerated on every save by the PostToolUse hook into
+`<Name>.showcase.tsx` companions, so it cannot silently go stale relative to the code
+it mirrors.
 
-Explicitly **not** for: feeding Claude (it reads source directly), human-facing docs,
-or live prop-editing playground. See [ADR-0001](docs/adr/0001-personal-tool-scope.md).
+The mirror identity rules out anything that would introduce a parallel artifact Claude
+could forget to update — no separate stories files, no hand-authored prose, no
+"when to use" pages. It also rules out features with no anti-drift payoff for a
+personal tool — no prop-controls playground, no auto-generated prop tables, no a11y
+audit panel. See [ADR-0001](docs/adr/0001-personal-tool-scope.md).
 
 ---
 

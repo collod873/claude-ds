@@ -1801,8 +1801,12 @@ function renderCarriedRefs(carried: Map<string, CarriedRef>): string {
   if (carried.size === 0) return "";
   const importsBySpec = new Map<string, { plain: Set<string>; aliased: Map<string, string> }>();
   const typeImportsBySpec = new Map<string, { plain: Set<string>; aliased: Map<string, string> }>();
-  const locals: string[] = [];
-  for (const ref of carried.values()) {
+  // Collect locals as {name, rawSource} so we can topologically sort them before
+  // emitting — discovery order has dependents before dependencies (the ref-walking
+  // code finds `b` first, then recurses into `b` to find `a`), which would produce
+  // TS2448 "used before declaration" when `b`'s rawSource references `a`.
+  const localMap = new Map<string, string>(); // name → rawSource
+  for (const [name, ref] of carried.entries()) {
     if (ref.kind === "import") {
       let group = importsBySpec.get(ref.rawSpec);
       if (!group) {
@@ -1820,11 +1824,58 @@ function renderCarriedRefs(carried: Map<string, CarriedRef>): string {
       if (ref.localName === ref.exportedName) group.plain.add(ref.localName);
       else group.aliased.set(ref.localName, ref.exportedName);
     } else {
-      // "local": emit verbatim — rawSource is the full VariableStatement including
-      // the type annotation and trailing semicolon, so we don't need to wrap it.
-      locals.push(ref.rawSource);
+      // "local": collect for topological ordering below.
+      localMap.set(name, ref.rawSource);
     }
   }
+
+  // Topological sort of local consts so that dependencies are emitted before
+  // dependents. Build a simple adjacency list: for each local, which other carried
+  // locals does its rawSource reference? We detect references by scanning the
+  // rawSource for each other local name as a word-boundary identifier match.
+  // Kahn's algorithm (stable — preserves original order among independents).
+  const localNames = Array.from(localMap.keys());
+  const localNameSet = new Set(localNames);
+  // inDegree[i] = number of locals that `localNames[i]` depends on (that are also carried)
+  const inDegree = new Map<string, number>();
+  // dependents[dep] = list of locals that reference dep
+  const dependents = new Map<string, string[]>();
+  for (const name of localNames) {
+    inDegree.set(name, 0);
+    dependents.set(name, []);
+  }
+  for (const name of localNames) {
+    const src = localMap.get(name)!;
+    for (const dep of localNames) {
+      if (dep === name) continue;
+      // Check if `name`'s rawSource contains `dep` as a standalone identifier.
+      // Use word-boundary regex to avoid partial matches (e.g. "aColumn" matching "a").
+      const re = new RegExp(`\\b${dep.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+      if (re.test(src)) {
+        // `name` depends on `dep` — dep must come before name
+        inDegree.set(name, (inDegree.get(name) ?? 0) + 1);
+        dependents.get(dep)!.push(name);
+      }
+    }
+  }
+  const sorted: string[] = [];
+  // Queue: all locals with no dependencies on other carried locals
+  const queue: string[] = localNames.filter((n) => inDegree.get(n) === 0);
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    sorted.push(name);
+    for (const dependent of dependents.get(name) ?? []) {
+      const newDegree = (inDegree.get(dependent) ?? 0) - 1;
+      inDegree.set(dependent, newDegree);
+      if (newDegree === 0) queue.push(dependent);
+    }
+  }
+  // If cycle detected (shouldn't happen in practice), append remaining unsorted
+  for (const name of localNames) {
+    if (!sorted.includes(name)) sorted.push(name);
+  }
+  const locals = sorted.map((name) => localMap.get(name)!);
+
   const importLines: string[] = [];
   for (const [spec, group] of importsBySpec.entries()) {
     const parts: string[] = [];

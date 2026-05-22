@@ -1748,6 +1748,65 @@ describe("namespace export + sibling function declarations (#69, #70)", () => {
   });
 });
 
+// ── Bug B: carried locals emitted in discovery order (dependent before dependency) ──
+// When a local const `b` references another local const `a`, and `b` is
+// discovered first (because meta.examples directly uses `b`), the generator
+// previously emitted `const b = …; const a = …;` — causing TS2448 "used before
+// declaration" because `b`'s initializer references `a`. The fix topologically
+// sorts carried locals so dependencies always precede dependents.
+
+describe("Bug B — carried locals are emitted in dependency order (no TS2448)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fresh();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("dependency local (a) is emitted before dependent local (b) that references it", async () => {
+    // Reproduce the scenario: `c` references `b` which references `a`.
+    // meta.examples uses `c` directly. Discovery order adds `b` to carried first
+    // (because it's in `c`'s source), then `a` (because it's in `b`'s source).
+    // Without topological sort the output would be `const b = …; const a = …;`
+    // causing TS2448 since `b` references `a` before `a` is declared.
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "chain.tsx"),
+      [
+        `import React from "react";`,
+        `export function Foo() { return <div />; }`,
+        `const a = <Foo />;`,
+        `const b = <>{a}<Foo /></>;`,
+        `const c = <>{b}<Foo /></>;`,
+        `export function Chain({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export const meta = {`,
+        `  kind: "atom",`,
+        `  examples: [{ name: "chain", props: { children: c } }],`,
+        `};`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "chain.showcase.tsx"), "utf8");
+    // Both locals must be present (a is a dependency of b, which is in c's source)
+    expect(content).toContain("const a =");
+    expect(content).toContain("const b =");
+    // `a` must appear before `b` so `b`'s initializer can reference `a`
+    const posA = content.indexOf("const a =");
+    const posB = content.indexOf("const b =");
+    expect(posA).toBeLessThan(posB);
+  });
+});
+
 // ── Bug A: undefined props emitted as null (issue #72 follow-up) ─────────────
 // Props set to `undefined` in meta examples/states must be omitted from the
 // generated JSX, not emitted as `={null}` or `={undefined}` — both break tsc
