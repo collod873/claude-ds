@@ -577,26 +577,62 @@ function resolveImportedValue(
   const sf = ts.createSourceFile(filePath, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const { localScope: scope, importScope } = buildScopes(sf, dirname(filePath), consumerRoot);
 
+  // Use an isolated carried map during evaluation. Refs from the fixture file's
+  // internal evaluation are only merged back into the meta's carried map when
+  // the resolved value contains FnMarkers — meaning those identifiers will
+  // appear verbatim in the emitted showcase and must be imported.
+  // Refs collected for fully-concrete values (primitives / plain objects with no
+  // FnMarkers) are discarded because the showcase serialises those inline and
+  // never references the fixture-internal identifiers directly.
+  const isolatedCarried = new Map<string, CarriedRef>();
+
+  let result: unknown = null;
+
   for (const stmt of sf.statements) {
     if (ts.isVariableStatement(stmt)) {
       for (const decl of stmt.declarationList.declarations) {
         if (ts.isIdentifier(decl.name) && decl.name.text === exportName && decl.initializer) {
-          return astNodeToValue(decl.initializer, sf, scope, importScope, consumerRoot, carried, depth + 1);
+          result = astNodeToValue(decl.initializer, sf, scope, importScope, consumerRoot, isolatedCarried, depth + 1);
+          break;
         }
       }
     }
+    if (result !== null) break;
     if (ts.isExportDeclaration(stmt) && stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
       for (const spec of stmt.exportClause.elements) {
         if (spec.name.text === exportName) {
           const localName = spec.propertyName?.text ?? spec.name.text;
           if (scope.has(localName)) {
-            return astNodeToValue(scope.get(localName)!, sf, scope, importScope, consumerRoot, carried, depth + 1);
+            result = astNodeToValue(scope.get(localName)!, sf, scope, importScope, consumerRoot, isolatedCarried, depth + 1);
+            break;
           }
         }
       }
     }
+    if (result !== null) break;
   }
-  return null;
+
+  // Merge isolated refs into the caller's carried map only when the resolved
+  // value is a non-FnMarker container (object or array) that itself contains
+  // nested FnMarkers. In that case the FnMarker source text appears verbatim
+  // in the emitted showcase, so the identifiers it references must be imported.
+  //
+  // When the top-level result is a FnMarker (the fixture export itself is an
+  // unevaluatable call/expression), the caller's property-access or identifier
+  // handler will discard this intermediate value and call its own emitFn on the
+  // original source expression — collecting the correct refs from the meta
+  // file's scope instead. Merging fixture-internal refs in that case would
+  // introduce phantom imports (e.g. internal helper functions, transitive
+  // fixture imports that the showcase never directly references).
+  const resultIsFnMarkerContainer =
+    !isFnMarker(result) && containsFnMarker(result);
+  if (resultIsFnMarkerContainer) {
+    for (const [name, ref] of isolatedCarried.entries()) {
+      if (!carried.has(name)) carried.set(name, ref);
+    }
+  }
+
+  return result;
 }
 
 /**

@@ -1372,6 +1372,89 @@ describe("AST-based meta extractor (A3)", () => {
     // Must NOT emit the fixture-relative form (resolves from _fixtures/ dir, not showcase dir)
     expect(content).not.toContain('from "./address-fixtures"');
   });
+
+  it("over-eager identifier collection: property-access on fixture export with internal helper does not pull in helper or transitive imports", async () => {
+    // Regression for: meta uses `hendersonContact.fullName` (string property access).
+    // contact-fixtures.ts defines an internal helper function `buildContact()` and imports
+    // `hendersonAddress` from address-fixtures.ts to build the fixture objects.
+    // The showcase must only import the directly referenced identifiers (hendersonContact,
+    // okaforLead, longNameContact) and NOT the internal helper or transitive imports.
+    const dsDir = join(dir, "design-system", "composites");
+    const fixturesDir = join(dir, "design-system", "_fixtures");
+    await mkdir(dsDir, { recursive: true });
+    await mkdir(fixturesDir, { recursive: true });
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "test-consumer" }));
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }));
+
+    // Internal address fixture (transitively imported by contact-fixtures)
+    await writeFile(
+      join(fixturesDir, "address-fixtures.ts"),
+      [
+        `export const hendersonAddress = { street: "1 Henderson Ave" };`,
+        `export const longAddress = { street: "A Very Long Street Name Indeed" };`,
+      ].join("\n")
+    );
+
+    // Contact fixtures — internal helper `buildContact` is NOT exported.
+    // hendersonContact et al. are built via the helper call (CallExpression).
+    await writeFile(
+      join(fixturesDir, "contact-fixtures.ts"),
+      [
+        `import { hendersonAddress, longAddress } from "./address-fixtures";`,
+        `function buildContact(name: string, phone: string, addr: { street: string }) {`,
+        `  return { fullName: name, phoneE164: phone, addressStreet: addr.street };`,
+        `}`,
+        `export const hendersonContact = buildContact("Jane Henderson", "+15551234567", hendersonAddress);`,
+        `export const okaforLead = buildContact("Chidi Okafor", "+15559876543", longAddress);`,
+        `export const longNameContact = buildContact("Maximilian Bartholomew", "+15550001234", hendersonAddress);`,
+      ].join("\n")
+    );
+
+    // Component meta — only uses .fullName and .phoneE164 (string properties)
+    await writeFile(
+      join(dsDir, "contact-card.tsx"),
+      [
+        `import {`,
+        `  hendersonContact,`,
+        `  okaforLead,`,
+        `  longNameContact,`,
+        `} from "@/design-system/_fixtures/contact-fixtures";`,
+        ``,
+        `export const meta = {`,
+        `  kind: "composite" as const,`,
+        `  examples: [`,
+        `    { name: "Henderson", props: { name: hendersonContact.fullName, phone: hendersonContact.phoneE164 } },`,
+        `    { name: "Okafor", props: { name: okaforLead.fullName } },`,
+        `  ],`,
+        `  states: {`,
+        `    longText: { props: { name: longNameContact.fullName } },`,
+        `  },`,
+        `};`,
+        ``,
+        `export default function ContactCard({ name, phone }: { name: string; phone?: string }) {`,
+        `  return <div>{name}{phone && <span>{phone}</span>}</div>;`,
+        `}`,
+      ].join("\n")
+    );
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    expect(r.status).toBe(0);
+
+    const content = await readFile(join(dsDir, "contact-card.showcase.tsx"), "utf8");
+
+    // The meta props fully resolve to string values, so the showcase must not
+    // import the fixture helpers at all — just emit the plain strings inline.
+    // (Or if the property-access falls back to a FnMarker, hendersonContact et al.
+    // are the only identifiers that should be imported — not internal helpers.)
+
+    // Fixture-internal helper must NOT appear in the showcase
+    expect(content).not.toContain("buildContact");
+
+    // Transitive fixture imports must NOT appear in the showcase
+    expect(content).not.toContain("hendersonAddress");
+    expect(content).not.toContain("longAddress");
+    expect(content).not.toContain("address-fixtures");
+  });
 });
 
 // ── JSX-attribute / auto-children regression tests (#66, #67, #68, #73) ──────
