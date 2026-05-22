@@ -23,14 +23,21 @@ ds_check_classification() {
     *.showcase.tsx|*.test.tsx|*.stories.tsx) return 0 ;;
   esac
 
-  if grep -nE 'from\s+["'"'"'][^"'"'"']*@/design-system/' "$file" >/dev/null 2>&1; then
+  # Match `from '@/design-system/...'` but exclude type-only imports
+  # (`import type { ... } from '@/design-system/...'`). A type-only import
+  # carries no runtime dependency, so it does not violate atom classification.
+  # Lines starting with `import type` (optionally preceded by whitespace) are
+  # filtered out before flagging.
+  if grep -nE 'from\s+["'"'"'][^"'"'"']*@/design-system/' "$file" 2>/dev/null \
+       | grep -vE '^[0-9]+:\s*import\s+type\b' >/dev/null 2>&1; then
     while IFS=: read -r line _rest; do
       local hint="CLASS-001: atom imports @/design-system/* — move to composites/ or run: npx claude-ds reconform --backfill-meta --fix"
       echo "$file:$line: CLASS-001: $hint" >&2
       if [ -f ".claude/hooks/lib/log-failure.sh" ]; then
         bash .claude/hooks/lib/log-failure.sh "CLASS-001" "$file" "$line" "$hint" || true
       fi
-    done < <(grep -nE 'from\s+["'"'"'][^"'"'"']*@/design-system/' "$file")
+    done < <(grep -nE 'from\s+["'"'"'][^"'"'"']*@/design-system/' "$file" \
+               | grep -vE '^[0-9]+:\s*import\s+type\b')
     rc=2
   fi
 

@@ -183,6 +183,45 @@ describe("regenerate-companions.sh [integration]", () => {
     expect(validatorMatch.length).toBeGreaterThan(0);
   });
 
+  // ── Type-only imports do NOT trigger CLASS-001 (issue #76) ────────────────
+
+  it("does NOT flag CLASS-001 for an atom that only has a type-only import from @/design-system/*", async () => {
+    await scaffold(dir, FIXTURE_VALID_ATOM);
+
+    // Overwrite the valid atom with one that has ONLY `import type { Meta } from '@/design-system/...'`
+    const atomPath = join(dir, "design-system", "atoms", "badge.tsx");
+    await writeFile(
+      atomPath,
+      [
+        `import React from "react";`,
+        `import type { Meta } from "@/design-system/types/meta";`,
+        ``,
+        `export interface BadgeProps { label: string }`,
+        `export function Badge({ label }: BadgeProps) { return <span>{label}</span>; }`,
+        ``,
+        `export const meta: Meta = {`,
+        `  kind: "atom",`,
+        `  examples: [{ name: "default", props: { label: "New" } }],`,
+        `};`,
+        ``,
+      ].join("\n"),
+      "utf8"
+    );
+
+    // Run the validator directly — that's the unit-of-behavior under test.
+    const r = spawnSync(
+      "bash",
+      [
+        "-c",
+        `source scripts/lib/ds-validators.sh && ds_check_classification design-system/atoms/badge.tsx`,
+      ],
+      { cwd: dir, encoding: "utf8", timeout: 5_000 }
+    );
+
+    expect(r.status).toBe(0);
+    expect(r.stderr ?? "").not.toMatch(/CLASS-001/);
+  });
+
   // ── Scope gate: non-design-system files are ignored ───────────────────────
 
   it("exits 0 and does nothing for .tsx outside design-system/", async () => {
