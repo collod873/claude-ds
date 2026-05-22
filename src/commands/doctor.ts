@@ -11,7 +11,7 @@ import { loadProject } from "../lib/project.js";
 import { parseExceptions, openCount } from "../lib/exceptions.js";
 import { detectLookalikes, Finding } from "../lib/lookalike.js";
 import { detectPackageManager, PackageManager } from "../lib/package-manager.js";
-import { scanRootDupes, RootDupeFinding } from "./reconcile.js";
+import { scanRootDupes, RootDupeFinding } from "../lib/root-dupes.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
