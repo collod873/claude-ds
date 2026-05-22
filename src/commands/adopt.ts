@@ -11,6 +11,7 @@ import { detectAppDir, detectClaudeMdCandidates, DEFAULT_CLAUDE_MD_TARGET } from
 import { loadProject } from "../lib/project.js";
 import { run } from "../lib/runner.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
+import { migrateConfig } from "../lib/ops/migrate-config.js";
 
 const execFile = promisify(execFileCb);
 
@@ -213,6 +214,26 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   //
   // NOTE: backfillCompanions Op (#81) will compose here once it exists. Adopt does not
   // currently do companion stub backfill, so no inline placeholder is needed.
+  //
+  // #85: apply migrateConfig before the main Op pipeline. Adopt just wrote a fresh
+  // current-shape config above, so this is structurally a no-op here — but wiring
+  // it in for symmetry with sync/reconform protects against the case where adopt
+  // is re-run against a pre-v0.6 config (and keeps the pattern uniform across
+  // commands so future readers don't wonder why adopt is the odd one out).
+  {
+    const preCtx = await loadProject(cwd);
+    const migrationReport = await run(preCtx, [migrateConfig], "apply");
+    for (const c of migrationReport.applied) {
+      if (c.kind === "write" && c.path === ".claude-ds.json") {
+        info("migrate-config: .claude-ds.json updated to v0.6 shape (app_dir / claude_md_target)");
+      }
+    }
+    if (migrationReport.failed) {
+      err(`migrate-config failed: ${migrationReport.failed.error}`);
+      process.exit(2);
+    }
+  }
+
   const ctx = await loadProject(cwd);
   const op = makeSyncPackFiles();
   const report = await run(ctx, [op], "apply");

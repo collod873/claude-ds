@@ -6,6 +6,7 @@ import { parseExceptions } from "../lib/exceptions.js";
 import { info, err } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
 import { migrateClaudeMd } from "../lib/ops/migrate-claude-md.js";
+import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { run } from "../lib/runner.js";
 
 async function exists(p: string): Promise<boolean> {
@@ -175,6 +176,24 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
     err(`invalid .claude-ds.json: ${(e as Error).message}`);
     process.exit(2);
   }
+
+  // #85: apply migrateConfig before subsequent Ops so they plan against the
+  // post-migration cfg (mirrors sync.ts pattern). Re-loadProject afterward so
+  // migrateClaudeMd and downstream code see the migrated app_dir / claude_md_target.
+  {
+    const migrationReport = await run(ctx, [migrateConfig], dryRun ? "dry-run" : "apply");
+    for (const c of migrationReport.applied) {
+      if (c.kind === "write" && c.path === ".claude-ds.json") {
+        info("migrate-config: .claude-ds.json updated to v0.6 shape (app_dir / claude_md_target)");
+      }
+    }
+    if (migrationReport.failed) {
+      err(`migrate-config failed: ${migrationReport.failed.error}`);
+      process.exit(2);
+    }
+    ctx = await loadProject(cwd);
+  }
+
   // ── #34 migration: move managed CLAUDE.md block out of root into claude_md_target ──
   // Delegated to migrateClaudeMd Op (#80). Op is idempotent and a no-op when
   // target == root, root absent, root has no managed block, or block is already

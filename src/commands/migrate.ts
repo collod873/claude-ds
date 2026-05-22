@@ -4,10 +4,28 @@ import { classify } from "../lib/classify.js";
 import { parseExceptions } from "../lib/exceptions.js";
 import { info, err, confirm } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
+import { run } from "../lib/runner.js";
+import { migrateConfig } from "../lib/ops/migrate-config.js";
 
 export async function migrateCmd(opts: { source: string; tier?: "atom"|"composite"; rename?: string; reason: string; yes?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
-  const ctx = await loadProject(cwd);
+  let ctx = await loadProject(cwd);
+
+  // #85: apply migrateConfig before downstream work, mirroring sync/reconform.
+  // Re-loadProject afterward so subsequent code sees the migrated cfg.
+  {
+    const migrationReport = await run(ctx, [migrateConfig], "apply");
+    for (const c of migrationReport.applied) {
+      if (c.kind === "write" && c.path === ".claude-ds.json") {
+        info("migrate-config: .claude-ds.json updated to v0.6 shape (app_dir / claude_md_target)");
+      }
+    }
+    if (migrationReport.failed) {
+      err(`migrate-config failed: ${migrationReport.failed.error}`);
+      process.exit(2);
+    }
+    ctx = await loadProject(cwd);
+  }
   const abs = resolve(cwd, opts.source);
   const rel = relative(resolve(cwd), abs);
   if (!rel || rel.startsWith("..")) { err("source outside project root"); process.exit(2); }
