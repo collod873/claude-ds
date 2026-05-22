@@ -913,6 +913,8 @@ function buildScopes(
   // explicit display-name import line below.
   for (const stmt of sf.statements) {
     if (ts.isFunctionDeclaration(stmt) && stmt.name) {
+      const isExported = !!stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+      if (!isExported) continue;
       importScope.set(stmt.name.text, {
         filePath: sf.fileName,
         exportName: stmt.name.text,

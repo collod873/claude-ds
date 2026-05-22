@@ -6,6 +6,14 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [0.7.15] — 2026-05-22
+
+Tightened `buildScopes` after the deeper resolver in 0.7.14 started leaking private fixture helpers into showcase carry imports.
+
+### Fixed
+
+- **Private fixture helpers leaking into showcase imports** (`generate-showcase-companion.ts`). `buildScopes` registered every top-level `FunctionDeclaration` in scanned files as an importable symbol. After 0.7.14's depth fix the resolver recurses into fixture call expressions like `hendersonContact = contact("Henderson", ...)`, capturing `contact` as a required carry. But `contact` is a file-private helper — emitted imports failed with `TS2459: Module declares 'contact' locally, but it is not exported.` Fix: gate the registration on the `export` modifier so only actually-exported function declarations enter `importScope`.
+
 ## [0.7.14] — 2026-05-22
 
 Two generator bugs that caused `tsc --noEmit` failures in showcase companions when components use imported fixtures or clear spread props with `undefined`.
