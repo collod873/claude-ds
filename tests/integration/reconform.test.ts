@@ -210,14 +210,14 @@ describe("reconform", () => {
 
   it("meta check: companion files (.showcase.tsx, .test.tsx) exempt from meta requirement", async () => {
     await scaffoldProject(dir);
-    // Main component has meta; companions don't (they shouldn't need to)
+    // Main component has meta; companions don't (they shouldn't need to).
+    // Companion .test.tsx alone is sufficient: meta-audit treats .showcase.tsx,
+    // .test.tsx, and .stories.tsx symmetrically via COMPANION_SUFFIXES. We omit
+    // .showcase.tsx here to keep the dry-run baseline free of GEN-001/002
+    // violations under the new policy (#89); GEN drift is covered separately.
     await writeFile(
       join(dir, "design-system", "atoms", "badge.tsx"),
       `export const meta = { kind: "atom", examples: [] };\nexport function Badge() { return null; }\n`
-    );
-    await writeFile(
-      join(dir, "design-system", "atoms", "badge.showcase.tsx"),
-      `export default function BadgeShowcase() { return null; }\n`
     );
     await writeFile(
       join(dir, "design-system", "atoms", "badge.test.tsx"),
@@ -228,6 +228,48 @@ describe("reconform", () => {
     expect(r.code).toBe(0);
     // No META-001 for badge (main file has meta, companions are exempt)
     expect(r.stdout).not.toMatch(/META-001/);
+  });
+
+  // ── #89: dry-run exit-2 on GEN-001/002 violations ──────────────────────────
+
+  it("#89: --dry-run with GEN-001 violation exits 2 and prints the violation", async () => {
+    await scaffoldProject(dir);
+    await writeFile(
+      join(dir, "design-system", "atoms", "tag.tsx"),
+      [
+        `import type { Meta } from "@/design-system/types/meta";`,
+        `export const meta: Meta = { kind: "atom", examples: [{ name: "default", props: {} }] };`,
+        `export function Tag() { return null; }`,
+        ``,
+      ].join("\n")
+    );
+    // Companion exists but missing @generated header → GEN-001 violation.
+    await writeFile(
+      join(dir, "design-system", "atoms", "tag.showcase.tsx"),
+      `// hand-written stub\nexport default function TagShowcase() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/GEN-001/);
+    expect(r.stderr).toMatch(/tag\.showcase\.tsx/);
+  });
+
+  it("#89: --dry-run with no GEN violations exits 0", async () => {
+    await scaffoldProject(dir);
+    // Atom with meta, no companions → integrity check finds nothing.
+    await writeFile(
+      join(dir, "design-system", "atoms", "label.tsx"),
+      [
+        `import type { Meta } from "@/design-system/types/meta";`,
+        `export const meta: Meta = { kind: "atom", examples: [{ name: "default", props: {} }] };`,
+        `export function Label() { return null; }`,
+        ``,
+      ].join("\n")
+    );
+
+    const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
   });
 
   it("meta check: references dir scanned — reference file missing meta → reported", async () => {

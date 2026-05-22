@@ -117,15 +117,12 @@ export async function reconformCmd(opts: {
   // Phase 8 — stub-file warning.
   await emitStubWarning(cwd);
 
-  // Final report.
-  // Note: the genViolations dry-run exit-2 was dead code in the legacy
-  // implementation (the `if (dryRun) exit(0)` short-circuit fired first).
-  // Preserved as dead code here too — flipping it would change CI exit codes
-  // on legitimately stub-shaped showcase files. Track separately if needed.
-  void genViolations;
+  // Final report. Dry-run exits 2 when GEN-001/002 violations are present so
+  // CI can surface generator drift without an apply run (#89). The apply path
+  // auto-repairs GEN violations in-place and exits 0.
   if (dryRun) {
     info(`[dry-run] complete — ${companionsCreated.length} companion(s) would be created, ${metaMissing.length} meta export(s) missing${backfillMetaFlag ? `, ${classificationCount} misclassified` : ""}`);
-    process.exit(0);
+    process.exit(genViolations.length > 0 ? 2 : 0);
   }
 
   info(`reconform complete — ${companionsCreated.length} companion(s) created, ${metaMissing.length} meta export(s) missing${backfillMetaFlag ? `, ${metaBackfilled} meta backfilled, ${classificationCount} misclassified` : ""}, ${allViolations.length} violation(s) reviewed`);
