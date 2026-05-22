@@ -36,6 +36,16 @@ Directories the CLI considers in-scope for `audit` / `reconcile`. `strict: true`
 forbid unexpected files; `strict: false` roots (e.g. `design-system/atoms/`) are open
 for consumer growth.
 
+### Showcase
+The browsable page at `app/design/` in a consumer project that renders every coded
+atom and composite with its `meta.examples` variants. Its job is **visual catalog +
+self-audit**: see what's actually coded, spot issues, identify stale or missing variants.
+Generated from each `<Name>.tsx`'s `meta` export by `regenerate-companions.sh`
+(PostToolUse hook) into `<Name>.showcase.tsx` companions.
+
+Explicitly **not** for: feeding Claude (it reads source directly), human-facing docs,
+or live prop-editing playground. See [ADR-0001](docs/adr/0001-personal-tool-scope.md).
+
 ---
 
 ## New concepts (this refactor)
