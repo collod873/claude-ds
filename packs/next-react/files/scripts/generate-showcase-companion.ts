@@ -261,7 +261,10 @@ function resolveAtPrefix(importPath: string, consumerRoot: string): string {
         const prefix = pattern.replace(/\/\*$/, "/");
         if (importPath.startsWith(prefix) && targets[0]) {
           const mapped = targets[0].replace(/\/\*$/, "/").replace(/^\.\//, "");
-          return importPath.replace(prefix, mapped + "/").replace(/\/+/g, "/");
+          const result = importPath.replace(prefix, mapped + "/").replace(/\/+/g, "/");
+          // Strip any accidental leading "/" that would be misread as a filesystem root.
+          // e.g. when targets[0] = "./*" the replacement produces "/foo" instead of "foo".
+          return result.startsWith("/") ? result.slice(1) : result;
         }
       }
     }
@@ -271,6 +274,49 @@ function resolveAtPrefix(importPath: string, consumerRoot: string): string {
   // Default: @/ → ./src/
   return importPath.replace(/^@\//, "src/");
 }
+
+/**
+ * Given an absolute file path, try to find the shortest `@/…` alias specifier
+ * that refers to it under the consumer's tsconfig path mappings.
+ * Returns `null` if no alias covers the file.
+ */
+function filePathToAlias(absoluteFilePath: string, consumerRoot: string): string | null {
+  try {
+    const tsconfigPath = join(consumerRoot, "tsconfig.json");
+    if (!existsSync(tsconfigPath)) return null;
+    const raw = JSON.parse(readFileSync(tsconfigPath, "utf8")) as {
+      compilerOptions?: { paths?: Record<string, string[]> };
+    };
+    const paths = raw.compilerOptions?.paths ?? {};
+    // Sort longest target first so more-specific aliases win.
+    const sortedEntries = Object.entries(paths).sort(([, a], [, b]) => b[0].length - a[0].length);
+    // Canonicalise inputs: resolve both through node:path.resolve so that
+    // symlinked prefixes (e.g. /tmp → /private/tmp on macOS) don't cause
+    // false-negative prefix checks.
+    const canonicalFile = resolvePath(absoluteFilePath);
+    const canonicalRoot = resolvePath(consumerRoot);
+    for (const [pattern, targets] of sortedEntries) {
+      if (!pattern.includes("*") || !targets[0]) continue;
+      const aliasPrefix = pattern.replace(/\/\*$/, "/");
+      if (!aliasPrefix.startsWith("@/")) continue; // only @/ aliases
+      // Resolve the target glob to an absolute directory
+      const targetRelDir = targets[0].replace(/\/\*$/, "").replace(/^\.\//, "");
+      const targetAbsDir = targetRelDir ? resolvePath(canonicalRoot, targetRelDir) : canonicalRoot;
+      // Strip any trailing "/" for normalised comparison
+      const normalTarget = targetAbsDir.replace(/\/$/, "");
+      if (canonicalFile.startsWith(normalTarget + "/")) {
+        const rest = canonicalFile.slice(normalTarget.length + 1);
+        // Drop known TS extensions — the alias specifier shouldn't include them
+        const noExt = rest.replace(/\.(tsx?|d\.ts)$/, "");
+        return aliasPrefix + noExt;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 
 /**
  * Translate a TS AST node into a plain-JS value suitable for the JSX emitter.
@@ -584,11 +630,19 @@ function collectRefsFromNode(
     if (name === "React" || name === "undefined" || name === "null") return;
     if (importScope.has(name)) {
       const imp = importScope.get(name)!;
+      // Normalise the specifier so it resolves from the showcase output directory.
+      // When the import came from a fixture file (transitive resolution), `imp.rawSpec`
+      // is relative to the fixture file's directory — not the showcase's. Prefer the
+      // `@/` alias form (always valid from any directory in the consumer project);
+      // fall back to the original spec only for bare-specifiers (filePath === "").
+      const rawSpec = imp.filePath
+        ? (filePathToAlias(imp.filePath, consumerRoot) ?? imp.rawSpec)
+        : imp.rawSpec;
       carried.set(name, {
         kind: "import",
         localName: name,
         exportedName: imp.exportName,
-        rawSpec: imp.rawSpec,
+        rawSpec,
       });
       return;
     }

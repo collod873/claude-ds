@@ -1313,6 +1313,65 @@ describe("AST-based meta extractor (A3)", () => {
     // itemColumns. It must be carried as `import type`.
     expect(content).toMatch(/import\s+type\s*\{[^}]*Item[^}]*\}\s*from/);
   });
+
+  // ── @/ alias fixture imports (issue #93) ──────────────────────────────────
+
+  const FIXTURE_ALIAS_FIXTURES = resolve(
+    "packs/next-react/tests/fixtures/showcase-companion-alias-fixtures"
+  );
+
+  it("#93: direct @/ alias import produces alias-form specifier in carried import", async () => {
+    // contact-card.tsx imports from "@/design-system/_fixtures/contact-fixtures".
+    // An arrow in meta.examples references formatContact, triggering the carry path.
+    // The emitted showcase must use "@/..." not a relative path that won't resolve.
+    copyFixture(FIXTURE_ALIAS_FIXTURES, dir, "design-system/composites/contact-card.tsx");
+    copyFixture(FIXTURE_ALIAS_FIXTURES, dir, "design-system/_fixtures/contact-fixtures.ts");
+    copyFixture(FIXTURE_ALIAS_FIXTURES, dir, "design-system/_fixtures/address-fixtures.ts");
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "test-consumer" }));
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }));
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+
+    const content = await readFile(
+      join(dir, "design-system/composites/contact-card.showcase.tsx"),
+      "utf8"
+    );
+    // formatContact is carried — must use the @/ alias form, never a relative path
+    expect(content).toMatch(
+      /import\s*\{[^}]*formatContact[^}]*\}\s*from\s*"@\/design-system\/_fixtures\/contact-fixtures"/
+    );
+    // Must NOT emit a broken relative form anchored to the fixture directory
+    expect(content).not.toContain('from "../_fixtures/contact-fixtures"');
+    expect(content).not.toContain('from "./contact-fixtures"');
+  });
+
+  it("#93: transitive fixture import produces alias-form specifier (not fixture-relative path)", async () => {
+    // contact-fixtures.ts imports sampleAddress from "./address-fixtures".
+    // contact-card.tsx imports formatContact (which references sampleAddress).
+    // The showcase must emit "@/design-system/_fixtures/address-fixtures", not "./address-fixtures".
+    copyFixture(FIXTURE_ALIAS_FIXTURES, dir, "design-system/composites/contact-card.tsx");
+    copyFixture(FIXTURE_ALIAS_FIXTURES, dir, "design-system/_fixtures/contact-fixtures.ts");
+    copyFixture(FIXTURE_ALIAS_FIXTURES, dir, "design-system/_fixtures/address-fixtures.ts");
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "test-consumer" }));
+    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }));
+
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+
+    const content = await readFile(
+      join(dir, "design-system/composites/contact-card.showcase.tsx"),
+      "utf8"
+    );
+    // sampleAddress is transitively referenced inside formatContact; must use alias form
+    expect(content).toMatch(
+      /import\s*\{[^}]*sampleAddress[^}]*\}\s*from\s*"@\/design-system\/_fixtures\/address-fixtures"/
+    );
+    // Must NOT emit the fixture-relative form (resolves from _fixtures/ dir, not showcase dir)
+    expect(content).not.toContain('from "./address-fixtures"');
+  });
 });
 
 // ── JSX-attribute / auto-children regression tests (#66, #67, #68, #73) ──────
