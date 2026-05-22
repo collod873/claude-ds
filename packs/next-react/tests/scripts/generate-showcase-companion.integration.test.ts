@@ -1249,3 +1249,130 @@ describe("AST-based meta extractor (A3)", () => {
     expect(content).toMatch(/import\s+type\s*\{[^}]*Item[^}]*\}\s*from/);
   });
 });
+
+// ── JSX-attribute / auto-children regression tests (#66, #67, #68, #73) ──────
+
+describe("JSX attribute / children emission regressions", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fresh();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // ── #66 — boolean CVA axis emits {true}/{false} not "true"/"false" ────────
+  it("#66 boolean CVA axis emits JSX expression form, not string", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "tag.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const v = cva("t", {`,
+        `  variants: {`,
+        `    tone: { neutral: "n", primary: "p" },`,
+        `    selected: { true: "sel", false: "unsel" },`,
+        `  },`,
+        `  defaultVariants: { tone: "neutral", selected: false },`,
+        `});`,
+        `export function Tag(props: { tone?: "neutral" | "primary"; selected?: boolean; children?: React.ReactNode }) { return <span {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "tag.showcase.tsx"), "utf8");
+    // Must emit JSX-expression form for boolean values
+    expect(content).toContain("selected={true}");
+    expect(content).toContain("selected={false}");
+    // Must NOT emit string form
+    expect(content).not.toContain('selected="true"');
+    expect(content).not.toContain('selected="false"');
+  });
+
+  // ── #67 — boolean-shaped aria attr in CVA emits {true} not "true" ─────────
+  it("#67 boolean-shaped aria-invalid axis emits JSX expression", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "input-x.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const v = cva("i", {`,
+        `  variants: {`,
+        `    size: { sm: "s", md: "m" },`,
+        `    "aria-invalid": { true: "inv", false: "ok" },`,
+        `  },`,
+        `  defaultVariants: { size: "md", "aria-invalid": false },`,
+        `});`,
+        `export function InputX(props: any) { return <input {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "input-x.showcase.tsx"), "utf8");
+    expect(content).toContain("aria-invalid={true}");
+    expect(content).toContain("aria-invalid={false}");
+    expect(content).not.toContain('aria-invalid="true"');
+    expect(content).not.toContain('aria-invalid="false"');
+  });
+
+  // ── #68 — childless component renders self-closing, not text fallback ────
+  it("#68 component without children prop renders self-closing", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "brand-mark.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const v = cva("b", {`,
+        `  variants: {`,
+        `    size: { sm: "s", md: "m" },`,
+        `  },`,
+        `  defaultVariants: { size: "md" },`,
+        `});`,
+        // No children in props type — only size
+        `export function BrandMark({ size }: { size?: "sm" | "md" }) { return <svg data-size={size} />; }`,
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "brand-mark.showcase.tsx"), "utf8");
+    // Must NOT stuff displayName as text child
+    expect(content).not.toContain(">BrandMark</BrandMark>");
+    // Must emit self-closing form for at least one CVA combo
+    expect(content).toMatch(/<BrandMark\s+size="sm"\s*\/>/);
+  });
+
+  // ── #73 — embedded escaped quotes JSX-encode (use {"..."} expression) ────
+  it("#73 embedded escaped quotes in meta string emit valid JSX attribute", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "echo.tsx"),
+      [
+        `import React from "react";`,
+        `export function Echo(props: { phrase?: string }) { return <span>{props.phrase}</span>; }`,
+        `export const meta = { kind: "atom", examples: [{ name: "with-quotes", props: { phrase: "say \\"hi\\"" } }], skip: [] };`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "echo.showcase.tsx"), "utf8");
+    // Must NOT contain broken double-escaped attribute form
+    expect(content).not.toContain('phrase="\\"hi\\""');
+    expect(content).not.toContain('phrase="\\"');
+    // Must contain valid form: either JSX expression {"say \"hi\""} or &quot;-encoded
+    const hasExprForm = /phrase=\{"say \\"hi\\""\}/.test(content);
+    const hasEntityForm = content.includes('phrase="say &quot;hi&quot;"');
+    expect(hasExprForm || hasEntityForm).toBe(true);
+  });
+});

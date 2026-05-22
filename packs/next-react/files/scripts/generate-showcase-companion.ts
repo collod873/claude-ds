@@ -1144,18 +1144,58 @@ function extractVariantKeys(variantsBlock: string, _source: string): Record<stri
   // inside class value strings are not mistaken for variant keys.
   const stripped = stripStringLiterals(variantsBlock);
 
-  // Match each variant key and its value object (unquoted variant names only after stripping)
+  // Match each variant key and its value object. Variant axis names can be
+  // bare identifiers (`intent`) or quoted strings (`"aria-invalid"`). After
+  // stripStringLiterals the quoted-key text became `""`, so we must scan the
+  // ORIGINAL block for quoted-keyed axes — but locate their value object via
+  // brace-matching on the stripped block (so Tailwind modifier prefixes inside
+  // class strings stay neutralised).
+  const variantHits: Array<{ variantName: string; strippedValuesBlock: string }> = [];
+
+  // (a) bare-identifier axes from stripped block
   const variantRe = /(\w+)\s*:\s*\{([^}]*)\}/g;
   let m: RegExpExecArray | null;
   while ((m = variantRe.exec(stripped)) !== null) {
-    const variantName = m[1];
-    const strippedValuesBlock = m[2];
+    variantHits.push({ variantName: m[1], strippedValuesBlock: m[2] });
+  }
 
+  // (b) quoted-identifier axes (e.g. "aria-invalid") — scan original, then
+  //     slice the stripped block at the same offset to get the cleaned values.
+  const quotedAxisRe = /["']([A-Za-z_$][\w$-]*)["']\s*:\s*\{/g;
+  let qa: RegExpExecArray | null;
+  while ((qa = quotedAxisRe.exec(variantsBlock)) !== null) {
+    const variantName = qa[1];
+    if (variantHits.some((h) => h.variantName === variantName)) continue;
+    // Brace-match starting at the `{` position to extract the values block.
+    const openIdx = variantsBlock.indexOf("{", qa.index + qa[0].length - 1);
+    if (openIdx < 0) continue;
+    let depth = 0;
+    let endIdx = -1;
+    for (let i = openIdx; i < variantsBlock.length; i++) {
+      const ch = variantsBlock[i];
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          endIdx = i;
+          break;
+        }
+      }
+    }
+    if (endIdx < 0) continue;
+    // Use stripped version of that slice so Tailwind modifiers don't leak
+    const rawSlice = variantsBlock.slice(openIdx + 1, endIdx);
+    const strippedValuesBlock = stripStringLiterals(rawSlice);
+    variantHits.push({ variantName, strippedValuesBlock });
+  }
+
+  for (const { variantName, strippedValuesBlock } of variantHits) {
     // For value keys we need BOTH unquoted identifiers (from stripped block) AND
     // quoted identifiers like "icon-sm" (which were removed by stripping).
-    // Locate the original values block for this variant name.
-    const origVariantRe = new RegExp(`(?:^|[{,\\s])${variantName}\\s*:\\s*\\{([^}]*)\\}`);
-    const origMatch = variantsBlock.match(origVariantRe);
+    // Locate the original values block for this variant name (try bare then quoted).
+    const origVariantReBare = new RegExp(`(?:^|[{,\\s])${variantName}\\s*:\\s*\\{([^}]*)\\}`);
+    const origVariantReQuoted = new RegExp(`["']${variantName}["']\\s*:\\s*\\{([^}]*)\\}`);
+    const origMatch = variantsBlock.match(origVariantReBare) ?? variantsBlock.match(origVariantReQuoted);
     const origValuesBlock = origMatch ? origMatch[1] : strippedValuesBlock;
 
     const valueKeys: string[] = [];
@@ -1266,11 +1306,40 @@ function isIconSize(sizeValue: string): boolean {
  * by the showcase; emitAtomCompositeShowcase tracks this and emits the import
  * conditionally.
  */
-function autoChildren(props: Record<string, string>, displayName: string): string {
+function autoChildren(props: Record<string, string>, displayName: string, acceptsChildren = true): string {
   if ("children" in props) return ""; // explicit children present
   const sizeVal = props["size"] ?? "";
   if (isIconSize(sizeVal)) return `<Square aria-hidden="true" className="h-4 w-4" />`;
+  // #68: components without a `children` prop should self-close, not stuff
+  // displayName as a text node (which fails the prop type and breaks tsc).
+  if (!acceptsChildren) return "";
   return displayName;
+}
+
+/**
+ * Heuristic: does the source declare a `children` prop on its primary component?
+ * We don't run a full type-check — instead we look for common shapes:
+ *   - destructure: `function Foo({ children, ... }: ...)` or `({ children })`
+ *   - prop type: `children?: ...` or `children: ...` in a type/interface
+ *   - PropsWithChildren / React.PropsWithChildren wrapper
+ *   - spread-props pattern (`(props: any)` or `...rest`): assume children-accepting
+ *     because it forwards to a DOM element.
+ *
+ * Returns true on any match. Used by autoChildren so childless components
+ * (e.g. BrandMark) emit self-closing JSX instead of `<BrandMark>BrandMark</BrandMark>`.
+ */
+function componentAcceptsChildren(source: string): boolean {
+  // Strip comments + string literals to avoid matches inside docstrings.
+  const cleaned = stripStringLiterals(
+    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
+  );
+  if (/\bchildren\s*[?:]/.test(cleaned)) return true;
+  if (/\{\s*[^}]*\bchildren\b[^}]*\}\s*:/.test(cleaned)) return true;
+  if (/PropsWithChildren\b/.test(cleaned)) return true;
+  // Spread-props patterns commonly forward children to an underlying element.
+  if (/\(\s*\{[^}]*\.\.\.[A-Za-z_$][\w$]*[^}]*\}\s*:/.test(cleaned)) return true;
+  if (/\(\s*props\s*:\s*any\b/.test(cleaned)) return true;
+  return false;
 }
 
 interface UsageInfo {
@@ -1327,8 +1396,14 @@ function containsFnMarker(v: unknown): boolean {
 function renderPropsAttr(props: Record<string, unknown>): string {
   return Object.entries(props)
     .map(([k, v]) => {
-      // Plain string with no fn markers → use JSON.stringify shorthand
-      if (typeof v === "string" && !containsFnMarker(v)) return `${k}=${JSON.stringify(v)}`;
+      // Plain string with no fn markers → use JSON.stringify shorthand.
+      // If the string contains a double-quote, JSON.stringify produces an
+      // attribute value like "say \"hi\"" which JSX rejects. Emit as a
+      // braced JS expression in that case so the string survives intact (#73).
+      if (typeof v === "string" && !containsFnMarker(v)) {
+        if (v.includes('"')) return `${k}={${JSON.stringify(v)}}`;
+        return `${k}=${JSON.stringify(v)}`;
+      }
       if (typeof v === "boolean") return v ? k : `${k}={false}`;
       // Use serializeJSValue which handles FnMarker at any nesting depth
       return `${k}={${serializeJSValue(v)}}`;
@@ -1609,14 +1684,23 @@ function emitAtomCompositeShowcase(
 
         const groupLabel = primaryVal.charAt(0).toUpperCase() + primaryVal.slice(1);
 
+        const acceptsChildren = componentAcceptsChildren(source);
         const buttonBlocks = groupCombos
           .map((ce) => {
             const propsStr = Object.entries(ce.props)
-              .map(([k, v]) => `${k}="${v}"`)
+              .map(([k, v]) => {
+                // #66 / #67: boolean-shaped CVA axes (values literally "true"/"false")
+                // must emit as JSX expressions `{true}`/`{false}` so the component's
+                // boolean prop type accepts them. Plain string-valued axes stay quoted.
+                if (v === "true") return `${k}={true}`;
+                if (v === "false") return `${k}={false}`;
+                return `${k}="${v}"`;
+              })
               .join(" ");
             // Children fallback for auto-generated combos. Icon sizes get a
-            // lucide Square placeholder; text sizes get the displayName.
-            const children = autoChildren(ce.props, displayName);
+            // lucide Square placeholder; text sizes get the displayName —
+            // but only when the component actually accepts children (#68).
+            const children = autoChildren(ce.props, displayName, acceptsChildren);
             // Secondary axis label (everything except the primary axis)
             const secondaryLabel = Object.entries(ce.props)
               .filter(([k]) => k !== primaryAxis)
