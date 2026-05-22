@@ -1539,6 +1539,8 @@ function renderPropsAttr(props: Record<string, unknown>): string {
 const FORCE_WRAPPER: Partial<Record<StateKey, string>> = {
   hover: "force-hover",
   focus: "force-focus",
+  error: "relative overflow-hidden rounded border border-dashed border-border max-h-64 min-h-32 grid place-items-center",
+  stacked: "relative overflow-hidden rounded border border-dashed border-border max-h-64 min-h-32 grid place-items-center",
 };
 
 const FORCE_ATTR: Partial<Record<StateKey, Record<string, unknown>>> = {
@@ -1568,12 +1570,15 @@ function emitStateRow(
   const cell = wrapper
     ? `<div className="${wrapper}">${tag}</div>`
     : tag;
+  const portalHint = stateKey === "stacked"
+    ? `              <span className="text-xs text-muted-foreground italic">↘ Renders to viewport portal — check bottom corner.</span>\n`
+    : "";
   return [
     `        <section className="mb-6">`,
     `          <h2 className="text-lg font-semibold mb-3">${label}</h2>`,
     `          <div className="flex flex-wrap items-end gap-3">`,
     `            <div className="flex flex-col items-start gap-1">`,
-    `              ${cell}`,
+    `${portalHint}              ${cell}`,
     `              <span className="text-xs text-muted-foreground">${spec.name}</span>`,
     `            </div>`,
     `          </div>`,

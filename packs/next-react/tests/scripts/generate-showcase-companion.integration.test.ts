@@ -841,7 +841,7 @@ describe("v0.7.0 hand-off contract (issue #60)", () => {
     expect(content).toContain("long-text");
   });
 
-  it("(c2) meta.states.error and meta.states.stacked produce labeled rows with no special attribute injection", async () => {
+  it("(c2) meta.states.error and meta.states.stacked produce labeled rows with containment wrapper", async () => {
     const dsDir = join(dir, "design-system", "atoms");
     await mkdir(dsDir, { recursive: true });
     await writeFile(
@@ -873,9 +873,23 @@ describe("v0.7.0 hand-off contract (issue #60)", () => {
     expect(content).toContain(">Stacked<");
     expect(content).toContain("stacked-items");
     // Neither row should inject special attributes (no aria-*, no disabled)
-    // The generator emits the props as-is — confirm no force-wrapper divs for these keys
-    expect(content).not.toContain('className="force-error"');
-    expect(content).not.toContain('className="force-stacked"');
+    expect(content).not.toContain("aria-");
+    expect(content).not.toContain("disabled");
+    // Both rows must use the containment wrapper class (clip screen-fillers, #91)
+    const containmentClass = "relative overflow-hidden rounded border border-dashed border-border max-h-64 min-h-32 grid place-items-center";
+    expect(content).toContain(`className="${containmentClass}"`);
+    // The wrapper must appear in both the error and stacked sections
+    const errorIdx = content.indexOf(">Error<");
+    const stackedIdx = content.indexOf(">Stacked<");
+    expect(errorIdx).toBeGreaterThan(-1);
+    expect(stackedIdx).toBeGreaterThan(-1);
+    const errorSection = content.slice(errorIdx, stackedIdx);
+    const stackedSection = content.slice(stackedIdx);
+    expect(errorSection).toContain(`className="${containmentClass}"`);
+    expect(stackedSection).toContain(`className="${containmentClass}"`);
+    // Portal hint caption must appear in the stacked section only
+    expect(stackedSection).toContain("Renders to viewport portal");
+    expect(errorSection).not.toContain("Renders to viewport portal");
   });
 
   it("(d) with stub analyzer present, tag column appears in output", async () => {
@@ -1066,6 +1080,20 @@ describe("v0.7.8 showcase format finalization (issue #65)", () => {
     spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
     const content = await readFile(join(dsDir, "tag.showcase.tsx"), "utf8");
     expect(content).not.toContain(">States<");
+  });
+
+  it("(#91) containment wrapper does NOT appear on in-flow state rows (hover/focus/disabled/pressed/expanded/invalid)", async () => {
+    const showcasePath = await seedButtonWithIconAndStates({ withAnalyzer: false });
+    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const content = await readFile(showcasePath, "utf8");
+    const containmentClass = "relative overflow-hidden rounded border border-dashed border-border max-h-64 min-h-32 grid place-items-center";
+    // Containment class must NOT appear — fixture has no error/stacked state
+    expect(content).not.toContain(containmentClass);
+    // Portal hint must NOT appear
+    expect(content).not.toContain("Renders to viewport portal");
+    // Existing force mechanisms still intact
+    expect(content).toMatch(/>Hover<[\s\S]*?force-hover/);
+    expect(content).toMatch(/>Focus<[\s\S]*?force-focus/);
   });
 });
 
