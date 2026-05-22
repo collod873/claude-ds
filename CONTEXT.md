@@ -90,4 +90,10 @@ present and the path is tracked. Lives in `src/lib/runner.ts`.
 - **Prompts live in commands, not Operations.** Commands gather user decisions into
   `ctx.decisions` before calling `run()`. `plan()` is deterministic given a ctx.
 - **One chokepoint for bytes.** All file mutation flows through the Runner. No raw
-  `writeFile()` calls in commands.
+  `writeFile()` / `unlink()` / `rename()` calls in commands, with these explicit
+  carve-outs:
+  - `init` — bootstrap write of `.claude-ds.json` before the Runner context exists.
+  - `doctor` — writes into a disposable tmp sandbox for hook verification; never touches consumer bytes.
+  - `migrate` — single user-driven component move (rename + stub stubs); Op infra is overhead without payoff.
+  - `migrate-layout` — one-shot file reorganisation driven by the user; same rationale as `migrate`.
+  - `enforce` — a single config-key flip; no file content mutation.

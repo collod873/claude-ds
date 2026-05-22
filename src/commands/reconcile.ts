@@ -1,10 +1,12 @@
-import { readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DeprecatedPath } from "../lib/manifest.js";
 import { loadProject } from "../lib/project.js";
 import { info, err, confirm } from "../lib/log.js";
 import { createInterface } from "node:readline/promises";
 import { scanRootDupes, RootDupeFinding } from "../lib/root-dupes.js";
+import { run, type Operation } from "../lib/runner.js";
+import { makeDeleteFiles, makeMergeRootToCanonical } from "../lib/ops/reconcile-mutations.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -159,30 +161,25 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     }
   }
 
+  // ── Gather decisions (no I/O yet) ─────────────────────────────────────────
+  // Prompts happen here; actual file mutations flow through Ops via the Runner below.
+  const pathsToDelete: string[] = [];
+  const mergeRequests: Array<{ root: string; canonical: string }> = [];
+  let skipped = 0;
+
   // ── Remediate root dupes (content-differs path) ───────────────────────────
   // Root dupes that are content-identical are handled by the normal deprecated-path
   // deletion below. Dupes where content differs need merge-or-skip handling first.
-  let deleted = 0;
-  let skipped = 0;
-
   for (const f of rootDupeFindings) {
     if (!f.contentDiffers) continue; // identical — handled by deprecated delete below
     if (!isTTY && !force) {
-      // Non-TTY, non-force: can't prompt, bail out
       info(`warning: ${f.rootPath} content differs from ${f.canonicalPath} — run \`reconcile\` interactively to merge, or pass --force to delete root`);
       skipped++;
       continue;
     }
     if (force) {
       // --force: delete root copy unconditionally (canonical wins); user content in root is stale
-      try {
-        await unlink(join(cwd, f.rootPath));
-        info(`deleted: ${f.rootPath} (canonical ${f.canonicalPath} kept; content differed — pass --merge-root to overwrite canonical instead)`);
-        deleted++;
-      } catch (e) {
-        info(`warning: could not delete ${f.rootPath}: ${(e as Error).message}`);
-        skipped++;
-      }
+      pathsToDelete.push(f.rootPath);
       continue;
     }
     // Interactive: offer merge root→canonical then delete root
@@ -195,25 +192,9 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     const ans = (await rl.question(`Choose [a/b/c]: `)).trim().toLowerCase();
     rl.close();
     if (ans === "a") {
-      try {
-        const rootContent = await readFile(join(cwd, f.rootPath), "utf8");
-        await writeFile(join(cwd, f.canonicalPath), rootContent, "utf8");
-        await unlink(join(cwd, f.rootPath));
-        info(`merged: ${f.rootPath} → ${f.canonicalPath}, root deleted`);
-        deleted++;
-      } catch (e) {
-        info(`warning: could not merge ${f.rootPath}: ${(e as Error).message}`);
-        skipped++;
-      }
+      mergeRequests.push({ root: f.rootPath, canonical: f.canonicalPath });
     } else if (ans === "b") {
-      try {
-        await unlink(join(cwd, f.rootPath));
-        info(`deleted: ${f.rootPath} (canonical kept)`);
-        deleted++;
-      } catch (e) {
-        info(`warning: could not delete ${f.rootPath}: ${(e as Error).message}`);
-        skipped++;
-      }
+      pathsToDelete.push(f.rootPath);
     } else {
       info(`skipped: ${f.rootPath} — resolve manually`);
       skipped++;
@@ -226,16 +207,7 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   for (const f of toDelete) {
     // Skip root-dupes that differ in content — handled above (merged, deleted, or skipped)
     if (rootDupePaths.has(f.path) && rootDupeFindings.find(r => r.rootPath === f.path)?.contentDiffers) continue;
-    const full = join(cwd, f.path);
-    if (!(await exists(full))) continue; // already deleted in merge step
-    try {
-      await unlink(full);
-      info(`deleted: ${f.path}`);
-      deleted++;
-    } catch (e) {
-      info(`warning: could not delete ${f.path}: ${(e as Error).message}`);
-      skipped++;
-    }
+    pathsToDelete.push(f.path);
   }
 
   // ── Handle CLAUDE.md collisions ───────────────────────────────────────────
@@ -257,25 +229,30 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     rl.close();
 
     if (ans === "a") {
-      try {
-        await unlink(join(cwd, "CLAUDE.md"));
-        info(`deleted: CLAUDE.md`);
-        deleted++;
-      } catch (e) {
-        info(`warning: could not delete CLAUDE.md: ${(e as Error).message}`);
-        skipped++;
-      }
+      pathsToDelete.push("CLAUDE.md");
     } else if (ans === "b") {
-      try {
-        await unlink(join(cwd, ".claude", "CLAUDE.md"));
-        info(`deleted: .claude/CLAUDE.md`);
-        deleted++;
-      } catch (e) {
-        info(`warning: could not delete .claude/CLAUDE.md: ${(e as Error).message}`);
-        skipped++;
-      }
+      pathsToDelete.push(".claude/CLAUDE.md");
     } else {
       info(`skipped: CLAUDE.md collision — resolve manually`);
+      skipped++;
+    }
+  }
+
+  // ── Apply via Runner ──────────────────────────────────────────────────────
+  const ops: Operation[] = [];
+  for (const { root, canonical } of mergeRequests) {
+    ops.push(makeMergeRootToCanonical(root, canonical));
+  }
+  if (pathsToDelete.length > 0) {
+    ops.push(makeDeleteFiles(pathsToDelete));
+  }
+
+  let deleted = 0;
+  if (ops.length > 0) {
+    const report = await run(ctx, ops, "apply");
+    deleted = report.applied.filter(c => c.kind === "delete").length;
+    if (report.failed) {
+      info(`warning: could not apply change to ${report.failed.change.path}: ${report.failed.error}`);
       skipped++;
     }
   }
