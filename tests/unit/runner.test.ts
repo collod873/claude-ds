@@ -146,6 +146,43 @@ describe("runner — apply rename", () => {
   });
 });
 
+describe("runner — abort change", () => {
+  it("dry-run: logs abort reason; no disk touch", async () => {
+    await writeFile(join(dir, "f.txt"), "untouched");
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "abort", path: "f.txt", reason: "hand-edited" },
+    ]);
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: any) => {
+      written.push(String(chunk));
+      return true;
+    }) as any);
+    const report = await run(ctx, [op], "dry-run");
+    spy.mockRestore();
+
+    expect(report.applied).toEqual([]);
+    expect(written.join("")).toContain("[op] f.txt (abort: hand-edited)");
+    expect(await readFile(join(dir, "f.txt"), "utf8")).toBe("untouched");
+  });
+
+  it("apply: skips file, records in applied, does not fail or block later changes", async () => {
+    await writeFile(join(dir, "keep.txt"), "original");
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "abort", path: "keep.txt", reason: "hand-edited" },
+      { kind: "write", path: "after.txt", before: null, after: Buffer.from("wrote") },
+    ]);
+    const report = await run(ctx, [op], "apply");
+    expect(report.failed).toBeUndefined();
+    expect(report.applied).toHaveLength(2);
+    // abort did not touch the file
+    expect(await readFile(join(dir, "keep.txt"), "utf8")).toBe("original");
+    // a later change still ran
+    expect(await readFile(join(dir, "after.txt"), "utf8")).toBe("wrote");
+  });
+});
+
 describe("runner — apply failure handling", () => {
   it("stops on first failure; later changes not applied", async () => {
     // Make a regular file at 'blocker' — then a write whose path is 'blocker/child.txt'

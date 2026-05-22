@@ -1,14 +1,14 @@
-import { readFile, writeFile, stat, mkdir, chmod } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { readFile, writeFile, stat, chmod } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { diffFile } from "../lib/sync-diff.js";
 import { parseLsRemote } from "../lib/tags.js";
 import { info, err, confirm } from "../lib/log.js";
-import { resolveManifestPath } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
+import { run } from "../lib/runner.js";
 import { detectFormatter, runFormatter } from "../lib/formatter.js";
+import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 
 export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
@@ -16,60 +16,33 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
   const ctx = await loadProject(cwd);
   const cfg = ctx.cfg;
 
-  let packDir: string = ctx.packDir;
-  let manifest = ctx.manifest;
+  // Resolve upstream target version and (in offline mode) override the pack source.
   let target: string;
+  const opOpts: Parameters<typeof makeSyncPackFiles>[0] = {};
   if (opts.offlineFixture) {
-    // Relative fixture paths are resolved from repo root (same as how pack names work in init)
+    // Relative fixture paths are resolved from repo root (same as how pack names work in init).
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..", "..");
-    packDir = resolve(repoRoot, opts.offlineFixture);
+    opOpts.packDir = resolve(repoRoot, opts.offlineFixture);
+    opOpts.manifest = parseManifest(await readFile(join(opOpts.packDir, "manifest.json"), "utf8"));
     target = cfg.version;
-    manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
   } else {
     const r = spawnSync("git", ["ls-remote", "--tags", "https://github.com/collod873/claude-ds"], { encoding: "utf8" });
     if (r.status !== 0) { err("network: cannot reach upstream"); process.exit(2); }
     const tags = parseLsRemote(r.stdout);
     target = tags[tags.length - 1] ?? cfg.version;
   }
-  const actions: Array<{ path: string; writePath: string; upstream: string; verdict: ReturnType<typeof diffFile> }> = [];
-  for (const f of manifest.files) {
-    if (f.category === "generated") continue;
-    if (cfg.removed.includes(f.path)) continue;
 
-    // #47: rewrite app/... → <app_dir>/... at I/O boundary.
-    // #34: route CLAUDE.md to the configured target (default "CLAUDE.md" for back-compat).
-    const writePath = f.path === "CLAUDE.md"
-      ? cfg.claude_md_target
-      : resolveManifestPath(f.path, cfg.app_dir);
+  // Plan once. The Runner is the only thing that writes; we just stage Changes here.
+  const op = makeSyncPackFiles(opOpts);
+  await op.plan(ctx);
 
-    // Path-traversal guard: reject any manifest entry that escapes cwd
-    const dest = join(cwd, writePath);
-    const rel = relative(cwd, dest);
-    if (rel.startsWith("..") || rel === "") { err(`path traversal rejected: ${f.path}`); process.exit(2); }
-
-    const srcName = f.path === "package.json" ? "package.json.seed" : f.path === "CLAUDE.md" ? "CLAUDE.md.fragment" : f.path;
-    let upstream = await readFile(join(packDir, "files", srcName), "utf8");
-    // Fragment files ship without marker wrappers — add them so diffFile can extract the inner region.
-    if (f.category === "hybrid" && f.format === "markdown" && srcName.endsWith(".fragment")) {
-      upstream = `<!-- >>> claude-ds managed >>> -->\n${upstream}\n<!-- <<< claude-ds managed <<< -->`;
-    } else if (f.category === "hybrid" && f.format === "shell" && srcName.endsWith(".fragment")) {
-      upstream = `# >>> claude-ds managed >>>\n${upstream}\n# <<< claude-ds managed <<<`;
-    }
-    // v1 gap: no prior-snapshot cache — use prev=null so managed files without a known
-    // prior state are treated as "upstream wins" rather than false-abort on hand-edit detection.
-    const prev: string | null = null;
-    const current = (await ctx.exists(dest)) ? await readFile(dest, "utf8") : null;
-    const verdict = diffFile({ category: f.category, format: f.format, owned_keys: f.owned_keys }, { prev, upstream, current });
-    actions.push({ path: f.path, writePath, upstream, verdict });
-    // #18c: distinguish new files (create:) from content-changed files (rewrite:)
-    const displayAction = (verdict.action === "rewrite" && current === null) ? "create" : verdict.action;
-    // Log canonical path when it equals the write path; otherwise show both so consumers
-    // see where pack content actually landed (e.g. "app/design/... → src/app/design/...").
-    const displayPath = (writePath === f.path) ? f.path : `${f.path} → ${writePath}`;
-    info(`${displayAction}: ${displayPath} — ${verdict.reason}`);
+  // Render preview in the existing user-facing format (tests assert on these labels).
+  for (const d of op.decisions) {
+    info(`${d.displayAction}: ${d.displayPath} — ${d.verdict.reason}`);
   }
-  // #18d: summarise whether .claude-ds.json config keys (aside from version) will change
+
+  // #18d: summarise whether .claude-ds.json config keys (aside from version) will change.
   {
     const nonVersionKeys = Object.keys(cfg).filter(k => k !== "version") as Array<keyof typeof cfg>;
     const nextVersion = target;
@@ -80,31 +53,38 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
       info("config unchanged");
     }
   }
+
   if (!(await confirm("Apply the above?"))) { info("aborted"); return; }
+
+  // Apply via the Runner. Plan is cached so this does not re-run diffFile.
+  const report = await run(ctx, [op], "apply");
+
+  // Surface aborts in the existing format (Runner records them; we report them).
+  for (const d of op.decisions) {
+    if (d.verdict.action === "abort") err(`skipped (abort): ${d.manifestPath} — ${d.verdict.reason}`);
+  }
+  if (report.failed) {
+    err(`apply failed at ${report.failed.change.kind}: ${report.failed.error}`);
+    process.exit(2);
+  }
+
+  // #15: hook and script files must be executable. Runner writes bytes only; chmod is
+  // a post-write concern that stays at the command boundary until/unless Change gains a mode.
   const rewrittenPaths: string[] = [];
-  for (const a of actions) {
-    const dest = join(cwd, a.writePath);
-    if (a.verdict.action === "rewrite") {
-      await mkdir(dirname(dest), { recursive: true });
-      const content = a.verdict.newContent ?? a.upstream;
-      await writeFile(dest, content, "utf8");
-      // #15: hook and script files must be executable
-      if (a.writePath.startsWith(".claude/hooks/") || a.writePath.startsWith("scripts/")) await chmod(dest, 0o755);
-      rewrittenPaths.push(a.writePath);
-    } else if (a.verdict.action === "rewrite-region") {
-      await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, a.verdict.newContent, "utf8");
-      if (a.writePath.startsWith(".claude/hooks/") || a.writePath.startsWith("scripts/")) await chmod(dest, 0o755);
-      rewrittenPaths.push(a.writePath);
-    } else if (a.verdict.action === "abort") {
-      err(`skipped (abort): ${a.path} — ${a.verdict.reason}`);
+  for (const c of report.applied) {
+    if (c.kind !== "write") continue;
+    rewrittenPaths.push(c.path);
+    if (c.path.startsWith(".claude/hooks/") || c.path.startsWith("scripts/")) {
+      await chmod(join(cwd, c.path), 0o755);
     }
   }
+
   // #54: format rewritten files with the consumer's formatter (biome or prettier) if detected.
   const formatter = await detectFormatter(cwd);
   if (formatter && rewrittenPaths.length > 0) {
     await runFormatter(formatter, rewrittenPaths, cwd);
   }
+
   const nextCfg = { ...cfg, version: target };
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(nextCfg, null, 2) + "\n", "utf8");
   info(`sync complete → ${target}`);

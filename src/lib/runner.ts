@@ -51,6 +51,8 @@ function renderDiff(opName: string, c: Change): string {
     } else {
       for (const l of c.before.toString("utf8").split("\n")) lines.push(`-${l}`);
     }
+  } else if (c.kind === "abort") {
+    lines.push(`${header} (abort: ${c.reason})`);
   } else {
     lines.push(`${header} (rename)`);
   }
@@ -67,6 +69,11 @@ async function exists(p: string): Promise<boolean> {
 }
 
 async function applyChange(ctx: ProjectContext, c: Change): Promise<void> {
+  if (c.kind === "abort") {
+    // Abort is a planning verdict, not an action — the Op already decided it can't safely
+    // touch this file. Recorded in `applied` for symmetry with other Changes, but no I/O.
+    return;
+  }
   if (c.kind === "write") {
     const abs = resolveIn(ctx.cwd, c.path);
     await mkdir(dirname(abs), { recursive: true });
