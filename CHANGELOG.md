@@ -31,6 +31,33 @@ No file moves. Consumers should add `states.disabled` / `states.hover` / `states
 
 ---
 
+## [0.7.6] — 2026-05-21
+
+Documentation backfill for the v0.7.6 stub-meta semantic flip (issue #64). No code change in this entry — the original v0.7.6 ship (issue #62) altered generator behavior without a CHANGELOG record; this entry exists so contributors hitting the new semantics have something to grep for.
+
+### Pack semantics (behavioral, shipped in v0.7.6 — recorded here retroactively)
+- **`meta.examples: []` is now an authoritative stub signal.** The showcase generator emits a placeholder card and skips CVA auto-expansion entirely, regardless of whether `parseCva()` finds variants in the source.
+- **Before (≤ v0.7.5):** an empty `examples[]` triggered auto-CVA-expansion, which produced a synthesized default entry from the CVA matrix.
+- **After (≥ v0.7.6):** empty `examples[]` means "intentionally not showcased yet" — no auto-expansion, no rendered component, just a placeholder card.
+
+### Migration for contributors
+If you were relying on the old auto-expand-from-empty behavior, write the default entry explicitly:
+
+```ts
+// Before — implicitly auto-expanded from CVA
+export const meta = { examples: [] };
+
+// After — explicit default
+export const meta = { examples: [{ name: "default", props: {} }] };
+```
+
+This is the same migration the v0.7.6 work applied to five of claude-ds's own internal test fixtures.
+
+### Consumer impact
+None at time of writing — Crewops adopted v0.7.7 cleanly under the new semantics. This entry is preventive: it documents the flip for the next consumer onboarding or contributor who tries the old pattern.
+
+---
+
 ## [0.7.4] — 2026-05-20
 
 Two showcase-generator gaps surfaced by the Crewops DataTable pilot. Without these, every composite that uses shared `_fixtures/` modules or is marked `"use client"` needs the same manual patch after each regen.

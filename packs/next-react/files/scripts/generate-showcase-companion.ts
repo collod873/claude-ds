@@ -1,4 +1,5 @@
 #!/usr/bin/env node --experimental-strip-types
+// NOTE (v0.7.6+): `meta.examples: []` is an authoritative stub signal — generator emits a placeholder card and skips CVA auto-expansion.
 /**
  * generate-showcase-companion.ts — Generates per-component .showcase.tsx and .states.json
  * from the `meta` export in each design-system component source file.
