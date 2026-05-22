@@ -2104,16 +2104,18 @@ async function main(): Promise<void> {
         showcaseContent = emitReferenceShowcase(componentName, displayName, meta, sourceName, useClient);
         allExamples = [];
       } else if (isNamespaceOnlyExport(entryPath, displayName)) {
-        // #69: namespace-only export (e.g. `export const Skeleton = { Line, Block, Circle }`).
-        // The component is not callable — emitting `<Skeleton ... />` would crash at runtime
-        // and leave a stale .showcase.tsx. Fail loud so the author fixes the source.
+        // #69 / #92: namespace-only export (e.g. `export const Skeleton = { Line, Block, Circle }`).
+        // The component is not callable — we cannot emit `<Skeleton ... />` JSX for it, but
+        // that is a per-component limitation, not a fatal run error. Skip this component,
+        // preserve any hand-authored .showcase.tsx, and continue with the rest of the run.
         process.stderr.write(
           `${entryPath}:0: GEN-069: \`${displayName}\` is a namespace-only export (object literal, not callable). ` +
           `Generator cannot emit <${displayName} ... /> JSX. ` +
-          `Either (a) split the file so each callable component (e.g. ${displayName}.Line) lives in its own file with its own meta, ` +
+          `Either (a) hand-author \`${componentName}.showcase.tsx\` beside this file (it will be preserved across runs), ` +
           `or (b) export a top-level callable \`${displayName}\` component alongside the namespace object.\n`
         );
-        process.exit(1);
+        skipped++;
+        continue;
       } else {
         // Compute full example list (explicit + CVA cross-product) for states.json
         const skip = meta.skip ?? [];
