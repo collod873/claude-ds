@@ -1454,3 +1454,89 @@ describe("JSX attribute / children emission regressions", () => {
     expect(hasResolved || hasVerbatim).toBe(true);
   });
 });
+
+// ── #69 namespace export + #70 sibling function declarations ────────────────
+
+describe("namespace export + sibling function declarations (#69, #70)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fresh();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // ── #69 — namespace-only export must fail loud, not silently emit broken JSX ─
+  it("#69 namespace-only export (object literal) fails loud with actionable error", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "skeleton.tsx"),
+      [
+        `import React from "react";`,
+        `function Line(props: any) { return <span {...props} />; }`,
+        `function Block(props: any) { return <div {...props} />; }`,
+        `function Circle(props: any) { return <span {...props} />; }`,
+        `export const Skeleton = { Line, Block, Circle };`,
+        `export const meta = { kind: "atom", examples: [{ name: "line", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    // Must exit non-zero
+    expect(r.status).not.toBe(0);
+    // Error must mention the file and the problem
+    const combined = r.stdout + r.stderr;
+    expect(combined).toMatch(/skeleton\.tsx/);
+    expect(combined).toMatch(/namespace|not callable|object literal/i);
+  });
+
+  // ── #70 — sibling function declarations get imports emitted when referenced in meta JSX ─
+  it("#70 sibling function declaration referenced in meta JSX gets imported", async () => {
+    const dsDir = join(dir, "design-system", "composites");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "card.tsx"),
+      [
+        `import React from "react";`,
+        `export function Card({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export function CardHeader({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export function CardBody({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export const meta = {`,
+        `  kind: "composite",`,
+        `  examples: [{`,
+        `    name: "with-header",`,
+        `    props: { children: <><CardHeader>Title</CardHeader><CardBody>Body</CardBody></> }`,
+        `  }],`,
+        `  skip: [],`,
+        `};`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "card.showcase.tsx"), "utf8");
+    // The generated showcase must import CardHeader and CardBody from "./card"
+    expect(content).toMatch(/import\s*\{[^}]*CardHeader[^}]*\}\s*from\s*"\.\/card"/);
+    expect(content).toMatch(/import\s*\{[^}]*CardBody[^}]*\}\s*from\s*"\.\/card"/);
+    // Card itself must still be imported once (no duplicate)
+    const cardImportMatches = content.match(/import\s*(?:\{[^}]*\bCard\b[^}]*\}|Card)\s*from\s*"\.\/card"/g) ?? [];
+    // Card should appear in an import statement (either alone or grouped with siblings).
+    expect(cardImportMatches.length).toBeGreaterThan(0);
+    // No two separate `import { Card } from "./card"` lines.
+    const cardOnlyImports = content.match(/^import\s*\{\s*Card\s*\}\s*from\s*"\.\/card"/gm) ?? [];
+    expect(cardOnlyImports.length).toBeLessThanOrEqual(1);
+  });
+});

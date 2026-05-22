@@ -678,13 +678,19 @@ function collectRefsFromNode(
   // Block / source file: variable declarations bind names within
   if (ts.isBlock(node) || ts.isSourceFile(node)) {
     const innerBound = new Set(bound);
+    const isFileScope = ts.isSourceFile(node);
     ts.forEachChild(node, (child) => {
       if (ts.isVariableStatement(child)) {
         for (const decl of child.declarationList.declarations) {
           collectBindingNames(decl.name, innerBound);
         }
       } else if (ts.isFunctionDeclaration(child) && child.name) {
-        innerBound.add(child.name.text);
+        // #70: at file scope, sibling function declarations must NOT be treated
+        // as bound — meta JSX referencing them (e.g. <CardHeader />) needs an
+        // import emitted in the showcase. buildScopes registers them in
+        // importScope with rawSpec="./<basename>" so the carry path picks them
+        // up as free identifiers. Inside nested blocks they remain bound.
+        if (!isFileScope) innerBound.add(child.name.text);
       }
     });
     ts.forEachChild(node, (child) => {
@@ -795,6 +801,21 @@ function buildScopes(
   for (const stmt of sf.statements) {
     if ((ts.isTypeAliasDeclaration(stmt) || ts.isInterfaceDeclaration(stmt)) && stmt.name) {
       typeImportScope.set(stmt.name.text, { exportName: stmt.name.text, rawSpec: localTypeSpec });
+    }
+  }
+
+  // #70: register top-level function declarations as imports from the local
+  // module so meta JSX referencing siblings like <CardHeader /> gets imports
+  // emitted via the carry mechanism. The file's primary component is also
+  // registered here; emitAtomCompositeShowcase de-duplicates against the
+  // explicit display-name import line below.
+  for (const stmt of sf.statements) {
+    if (ts.isFunctionDeclaration(stmt) && stmt.name) {
+      importScope.set(stmt.name.text, {
+        filePath: sf.fileName,
+        exportName: stmt.name.text,
+        rawSpec: localTypeSpec,
+      });
     }
   }
 
@@ -962,6 +983,59 @@ function extractMetaFromAST(filePath: string): {
   }
 
   return { meta: { kind, examples, skip, states }, carried, useClient };
+}
+
+/**
+ * #69: detect a namespace-only export — a top-level `export const <Name> = { ... }`
+ * whose initializer is a plain object literal (not a function/arrow/call/forwardRef).
+ * The generator emits `<Name ... />` JSX assuming Name is callable; when it is not,
+ * the showcase crashes at render. We fail loud at generation time so authors fix
+ * the source rather than ship a stale .showcase.tsx.
+ *
+ * Returns true when displayName refers to a non-callable object literal export AND
+ * no callable declaration of the same name exists in the file.
+ */
+function isNamespaceOnlyExport(filePath: string, displayName: string): boolean {
+  if (!tsRuntime) return false;
+  const ts = tsRuntime;
+  let source: string;
+  try {
+    source = readFileSync(filePath, "utf8");
+  } catch {
+    return false;
+  }
+  const sf = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let hasCallableDecl = false;
+  let hasObjectLiteralExport = false;
+  for (const stmt of sf.statements) {
+    // function Name(...) — callable
+    if (ts.isFunctionDeclaration(stmt) && stmt.name?.text === displayName) {
+      hasCallableDecl = true;
+    }
+    // class Name {} — callable (via JSX)
+    if (ts.isClassDeclaration(stmt) && stmt.name?.text === displayName) {
+      hasCallableDecl = true;
+    }
+    if (ts.isVariableStatement(stmt)) {
+      const hasExport = stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+      for (const decl of stmt.declarationList.declarations) {
+        if (!ts.isIdentifier(decl.name) || decl.name.text !== displayName) continue;
+        const init = decl.initializer;
+        if (!init) continue;
+        // Arrow / function expr / call (forwardRef, memo) — treat as callable
+        if (
+          ts.isArrowFunction(init) ||
+          ts.isFunctionExpression(init) ||
+          ts.isCallExpression(init)
+        ) {
+          hasCallableDecl = true;
+        } else if (hasExport && ts.isObjectLiteralExpression(init)) {
+          hasObjectLiteralExport = true;
+        }
+      }
+    }
+  }
+  return hasObjectLiteralExport && !hasCallableDecl;
 }
 
 /**
@@ -1812,6 +1886,16 @@ function emitAtomCompositeShowcase(
   });
   const squareImportLine = needsSquareImport ? `import { Square } from "lucide-react";` : "";
 
+  // #70: the explicit `importLine` above already imports the primary
+  // displayName from "./<componentName>". If the carry mechanism also picked
+  // it up (because it was a top-level function declaration registered in
+  // importScope), drop it from `carried` to avoid emitting a duplicate import.
+  if (carried) {
+    const ref = carried.get(displayName);
+    if (ref && ref.kind === "import" && ref.rawSpec === `./${componentName}`) {
+      carried.delete(displayName);
+    }
+  }
   const carriedBlock = carried ? renderCarriedRefs(carried) : "";
 
   return [
@@ -2009,6 +2093,17 @@ async function main(): Promise<void> {
       if (meta.kind === "reference") {
         showcaseContent = emitReferenceShowcase(componentName, displayName, meta, sourceName, useClient);
         allExamples = [];
+      } else if (isNamespaceOnlyExport(entryPath, displayName)) {
+        // #69: namespace-only export (e.g. `export const Skeleton = { Line, Block, Circle }`).
+        // The component is not callable — emitting `<Skeleton ... />` would crash at runtime
+        // and leave a stale .showcase.tsx. Fail loud so the author fixes the source.
+        process.stderr.write(
+          `${entryPath}:0: GEN-069: \`${displayName}\` is a namespace-only export (object literal, not callable). ` +
+          `Generator cannot emit <${displayName} ... /> JSX. ` +
+          `Either (a) split the file so each callable component (e.g. ${displayName}.Line) lives in its own file with its own meta, ` +
+          `or (b) export a top-level callable \`${displayName}\` component alongside the namespace object.\n`
+        );
+        process.exit(1);
       } else {
         // Compute full example list (explicit + CVA cross-product) for states.json
         const skip = meta.skip ?? [];
