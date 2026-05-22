@@ -1,10 +1,12 @@
-import { readFile, writeFile, stat, readdir, rename, unlink } from "node:fs/promises";
-import { join, dirname, basename, relative } from "node:path";
+import { readFile, writeFile, stat, readdir, rename } from "node:fs/promises";
+import { join, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { parseExceptions } from "../lib/exceptions.js";
 import { info, err } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
+import { migrateClaudeMd } from "../lib/ops/migrate-claude-md.js";
+import { run } from "../lib/runner.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -173,58 +175,11 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
     err(`invalid .claude-ds.json: ${(e as Error).message}`);
     process.exit(2);
   }
-  const cfg = ctx.cfg;
-
   // ── #34 migration: move managed CLAUDE.md block out of root into claude_md_target ──
-  // Idempotent: only runs when target != root AND root contains a managed block.
-  // Strips the block from root; if root file is then "empty enough" (no user content
-  // beyond what claude-ds wrote), deletes the file.
-  if (cfg.claude_md_target !== "CLAUDE.md") {
-    const rootPath = join(cwd, "CLAUDE.md");
-    if (await exists(rootPath)) {
-      const rootContent = await readFile(rootPath, "utf8");
-      const openMarker = "<!-- >>> claude-ds managed >>> -->";
-      const closeMarker = "<!-- <<< claude-ds managed <<< -->";
-      const openIdx = rootContent.indexOf(openMarker);
-      const closeIdx = rootContent.indexOf(closeMarker);
-      if (openIdx >= 0 && closeIdx > openIdx) {
-        const inner = rootContent.slice(openIdx + openMarker.length, closeIdx).replace(/^\n|\n$/g, "");
-        const block = `<!-- >>> claude-ds managed >>> -->\n${inner}\n<!-- <<< claude-ds managed <<< -->\n`;
-        const targetAbs = join(cwd, cfg.claude_md_target);
-        if (dryRun) {
-          info(`[dry-run] would migrate CLAUDE.md managed block → ${cfg.claude_md_target}`);
-        } else {
-          // Inject into target (create if missing, append if exists & no block, skip if already present).
-          const { mkdir } = await import("node:fs/promises");
-          await mkdir(dirname(targetAbs), { recursive: true });
-          if (await exists(targetAbs)) {
-            const tgtCur = await readFile(targetAbs, "utf8");
-            if (!tgtCur.includes(openMarker)) {
-              const sep = tgtCur.endsWith("\n") ? "" : "\n";
-              await writeFile(targetAbs, `${tgtCur}${sep}\n## claude-ds\n${block}`, "utf8");
-            }
-          } else {
-            await writeFile(targetAbs, `# Project\n\n## claude-ds\n${block}`, "utf8");
-          }
-          // Strip block from root.
-          const before = rootContent.slice(0, openIdx).replace(/\n+$/, "");
-          const after = rootContent.slice(closeIdx + closeMarker.length).replace(/^\n+/, "");
-          // Strip an immediately-preceding "## claude-ds" heading if present (adopt-injected).
-          const trimmedHeading = before.replace(/##\s+claude-ds\s*$/m, "").replace(/\n+$/, "");
-          const stripped = (trimmedHeading + (after ? "\n\n" + after : "")).trim();
-          // If only "# Project" (or empty), assume claude-ds owned the file → delete.
-          const isClaudeOwnedShell = stripped === "" || /^#\s+Project\s*$/.test(stripped);
-          if (isClaudeOwnedShell) {
-            await unlink(rootPath);
-            info(`reconform: removed root CLAUDE.md (claude-ds-only content); managed block now at ${cfg.claude_md_target}`);
-          } else {
-            await writeFile(rootPath, stripped + "\n", "utf8");
-            info(`reconform: stripped managed block from root CLAUDE.md; now at ${cfg.claude_md_target} (user content preserved)`);
-          }
-        }
-      }
-    }
-  }
+  // Delegated to migrateClaudeMd Op (#80). Op is idempotent and a no-op when
+  // target == root, root absent, root has no managed block, or block is already
+  // at the target.
+  await run(ctx, [migrateClaudeMd], dryRun ? "dry-run" : "apply");
 
   // ── Precondition: pack manifest ─────────────────────────────────────────────
   // loadProject already parsed the manifest; pack dir comes from ctx.
