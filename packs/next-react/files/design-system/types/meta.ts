@@ -38,7 +38,7 @@ export interface MetaStates {
   loading?: ExampleSpec;
   /** Long-text row — props spread as-is (typically a long `children` string). */
   longText?: ExampleSpec;
-  /** Empty-state row (composites only) — props spread as-is. */
+  /** Empty-state row — props spread as-is. */
   empty?: ExampleSpec;
   /** Disabled row — generator adds the `disabled` attribute on top of declared props. */
   disabled?: ExampleSpec;

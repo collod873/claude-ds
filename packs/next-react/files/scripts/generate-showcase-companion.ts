@@ -1852,8 +1852,6 @@ function emitAtomCompositeShowcase(
   // ── State sections — one row per declared state, in canonical order ─────
   const stateSections: string[] = [];
   for (const key of STATE_KEYS) {
-    // `empty` is only meaningful for composites
-    if (key === "empty" && meta.kind !== "composite") continue;
     const spec = meta.states?.[key];
     if (!spec) continue;
     stateSections.push(emitStateRow(displayName, key, spec));
