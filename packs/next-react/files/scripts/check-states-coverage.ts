@@ -64,7 +64,22 @@ function checkDir(dsRoot: string, dirName: string): Finding[] {
       continue;
     }
 
-    if (!Array.isArray(parsed) || parsed.length === 0) {
+    // Accept both shapes:
+    //   1. Bare array:  [{...}, ...]
+    //   2. Wrapped:     { __generated?: ..., states: [{...}, ...] }
+    // The current generator emits the wrapped shape; older hand-authored
+    // files may be bare arrays.
+    let states: unknown = parsed;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      "states" in (parsed as Record<string, unknown>)
+    ) {
+      states = (parsed as Record<string, unknown>).states;
+    }
+
+    if (!Array.isArray(states) || states.length === 0) {
       findings.push({
         file: componentPath,
         line: 0,
