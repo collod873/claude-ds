@@ -17,14 +17,14 @@ function toTitleCase(name: string): string {
     .join(" ");
 }
 
-export function metaStubAtomComposite(kind: "atom" | "composite", hasCva: boolean): string {
+function metaStubAtomComposite(kind: "atom" | "composite", hasCva: boolean): string {
   if (hasCva) {
     return `export const meta: Meta = { kind: "${kind}", examples: [], skip: [] };\n`;
   }
   return `export const meta: Meta = { kind: "${kind}", examples: [{ name: "default", props: {} }] };\n`;
 }
 
-export function metaStubReference(title: string): string {
+function metaStubReference(title: string): string {
   return [
     `// TODO(claude-ds): replace stub render`,
     `export const meta: Meta = { kind: "reference", title: ${JSON.stringify(title)}, render: () => null };`,
@@ -36,11 +36,8 @@ export function metaStubReference(title: string): string {
  * Insert `import type { Meta } from "@/design-system/types/meta"` after any
  * leading `'use client' / 'use server'` directive and existing import block,
  * unless the source already imports `Meta` from `types/meta`.
- *
- * Exported so reconform's classification audit (still inline pending #83) can
- * share the exact same import-injection behaviour the integration tests verify.
  */
-export function ensureMetaImport(source: string): { source: string; injected: boolean } {
+function ensureMetaImport(source: string): { source: string; injected: boolean } {
   const hasMetaImport = /import\s+(?:type\s+)?\{[^}]*\bMeta\b[^}]*\}\s+from\s+["'][^"']*\/types\/meta["']/.test(source)
     || /import\s+type\s+\{[^}]*\bMeta\b[^}]*\}\s+from\s+["'][^"']*\/types\/meta["']/.test(source);
   if (hasMetaImport) return { source, injected: false };

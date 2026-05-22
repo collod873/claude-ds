@@ -38,7 +38,20 @@ for consumer growth.
 
 ---
 
-## New concepts (this refactor — see issues #TBD)
+## New concepts (this refactor)
+
+Landed across issues:
+- [#77] `loadProject` / `ProjectContext` boot seam
+- [#78] / [#84] `migrateConfig` Op (config-shape migration via Runner)
+- [#79] `syncPackFiles` Op (sync's pack-file phase)
+- [#80] `migrateClaudeMd` Op (CLAUDE.md target migration)
+- [#81] `backfillCompanions`, `backfillMeta`, `rewriteImports` Ops
+- [#82] adopt routed through the Runner
+- [#83] reconform reduced to a thin orchestrator; non-Op phases live under
+  `src/lib/reports/` (pure reporting) and `src/lib/checks/` (side-effect
+  orchestration — script invocation, interactive prompts, generated-file
+  integrity auto-repair)
+
 
 ### Operation
 A planned mutation phase. Interface: `{ name, plan(ctx): Promise<Change[]> }`.

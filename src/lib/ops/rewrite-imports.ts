@@ -7,11 +7,8 @@ import type { ProjectContext } from "../project.js";
  * Match `from "...@/design-system/<tier>/..."` — but exclude `types/meta`. The
  * `Meta` type import is structural, not a real DS-module dependency, and would
  * otherwise promote every atom to composite the moment we backfill meta.
- *
- * Exported so reconform's classification audit (still inline pending #83) can
- * share the same definition the integration tests pin behaviour to.
  */
-export const DS_IMPORT_RE = /from\s+["'][^"']*@\/design-system\/(?!types\/meta)/;
+const DS_IMPORT_RE = /from\s+["'][^"']*@\/design-system\/(?!types\/meta)/;
 
 export function fileImportsDsModule(source: string): boolean {
   return DS_IMPORT_RE.test(source);
