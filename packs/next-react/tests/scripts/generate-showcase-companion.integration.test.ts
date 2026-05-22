@@ -1747,3 +1747,180 @@ describe("namespace export + sibling function declarations (#69, #70)", () => {
     expect(cardOnlyImports.length).toBeLessThanOrEqual(1);
   });
 });
+
+// ── Bug A: undefined props emitted as null (issue #72 follow-up) ─────────────
+// Props set to `undefined` in meta examples/states must be omitted from the
+// generated JSX, not emitted as `={null}` or `={undefined}` — both break tsc
+// for non-nullable prop types.
+
+describe("Bug A — undefined props are omitted from generated JSX", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fresh();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("prop explicitly set to undefined in examples[] is omitted from JSX attributes", async () => {
+    const dsDir = join(dir, "design-system", "composites");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "summary.tsx"),
+      [
+        `import React from "react";`,
+        `export function Summary({ status, reference }: { status: string; reference?: string }) {`,
+        `  return <div>{status}{reference}</div>;`,
+        `}`,
+        `export const meta = {`,
+        `  kind: "composite",`,
+        `  examples: [`,
+        `    {`,
+        `      name: "no-reference",`,
+        `      props: { status: "draft", reference: undefined },`,
+        `    },`,
+        `  ],`,
+        `};`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "summary.showcase.tsx"), "utf8");
+    // Must render the component
+    expect(content).toContain("<Summary");
+    // `reference` was undefined — must NOT appear as an attribute at all
+    expect(content).not.toContain("reference=");
+    // Must NOT emit null for undefined props
+    expect(content).not.toContain("reference={null}");
+    expect(content).not.toContain("reference={undefined}");
+    // status was a string — must appear
+    expect(content).toContain('status="draft"');
+  });
+
+  it("prop set to undefined in states overrides a spread and is omitted from JSX", async () => {
+    const dsDir = join(dir, "design-system", "composites");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "card.tsx"),
+      [
+        `import React from "react";`,
+        `export function Card({ title, badge }: { title: string; badge?: string }) {`,
+        `  return <div>{title}{badge}</div>;`,
+        `}`,
+        `const base = { title: "Hello", badge: "New" };`,
+        `export const meta = {`,
+        `  kind: "composite",`,
+        `  examples: [{ name: "default", props: { ...base } }],`,
+        `  states: {`,
+        `    empty: {`,
+        `      name: "no badge",`,
+        `      props: { ...base, badge: undefined },`,
+        `    },`,
+        `  },`,
+        `};`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "card.showcase.tsx"), "utf8");
+    // Default example has badge — it should appear in Examples section
+    const examplesIdx = content.indexOf(">Examples<");
+    const statesIdx = content.indexOf(">States<");
+    expect(examplesIdx).toBeGreaterThan(-1);
+    expect(statesIdx).toBeGreaterThan(-1);
+    const examplesSection = content.slice(examplesIdx, statesIdx);
+    expect(examplesSection).toContain('badge="New"');
+    // States empty section: badge was overridden to undefined — must NOT appear
+    const statesSection = content.slice(statesIdx);
+    expect(statesSection).not.toContain("badge=");
+    expect(statesSection).not.toContain("badge={null}");
+  });
+});
+
+// ── Bug B: nested object properties inside imported fixtures resolve to null ──
+// When resolving `fixture[i].nested.prop`, the depth limit (previously 10) was
+// exceeded for deeply-nested meta → examples → props → identifier → element
+// access → resolveImportedValue → array → object → nested object → property.
+// Increasing the limit to 20 allows full resolution.
+
+describe("Bug B — nested object properties in imported fixtures resolve correctly", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fresh();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("array[i].nestedObj.prop resolves to the string value, not null", async () => {
+    const dsDir = join(dir, "design-system", "composites");
+    const fixturesDir = join(dir, "design-system", "_fixtures");
+    await mkdir(dsDir, { recursive: true });
+    await mkdir(fixturesDir, { recursive: true });
+    // package.json needed so findConsumerRoot() can locate the project root and
+    // resolveAtPrefix() can read tsconfig paths for @/ alias resolution.
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "test-consumer" }, null, 2));
+    // Fixture file with a nested object property
+    await writeFile(
+      join(fixturesDir, "task-fixtures.ts"),
+      [
+        `export interface Assignee { name: string; avatarUrl?: string }`,
+        `export interface TaskFixture { title: string; assignee: Assignee }`,
+        `export const acmeTasks: TaskFixture[] = [`,
+        `  { title: "Task one", assignee: { name: "Marcus Webb" } },`,
+        `  { title: "Task two", assignee: { name: "Sara Kim" } },`,
+        `];`,
+      ].join("\n")
+    );
+    // tsconfig so @/ alias resolution works
+    await writeFile(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }, null, 2)
+    );
+    await writeFile(
+      join(dsDir, "task-row.tsx"),
+      [
+        `import React from "react";`,
+        `import { acmeTasks } from "@/design-system/_fixtures/task-fixtures";`,
+        `export function TaskRow({ title, assignee }: { title: string; assignee: { name: string } }) {`,
+        `  return <div>{title} — {assignee.name}</div>;`,
+        `}`,
+        `export const meta = {`,
+        `  kind: "composite",`,
+        `  examples: [`,
+        `    {`,
+        `      name: "in-progress",`,
+        `      props: {`,
+        `        title: acmeTasks[0].title,`,
+        `        assignee: acmeTasks[0].assignee,`,
+        `      },`,
+        `    },`,
+        `  ],`,
+        `};`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "task-row.showcase.tsx"), "utf8");
+    expect(content).toContain("<TaskRow");
+    // assignee must be resolved as a complete object — name must NOT be null
+    expect(content).not.toContain('{ name: null }');
+    // The string value must be present
+    expect(content).toContain('"Marcus Webb"');
+    // title must also be resolved
+    expect(content).toContain('"Task one"');
+  });
+});

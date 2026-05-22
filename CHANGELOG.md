@@ -6,6 +6,23 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [0.7.14] — 2026-05-22
+
+Two generator bugs that caused `tsc --noEmit` failures in showcase companions when components use imported fixtures or clear spread props with `undefined`.
+
+### Fixed
+
+- **Bug A — `undefined` props emitted as `null`** (`generate-showcase-companion.ts`, `generated-integrity.ts`). Props explicitly set to `undefined` (e.g. `reference: undefined` to clear a spread) were serialized as `={null}` in generated JSX, breaking tsc for non-nullable prop types. Root cause: TypeScript parses `undefined` in value position as an `Identifier`, not `UndefinedKeyword`; the AST resolver fell through to the "unresolved identifier" branch and returned `null`. Fix: recognise `name === "undefined"` in the Identifier case and return JS `undefined`; `renderPropsAttr` then omits those props entirely (matching the intent of explicit `undefined` in source). The regex fallback paths (`parseExamples`, `parseStates`) also used `undefined → null` replacement; they now use a sentinel that gets filtered before prop serialization.
+- **Bug B — nested object properties in imported fixtures resolved to `null`** (`generate-showcase-companion.ts`). Props like `assignee: acmeTasks[0].assignee` where `assignee` is `{ name: "Marcus Webb" }` produced `assignee={{ name: null }}` in generated JSX. The depth guard (`depth > 10`) was too shallow for the call chain: meta → examples array → example → props object → element access → `resolveImportedValue` → array literal → object element → nested object → property value. Increasing the limit to 20 allows full resolution.
+
+### Tests
+
+Two new regression test groups in `generate-showcase-companion.integration.test.ts`:
+- `"Bug A — undefined props are omitted from generated JSX"` — verifies that both inline `undefined` values and spread-overridden-to-undefined props are omitted, not emitted as `null`.
+- `"Bug B — nested object properties in imported fixtures resolve correctly"` — verifies that `array[i].nestedObj.prop` resolves to the string value rather than `null`.
+
+---
+
 ## [Unreleased]
 
 ### Breaking for consumers

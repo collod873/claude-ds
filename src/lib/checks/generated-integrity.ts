@@ -21,6 +21,8 @@ function toPascalCase(name: string): string {
     .map(s => s.charAt(0).toUpperCase() + s.slice(1)).join("");
 }
 
+const DS_UNDEFINED_SENTINEL = "__DS_UNDEFINED__";
+
 function parseExamples(source: string): Array<{ name: string; props: Record<string, unknown> }> {
   const m = source.match(/examples\s*:\s*(\[[\s\S]*?\])\s*(?:,|\})/);
   if (!m) return [];
@@ -29,16 +31,23 @@ function parseExamples(source: string): Array<{ name: string; props: Record<stri
       .replace(/\/\/[^\n]*/g, "")
       .replace(/,\s*([\]}])/g, "$1")
       .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')
-      .replace(/:\s*undefined\b/g, ": null")
+      .replace(/:\s*undefined\b/g, `:"${DS_UNDEFINED_SENTINEL}"`)
       .replace(/:\s*'([^']*)'/g, ':"$1"');
     const parsed = JSON.parse(sanitized);
     if (!Array.isArray(parsed)) return [];
     return parsed.map((e: unknown) => {
       const obj = e as Record<string, unknown>;
+      const rawProps = typeof obj.props === "object" && obj.props !== null
+        ? (obj.props as Record<string, unknown>) : {};
+      // Drop sentinel keys: props set to `undefined` in source should be omitted
+      // from generated JSX, not emitted as null (which breaks non-nullable prop types).
+      const props: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(rawProps)) {
+        if (v !== DS_UNDEFINED_SENTINEL) props[k] = v;
+      }
       return {
         name: typeof obj.name === "string" ? obj.name : "unnamed",
-        props: typeof obj.props === "object" && obj.props !== null
-          ? (obj.props as Record<string, unknown>) : {},
+        props,
       };
     });
   } catch { return []; }

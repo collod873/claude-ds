@@ -334,7 +334,7 @@ function astNodeToValue(
   depth = 0,
   typeImportScope: Map<string, { exportName: string; rawSpec: string }> = new Map()
 ): unknown {
-  if (depth > 10) return null; // guard against deep cycles
+  if (depth > 20) return null; // guard against deep cycles
   const ts = getTS();
 
   // Helper: capture an AST sub-tree as a raw-source FnMarker AND collect any
@@ -369,6 +369,11 @@ function astNodeToValue(
   // Identifier — resolve from local scope or import scope
   if (ts.isIdentifier(node)) {
     const name = node.text;
+    // `undefined` in value position is parsed as an Identifier by TypeScript,
+    // not as UndefinedKeyword (which only appears in type positions). Handle it
+    // explicitly so props like `reference: undefined` round-trip correctly instead
+    // of being dropped with an "unresolved identifier" warning and rendered as null.
+    if (name === "undefined") return undefined;
     if (localScope.has(name)) {
       return astNodeToValue(localScope.get(name)!, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1, typeImportScope);
     }
@@ -1226,7 +1231,7 @@ function parseStates(source: string): MetaStates | undefined {
       .replace(/\/\/[^\n]*/g, "")
       .replace(/,\s*([\]}])/g, "$1")
       .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')
-      .replace(/:\s*undefined\b/g, ": null")
+      .replace(/:\s*undefined\b/g, `:"${REGEX_UNDEFINED_SENTINEL}"`)
       .replace(/:\s*'([^']*)'/g, ':"$1"');
     const parsed = JSON.parse(sanitized) as Record<string, unknown>;
     const out: MetaStates = {};
@@ -1234,12 +1239,18 @@ function parseStates(source: string): MetaStates | undefined {
       const v = parsed[key];
       if (v && typeof v === "object") {
         const spec = v as Record<string, unknown>;
+        const rawProps = typeof spec.props === "object" && spec.props !== null
+          ? (spec.props as Record<string, unknown>)
+          : {};
+        // Drop sentinel props — `undefined` values in source must be omitted
+        // from generated JSX, not emitted as null.
+        const props: Record<string, unknown> = {};
+        for (const [k, val] of Object.entries(rawProps)) {
+          if (val !== REGEX_UNDEFINED_SENTINEL) props[k] = val;
+        }
         out[key] = {
           name: typeof spec.name === "string" ? spec.name : key,
-          props:
-            typeof spec.props === "object" && spec.props !== null
-              ? (spec.props as Record<string, unknown>)
-              : {},
+          props,
         };
       }
     }
@@ -1248,6 +1259,8 @@ function parseStates(source: string): MetaStates | undefined {
     return undefined;
   }
 }
+
+const REGEX_UNDEFINED_SENTINEL = "__DS_UNDEFINED__";
 
 function parseExamples(source: string): Example[] {
   // Find examples array in meta
@@ -1258,22 +1271,32 @@ function parseExamples(source: string): Example[] {
     // Replace JS-style property shorthand, functions, etc. with JSON-safe equivalents.
     // We support: name: "string", props: { key: "val", key2: 123, key3: true/false/null }
     const raw = examplesMatch[1];
-    // Attempt JSON.parse after light sanitization
+    // Attempt JSON.parse after light sanitization.
+    // `undefined` is replaced with a sentinel string rather than `null` so we can
+    // distinguish "prop explicitly cleared to undefined" (→ omit from JSX) from
+    // "prop intentionally set to null" (→ emit `={null}`).
     const sanitized = raw
       .replace(/\/\/[^\n]*/g, "") // remove line comments
       .replace(/,\s*([\]}])/g, "$1") // trailing commas
       .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":') // unquoted keys
-      .replace(/:\s*undefined\b/g, ": null") // undefined → null
+      .replace(/:\s*undefined\b/g, `:"${REGEX_UNDEFINED_SENTINEL}"`) // undefined → sentinel
       .replace(/:\s*'([^']*)'/g, ':"$1"'); // single-quoted strings → double-quoted
     const parsed = JSON.parse(sanitized);
     if (!Array.isArray(parsed)) return [];
     return parsed.map((e: unknown) => {
       const obj = e as Record<string, unknown>;
+      const rawProps = typeof obj.props === "object" && obj.props !== null
+        ? (obj.props as Record<string, unknown>)
+        : {};
+      // Drop sentinel props — they were `undefined` in source and must be omitted
+      // from generated JSX rather than emitted as null.
+      const props: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(rawProps)) {
+        if (v !== REGEX_UNDEFINED_SENTINEL) props[k] = v;
+      }
       return {
         name: typeof obj.name === "string" ? obj.name : "unnamed",
-        props: typeof obj.props === "object" && obj.props !== null
-          ? (obj.props as Record<string, unknown>)
-          : {},
+        props,
       };
     });
   } catch {
@@ -1605,18 +1628,23 @@ function containsFnMarker(v: unknown): boolean {
 
 function renderPropsAttr(props: Record<string, unknown>): string {
   return Object.entries(props)
-    .map(([k, v]) => {
+    .flatMap(([k, v]) => {
+      // Props explicitly set to `undefined` (e.g. `reference: undefined` to clear
+      // a spread) are omitted from the JSX attribute list entirely. Emitting
+      // `reference={undefined}` or `reference={null}` widens the value past the
+      // declared optional type and causes tsc errors for non-nullable prop types.
+      if (v === undefined) return [];
       // Plain string with no fn markers → use JSON.stringify shorthand.
       // If the string contains a double-quote, JSON.stringify produces an
       // attribute value like "say \"hi\"" which JSX rejects. Emit as a
       // braced JS expression in that case so the string survives intact (#73).
       if (typeof v === "string" && !containsFnMarker(v)) {
-        if (v.includes('"')) return `${k}={${JSON.stringify(v)}}`;
-        return `${k}=${JSON.stringify(v)}`;
+        if (v.includes('"')) return [`${k}={${JSON.stringify(v)}}`];
+        return [`${k}=${JSON.stringify(v)}`];
       }
-      if (typeof v === "boolean") return v ? k : `${k}={false}`;
+      if (typeof v === "boolean") return [v ? k : `${k}={false}`];
       // Use serializeJSValue which handles FnMarker at any nesting depth
-      return `${k}={${serializeJSValue(v)}}`;
+      return [`${k}={${serializeJSValue(v)}}`];
     })
     .join(" ");
 }
