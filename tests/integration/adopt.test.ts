@@ -331,4 +331,57 @@ describe("adopt", () => {
     expect(content).toContain("ci:hook-contract");
     expect(content).toContain("ci:consistency");
   });
+
+  // #86: seedClaudeMdMarkers — markerless pre-existing CLAUDE.md target
+  it("#86 adopting against a markerless CLAUDE.md injects both user content and managed block", async () => {
+    // Pre-existing markerless CLAUDE.md (consumer-authored, no markers)
+    await writeFile(join(dir, "CLAUDE.md"), "# My Project\n\nUser notes here.\n");
+
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // The configured target (default .claude/CLAUDE.md) should have been created
+    // by syncPackFiles (current===null path). But since CLAUDE.md is picked as the
+    // candidate (only one candidate present), claudeMdTarget == "CLAUDE.md".
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    // Original user content preserved
+    expect(content).toContain("User notes here.");
+    // Managed block injected
+    expect(content).toContain("<!-- >>> claude-ds managed >>> -->");
+    expect(content).toContain("<!-- <<< claude-ds managed <<< -->");
+    expect(content).toContain("claude-ds");
+  });
+
+  it("#86 adopting twice in a row is a no-op on the second run (no duplicate markers)", async () => {
+    await writeFile(join(dir, "CLAUDE.md"), "# My Project\n\nUser notes here.\n");
+
+    const r1 = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r1.code).toBe(0);
+    const after1 = await readFile(join(dir, "CLAUDE.md"), "utf8");
+
+    // Run adopt again — must refuse because .claude-ds.json already exists
+    const r2 = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r2.code).not.toBe(0); // adopt exits 2 when .claude-ds.json already present
+
+    // File unchanged — no duplicate marker pairs, no duplicate headings
+    const after2 = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(after2).toBe(after1);
+    const markerCount = (after1.match(/<!-- >>> claude-ds managed >>> -->/g) ?? []).length;
+    expect(markerCount).toBe(1);
+  });
+
+  it("#86 reconform idempotent re-plan returns empty plan after adopt against markerless CLAUDE.md", async () => {
+    await writeFile(join(dir, "CLAUDE.md"), "# My Project\n\nUser notes here.\n");
+
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    // sync with stdin "n" (decline to apply) is the proxy for "re-plan shows no pending changes".
+    // It prints the plan preview then exits 0 after "aborted". CLAUDE.md should be "skip".
+    const sync = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "n\n" });
+    expect(sync.code).toBe(0);
+    expect(sync.stdout).not.toMatch(/abort:.*CLAUDE\.md/);
+    expect(sync.stdout).not.toMatch(/rewrite:.*CLAUDE\.md/);
+    expect(sync.stdout).toMatch(/skip: CLAUDE\.md.* — marker region in sync/);
+  });
 });

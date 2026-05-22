@@ -12,6 +12,7 @@ import { loadProject } from "../lib/project.js";
 import { run } from "../lib/runner.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
+import { makeSeedClaudeMdMarkers } from "../lib/ops/seed-claude-md-markers.js";
 
 const execFile = promisify(execFileCb);
 
@@ -235,44 +236,17 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   }
 
   const ctx = await loadProject(cwd);
+  // #86: seed markers before syncPackFiles so diffFile always sees a well-formed
+  // hybrid+markdown file. Without this, a markerless pre-existing CLAUDE.md target
+  // causes diffFile → extractMarkerInner to throw → abort verdict → managed block
+  // never lands. seedClaudeMdMarkers is idempotent (no-ops if markers exist).
+  const seedOp = makeSeedClaudeMdMarkers();
   const op = makeSyncPackFiles();
-  const report = await run(ctx, [op], "apply");
+  const report = await run(ctx, [seedOp, op], "apply");
 
   if (report.failed) {
     err(`adopt failed at ${report.failed.change.kind}: ${report.failed.error}`);
     process.exit(2);
-  }
-
-  // CLAUDE.md first-install marker injection — kept inline, NOT yet routed through Runner.
-  //
-  // FINDING: syncPackFiles uses diffFile for hybrid-markdown, which calls
-  // extractMarkerInner() on `current`. If the consumer's CLAUDE.md target pre-exists
-  // WITHOUT the managed marker pair (common at adopt time — they wrote their own
-  // CLAUDE.md before adopting), diffFile returns `abort` and the Runner correctly
-  // no-ops the write. Legacy adopt's behavior in that case was to APPEND a
-  // `## claude-ds\n<markers>` block to the bottom of that markerless file —
-  // semantically different from "merge inside markers" (the sync verdict).
-  //
-  // Routing this cleanly needs either a dedicated Op (e.g. `seedClaudeMdMarkers`) or
-  // a diffFile extension that handles "no markers yet → append a fresh marker block."
-  // For now, preserve legacy behavior inline so the marker block lands; subsequent
-  // `sync` runs will see a well-formed hybrid file and route through diffFile normally.
-  //
-  // The `current === null` case (CLAUDE.md target does not exist) is already handled
-  // by syncPackFiles + Runner — diffFile returns `rewrite` and writes the
-  // marker-wrapped fragment.
-  const claudeMdEntry = manifest.files.find(f => f.path === "CLAUDE.md");
-  if (claudeMdEntry) {
-    const targetAbs = resolve(cwd, claudeMdTarget);
-    if (await exists(targetAbs)) {
-      const cur = await readFile(targetAbs, "utf8");
-      if (!cur.includes("<!-- >>> claude-ds managed >>> -->")) {
-        const fragment = await readFile(join(packDir, "files", "CLAUDE.md.fragment"), "utf8");
-        const block = `<!-- >>> claude-ds managed >>> -->\n${fragment}\n<!-- <<< claude-ds managed <<< -->\n`;
-        const sep = cur.endsWith("\n") ? "" : "\n";
-        await writeFile(targetAbs, `${cur}${sep}\n## claude-ds\n${block}`, "utf8");
-      }
-    }
   }
 
   // ---- Post-write housekeeping ------------------------------------------
