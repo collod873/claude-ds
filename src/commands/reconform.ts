@@ -75,8 +75,7 @@ export async function reconformCmd(opts: {
       if (opRpt.name !== "backfill-meta") continue;
       for (const c of opRpt.changes) {
         if (c.kind !== "write") continue;
-        const before = c.before?.toString("utf8") ?? "";
-        const injected = !/import\s+(?:type\s+)?\{[^}]*\bMeta\b[^}]*\}\s+from\s+["'][^"']*\/types\/meta["']/.test(before);
+        const injected = c.note?.injectedMetaImport === true;
         if (writeMeta) { info(`backfilled meta: ${c.path}${injected ? " (+ Meta import)" : ""}`); metaBackfilled++; }
         else { info(`[dry-run] would backfill meta: ${c.path}`); }
       }

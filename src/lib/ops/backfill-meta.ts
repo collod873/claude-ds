@@ -84,7 +84,7 @@ function ensureMetaImport(source: string): { source: string; injected: boolean }
  * when the file path falls outside the atom/composite/reference tiers (the Op
  * skips it).
  */
-function buildBackfilledSource(relPath: string, source: string): string | null {
+function buildBackfilledSource(relPath: string, source: string): { after: string; injectedMetaImport: boolean } | null {
   const isReference = relPath.includes("design-system/references/");
   const isAtom = relPath.includes("design-system/atoms/");
   const isComposite = relPath.includes("design-system/composites/");
@@ -101,9 +101,9 @@ function buildBackfilledSource(relPath: string, source: string): string | null {
     return null;
   }
 
-  const { source: withImport } = ensureMetaImport(source);
+  const { source: withImport, injected } = ensureMetaImport(source);
   const sep = withImport.endsWith("\n\n") ? "" : withImport.endsWith("\n") ? "\n" : "\n\n";
-  return withImport + sep + stub;
+  return { after: withImport + sep + stub, injectedMetaImport: injected };
 }
 
 /**
@@ -152,14 +152,15 @@ export const backfillMeta: Operation = {
         if (META_RE.test(source)) continue;
 
         const relPath = join(scanRel, entry);
-        const after = buildBackfilledSource(relPath, source);
-        if (after === null) continue;
+        const built = buildBackfilledSource(relPath, source);
+        if (built === null) continue;
 
         changes.push({
           kind: "write",
           path: relPath,
           before: Buffer.from(source, "utf8"),
-          after: Buffer.from(after, "utf8"),
+          after: Buffer.from(built.after, "utf8"),
+          note: { injectedMetaImport: built.injectedMetaImport },
         });
       }
     }

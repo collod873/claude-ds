@@ -140,4 +140,25 @@ describe("backfillMeta op", () => {
     const changes = await backfillMeta.plan(fakeCtx());
     expect(changes).toEqual([]);
   });
+
+  it("attaches note.injectedMetaImport: true when source had no Meta import", async () => {
+    await mkdir(join(cwd, "design-system", "atoms"), { recursive: true });
+    await writeFile(join(cwd, "design-system", "atoms", "needs-import.tsx"), `export function X() { return null; }\n`);
+    const changes = await backfillMeta.plan(fakeCtx());
+    expect(changes).toHaveLength(1);
+    const c = changes[0];
+    if (c.kind !== "write") throw new Error("expected write");
+    expect(c.note?.injectedMetaImport).toBe(true);
+  });
+
+  it("attaches note.injectedMetaImport: false when source already imports Meta", async () => {
+    await mkdir(join(cwd, "design-system", "atoms"), { recursive: true });
+    const src = `import type { Meta } from "@/design-system/types/meta";\nexport function Y() { return null; }\n`;
+    await writeFile(join(cwd, "design-system", "atoms", "has-import.tsx"), src);
+    const changes = await backfillMeta.plan(fakeCtx());
+    expect(changes).toHaveLength(1);
+    const c = changes[0];
+    if (c.kind !== "write") throw new Error("expected write");
+    expect(c.note?.injectedMetaImport).toBe(false);
+  });
 });

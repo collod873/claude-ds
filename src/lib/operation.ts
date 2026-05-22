@@ -14,7 +14,7 @@ import type { ProjectContext } from "./project.js";
  * the same way as any other planned outcome.
  */
 export type Change =
-  | { kind: "write"; path: string; before: Buffer | null; after: Buffer }
+  | { kind: "write"; path: string; before: Buffer | null; after: Buffer; note?: Record<string, unknown> }
   | { kind: "delete"; path: string; before: Buffer }
   | { kind: "rename"; path: string; after: string }
   | { kind: "abort"; path: string; reason: string };
