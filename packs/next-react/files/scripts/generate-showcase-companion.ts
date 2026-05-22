@@ -902,7 +902,12 @@ function buildScopes(
   const localTypeSpec = `./${sourceBasename}`;
   for (const stmt of sf.statements) {
     if ((ts.isTypeAliasDeclaration(stmt) || ts.isInterfaceDeclaration(stmt)) && stmt.name) {
-      typeImportScope.set(stmt.name.text, { exportName: stmt.name.text, rawSpec: localTypeSpec });
+      // Only register types that are actually exported — non-exported types cannot be
+      // imported by the generated showcase, so carrying them produces a TS error (#defect3).
+      const isExported = !!stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+      if (isExported) {
+        typeImportScope.set(stmt.name.text, { exportName: stmt.name.text, rawSpec: localTypeSpec });
+      }
     }
   }
 
@@ -923,11 +928,68 @@ function buildScopes(
     }
   }
 
+  // Defect #4: function declarations exported via `export { Foo, Bar }` block
+  // (no `export` keyword on the function itself) are not caught by the #70 pass
+  // above. Build a set of non-exported function declaration names, then resolve
+  // them through any `export { ... }` statement in the file.
+  const nonExportedFnNames = new Set<string>();
+  for (const stmt of sf.statements) {
+    if (ts.isFunctionDeclaration(stmt) && stmt.name) {
+      const isDirectlyExported = !!stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+      if (!isDirectlyExported) nonExportedFnNames.add(stmt.name.text);
+    }
+  }
+  if (nonExportedFnNames.size > 0) {
+    for (const stmt of sf.statements) {
+      if (
+        ts.isExportDeclaration(stmt) &&
+        !stmt.moduleSpecifier && // only re-export blocks within the same file
+        stmt.exportClause &&
+        ts.isNamedExports(stmt.exportClause)
+      ) {
+        for (const spec of stmt.exportClause.elements) {
+          const localName = spec.propertyName?.text ?? spec.name.text;
+          if (nonExportedFnNames.has(localName)) {
+            importScope.set(spec.name.text, {
+              filePath: sf.fileName,
+              exportName: spec.name.text,
+              rawSpec: localTypeSpec,
+            });
+          }
+        }
+      }
+    }
+  }
+
   for (const stmt of sf.statements) {
     // Variable declarations: const foo = ...
     if (ts.isVariableStatement(stmt)) {
+      const isExportedStmt = !!stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
       for (const decl of stmt.declarationList.declarations) {
         if (ts.isIdentifier(decl.name) && decl.initializer) {
+          // Defect #2: exported consts whose initializer is React.forwardRef(…) or
+          // React.memo(…) are callable components — they must be carried as imports
+          // from the source file, not inlined verbatim. Inlining would copy the full
+          // forwardRef body into the showcase (including any non-exported local types
+          // it references), causing TS errors.
+          if (isExportedStmt && ts.isCallExpression(decl.initializer)) {
+            const callee = decl.initializer.expression;
+            const isWrappedComponent =
+              (ts.isPropertyAccessExpression(callee) &&
+                ts.isIdentifier(callee.expression) &&
+                callee.expression.text === "React" &&
+                (callee.name.text === "forwardRef" || callee.name.text === "memo")) ||
+              (ts.isIdentifier(callee) &&
+                (callee.text === "forwardRef" || callee.text === "memo"));
+            if (isWrappedComponent) {
+              importScope.set(decl.name.text, {
+                filePath: sf.fileName,
+                exportName: decl.name.text,
+                rawSpec: localTypeSpec,
+              });
+              continue; // do NOT also add to localScope
+            }
+          }
           localScope.set(decl.name.text, decl.initializer);
         }
       }
