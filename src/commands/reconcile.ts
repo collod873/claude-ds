@@ -94,7 +94,6 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     : [];
   // #23: root-dupe scan — deprecated root files where canonical design-system/ copy also exists
   const rootDupeFindings = await scanRootDupes(cwd, manifest.deprecated_paths);
-  const rootDupePaths = new Set(rootDupeFindings.map(f => f.rootPath));
   const allFindings = [...deprecatedFindings, ...collisionFindings];
 
   if (allFindings.length === 0 && rootDupeFindings.length === 0) {
@@ -162,7 +161,6 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   }
 
   // ── Gather decisions (no I/O yet) ─────────────────────────────────────────
-  // Prompts happen here; actual file mutations flow through Ops via the Runner below.
   const pathsToDelete: string[] = [];
   const mergeRequests: Array<{ root: string; canonical: string }> = [];
   let skipped = 0;
@@ -206,7 +204,7 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   const toDelete = (force || isTTY) ? deprecatedList : [];
   for (const f of toDelete) {
     // Skip root-dupes that differ in content — handled above (merged, deleted, or skipped)
-    if (rootDupePaths.has(f.path) && rootDupeFindings.find(r => r.rootPath === f.path)?.contentDiffers) continue;
+    if (rootDupeMap.get(f.path)?.contentDiffers) continue;
     pathsToDelete.push(f.path);
   }
 
@@ -239,10 +237,7 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   }
 
   // ── Apply via Runner ──────────────────────────────────────────────────────
-  const ops: Operation[] = [];
-  for (const { root, canonical } of mergeRequests) {
-    ops.push(makeMergeRootToCanonical(root, canonical));
-  }
+  const ops: Operation[] = mergeRequests.map(({ root, canonical }) => makeMergeRootToCanonical(root, canonical));
   if (pathsToDelete.length > 0) {
     ops.push(makeDeleteFiles(pathsToDelete));
   }
