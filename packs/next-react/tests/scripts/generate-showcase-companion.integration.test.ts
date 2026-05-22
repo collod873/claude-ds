@@ -1375,4 +1375,82 @@ describe("JSX attribute / children emission regressions", () => {
     const hasEntityForm = content.includes('phrase="say &quot;hi&quot;"');
     expect(hasExprForm || hasEntityForm).toBe(true);
   });
+
+  // ── #71 — PropertyAccessExpression resolves through module-scope const ───
+  it("#71 resolves property access on module-scope const literal", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "phone.tsx"),
+      [
+        `import React from "react";`,
+        `const contact = { phoneE164: "+15551234567", name: "Acme" };`,
+        `export function Phone({ phoneNumber }: { phoneNumber: string }) { return <a>{phoneNumber}</a>; }`,
+        `export const meta = {`,
+        `  kind: "atom",`,
+        `  examples: [{ name: "default", props: { phoneNumber: contact.phoneE164 } }],`,
+        `  skip: [],`,
+        `};`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "phone.showcase.tsx"), "utf8");
+    expect(content).not.toContain("phoneNumber={null}");
+    expect(content).toContain('phoneNumber="+15551234567"');
+  });
+
+  // ── #72 — new Date(...) and array-index expressions ───────────────────────
+  it("#72 emits new Date(...) verbatim in showcase JSX", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "stamp.tsx"),
+      [
+        `import React from "react";`,
+        `export function Stamp({ created }: { created: Date }) { return <time>{created.toISOString()}</time>; }`,
+        `export const meta = {`,
+        `  kind: "atom",`,
+        `  examples: [{ name: "default", props: { created: new Date("2026-01-01") } }],`,
+        `  skip: [],`,
+        `};`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "stamp.showcase.tsx"), "utf8");
+    expect(content).not.toContain("created={null}");
+    expect(content).toContain(`new Date("2026-01-01")`);
+  });
+
+  it("#72 resolves array-index expression against module-scope const", async () => {
+    const dsDir = join(dir, "design-system", "composites");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "notify.tsx"),
+      [
+        `import React from "react";`,
+        `const acmeNotifications = [`,
+        `  { id: "n1", title: "First notification" },`,
+        `  { id: "n2", title: "Second notification" },`,
+        `];`,
+        `export function Notify({ notification }: { notification: { id: string; title: string } }) {`,
+        `  return <div>{notification.title}</div>;`,
+        `}`,
+        `export const meta = {`,
+        `  kind: "composite",`,
+        `  examples: [{ name: "default", props: { notification: acmeNotifications[0] } }],`,
+        `  skip: [],`,
+        `};`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "notify.showcase.tsx"), "utf8");
+    expect(content).not.toContain("notification={null}");
+    // Either resolved to the literal object, or emitted verbatim as acmeNotifications[0]
+    const hasResolved = /notification=\{\s*\{[^}]*id:\s*"n1"/.test(content);
+    const hasVerbatim = content.includes("acmeNotifications[0]");
+    expect(hasResolved || hasVerbatim).toBe(true);
+  });
 });

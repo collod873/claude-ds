@@ -391,6 +391,45 @@ function astNodeToValue(
     return result;
   }
 
+  // Property access — e.g. `contact.phoneE164` where `contact` is a module-scope
+  // const object literal. Resolve the target, then index by the property name.
+  // Issue #71: previously fell through to the "unhandled node kind" branch and
+  // emitted null, breaking non-nullable prop types in the generated showcase.
+  if (ts.isPropertyAccessExpression(node)) {
+    const target = astNodeToValue(node.expression, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1, typeImportScope);
+    const key = node.name.text;
+    if (target && typeof target === "object" && !Array.isArray(target) && !isFnMarker(target)) {
+      const obj = target as Record<string, unknown>;
+      if (key in obj) return obj[key];
+    }
+    // Couldn't resolve — emit the expression verbatim as a fn marker so the
+    // showcase at least carries the reference. collectRefsFromNode will pull
+    // in any free identifiers (e.g. the target `contact`).
+    return emitFn(node);
+  }
+
+  // Element access — e.g. `acmeNotifications[0]` where the target is a known
+  // module-scope const array. Resolve target + index; fall back to verbatim
+  // emission if either side can't be evaluated. Issue #72.
+  if (ts.isElementAccessExpression(node)) {
+    const target = astNodeToValue(node.expression, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1, typeImportScope);
+    const index = astNodeToValue(node.argumentExpression, sourceFile, localScope, importScope, consumerRoot, carried, depth + 1, typeImportScope);
+    if (Array.isArray(target) && typeof index === "number" && Number.isInteger(index) && index >= 0 && index < target.length) {
+      return target[index];
+    }
+    if (target && typeof target === "object" && !Array.isArray(target) && !isFnMarker(target) && typeof index === "string") {
+      const obj = target as Record<string, unknown>;
+      if (index in obj) return obj[index];
+    }
+    return emitFn(node);
+  }
+
+  // `new Foo(...)` — emit verbatim as a fn marker. Most commonly `new Date("...")`.
+  // Issue #72: previously fell through to "unhandled node kind" and dropped to null.
+  if (ts.isNewExpression(node)) {
+    return emitFn(node);
+  }
+
   // Call expressions — e.g. `jobColumns.map(...)` or `acmeJobs.slice(...)`
   if (ts.isCallExpression(node)) {
     // Try to evaluate simple identifier.method() calls for known array methods
