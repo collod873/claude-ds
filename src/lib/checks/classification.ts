@@ -100,11 +100,10 @@ export async function applyClassificationMoves(
       await rename(f.file, destFile);
     }
 
-    // Note: original reconform passes `design-system/<tier>/<name>` here; the
-    // helper prepends `@/design-system/`, producing a double prefix. Preserved
-    // verbatim — out of scope to fix in #83.
-    const fromImport = `design-system/${srcTier}/${componentName}`;
-    const toImport = `design-system/${dstTier}/${componentName}`;
+    // rewriteImportPaths contract: pass tier-relative segment only (e.g.
+    // "atoms/button"). The function prepends "@/design-system/" internally.
+    const fromImport = `${srcTier}/${componentName}`;
+    const toImport = `${dstTier}/${componentName}`;
     const changed = await rewriteImportPaths(cwd, fromImport, toImport);
     info(`moved ${f.currentTier}→${f.shouldBe}: ${basename(f.file)} (rewrote ${changed.length} import site(s))`);
   }

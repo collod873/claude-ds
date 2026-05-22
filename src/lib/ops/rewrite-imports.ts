@@ -29,7 +29,9 @@ export async function rewriteImportPaths(
   from: string,
   to: string,
 ): Promise<string[]> {
-  // from/to are like "atoms/button" or "composites/button"
+  // Contract: `from` and `to` are tier-relative segments like "atoms/button" or
+  // "composites/button". This function prepends "@/design-system/" internally.
+  // Callers MUST NOT include "design-system/" in their arguments.
   const fromPath = `@/design-system/${from}`;
   const toPath = `@/design-system/${to}`;
   const { writeFile } = await import("node:fs/promises");
