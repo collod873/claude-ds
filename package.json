@@ -17,7 +17,8 @@
     "build": "tsc -p . && chmod +x dist/cli.js",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "sandcastle": "npx tsx .sandcastle/main.mts"
   },
   "engines": {
     "node": ">=20"
@@ -28,6 +29,7 @@
     "typescript": "^5.4.0"
   },
   "devDependencies": {
+    "@ai-hero/sandcastle": "^0.5.11",
     "@types/node": "^20.11.0",
     "@types/picomatch": "^4.0.3",
     "tsx": "^4.7.0",
