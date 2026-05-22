@@ -1,14 +1,16 @@
-import { readFile, writeFile, mkdir, stat, readdir, chmod } from "node:fs/promises";
+import { readFile, writeFile, stat, readdir, chmod } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { mergeJsonKeys } from "../lib/json-merge.js";
 import { info, err, confirm } from "../lib/log.js";
 import { detectLookalikes } from "../lib/lookalike.js";
 import { detectPackageManager, runCmd } from "../lib/package-manager.js";
-import { detectAppDir, detectClaudeMdCandidates, DEFAULT_CLAUDE_MD_TARGET, resolveManifestPath } from "../lib/paths.js";
+import { detectAppDir, detectClaudeMdCandidates, DEFAULT_CLAUDE_MD_TARGET } from "../lib/paths.js";
+import { loadProject } from "../lib/project.js";
+import { run } from "../lib/runner.js";
+import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 
 const execFile = promisify(execFileCb);
 
@@ -29,6 +31,11 @@ async function exists(p: string): Promise<boolean> { try { await stat(p); return
  * causing build errors on every /design route. (#52)
  *
  * Only runs when the consumer uses a src/app layout. Idempotent.
+ *
+ * NOTE: this remains a direct write (not routed through the Runner) because
+ * tsconfig.json is not a pack-owned file — it's a consumer config the CLI
+ * surgically patches once at adopt time. It is not in the manifest, so
+ * syncPackFiles cannot plan a Change for it.
  */
 async function patchTsconfigForSrcApp(cwd: string): Promise<void> {
   const tsconfigPath = join(cwd, "tsconfig.json");
@@ -66,18 +73,6 @@ async function patchTsconfigForSrcApp(cwd: string): Promise<void> {
   info("patched tsconfig.json: added @/design-system/* path alias for src/app layout (#52)");
 }
 
-// Paths under these prefixes require the executable bit (relative to project root).
-function needsExecBit(relPath: string): boolean {
-  return relPath.startsWith(".claude/hooks/") || relPath.startsWith("scripts/");
-}
-
-async function writeExecutable(dest: string, content: string, relPath: string): Promise<void> {
-  await writeFile(dest, content, "utf8");
-  if (needsExecBit(relPath)) await chmod(dest, 0o755);
-}
-
-interface OverwriteRecord { path: string; prevSize: number; newSize: number; category: "managed" | "hybrid"; }
-
 export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: string; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
   if (await exists(join(cwd, ".claude-ds.json"))) { err(".claude-ds.json already exists — did you mean `claude-ds sync`?"); process.exit(2); }
@@ -110,6 +105,12 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   // Merge order: pack defaults < --ignore flag (flag extends, not replaces).
   const flagGlobs = opts.ignore ? opts.ignore.split(",").map(g => g.trim()).filter(Boolean) : [];
   const ignoreGlobs = [...manifest.lookalike_ignore, ...flagGlobs];
+
+  // ---- Interactive phase (precedes loadProject) ---------------------------
+  // Per CONTEXT.md "Working rules": prompts live in commands, not Operations.
+  // Resolve all user decisions (lookalike gate, app_dir, claude_md_target) up
+  // front, then write the initial config + boot a ProjectContext + delegate
+  // file writes to the Runner.
 
   // Precondition gate runs BEFORE the confirmation prompt — fail fast on lookalikes.
   // ignoreGlobs lets users suppress false positives from the heuristic.
@@ -186,59 +187,103 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     }
   }
 
-  const overwrites: OverwriteRecord[] = [];
+  // ---- Init boundary: write the initial .claude-ds.json so loadProject can boot ----
+  // This is the documented exception to the "all writes go through the Runner" rule —
+  // adopt is the only command that creates the config file. Once written, every
+  // subsequent file mutation in this command flows through the Runner chokepoint.
+  const version = await getVersion(join(repoRoot, "package.json"));
+  const cfg: Record<string, unknown> = {
+    version: `v${version}`,
+    pack,
+    mode: "warn",
+    enforce_threshold: 10,
+    removed: [],
+    app_dir: appDir,
+    claude_md_target: claudeMdTarget,
+  };
+  if (flagGlobs.length > 0) cfg.lookalike_ignore = flagGlobs;
+  await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
 
-  for (const f of manifest.files) {
-    if (f.category === "generated") continue;
-    // #34: CLAUDE.md is no longer written through the normal manifest loop — it goes
-    // through a dedicated injection path (below) so it lands at claude_md_target, never root.
-    if (f.path === "CLAUDE.md") continue;
-    const srcName = f.path === "package.json" ? "package.json.seed" : f.path;
-    // #47: rewrite app/... paths through the detected app_dir (manifest stays canonical).
-    const writePath = resolveManifestPath(f.path, appDir);
-    const dest = resolve(cwd, writePath);
-    const cwdResolved = resolve(cwd);
-    if (dest !== cwdResolved && !dest.startsWith(cwdResolved + "/")) {
-      err(`manifest path escapes project root: ${f.path}`);
-      process.exit(2);
+  // ---- Boot ProjectContext and route file writes through the Runner ----
+  // First install becomes the special case where diffFile sees `current = null`:
+  //   - managed/hybrid/seeded files with no on-disk counterpart → verdict "rewrite, missing on disk — recreating"
+  //   - pre-existing managed files → verdict "rewrite, upstream changed" (or "skip, in sync" if byte-identical)
+  //   - pre-existing hybrid files → marker/JSON-key merge via diffFile, same as sync
+  // This is why we no longer need adopt-specific write logic — diffFile + Runner cover it.
+  //
+  // NOTE: backfillCompanions Op (#81) will compose here once it exists. Adopt does not
+  // currently do companion stub backfill, so no inline placeholder is needed.
+  const ctx = await loadProject(cwd);
+  const op = makeSyncPackFiles();
+  const report = await run(ctx, [op], "apply");
+
+  if (report.failed) {
+    err(`adopt failed at ${report.failed.change.kind}: ${report.failed.error}`);
+    process.exit(2);
+  }
+
+  // CLAUDE.md first-install marker injection — kept inline, NOT yet routed through Runner.
+  //
+  // FINDING: syncPackFiles uses diffFile for hybrid-markdown, which calls
+  // extractMarkerInner() on `current`. If the consumer's CLAUDE.md target pre-exists
+  // WITHOUT the managed marker pair (common at adopt time — they wrote their own
+  // CLAUDE.md before adopting), diffFile returns `abort` and the Runner correctly
+  // no-ops the write. Legacy adopt's behavior in that case was to APPEND a
+  // `## claude-ds\n<markers>` block to the bottom of that markerless file —
+  // semantically different from "merge inside markers" (the sync verdict).
+  //
+  // Routing this cleanly needs either a dedicated Op (e.g. `seedClaudeMdMarkers`) or
+  // a diffFile extension that handles "no markers yet → append a fresh marker block."
+  // For now, preserve legacy behavior inline so the marker block lands; subsequent
+  // `sync` runs will see a well-formed hybrid file and route through diffFile normally.
+  //
+  // The `current === null` case (CLAUDE.md target does not exist) is already handled
+  // by syncPackFiles + Runner — diffFile returns `rewrite` and writes the
+  // marker-wrapped fragment.
+  const claudeMdEntry = manifest.files.find(f => f.path === "CLAUDE.md");
+  if (claudeMdEntry) {
+    const targetAbs = resolve(cwd, claudeMdTarget);
+    if (await exists(targetAbs)) {
+      const cur = await readFile(targetAbs, "utf8");
+      if (!cur.includes("<!-- >>> claude-ds managed >>> -->")) {
+        const fragment = await readFile(join(packDir, "files", "CLAUDE.md.fragment"), "utf8");
+        const block = `<!-- >>> claude-ds managed >>> -->\n${fragment}\n<!-- <<< claude-ds managed <<< -->\n`;
+        const sep = cur.endsWith("\n") ? "" : "\n";
+        await writeFile(targetAbs, `${cur}${sep}\n## claude-ds\n${block}`, "utf8");
+      }
     }
-    if (f.category === "seeded" && await exists(dest)) continue;
-    const content = await readFile(join(packDir, "files", srcName), "utf8");
-    await mkdir(dirname(dest), { recursive: true });
-    if (f.category === "hybrid" && f.format === "markdown" && await exists(dest)) {
-      const cur = await readFile(dest, "utf8");
-      const merged = `${cur}\n<!-- >>> claude-ds managed >>> -->\n${content}\n<!-- <<< claude-ds managed <<< -->\n`;
-      // Record overwrite only when merged result differs from current on-disk content.
-      if (merged !== cur) {
-        overwrites.push({ path: f.path, prevSize: Buffer.byteLength(cur, "utf8"), newSize: Buffer.byteLength(merged, "utf8"), category: "hybrid" });
-      }
-      await writeExecutable(dest, merged, f.path);
-    } else if (f.category === "hybrid" && f.format === "markdown") {
-      await writeExecutable(dest, `# Project\n<!-- >>> claude-ds managed >>> -->\n${content}\n<!-- <<< claude-ds managed <<< -->\n`, f.path);
-    } else if (f.category === "hybrid" && f.format === "json") {
-      if (await exists(dest)) {
-        const current = await readFile(dest, "utf8");
-        // Detect existing indentation: find first indented line, check if it starts with a tab.
-        const firstIndented = current.split("\n").find(l => l.startsWith(" ") || l.startsWith("\t"));
-        const indent = firstIndented && firstIndented.startsWith("\t") ? "\t" : 2;
-        const merged = mergeJsonKeys(content, current, f.owned_keys ?? ["hooks"], indent);
-        if (merged !== current) {
-          overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(merged, "utf8"), category: "hybrid" });
-        }
-        await writeExecutable(dest, merged, f.path);
-      } else {
-        await writeExecutable(dest, content, f.path);
-      }
-    } else {
-      // managed category: check for overwrite before writing.
-      if (f.category === "managed" && await exists(dest)) {
-        const current = await readFile(dest, "utf8");
-        if (current !== content) {
-          overwrites.push({ path: f.path, prevSize: Buffer.byteLength(current, "utf8"), newSize: Buffer.byteLength(content, "utf8"), category: "managed" });
-        }
-      }
-      await writeExecutable(dest, content, f.path);
+  }
+
+  // ---- Post-write housekeeping ------------------------------------------
+  // #15: hook and script files must be executable. Runner writes bytes only; chmod is
+  // a post-write concern that stays at the command boundary (mirrors sync.ts).
+  for (const c of report.applied) {
+    if (c.kind !== "write") continue;
+    if (c.path.startsWith(".claude/hooks/") || c.path.startsWith("scripts/")) {
+      await chmod(join(cwd, c.path), 0o755);
     }
+  }
+
+  // Overwrite reporting — reconstruct from op.decisions + applied Changes so the
+  // existing user-facing "Overwrote N managed file(s)" preview format is preserved.
+  // A write that had a non-null `before` is an overwrite of pre-existing user content.
+  interface OverwriteRecord { path: string; prevSize: number; newSize: number; category: "managed" | "hybrid"; }
+  const overwrites: OverwriteRecord[] = [];
+  const decisionByWritePath = new Map(op.decisions.map(d => [d.writePath, d]));
+  for (const c of report.applied) {
+    if (c.kind !== "write" || c.before === null) continue;
+    if (c.before.equals(c.after)) continue; // no-op write (defensive; diffFile would have skipped)
+    const d = decisionByWritePath.get(c.path);
+    if (!d) continue;
+    const entry = manifest.files.find(f => f.path === d.manifestPath);
+    if (!entry) continue;
+    if (entry.category !== "managed" && entry.category !== "hybrid") continue;
+    overwrites.push({
+      path: d.manifestPath,
+      prevSize: c.before.length,
+      newSize: c.after.length,
+      category: entry.category,
+    });
   }
 
   if (overwrites.length > 0) {
@@ -264,26 +309,6 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     process.stdout.write(lines.join("\n") + "\n");
   }
 
-  // #34: inject the managed pointer block into claudeMdTarget. Never write root unless that's the target.
-  const claudeMdEntry = manifest.files.find(f => f.path === "CLAUDE.md");
-  if (claudeMdEntry) {
-    const fragment = await readFile(join(packDir, "files", "CLAUDE.md.fragment"), "utf8");
-    const block = `<!-- >>> claude-ds managed >>> -->\n${fragment}\n<!-- <<< claude-ds managed <<< -->\n`;
-    const targetAbs = resolve(cwd, claudeMdTarget);
-    await mkdir(dirname(targetAbs), { recursive: true });
-    if (await exists(targetAbs)) {
-      const cur = await readFile(targetAbs, "utf8");
-      // If the block is already present (idempotent re-adopt), skip rewriting.
-      if (!cur.includes("<!-- >>> claude-ds managed >>> -->")) {
-        const sep = cur.endsWith("\n") ? "" : "\n";
-        await writeFile(targetAbs, `${cur}${sep}\n## claude-ds\n${block}`, "utf8");
-      }
-    } else {
-      // Create a minimal stub at the chosen target. Header makes it clear who owns the file.
-      await writeFile(targetAbs, `# Project\n\n## claude-ds\n${block}`, "utf8");
-    }
-  }
-
   // #52: src/app consumers have @/* → ./src/* in their tsconfig, so
   // @/design-system/* resolves to ./src/design-system/* which doesn't exist
   // (design-system/ always lives at repo root). Inject a path override that
@@ -294,6 +319,10 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     await patchTsconfigForSrcApp(cwd);
   }
 
+  // Post-pack-write build-manifest run: now that scripts/build-manifest.ts has been
+  // installed (managed file from the pack), run it if no manifest exists yet. The
+  // pre-write run above handled the case where the user had a pre-existing script;
+  // this handles the fresh-install case.
   const buildScriptPath = join(cwd, "scripts", "build-manifest.ts");
   const manifestPath = join(cwd, "design-system", "manifest.json");
   if (await exists(buildScriptPath) && !(await exists(manifestPath))) {
@@ -309,13 +338,6 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     }
   }
 
-  const version = await getVersion(join(repoRoot, "package.json"));
-  const cfg: Record<string, unknown> = { version: `v${version}`, pack, mode: "warn", enforce_threshold: 10, removed: [] };
-  if (flagGlobs.length > 0) cfg.lookalike_ignore = flagGlobs;
-  // #47/#34: persist detected layout so sync/audit/reconform use the same locations.
-  cfg.app_dir = appDir;
-  cfg.claude_md_target = claudeMdTarget;
-  await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
   const pm = await detectPackageManager(cwd);
   info(`adopted claude-ds (${pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);
   info(`CI scripts installed. Run: ${runCmd(pm, "ci:hook-contract")} and ${runCmd(pm, "ci:consistency")}`);
