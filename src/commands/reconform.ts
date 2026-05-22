@@ -7,6 +7,9 @@ import { info, err } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
 import { migrateClaudeMd } from "../lib/ops/migrate-claude-md.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
+import { backfillCompanions } from "../lib/ops/backfill-companions.js";
+import { backfillMeta as backfillMetaOp } from "../lib/ops/backfill-meta.js";
+import { fileImportsDsModule, rewriteImports, rewriteImportPaths } from "../lib/ops/rewrite-imports.js";
 import { run } from "../lib/runner.js";
 
 async function exists(p: string): Promise<boolean> {
@@ -31,16 +34,6 @@ function parseViolations(stderr: string): Violation[] {
   return violations;
 }
 
-/** Convert kebab-case or snake_case to PascalCase for use as a JS identifier.
- *  e.g. "top-bar" → "TopBar", "tag_picker" → "TagPicker", "activitytimeline" → "Activitytimeline"
- */
-function toPascalCase(name: string): string {
-  return name
-    .split(/[-_]/)
-    .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join("");
-}
-
 /** Count lines in a file. Returns 0 if file is absent or unreadable. */
 async function countLines(p: string): Promise<number> {
   try {
@@ -49,111 +42,6 @@ async function countLines(p: string): Promise<number> {
   } catch {
     return 0;
   }
-}
-
-function showcaseStub(displayName: string, fileBase: string): string {
-  return [
-    `// TODO(claude-ds): reconform stub — replace with real showcase`,
-    `import * as Mod from "./${fileBase}";`,
-    ``,
-    `void Mod;`,
-    ``,
-    `export default function ${displayName}Showcase() {`,
-    `  return null;`,
-    `}`,
-    ``,
-  ].join("\n");
-}
-
-function statesStub(): string {
-  // .states.json must be valid JSON; the stub-warning is printed via info()
-  return `[]`;
-}
-
-function testStub(displayName: string, fileBase: string): string {
-  return [
-    `// TODO(claude-ds): reconform stub — replace with real assertions`,
-    `import { describe, it, expect } from "vitest";`,
-    `import * as Mod from "./${fileBase}";`,
-    ``,
-    `describe("${displayName}", () => {`,
-    `  it("module loads", () => {`,
-    `    expect(Mod).toBeDefined();`,
-    `  });`,
-    `});`,
-    ``,
-  ].join("\n");
-}
-
-// ── Title Case helper ─────────────────────────────────────────────────────────
-function toTitleCase(name: string): string {
-  return name
-    .split(/[-_]/)
-    .map(s => s.charAt(0).toUpperCase() + s.slice(1))
-    .join(" ");
-}
-
-// ── Meta stub generators ──────────────────────────────────────────────────────
-function metaStubAtomComposite(kind: "atom" | "composite", hasCva: boolean): string {
-  if (hasCva) {
-    return `export const meta: Meta = { kind: "${kind}", examples: [], skip: [] };\n`;
-  }
-  return `export const meta: Meta = { kind: "${kind}", examples: [{ name: "default", props: {} }] };\n`;
-}
-
-function metaStubReference(title: string): string {
-  return [
-    `// TODO(claude-ds): replace stub render`,
-    `export const meta: Meta = { kind: "reference", title: ${JSON.stringify(title)}, render: () => null };`,
-    ``,
-  ].join("\n");
-}
-
-// ── Classification audit helpers ──────────────────────────────────────────────
-// Match `from "...@/design-system/..."` — but exclude `types/meta` (the Meta type
-// import is structural, not a real DS-module dependency, and would otherwise
-// promote every atom to composite the moment we backfill meta).
-const DS_IMPORT_RE = /from\s+["'][^"']*@\/design-system\/(?!types\/meta)/;
-
-function fileImportsDsModule(source: string): boolean {
-  return DS_IMPORT_RE.test(source);
-}
-
-async function rewriteImportPaths(
-  projectRoot: string,
-  from: string,
-  to: string
-): Promise<string[]> {
-  // from/to are like "atoms/button" or "composites/button"
-  const fromPath = `@/design-system/${from}`;
-  const toPath = `@/design-system/${to}`;
-  const changed: string[] = [];
-
-  async function walk(dir: string): Promise<void> {
-    let entries: string[];
-    try { entries = await readdir(dir); } catch { return; }
-    for (const entry of entries) {
-      const full = join(dir, entry);
-      const s = await stat(full).catch(() => null);
-      if (!s) continue;
-      if (s.isDirectory()) {
-        if (entry === "node_modules" || entry === ".git") continue;
-        await walk(full);
-      } else if (s.isFile() && (entry.endsWith(".ts") || entry.endsWith(".tsx") || entry.endsWith(".js") || entry.endsWith(".jsx"))) {
-        let content: string;
-        try { content = await readFile(full, "utf8"); } catch { continue; }
-        // Exact string match — no partial regex
-        if (content.includes(fromPath)) {
-          const updated = content.split(fromPath).join(toPath);
-          await writeFile(full, updated, "utf8");
-          changed.push(full);
-        }
-      }
-    }
-  }
-
-  await walk(projectRoot);
-  return changed;
 }
 
 export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backfillMeta?: boolean; fix?: boolean; demoteComposites?: boolean }): Promise<void> {
@@ -194,123 +82,29 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
     ctx = await loadProject(cwd);
   }
 
-  // ── #34 migration: move managed CLAUDE.md block out of root into claude_md_target ──
-  // Delegated to migrateClaudeMd Op (#80). Op is idempotent and a no-op when
-  // target == root, root absent, root has no managed block, or block is already
-  // at the target.
-  await run(ctx, [migrateClaudeMd], dryRun ? "dry-run" : "apply");
-
-  // ── Precondition: pack manifest ─────────────────────────────────────────────
-  // loadProject already parsed the manifest; pack dir comes from ctx.
-  const packDir = ctx.packDir;
-  const packScriptsDir = join(packDir, "scripts");
-
-  // ── Walk scaffold dirs ──────────────────────────────────────────────────────
-  const TIERS: Array<{ dir: string }> = [
-    { dir: join(cwd, "design-system", "atoms") },
-    { dir: join(cwd, "design-system", "composites") },
-  ];
-
-  // Tracks all companions created (or would-be-created in dry-run)
+  // ── #34 migration + companion backfill ──────────────────────────────────────
+  // - migrateClaudeMd (#80): no-op when target == root or block already at target.
+  // - backfillCompanions (#81): writes `.showcase.tsx` / `.states.json` /
+  //   `.test.tsx` stubs for atoms & composites missing them. Runs in apply mode
+  //   regardless of `--fix` so the existing reconform UX is preserved (companion
+  //   creation has always been a default action; only meta backfill is gated on
+  //   `--fix`).
+  const passAReport = await run(
+    ctx,
+    [migrateClaudeMd, backfillCompanions],
+    dryRun ? "dry-run" : "apply",
+  );
   const companionsCreated: string[] = [];
-
-  for (const { dir: tierDir } of TIERS) {
-    if (!(await exists(tierDir))) continue;
-
-    let entries: string[];
-    try {
-      entries = await readdir(tierDir);
-    } catch {
-      info(`warning: cannot read ${tierDir}, skipping`);
-      continue;
+  for (const opRpt of passAReport.ops) {
+    if (opRpt.name !== "backfill-companions") continue;
+    for (const c of opRpt.changes) {
+      if (c.kind === "write") companionsCreated.push(join(cwd, c.path));
     }
-
-    // Companion suffixes that are NOT main component files (flat layout)
-    const COMPANION_SUFFIXES = [".showcase.tsx", ".states.json", ".test.tsx", ".stories.tsx"];
-    const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
-
-    for (const entry of entries) {
-      if (entry === ".keep" || entry === ".gitkeep") continue;
-
-      // Flat layout: skip non-.tsx files and companion files
-      if (!entry.endsWith(".tsx")) continue;
-      if (COMPANION_SUFFIXES.some(s => entry.endsWith(s))) continue;
-      if (SKIP_PATTERNS.some(re => re.test(entry))) continue;
-
-      // entry is e.g. "button.tsx" — ensure it's a file not a directory
-      const entryPath = join(tierDir, entry);
-      const entryStat = await stat(entryPath).catch(() => null);
-      if (!entryStat || !entryStat.isFile()) continue;
-
-      // Derive component name by stripping .tsx
-      const componentName = entry.slice(0, -4); // "top-bar" (kebab, used for file paths)
-      const displayName = toPascalCase(componentName); // "TopBar" (PascalCase, used in identifiers/JSX)
-
-      // ── Companion pass ────────────────────────────────────────────────────
-      // Companions are siblings in the same tier directory (flat layout).
-      // .snapshot.png is intentionally skipped per spec (post-write hook produces it)
-      const companions: Array<{ path: string; stub: () => string; label: string }> = [
-        {
-          path: join(tierDir, `${componentName}.showcase.tsx`),
-          stub: () => showcaseStub(displayName, componentName),
-          label: `${componentName}.showcase.tsx`,
-        },
-        {
-          path: join(tierDir, `${componentName}.states.json`),
-          stub: () => statesStub(),
-          label: `${componentName}.states.json`,
-        },
-        {
-          path: join(tierDir, `${componentName}.test.tsx`),
-          stub: () => testStub(displayName, componentName),
-          label: `${componentName}.test.tsx`,
-        },
-      ];
-
-      for (const companion of companions) {
-        if (await exists(companion.path)) continue;
-
-        if (dryRun) {
-          info(`[dry-run] would create: ${companion.path}`);
-          companionsCreated.push(companion.path);
-          continue;
-        }
-
-        // Check if pack ships a dedicated generator for this companion type.
-        // The next-react pack ships generate-showcase.ts but it generates app/design/
-        // route pages from manifest.json — NOT per-component .showcase.tsx files.
-        // Until a per-component companion generator exists in the pack
-        // (e.g. scripts/generate-showcase-companion.ts), the stub path is the main path.
-        // If the pack ever ships such a generator, add it to the lookup below.
-        const generatorLookup: Record<string, string> = {
-          // ".showcase.tsx": "generate-showcase-companion.ts",  // not yet in pack
-        };
-        const ext = companion.label.replace(/^[^.]+/, ""); // e.g. ".showcase.tsx"
-        const generatorName = generatorLookup[ext];
-        const generatorPath = generatorName ? join(packScriptsDir, generatorName) : null;
-        const useGenerator = generatorPath !== null && (await exists(generatorPath));
-
-        if (useGenerator && generatorPath) {
-          const result = spawnSync(
-            "node",
-            ["--experimental-strip-types", generatorPath, companion.path, companion.path.replace(cwd + "/", "")],
-            { cwd, encoding: "utf8", timeout: 30_000 }
-          );
-          if (result.status === 0) {
-            info(`generated (pack generator): ${companion.path}`);
-            companionsCreated.push(companion.path);
-            continue;
-          }
-          info(`warning: pack generator failed (exit ${result.status}), falling back to stub`);
-        }
-
-        // Write documented stub
-        const content = companion.stub();
-        await writeFile(companion.path, content, "utf8");
-        info(`created stub: ${companion.path}`);
-        companionsCreated.push(companion.path);
-      }
-    }
+  }
+  if (dryRun) {
+    for (const p of companionsCreated) info(`[dry-run] would create: ${p}`);
+  } else {
+    for (const p of companionsCreated) info(`created stub: ${p}`);
   }
 
   // ── Meta-export pass ────────────────────────────────────────────────────────
@@ -363,86 +157,25 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
   }
 
   // ── Backfill meta pass ─────────────────────────────────────────────────────
-  // Gated by --backfill-meta. Without --fix, reports only. With --fix, appends stubs.
+  // Gated by --backfill-meta. Without --fix, reports only (via the Op in
+  // dry-run mode, which prints diffs but writes nothing). With --fix, the Op
+  // applies stubs + Meta import injection.
   let metaBackfilled = 0;
   if (backfillMeta && metaMissing.length > 0) {
-    for (const relPath of metaMissing) {
-      const fullPath = join(cwd, relPath);
-      let source: string;
-      try { source = await readFile(fullPath, "utf8"); } catch { continue; }
-
-      // Determine kind from path
-      const isReference = relPath.includes("design-system/references/");
-      const isAtom = relPath.includes("design-system/atoms/");
-      const isComposite = relPath.includes("design-system/composites/");
-
-      let stub: string;
-      if (isReference) {
-        const componentName = basename(fullPath, ".tsx");
-        const title = toTitleCase(componentName);
-        stub = metaStubReference(title);
-      } else if (isAtom || isComposite) {
-        const kind: "atom" | "composite" = isAtom ? "atom" : "composite";
-        const hasCva = source.includes("cva(");
-        stub = metaStubAtomComposite(kind, hasCva);
-      } else {
-        continue;
-      }
-
-      if (fix) {
-        // Ensure `Meta` type import exists when the stub references it (atom/composite/reference all do).
-        // Skip injection if source already imports Meta in any form.
-        const hasMetaImport = /import\s+(?:type\s+)?\{[^}]*\bMeta\b[^}]*\}\s+from\s+["'][^"']*\/types\/meta["']/.test(source)
-          || /import\s+type\s+\{[^}]*\bMeta\b[^}]*\}\s+from\s+["'][^"']*\/types\/meta["']/.test(source);
-        let sourceWithImport = source;
-        if (!hasMetaImport) {
-          const importLine = `import type { Meta } from "@/design-system/types/meta";\n`;
-          // Insert after 'use client'/'use server' directive (if present) and any contiguous
-          // leading import block. Otherwise prepend.
-          const lines = source.split("\n");
-          let insertIdx = 0;
-          // Skip leading 'use client' / 'use server' directives + blank lines
-          while (insertIdx < lines.length) {
-            const t = lines[insertIdx].trim();
-            if (t === "" || /^["']use (client|server)["'];?$/.test(t)) {
-              insertIdx++;
-            } else {
-              break;
-            }
-          }
-          // Skip contiguous import statements (single-line and multi-line)
-          while (insertIdx < lines.length) {
-            const t = lines[insertIdx].trim();
-            if (t.startsWith("import ")) {
-              // Advance past the import; if it doesn't end with `;`, consume until it does
-              while (insertIdx < lines.length && !lines[insertIdx].trimEnd().endsWith(";")) {
-                insertIdx++;
-              }
-              insertIdx++; // consume the line with `;`
-            } else if (t === "") {
-              insertIdx++;
-            } else {
-              break;
-            }
-          }
-          // Trim trailing blanks we just walked past so the inserted import sits next to the block
-          // Walk back to find the end of the import block / directive
-          let backIdx = insertIdx;
-          while (backIdx > 0 && lines[backIdx - 1].trim() === "") backIdx--;
-          const head = lines.slice(0, backIdx).join("\n");
-          const tail = lines.slice(backIdx).join("\n");
-          // Build: head + newline + importLine + (blank line) + tail
-          const headPart = head === "" ? "" : head + "\n";
-          const tailPart = tail.startsWith("\n") ? tail : (tail ? "\n" + tail : "");
-          sourceWithImport = headPart + importLine + tailPart;
+    const writeMeta = fix && !dryRun;
+    const metaReport = await run(ctx, [backfillMetaOp], writeMeta ? "apply" : "dry-run");
+    for (const opRpt of metaReport.ops) {
+      if (opRpt.name !== "backfill-meta") continue;
+      for (const c of opRpt.changes) {
+        if (c.kind !== "write") continue;
+        const before = c.before?.toString("utf8") ?? "";
+        const injected = !/import\s+(?:type\s+)?\{[^}]*\bMeta\b[^}]*\}\s+from\s+["'][^"']*\/types\/meta["']/.test(before);
+        if (writeMeta) {
+          info(`backfilled meta: ${c.path}${injected ? " (+ Meta import)" : ""}`);
+          metaBackfilled++;
+        } else {
+          info(`[dry-run] would backfill meta: ${c.path}`);
         }
-        // Append meta export to end of file (after a blank line if file doesn't end with one)
-        const sep = sourceWithImport.endsWith("\n\n") ? "" : sourceWithImport.endsWith("\n") ? "\n" : "\n\n";
-        await writeFile(fullPath, sourceWithImport + sep + stub, "utf8");
-        info(`backfilled meta: ${relPath}${hasMetaImport ? "" : " (+ Meta import)"}`);
-        metaBackfilled++;
-      } else {
-        info(`[dry-run] would backfill meta: ${relPath}`);
       }
     }
   }
@@ -546,6 +279,13 @@ export async function reconformCmd(opts: { dryRun?: boolean; cwd?: string; backf
       }
     }
   }
+
+  // ── Tier-relocation import cleanup (#81) ────────────────────────────────────
+  // rewriteImports scans the project for `@/design-system/<tier>/X` imports
+  // whose target component now lives in the OTHER tier (e.g. atoms↔composites
+  // moves applied outside reconform's own classification auto-move). No-op in
+  // steady state. Always runs — mode follows --dry-run.
+  await run(ctx, [rewriteImports], dryRun ? "dry-run" : "apply");
 
   const allViolations: Violation[] = [];
   const genViolations: Violation[] = [];
