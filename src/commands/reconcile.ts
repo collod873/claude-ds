@@ -1,8 +1,7 @@
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { parseManifest, DeprecatedPath } from "../lib/manifest.js";
-import { parseConfig } from "../lib/config.js";
+import { join } from "node:path";
+import { DeprecatedPath } from "../lib/manifest.js";
+import { loadProject } from "../lib/project.js";
 import { info, err, confirm } from "../lib/log.js";
 import { createInterface } from "node:readline/promises";
 
@@ -100,40 +99,25 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   const dryRun = opts.dryRun ?? false;
   const force = opts.force ?? false;
 
-  // ── Require .claude-ds.json ────────────────────────────────────────────────
+  // ── Boot via loadProject ──────────────────────────────────────────────────
+  // #84: loadProject is now a pure read — no longer rewrites pre-v0.6 configs as a
+  // side effect — so it's safe here. cfg.claude_md_target === "CLAUDE.md" (the
+  // parseConfig default) still drives the collision branch correctly because the
+  // raw file is untouched until a command opts into the migrateConfig Op.
   const cfgPath = join(cwd, ".claude-ds.json");
   if (!(await exists(cfgPath))) {
     err(".claude-ds.json absent — run `adopt` first");
     process.exit(2);
   }
-  // Intentionally use parseConfig (not loadProject) here: reconcile's CLAUDE.md collision
-  // detection turns on cfg.claude_md_target === "CLAUDE.md" (the parseConfig default),
-  // and loadConfigWithMigration would rewrite that field on pre-v0.6 configs — masking
-  // the collision the command is meant to surface.
-  let cfg;
+  let ctx;
   try {
-    cfg = parseConfig(await readFile(cfgPath, "utf8"));
+    ctx = await loadProject(cwd);
   } catch (e) {
-    err(`invalid .claude-ds.json: ${(e as Error).message}`);
+    err(`invalid .claude-ds.json or manifest: ${(e as Error).message}`);
     process.exit(2);
   }
-
-  // ── Load manifest ──────────────────────────────────────────────────────────
-  const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = resolve(here, "..", "..");
-  const packDir = join(repoRoot, "packs", cfg.pack);
-  const manifestPath = join(packDir, "manifest.json");
-  if (!(await exists(manifestPath))) {
-    err(`pack manifest not found: ${manifestPath}`);
-    process.exit(2);
-  }
-  let manifest;
-  try {
-    manifest = parseManifest(await readFile(manifestPath, "utf8"));
-  } catch (e) {
-    err(`invalid pack manifest: ${(e as Error).message}`);
-    process.exit(2);
-  }
+  const cfg = ctx.cfg;
+  const manifest = ctx.manifest;
 
   // ── Scan ───────────────────────────────────────────────────────────────────
   const deprecatedFindings = await scanDeprecated(cwd, manifest.deprecated_paths);

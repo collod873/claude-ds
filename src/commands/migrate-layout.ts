@@ -3,8 +3,8 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
-import { parseManifest } from "../lib/manifest.js";
-import { parseConfig } from "../lib/config.js";
+import { parseManifest, type Manifest } from "../lib/manifest.js";
+import { loadProject } from "../lib/project.js";
 import { detectLookalikes } from "../lib/lookalike.js";
 import { info, err, confirm } from "../lib/log.js";
 
@@ -19,15 +19,6 @@ export async function migrateLayoutCmd(opts: {
   cwd?: string;
 }) {
   const cwd = opts.cwd ?? process.cwd();
-  let pack = opts.pack;
-  if (!pack) {
-    // Intentionally use parseConfig (not loadProject) here: migrate-layout requires a clean
-    // working tree, and loadConfigWithMigration would mutate .claude-ds.json on pre-v0.6 configs.
-    const cfgPath = join(cwd, ".claude-ds.json");
-    if (!(await exists(cfgPath))) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
-    const cfg = parseConfig(await readFile(cfgPath, "utf8"));
-    pack = cfg.pack;
-  }
 
   // Refuse if not inside a git repo
   try {
@@ -46,10 +37,33 @@ export async function migrateLayoutCmd(opts: {
     process.exit(2);
   }
 
-  const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = resolve(here, "..", "..");
-  const packDir = join(repoRoot, "packs", pack);
-  const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+  // Resolve pack + manifest. Prefer loadProject when there's a config (no
+  // migration side effect now — #84 — so the clean-tree precondition holds).
+  // Fall back to --pack with a hand-rolled manifest load when adopt hasn't run.
+  let pack: string;
+  let packDir: string;
+  let manifest: Manifest;
+  const cfgPath = join(cwd, ".claude-ds.json");
+  if (await exists(cfgPath)) {
+    const ctx = await loadProject(cwd);
+    pack = opts.pack ?? ctx.cfg.pack;
+    if (pack === ctx.cfg.pack) {
+      packDir = ctx.packDir;
+      manifest = ctx.manifest;
+    } else {
+      const here = dirname(fileURLToPath(import.meta.url));
+      const repoRoot = resolve(here, "..", "..");
+      packDir = join(repoRoot, "packs", pack);
+      manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+    }
+  } else {
+    if (!opts.pack) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
+    pack = opts.pack;
+    const here = dirname(fileURLToPath(import.meta.url));
+    const repoRoot = resolve(here, "..", "..");
+    packDir = join(repoRoot, "packs", pack);
+    manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+  }
 
   const flagGlobs = opts.ignore
     ? opts.ignore

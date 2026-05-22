@@ -9,10 +9,31 @@ import { loadProject } from "../lib/project.js";
 import { run } from "../lib/runner.js";
 import { detectFormatter, runFormatter } from "../lib/formatter.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
+import { migrateConfig } from "../lib/ops/migrate-config.js";
 
 export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
   try { await stat(join(cwd, ".claude-ds.json")); } catch { err(".claude-ds.json absent"); process.exit(2); }
+
+  // #84: apply migrateConfig before planning the pack-file sync, so syncPackFiles
+  // plans against the post-migration cfg (correct app_dir / claude_md_target).
+  // Previously this was a hidden side effect of loadConfigWithMigration during boot;
+  // now it's a deliberate, visible Change applied via the Runner. The migration
+  // is reported in the standard preview format below.
+  {
+    const preCtx = await loadProject(cwd);
+    const migrationReport = await run(preCtx, [migrateConfig], "apply");
+    for (const c of migrationReport.applied) {
+      if (c.kind === "write" && c.path === ".claude-ds.json") {
+        info("migrate-config: .claude-ds.json updated to v0.6 shape (app_dir / claude_md_target)");
+      }
+    }
+    if (migrationReport.failed) {
+      err(`migrate-config failed: ${migrationReport.failed.error}`);
+      process.exit(2);
+    }
+  }
+
   const ctx = await loadProject(cwd);
   const cfg = ctx.cfg;
 
