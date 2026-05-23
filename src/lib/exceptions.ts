@@ -44,7 +44,10 @@ export function parseExceptions(raw: string): Exception[] {
     if (typeof entry.path !== "string")
       throw new ExceptionError(`malformed exception entry (missing path): ${JSON.stringify(e)}`);
 
-    result.push(entry as unknown as Exception);
+    const exception: Exception = { rule: entry.rule as DriftRuleId, path: entry.path };
+    if (typeof entry.issue === "string") exception.issue = entry.issue;
+    if (typeof entry.reason === "string") exception.reason = entry.reason;
+    result.push(exception);
   }
 
   return result;

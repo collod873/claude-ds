@@ -1,14 +1,16 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { parseExceptions } from "../exceptions.js";
+import { parseExceptions, type Exception } from "../exceptions.js";
+import type { DriftRuleId } from "../drift-rules.js";
 import { info } from "../log.js";
 import type { Violation } from "./run-check-scripts.js";
 
 /**
  * Interactive review of check-script violations. For each, prompt
  * [F]ix-now / [R]egister-exception / [S]kip. Registered exceptions append to
- * `design-system/exceptions.json` with a 90-day expiry.
+ * `design-system/exceptions.json`; lint surfaces missing/closed issue links
+ * separately (no expiry — removal is driven by issue closure).
  *
  * Side-effect orchestration helper: prompts on stdin/stdout and writes a
  * single file (exceptions.json). Kept inline-shaped because the prompt-driven
@@ -32,7 +34,7 @@ export async function reviewExceptions(cwd: string, violations: Violation[], dry
   }
 
   const exPath = join(cwd, "design-system", "exceptions.json");
-  let cur: import("../exceptions.js").Exception[];
+  let cur: Exception[];
   try {
     cur = parseExceptions(await readFile(exPath, "utf8"));
   } catch {
@@ -78,8 +80,8 @@ export async function reviewExceptions(cwd: string, violations: Violation[], dry
       if (!reason) { info("  skipped (no reason provided)"); continue; }
       const issue = (await ask("Issue link (URL or #N, leave blank to add later): ")).trim();
       const relPath = v.file.startsWith(cwd + "/") ? v.file.slice(cwd.length + 1) : v.file;
-      const entry: import("../exceptions.js").Exception = {
-        rule: v.ruleId as import("../exceptions.js").Exception["rule"],
+      const entry: Exception = {
+        rule: v.ruleId as DriftRuleId,
         path: relPath,
         reason,
         ...(issue ? { issue } : {}),
