@@ -19,14 +19,13 @@ After all branches are merged, make a single commit summarizing the merge if nee
 Before pushing or closing anything, run:
 
 1. `npm run build`
-2. `npm run typecheck`
-3. `npm run test`
+2. `npm run test`
 
 **If any of these fail**: do NOT push, do NOT close issues. Instead:
 - Leave a comment on each affected issue describing what failed and what you tried
 - Output `<promise>COMPLETE</promise>` and stop
 
-If all three pass, continue.
+If both pass, continue.
 
 # PUSH
 

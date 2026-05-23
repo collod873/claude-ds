@@ -15,6 +15,7 @@
   ],
   "scripts": {
     "build": "tsc -p . && chmod +x dist/cli.js",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
