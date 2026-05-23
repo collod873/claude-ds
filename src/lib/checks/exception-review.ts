@@ -76,10 +76,16 @@ export async function reviewExceptions(cwd: string, violations: Violation[], dry
     if (choice.startsWith("R")) {
       const reason = (await ask("Reason: ")).trim();
       if (!reason) { info("  skipped (no reason provided)"); continue; }
-      const expiry = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-      const relFile = v.file.startsWith(cwd + "/") ? v.file.slice(cwd.length + 1) : v.file;
-      cur.push({ rule_id: v.ruleId, file: relFile, reason, expiry });
-      info(`  registered exception (expiry=${expiry})`);
+      const issue = (await ask("Issue link (URL or #N, leave blank to add later): ")).trim();
+      const relPath = v.file.startsWith(cwd + "/") ? v.file.slice(cwd.length + 1) : v.file;
+      const entry: import("../exceptions.js").Exception = {
+        rule: v.ruleId as import("../exceptions.js").Exception["rule"],
+        path: relPath,
+        reason,
+        ...(issue ? { issue } : {}),
+      };
+      cur.push(entry);
+      info(`  registered exception${issue ? ` (issue=${issue})` : " (no issue link — add one to satisfy lint)"}`);
     } else if (choice.startsWith("F")) {
       info("  open the file and resolve the violation manually, then re-run reconform");
     } else {

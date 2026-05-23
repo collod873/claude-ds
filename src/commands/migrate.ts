@@ -47,8 +47,7 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   await writeFile(states, `[]`, "utf8");
   const exPath = join(cwd, "design-system/exceptions.json");
   const cur = parseExceptions(await readFile(exPath, "utf8"));
-  const expiry = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-  cur.push({ rule_id: "migration-default", file: dest.replace(cwd + "/", ""), reason: opts.reason, expiry });
+  cur.push({ rule: "DRIFT-MISPLACED", path: dest.replace(cwd + "/", ""), reason: opts.reason });
   await writeFile(exPath, JSON.stringify({ exceptions: cur }, null, 2) + "\n", "utf8");
-  info(`migrated → ${dest} (tier=${tier}), exception registered (expiry=${expiry})`);
+  info(`migrated → ${dest} (tier=${tier}), exception registered (add an issue link to satisfy lint)`);
 }

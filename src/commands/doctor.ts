@@ -356,7 +356,7 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
     if (await exists(exceptionsPath)) {
       try {
         const ex = parseExceptions(await readFile(exceptionsPath, "utf8"));
-        openExceptions = openCount(ex, new Date());
+        openExceptions = openCount(ex);
       } catch {
         // Seeded exceptions.json may be empty/stub — treat as 0 exceptions
         openExceptions = 0;

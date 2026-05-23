@@ -1,9 +1,26 @@
 import type { Tier, TierVerdict } from "./classifier.js";
 
+/**
+ * Stable public vocabulary for drift rule IDs (ADR-0006).
+ * Entries are valid across pack versions — do not remove or rename.
+ * Add new IDs here when a new rule ships; guard unimplemented rules
+ * with a comment so consumers can reference them in exceptions.json
+ * before the evaluator logic lands.
+ */
 export type DriftRuleId =
+  // Tier-placement rules (three-signal checker)
   | "DRIFT-MISPLACED"
   | "DRIFT-MISCLASSIFIED-ATOM"
-  | "DRIFT-MISCLASSIFIED-COMPOSITE";
+  | "DRIFT-MISCLASSIFIED-COMPOSITE"
+  // Feature-boundary rule
+  | "DRIFT-DS-IMPORTS-FEATURE"
+  // Patterns-tier rules (evaluator not yet wired; IDs stable for exceptions.json)
+  | "DRIFT-PATTERN-NO-SLOTS"
+  | "DRIFT-PATTERN-IMPORTS-PATTERN"
+  // Code-quality drift rules (evaluators not yet wired; IDs stable)
+  | "DRIFT-RAW-PRIMITIVE"
+  | "DRIFT-CVA-VARIANT-UNRENDERED"
+  | "DRIFT-INLINE-STATIC-STYLE";
 
 export interface DriftFinding {
   ruleId: DriftRuleId;
@@ -20,9 +37,24 @@ export interface DriftRuleInput {
 }
 
 const RULE_REGISTRY: Record<DriftRuleId, string> = {
-  "DRIFT-MISPLACED": "File lives in a folder that disagrees with its classifier-computed tier",
-  "DRIFT-MISCLASSIFIED-ATOM": "File declares meta.kind=atom but classifier says otherwise",
-  "DRIFT-MISCLASSIFIED-COMPOSITE": "File declares meta.kind=composite but classifier says otherwise",
+  "DRIFT-MISPLACED":
+    "File lives in a folder that disagrees with its classifier-computed tier",
+  "DRIFT-MISCLASSIFIED-ATOM":
+    "File declares meta.kind=atom but classifier says otherwise",
+  "DRIFT-MISCLASSIFIED-COMPOSITE":
+    "File declares meta.kind=composite but classifier says otherwise",
+  "DRIFT-DS-IMPORTS-FEATURE":
+    "Design-system file imports from features/ or lib/, violating the DS/feature boundary",
+  "DRIFT-PATTERN-NO-SLOTS":
+    "Pattern-tier file does not export children or named slot props",
+  "DRIFT-PATTERN-IMPORTS-PATTERN":
+    "Pattern-tier file imports from another pattern, violating the no-nested-patterns rule",
+  "DRIFT-RAW-PRIMITIVE":
+    "File renders a raw HTML primitive instead of its design-system atom equivalent",
+  "DRIFT-CVA-VARIANT-UNRENDERED":
+    "CVA variant defined in meta.variants is not exercised by any meta.examples entry",
+  "DRIFT-INLINE-STATIC-STYLE":
+    "File uses inline style={} with a literal value that should be a design token",
 };
 
 export function ruleDescription(id: DriftRuleId): string {
