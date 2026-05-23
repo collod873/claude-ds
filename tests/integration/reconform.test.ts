@@ -579,15 +579,15 @@ describe("reconform", () => {
     await writeFile(join(dir, "scripts", "check-multi.ts"), checkScript);
 
     // Pipe 3 cycles of R + reason
-    const stdin = "R\nbulk migration backlog\nR\nbulk migration backlog\nR\nbulk migration backlog\n";
+    const stdin = "R\nbulk migration backlog\n\nR\nbulk migration backlog\n\nR\nbulk migration backlog\n\n";
     const r = await runCli(["reconform"], { cwd: dir, stdin });
     expect(r.code).toBe(0);
 
     const exContent = await readFile(join(dir, "design-system", "exceptions.json"), "utf8");
     const parsed = JSON.parse(exContent);
-    const tstExceptions = parsed.exceptions.filter((e: { rule_id: string }) => e.rule_id === "TST-001");
+    const tstExceptions = parsed.exceptions.filter((e: { rule: string }) => e.rule === "TST-001");
     expect(tstExceptions.length).toBe(3);
-    const files = tstExceptions.map((e: { file: string }) => e.file).sort();
+    const files = tstExceptions.map((e: { path: string }) => e.path).sort();
     expect(files).toEqual([
       "design-system/atoms/a.tsx",
       "design-system/atoms/b.tsx",

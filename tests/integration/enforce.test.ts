@@ -22,7 +22,7 @@ describe("enforce", () => {
   });
 
   it("refuses when over threshold", async () => {
-    const many = Array.from({ length: 3 }).map((_, i) => ({ rule_id:`r${i}`, file:`f${i}`, reason:"x", expiry:"2099-01-01" }));
+    const many = Array.from({ length: 3 }).map((_, i) => ({ rule:"DRIFT-MISPLACED", path:`design-system/atoms/f${i}.tsx`, reason:"x" }));
     await mkdir(join(dir, "design-system"), { recursive: true });
     await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({ exceptions: many }));
     const r = await runCli(["enforce", "--yes"], { cwd: dir });
