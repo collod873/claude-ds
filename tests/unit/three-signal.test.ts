@@ -103,3 +103,66 @@ export const meta = { kind: "atom" };`;
     expect(result.signals.classifierVerdict.tier).toBe("composite");
   });
 });
+
+// ── checkThreeSignals — DRIFT-DS-IMPORTS-FEATURE end-to-end ──────────────────
+
+describe("checkThreeSignals — DRIFT-DS-IMPORTS-FEATURE", () => {
+  it("fires when DS atom imports from features/ (default domain roots)", () => {
+    const src = `
+import { useInvoice } from "@/features/invoicing/use-invoice";
+export function InvoiceAmount({ id }: { id: string }) {
+  const inv = useInvoice(id);
+  return <span>{inv.amount}</span>;
+}
+export const meta = { kind: "atom" };`;
+    const result = checkThreeSignals("design-system/atoms/invoice-amount.tsx", src);
+    expect(result.signals.locationTier).toBe("atom");
+    expect(result.signals.classifierVerdict.tier).toBe("feature");
+    const hit = result.findings.find(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("features/");
+  });
+
+  it("fires when DS composite imports from lib/ (default domain roots)", () => {
+    const src = `
+import { formatDate } from "@/lib/date";
+import { Button } from "@/design-system/atoms/button";
+export function DateButton() { return <Button label={formatDate(new Date())} />; }
+export const meta = { kind: "composite" };`;
+    const result = checkThreeSignals("design-system/composites/date-button.tsx", src);
+    expect(result.signals.classifierVerdict.tier).toBe("feature");
+    const hit = result.findings.find(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("lib/");
+  });
+
+  it("does not fire when DS file imports only atoms (fixture: DS file importing only atoms)", () => {
+    const src = `
+import { Button } from "@/design-system/atoms/button";
+import { Input } from "@/design-system/atoms/input";
+export function SearchBar() { return <div><Input /><Button label="Go" /></div>; }
+export const meta = { kind: "composite" };`;
+    const result = checkThreeSignals("design-system/composites/search-bar.tsx", src);
+    expect(result.findings.filter(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE")).toHaveLength(0);
+  });
+
+  it("does not fire for feature file outside design-system/ (fixture: feature file, not under DS, ignored)", () => {
+    const src = `
+import { useInvoice } from "@/features/invoicing/use-invoice";
+export function InvoiceList() { return <div />; }`;
+    const result = checkThreeSignals("features/invoicing/invoice-list.tsx", src);
+    expect(result.signals.locationTier).toBeNull();
+    expect(result.findings.filter(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE")).toHaveLength(0);
+  });
+
+  it("fires with custom domain roots passed through", () => {
+    const src = `
+import { useOrders } from "@/services/orders/use-orders";
+export function OrderCard() { return <div />; }
+export const meta = { kind: "atom" };`;
+    const result = checkThreeSignals("design-system/atoms/order-card.tsx", src, ["services"]);
+    expect(result.signals.classifierVerdict.tier).toBe("feature");
+    const hit = result.findings.find(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE");
+    expect(hit).toBeDefined();
+  });
+});

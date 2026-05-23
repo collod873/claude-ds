@@ -45,11 +45,12 @@ export function metaKindFromSource(source: string): Tier | null {
  * Run the three-signal check for a single file.
  *
  * Pure: no I/O. Pass the file's relative path and its full source text.
+ * @param domainRoots - Domain folder names that mark a file as feature-tier (passed to classifier).
  */
-export function checkThreeSignals(filePath: string, source: string): ThreeSignalResult {
+export function checkThreeSignals(filePath: string, source: string, domainRoots?: string[]): ThreeSignalResult {
   const locationTier = locationTierFromPath(filePath);
   const metaKind = metaKindFromSource(source);
-  const classifierVerdict = classifySource(source);
+  const classifierVerdict = classifySource(source, domainRoots);
 
   const signals: ThreeSignals = { locationTier, metaKind, classifierVerdict };
 
