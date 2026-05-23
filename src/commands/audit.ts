@@ -7,6 +7,7 @@ import { info, err } from "../lib/log.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
+import { checkThreeSignals } from "../lib/three-signal.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -150,4 +151,30 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
   }
 
   if (opts.suggestRemovals) info("--suggest-removals: (heuristic) no ad-hoc removals detected at v1");
+
+  // Drift check: scan design-system/atoms/ and design-system/composites/ for DRIFT-MISPLACED.
+  const driftTierDirs = ["design-system/atoms", "design-system/composites"];
+  let driftCount = 0;
+  for (const tierDir of driftTierDirs) {
+    const abs = join(cwd, tierDir);
+    let entries: string[];
+    try { entries = await readdir(abs); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.endsWith(".tsx")) continue;
+      if (entry.endsWith(".showcase.tsx") || entry.endsWith(".test.tsx") || entry.endsWith(".stories.tsx")) continue;
+      const filePath = `${tierDir}/${entry}`;
+      let source: string;
+      try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+      const { findings } = checkThreeSignals(filePath, source);
+      for (const f of findings) {
+        info(`[${f.ruleId}] ${f.file}: ${f.message}`);
+        driftCount++;
+      }
+    }
+  }
+  if (driftCount > 0) {
+    info(`${driftCount} drift finding(s) — add to design-system/exceptions.json to suppress`);
+  } else {
+    info("drift check: no DRIFT-MISPLACED findings");
+  }
 }
