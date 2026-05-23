@@ -5,18 +5,14 @@ export interface TierVerdict {
   signals: string[];
 }
 
-const DS_ATOM_RE = /from\s+["'][^"']*(?:@\/)?design-system\/atoms\//g;
-const DS_COMPOSITE_RE = /from\s+["'][^"']*(?:@\/)?design-system\/composites\//g;
 const DS_PATTERN_RE = /from\s+["'][^"']*(?:@\/)?design-system\/patterns\//;
 const FEATURE_RE = /from\s+["'][^"']*\/features\//;
 const LIB_RE = /from\s+["'][^"']*\/lib\//;
+const DS_COMPONENT_IMPORT_RE = /from\s+["']([^"']*(?:@\/)?design-system\/(?:atoms|composites)\/[^"']+)["']/g;
 
 function countDistinctDsComponentImports(source: string): number {
   const seen = new Set<string>();
-  const allMatches = [
-    ...source.matchAll(/from\s+["']([^"']*(?:@\/)?design-system\/(?:atoms|composites)\/[^"']+)["']/g),
-  ];
-  for (const m of allMatches) seen.add(m[1]);
+  for (const m of source.matchAll(DS_COMPONENT_IMPORT_RE)) seen.add(m[1]);
   return seen.size;
 }
 
@@ -44,12 +40,9 @@ export function classifySource(source: string): TierVerdict {
   }
 
   const dsCount = countDistinctDsComponentImports(source);
-  if (dsCount >= 2) {
-    signals.push(`composes ${dsCount} design-system components`);
-    return { tier: "composite", signals };
-  }
-  if (dsCount === 1) {
-    signals.push("imports 1 design-system component (atom/composite)");
+  if (dsCount > 0) {
+    const noun = dsCount === 1 ? "component" : "components";
+    signals.push(`composes ${dsCount} design-system ${noun}`);
     return { tier: "composite", signals };
   }
 
