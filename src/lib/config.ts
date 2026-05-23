@@ -39,12 +39,11 @@ export function parseConfig(raw: string): Config {
   if (typeof app_dir !== "string" || app_dir.length === 0) throw new ConfigError(`app_dir must be non-empty string`);
   const claude_md_target = o.claude_md_target === undefined ? "CLAUDE.md" : o.claude_md_target;
   if (typeof claude_md_target !== "string" || claude_md_target.length === 0) throw new ConfigError(`claude_md_target must be non-empty string`);
-  const domain_roots_raw = o.domain_roots === undefined ? ["features", "lib"] : o.domain_roots;
-  if (!Array.isArray(domain_roots_raw) || domain_roots_raw.some((x) => typeof x !== "string")) throw new ConfigError(`domain_roots must be string[]`);
-  const domain_roots = domain_roots_raw as string[];
+  const domain_roots = o.domain_roots === undefined ? ["features", "lib"] : o.domain_roots;
+  if (!Array.isArray(domain_roots) || domain_roots.some((x) => typeof x !== "string")) throw new ConfigError(`domain_roots must be string[]`);
   return {
     version: o.version, pack: o.pack, mode: o.mode, enforce_threshold,
     removed: removed as string[], lookalike_ignore: lookalike_ignore as string[],
-    app_dir, claude_md_target, domain_roots,
+    app_dir, claude_md_target, domain_roots: domain_roots as string[],
   };
 }

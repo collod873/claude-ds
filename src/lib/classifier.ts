@@ -9,6 +9,7 @@ export const DEFAULT_DOMAIN_ROOTS = ["features", "lib"];
 
 const DS_PATTERN_RE = /from\s+["'][^"']*(?:@\/)?design-system\/patterns\//;
 const DS_COMPONENT_IMPORT_RE = /from\s+["']([^"']*(?:@\/)?design-system\/(?:atoms|composites)\/[^"']+)["']/g;
+const REGEX_META_RE = /[.*+?^${}()|[\]\\]/g;
 
 function countDistinctDsComponentImports(source: string): number {
   const seen = new Set<string>();
@@ -16,9 +17,8 @@ function countDistinctDsComponentImports(source: string): number {
   return seen.size;
 }
 
-function buildDomainRootRegex(roots: string[]): RegExp {
-  const escaped = roots.map(r => r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return new RegExp(`from\\s+["'][^"']*\\/(?:${escaped.join("|")})\\/`);
+function domainRootRegex(root: string): RegExp {
+  return new RegExp(`from\\s+["'][^"']*\\/${root.replace(REGEX_META_RE, "\\$&")}\\/`);
 }
 
 /**
@@ -36,14 +36,10 @@ function buildDomainRootRegex(roots: string[]): RegExp {
 export function classifySource(source: string, domainRoots: string[] = DEFAULT_DOMAIN_ROOTS): TierVerdict {
   const signals: string[] = [];
 
-  const domainRE = buildDomainRootRegex(domainRoots);
-  if (domainRE.test(source)) {
-    for (const root of domainRoots) {
-      const rootRE = new RegExp(`from\\s+["'][^"']*\\/${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\/`);
-      if (rootRE.test(source)) signals.push(`imports from ${root}/`);
-    }
-    return { tier: "feature", signals };
+  for (const root of domainRoots) {
+    if (domainRootRegex(root).test(source)) signals.push(`imports from ${root}/`);
   }
+  if (signals.length > 0) return { tier: "feature", signals };
 
   if (DS_PATTERN_RE.test(source)) {
     signals.push("imports from design-system/patterns/");
