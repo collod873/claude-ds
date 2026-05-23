@@ -151,3 +151,47 @@ export function SubmitButton() {
     expect(v.tier).toBe("composite");
   });
 });
+
+// ── Configurable domain roots ─────────────────────────────────────────────────
+
+describe("classifySource — configurable domain roots", () => {
+  it("default domain roots: features/ is a feature", () => {
+    const src = `import { useInvoice } from "@/features/invoicing/use-invoice";
+export function InvoiceAmount() { return <span />; }`;
+    expect(classifySource(src).tier).toBe("feature");
+  });
+
+  it("default domain roots: lib/ is a feature", () => {
+    const src = `import { formatDate } from "@/lib/date";
+export function DateDisplay() { return <span />; }`;
+    expect(classifySource(src).tier).toBe("feature");
+  });
+
+  it("custom domain root: file importing from configured root is feature", () => {
+    const src = `import { useOrders } from "@/services/orders/use-orders";
+export function OrderList() { return <div />; }`;
+    expect(classifySource(src, ["services"]).tier).toBe("feature");
+  });
+
+  it("custom domain root signal includes the matched root path", () => {
+    const src = `import { useOrders } from "@/services/orders/use-orders";
+export function OrderList() { return <div />; }`;
+    const v = classifySource(src, ["services"]);
+    expect(v.signals.some(s => s.includes("services/"))).toBe(true);
+  });
+
+  it("custom domain roots override: services/ but not features/ (services-only config)", () => {
+    // With only "services" configured, a file importing from features/ is NOT feature-tier
+    const src = `import { useInvoice } from "@/features/invoicing/use-invoice";
+export function InvoiceAmount() { return <span />; }`;
+    // features/ is not in the custom root list, so it won't match
+    const v = classifySource(src, ["services"]);
+    expect(v.tier).not.toBe("feature");
+  });
+
+  it("multiple custom domain roots: any match makes it feature-tier", () => {
+    const src = `import { getSession } from "@/api/session";
+export function UserStatus() { return <div />; }`;
+    expect(classifySource(src, ["api", "services"]).tier).toBe("feature");
+  });
+});

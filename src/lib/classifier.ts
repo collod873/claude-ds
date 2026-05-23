@@ -5,9 +5,9 @@ export interface TierVerdict {
   signals: string[];
 }
 
+export const DEFAULT_DOMAIN_ROOTS = ["features", "lib"];
+
 const DS_PATTERN_RE = /from\s+["'][^"']*(?:@\/)?design-system\/patterns\//;
-const FEATURE_RE = /from\s+["'][^"']*\/features\//;
-const LIB_RE = /from\s+["'][^"']*\/lib\//;
 const DS_COMPONENT_IMPORT_RE = /from\s+["']([^"']*(?:@\/)?design-system\/(?:atoms|composites)\/[^"']+)["']/g;
 
 function countDistinctDsComponentImports(source: string): number {
@@ -16,21 +16,32 @@ function countDistinctDsComponentImports(source: string): number {
   return seen.size;
 }
 
+function buildDomainRootRegex(roots: string[]): RegExp {
+  const escaped = roots.map(r => r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`from\\s+["'][^"']*\\/(?:${escaped.join("|")})\\/`);
+}
+
 /**
  * Classify a TSX/TS source file by tier using import-graph signals.
  *
- * Predicates (this slice — atom + composite only):
- * - Feature: imports from features/ or lib/
+ * @param domainRoots - Domain folder names that mark a file as feature-tier.
+ *   Defaults to ["features", "lib"]. Pass custom roots to use project-specific config.
+ *
+ * Predicates:
+ * - Feature: imports from any configured domain root (default: features/, lib/)
  * - Composite: imports from design-system/atoms/ or composites/ (any count)
- * - Atom: no DS tier imports, no feature/lib imports
+ * - Atom: no DS tier imports, no domain root imports
  * - Unknown: imports from patterns/ (patterns predicate lands in a later slice)
  */
-export function classifySource(source: string): TierVerdict {
+export function classifySource(source: string, domainRoots: string[] = DEFAULT_DOMAIN_ROOTS): TierVerdict {
   const signals: string[] = [];
 
-  if (FEATURE_RE.test(source) || LIB_RE.test(source)) {
-    if (FEATURE_RE.test(source)) signals.push("imports from features/");
-    if (LIB_RE.test(source)) signals.push("imports from lib/");
+  const domainRE = buildDomainRootRegex(domainRoots);
+  if (domainRE.test(source)) {
+    for (const root of domainRoots) {
+      const rootRE = new RegExp(`from\\s+["'][^"']*\\/${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\/`);
+      if (rootRE.test(source)) signals.push(`imports from ${root}/`);
+    }
     return { tier: "feature", signals };
   }
 

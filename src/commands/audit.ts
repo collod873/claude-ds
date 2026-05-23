@@ -152,8 +152,9 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
 
   if (opts.suggestRemovals) info("--suggest-removals: (heuristic) no ad-hoc removals detected at v1");
 
-  // Drift check: scan design-system/atoms/ and design-system/composites/ for DRIFT-MISPLACED.
-  const driftTierDirs = ["design-system/atoms", "design-system/composites"];
+  // Drift check: scan DS tier dirs for DRIFT-MISPLACED and DRIFT-DS-IMPORTS-FEATURE.
+  const domainRoots = cfg?.domain_roots;
+  const driftTierDirs = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
   let driftCount = 0;
   for (const tierDir of driftTierDirs) {
     const abs = join(cwd, tierDir);
@@ -165,7 +166,7 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
       const filePath = `${tierDir}/${entry}`;
       let source: string;
       try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
-      const { findings } = checkThreeSignals(filePath, source);
+      const { findings } = checkThreeSignals(filePath, source, domainRoots);
       for (const f of findings) {
         info(`[${f.ruleId}] ${f.file}: ${f.message}`);
         driftCount++;
@@ -175,6 +176,6 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
   if (driftCount > 0) {
     info(`${driftCount} drift finding(s) — add to design-system/exceptions.json to suppress`);
   } else {
-    info("drift check: no DRIFT-MISPLACED findings");
+    info("drift check: no drift findings");
   }
 }

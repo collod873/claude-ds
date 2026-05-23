@@ -8,10 +8,13 @@ export interface Config {
   /** Where the claude-ds managed pointer block lives. Set at adopt time after detecting
    *  existing CLAUDE.md files. Never defaults to root unless the user already had one there. */
   claude_md_target: string;
+  /** Domain folder names whose imports mark a file as feature-tier (used by classifier + DRIFT-DS-IMPORTS-FEATURE).
+   *  Defaults to ["features", "lib"]. */
+  domain_roots: string[];
 }
 const ALLOWED = new Set([
   "version","pack","mode","enforce_threshold","removed","lookalike_ignore",
-  "app_dir","claude_md_target",
+  "app_dir","claude_md_target","domain_roots",
 ]);
 const VERSION_RE = /^v\d+\.\d+\.\d+$/;
 export function parseConfig(raw: string): Config {
@@ -36,9 +39,12 @@ export function parseConfig(raw: string): Config {
   if (typeof app_dir !== "string" || app_dir.length === 0) throw new ConfigError(`app_dir must be non-empty string`);
   const claude_md_target = o.claude_md_target === undefined ? "CLAUDE.md" : o.claude_md_target;
   if (typeof claude_md_target !== "string" || claude_md_target.length === 0) throw new ConfigError(`claude_md_target must be non-empty string`);
+  const domain_roots_raw = o.domain_roots === undefined ? ["features", "lib"] : o.domain_roots;
+  if (!Array.isArray(domain_roots_raw) || domain_roots_raw.some((x) => typeof x !== "string")) throw new ConfigError(`domain_roots must be string[]`);
+  const domain_roots = domain_roots_raw as string[];
   return {
     version: o.version, pack: o.pack, mode: o.mode, enforce_threshold,
     removed: removed as string[], lookalike_ignore: lookalike_ignore as string[],
-    app_dir, claude_md_target,
+    app_dir, claude_md_target, domain_roots,
   };
 }
