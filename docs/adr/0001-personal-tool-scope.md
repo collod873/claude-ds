@@ -27,8 +27,11 @@ Items explicitly **out of scope** under this decision:
 
 - **Pack authoring as a public surface.** No `claude-ds new-pack`, no
   pack-author guide. Collin authors packs.
-- **npx distribution fix.** README's `npx github:collod873/claude-ds#vX.Y.Z`
-  path stays advertised-but-broken.
+- ~~**npx distribution fix.** README's `npx github:collod873/claude-ds#vX.Y.Z`
+  path stays advertised-but-broken.~~ **Superseded by ADR-0011** (2026-05-22):
+  npx distribution gets fixed as part of the staged-migration model, because
+  versioned releases need real anchors. Personal-tool framing is unchanged;
+  npm publishing remains deferred until a real third-party user.
 - **Token cold-start wizard / Tokens-Studio / Figma import.** The 3-color
   stub `tokens.json` is enough; downstream tools (`update-tokens.ts`) cover
   authoring.
@@ -38,7 +41,10 @@ Items explicitly **out of scope** under this decision:
   Consumer apps handle icons however they handle them.
 - **Catalog coverage** ("you have 2 of 12 expected atoms"). No canonical
   expected-set.
-- **Patterns / page-template tier above composites.**
+- ~~**Patterns / page-template tier above composites.**~~ **Superseded by
+  ADR-0004** (2026-05-22): the rejection was vibes-based and doesn't survive a
+  multi-module SaaS where the app shell needs a slotted tier on day one.
+  Patterns added with mechanical predicates (export children/slots).
 - **Visual regression** (`tests/visual/` stays a placeholder).
 - **Public-facing usage docs.** Per-component "when to use / do-don't"
   pages are not built; the showcase covers Collin's needs.
