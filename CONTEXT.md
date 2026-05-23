@@ -3,6 +3,18 @@
 The shared dictionary for this codebase. New names land here first; code follows.
 Treat anything outside this file as historical until a decision lands in `docs/adr/`.
 
+## Operating principles
+
+- **North star** (CLAUDE.md): every change must be safe to drop into any
+  consumer repo without breaking it.
+- **Completeness principle** (ADR-0003): anything a consumer hand-rolls for
+  design-system concerns is a claude-ds defect. End state for any consumer
+  is zero local DS infrastructure outside the pack-installed scaffold.
+- **Mechanical enforcement** (ADR-0002): constraints are enforced by hooks
+  (block at write time) and audit (post-hoc), not by prose guidance. The
+  scaffold leaves no surface for drift to occur on (showcase-as-mirror,
+  read-only generated files, predicate-checked tiers).
+
 ---
 
 ## Existing concepts (already in code today)
@@ -35,6 +47,76 @@ a hybrid file's marker block (`<!-- >>> -->`, `# >>>`) rather than as its own fi
 Directories the CLI considers in-scope for `audit` / `reconcile`. `strict: true` roots
 forbid unexpected files; `strict: false` roots (e.g. `design-system/atoms/`) are open
 for consumer growth.
+
+### Tier
+One of `tokens` / `atoms` / `composites` / `patterns` — the four DS layers
+defined by ADR-0004. Each tier has a folder, a `meta.kind` value, and a set
+of mechanical predicates (import-direction rules, slot/export shape) that
+files in the tier must satisfy. Industry-honest names; see ADR-0004 for the
+full predicate table.
+_Avoid_: layer, level, category.
+
+### Pattern
+A DS file in `design-system/patterns/` defining a page-level skeleton via
+`children` or named slots. Distinguished from a composite mechanically: a
+pattern exports slots; a composite doesn't. App shell (sidebar + topbar +
+main slot) is the canonical example.
+
+### `meta.kind`
+Required self-declaration export on every file under `design-system/`.
+Value is one of `'atom' | 'composite' | 'pattern'`. One of the three signals
+the audit checks; mismatch with location or classifier-truth is drift
+(ADR-0006). `meta.kind` is hard-required as of v0.8.0; soft-fallback
+inference from dirname is removed.
+
+### Feature
+A domain-bound component that imports from `features/` or `lib/` (or
+another configured domain root). Features live in `features/<domain>/`, NOT
+in `design-system/`. The mechanical test is the import predicate, not folder
+location (ADR-0005). The drift rule `DRIFT-DS-IMPORTS-FEATURE` flags
+violations.
+
+### Drift rule
+A named, stable identifier for an audit check. Examples: `DRIFT-MISPLACED`,
+`DRIFT-MISCLASSIFIED-ATOM`, `DRIFT-RAW-PRIMITIVE`, `DRIFT-PATTERN-NO-SLOTS`,
+`DRIFT-DS-IMPORTS-FEATURE`, `DRIFT-CVA-VARIANT-UNRENDERED`,
+`DRIFT-INLINE-STATIC-STYLE`. IDs are part of the pack's public surface
+(referenced by `exceptions.json` forever); rule retirement requires a
+migration Op.
+
+### Exception
+An entry in `design-system/exceptions.json` sanctioning a specific drift
+rule on a specific path with a `reason` and a linked upstream `issue`. Per
+ADR-0003 workaround discipline, every exception must reference a live issue
+— it's a tracked workaround with a removal trigger, not a permanent
+license.
+
+### Migration Op
+A versioned `Op` shipped in `pack/versions/<version>/migrations/` that
+transforms a consumer from one pack version to the next. Migrations emit
+`Change[]` like any Op and run through the Runner (`claude-ds upgrade`).
+Examples: `add-patterns-tier`, `retire-states`, `migrate-managed-manifest`.
+See ADR-0011.
+
+### Pack version
+The semver tag (`0.8.0`, `0.9.0`, ...) a consumer is pinned to in its
+`.claude-ds.json`. Consumed via `npx github:collod873/claude-ds#vX.Y.Z`.
+Distinct from "what's at HEAD" — consumers move between versions via
+migration Ops, not by chasing `main`. Releases require a filled
+`verification.md` confirming Crewops upgraded successfully against the
+candidate.
+
+### Reserved example name
+A name in `meta.examples` that the showcase chrome treats as a named state
+rather than a generic example: `'loading'`, `'empty'`, `'skeleton'`,
+`'error'`. Consumers can't reuse these names for unrelated purposes.
+Introduced by ADR-0007 in place of the retired `.states.json` contract.
+
+### Sample component
+A component defined in the same file as a pattern, used to supply slot
+content to that pattern's `meta.examples`. Convention: `Sample` prefix
+(`SampleNav`, `SamplePage`). Lives in the same file as the pattern, not in
+a companion file — preserves the showcase-as-mirror property. See ADR-0004.
 
 ### Showcase
 The browsable page at `app/design/` in a consumer project that renders every coded
