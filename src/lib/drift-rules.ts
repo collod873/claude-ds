@@ -15,7 +15,7 @@ export type DriftRuleId =
   | "DRIFT-MISCLASSIFIED-COMPOSITE"
   // Feature-boundary rule
   | "DRIFT-DS-IMPORTS-FEATURE"
-  // Patterns-tier rules (evaluator not yet wired; IDs stable for exceptions.json)
+  // Patterns-tier rules
   | "DRIFT-PATTERN-NO-SLOTS"
   | "DRIFT-PATTERN-IMPORTS-PATTERN"
   // Code-quality drift rules (evaluators not yet wired; IDs stable)
