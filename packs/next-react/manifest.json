@@ -154,6 +154,11 @@
       "category": "managed"
     },
     {
+      "path": "tailwind.config.cjs",
+      "category": "hybrid",
+      "format": "javascript"
+    },
+    {
       "path": "commitlint.config.js",
       "category": "seeded"
     },
