@@ -40,12 +40,29 @@ describe("upgrade", () => {
   it("reports no migrations when no registered migrations exist for the range", async () => {
     await writeFile(
       join(dir, ".claude-ds.json"),
-      JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v0.9.0" }),
     );
     // Upgrading to a version beyond any registered migration
-    const r = await runCli(["upgrade", "--to", "v0.9.0", "--yes"], { cwd: dir });
+    const r = await runCli(["upgrade", "--to", "v1.0.0", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/no registered migrations/);
+  });
+
+  it("apply: manage-portal-scope installs portal-scope.module.css when upgrading to v0.9.0", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }),
+    );
+    const r = await runCli(["upgrade", "--to", "v0.9.0", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/upgrading from v0\.8\.0 → v0\.9\.0/);
+    expect(r.stdout).toMatch(/upgrade complete → v0\.9\.0/);
+    // portal-scope.module.css must be written to the consumer project
+    const css = await readFile(join(dir, "design-system/utils/portal-scope.module.css"), "utf8");
+    expect(css).toMatch(/\.portalScope/);
+    expect(css).toMatch(/display: contents/);
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.packVersion).toBe("v0.9.0");
   });
 
   it("dry-run: shows migration chain and exits without applying", async () => {
