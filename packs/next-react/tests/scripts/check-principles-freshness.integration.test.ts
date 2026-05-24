@@ -53,4 +53,26 @@ describe("check-principles-freshness.ts [integration]", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/^[^:]+:\d+: PRIN-001: /m);
   });
+
+  it("exit 1 with PRIN-000 when Last reviewed line is missing", async () => {
+    const dsDir = join(dir, "design-system");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(join(dsDir, "contracts.md"), `# Contracts\n\nSome content.\n`);
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/PRIN-000/);
+  });
+
+  it("exit 1 when contracts.md does not exist", () => {
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/PRIN-000/);
+  });
 });

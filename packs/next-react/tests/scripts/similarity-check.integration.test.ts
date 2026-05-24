@@ -44,4 +44,13 @@ describe("similarity-check.ts [integration]", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/^[^:]+:\d+: SIM-001: /m);
   });
+
+  it("exit 1 with SIM-000 when design-system/ is missing", () => {
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/SIM-000/);
+  });
 });

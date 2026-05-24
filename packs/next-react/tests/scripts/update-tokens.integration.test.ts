@@ -48,4 +48,41 @@ describe("update-tokens.ts [integration]", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/^[^:]+:\d+: TOK-000: /m);
   });
+
+  it("creates tokens.json when it does not exist", async () => {
+    const dsDir = join(dir, "design-system");
+    await mkdir(dsDir, { recursive: true });
+
+    const r = spawnSync(
+      "node",
+      ["--experimental-strip-types", SCRIPT, "--set", "color.primary=#ffffff"],
+      { cwd: dir, encoding: "utf8" }
+    );
+    expect(r.status).toBe(0);
+
+    const written = JSON.parse(await readFile(join(dsDir, "tokens.json"), "utf8"));
+    expect(written.color.primary).toBe("#ffffff");
+  });
+
+  it("output has stable key order, 2-space indent, trailing newline", async () => {
+    const dsDir = join(dir, "design-system");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "tokens.json"),
+      JSON.stringify({ z: 1, a: 2 }, null, 2) + "\n"
+    );
+
+    const r = spawnSync(
+      "node",
+      ["--experimental-strip-types", SCRIPT, "--set", "m=3"],
+      { cwd: dir, encoding: "utf8" }
+    );
+    expect(r.status).toBe(0);
+
+    const raw = await readFile(join(dsDir, "tokens.json"), "utf8");
+    const keys = Object.keys(JSON.parse(raw));
+    expect(keys).toEqual([...keys].sort());
+    expect(raw).toMatch(/^  "/m);
+    expect(raw.endsWith("\n")).toBe(true);
+  });
 });

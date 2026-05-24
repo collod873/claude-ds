@@ -48,4 +48,15 @@ describe("check-hook-contract.sh [integration]", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/^[^:]+:\d+: HOOK-001: /m);
   });
+
+  it("exit 0 when hooks dir is empty", async () => {
+    const hooksDir = join(dir, ".claude", "hooks");
+    await mkdir(hooksDir, { recursive: true });
+
+    const r = spawnSync("bash", [SCRIPT, hooksDir], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+  });
 });

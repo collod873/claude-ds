@@ -44,4 +44,45 @@ describe("check-tier-imports.ts [integration]", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/^[^:]+:\d+: TIER-001: /m);
   });
+
+  it("exit 2 with TIER-002 when composite imports from app/", async () => {
+    const compositesDir = join(dir, "design-system", "composites");
+    await mkdir(compositesDir, { recursive: true });
+    await writeFile(
+      join(compositesDir, "BadComposite.tsx"),
+      `import { MyPage } from "../../app/my-page";\nexport const BadComposite = () => null;\n`
+    );
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/TIER-002/);
+  });
+
+  it("exit 2 with TIER-003 when DS file imports from src/", async () => {
+    const atomsDir = join(dir, "design-system", "atoms");
+    await mkdir(atomsDir, { recursive: true });
+    await writeFile(
+      join(atomsDir, "SrcAtom.tsx"),
+      `import { util } from "src/utils";\nexport const SrcAtom = () => null;\n`
+    );
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/TIER-003/);
+  });
+
+  it("exit 1 with TIER-000 when design-system/ is missing", () => {
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/TIER-000/);
+  });
 });

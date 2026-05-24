@@ -115,4 +115,27 @@ describe("check-states-coverage.ts [integration]", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/^[^:]+:\d+: STATE-001: /m);
   });
+
+  it("exit 2 with STATE-001 when states.json is empty array", async () => {
+    const atomsDir = join(dir, "design-system", "atoms");
+    await mkdir(atomsDir, { recursive: true });
+    await writeFile(join(atomsDir, "Label.tsx"), "export const Label = () => null;");
+    await writeFile(join(atomsDir, "Label.states.json"), JSON.stringify([]));
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/STATE-001/);
+  });
+
+  it("exit 1 with STATE-000 when design-system/ is missing", () => {
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/STATE-000/);
+  });
 });
