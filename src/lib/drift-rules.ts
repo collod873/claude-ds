@@ -20,9 +20,9 @@ export type DriftRuleId =
   // Patterns-tier rules
   | "DRIFT-PATTERN-NO-SLOTS"
   | "DRIFT-PATTERN-IMPORTS-PATTERN"
-  // Code-quality drift rules (evaluators not yet wired; IDs stable)
-  | "DRIFT-RAW-PRIMITIVE"
-  | "DRIFT-CVA-VARIANT-UNRENDERED"
+  // Code-quality drift rules (IDs stable)
+  | "DRIFT-RAW-PRIMITIVE"   // evaluator not yet wired
+  | "DRIFT-CVA-VARIANT-UNRENDERED"  // evaluator not yet wired
   | "DRIFT-INLINE-STATIC-STYLE";
 
 export interface DriftFinding {
@@ -130,6 +130,43 @@ function evalPatternNoSlots(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
+/**
+ * Match a JSX style={{ ... }} where every property value is a static literal.
+ * Uses a regex over the full pattern — matches only when ALL values are
+ * primitives (strings, numbers, booleans, null/undefined). Exempt when any
+ * value is a computed expression, variable, function call, spread, or
+ * template literal with interpolation.
+ */
+const STATIC_STYLE_RE = new RegExp(
+  "style\\s*=\\s*\\{\\{\\s*" +
+  "(?:" +
+    "[a-zA-Z_$][\\w$]*\\s*:\\s*" +
+    "(?:" +
+      "'(?:[^'\\\\]|\\\\.)*'" +     // single-quoted string
+      '|"(?:[^"\\\\]|\\\\.)*"' +    // double-quoted string
+      "|`[^`$]*`" +                  // template literal without expressions
+      "|-?\\d+(?:\\.\\d+)?" +        // number (including negative/decimal)
+      "|true|false|null|undefined" + // keyword literals
+    ")" +
+    "\\s*,?\\s*" +
+  ")+" +
+  "\\}\\}",
+);
+
+/** DRIFT-INLINE-STATIC-STYLE: inline style={{}} with all-literal values. */
+function evalInlineStaticStyle(input: DriftRuleInput): DriftFinding | null {
+  const { file, locationTier, source } = input;
+  if (locationTier === null) return null;
+  if (source === undefined) return null;
+  if (!STATIC_STYLE_RE.test(source)) return null;
+  return {
+    ruleId: "DRIFT-INLINE-STATIC-STYLE",
+    file,
+    message:
+      "inline style={} with literal values — use design tokens instead",
+  };
+}
+
 /** DRIFT-PATTERN-IMPORTS-PATTERN: pattern-tier file imports from another pattern. */
 function evalPatternImportsPattern(input: DriftRuleInput): DriftFinding | null {
   const { file, locationTier, classifierVerdict } = input;
@@ -155,5 +192,7 @@ export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   if (patternNoSlots) findings.push(patternNoSlots);
   const patternImportsPattern = evalPatternImportsPattern(input);
   if (patternImportsPattern) findings.push(patternImportsPattern);
+  const inlineStaticStyle = evalInlineStaticStyle(input);
+  if (inlineStaticStyle) findings.push(inlineStaticStyle);
   return findings;
 }
