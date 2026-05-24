@@ -31,6 +31,12 @@ See [contracts.md](../../design-system/contracts.md) for:
 - Blocking violations must go through `lib/log-failure.sh`; raw `exit 2` is forbidden.
 - Hook order on `design-system/**`: exceptions → tokens → tier-imports → states → manifest → similarity; PostToolUse: regenerate-companions.
 
+## References
+
+Reference pages live in `design-system/references/` and export `meta` with
+`kind: "reference"`. They are hand-authored content pages (e.g. Tokens, Motion) rendered
+by the showcase catch-all route. Read `design-system/types/meta.ts` for the exact shape.
+
 ## Bypass Policy
 
 Only two sanctioned bypasses:

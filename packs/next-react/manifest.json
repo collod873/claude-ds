@@ -265,7 +265,11 @@
       "category": "seeded"
     },
     {
-      "path": ".claude/skills/scaffold-component/SKILL.md",
+      "path": ".claude/skills/component/SKILL.md",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/skills/pattern/SKILL.md",
       "category": "seeded"
     },
     {
@@ -415,6 +419,11 @@
       "path": ".claude/hooks/pre-write-ds-states.sh.verify-fixture.json",
       "since_version": "v0.8.0",
       "reason": "Companion fixture for retired pre-write-ds-states.sh (issue #105)"
+    },
+    {
+      "path": ".claude/skills/scaffold-component/SKILL.md",
+      "since_version": "v0.8.0",
+      "reason": "Replaced by component/ and pattern/ skills covering all four tiers (issue #94)"
     }
   ],
   "canonical_paths": [
