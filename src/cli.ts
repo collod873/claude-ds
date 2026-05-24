@@ -98,8 +98,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--pack <name>", "pack to check against")
     .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
     .option("--verify-hooks", "invoke each pack-registered hook with a pass fixture and report results")
-    .action(async (opts: { pack?: string; ignore?: string; verifyHooks?: boolean }) => {
-      await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks, cwd: defaults.cwd });
+    .option("--completeness", "verify consumer has zero local DS infrastructure outside pack-managed scaffold")
+    .action(async (opts: { pack?: string; ignore?: string; verifyHooks?: boolean; completeness?: boolean }) => {
+      await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks, completeness: opts.completeness, cwd: defaults.cwd });
     });
 
   program

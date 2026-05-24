@@ -215,3 +215,86 @@ describe("doctor", () => {
     expect(r.stdout).not.toMatch(/`app\/design\/.*` missing — lookalike/);
   });
 });
+
+describe("doctor --completeness", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("clean post-adopt consumer: exits 0 with completeness OK", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("completeness");
+    expect(r.stdout).toContain("OK");
+  });
+
+  it("consumer with orphan DS file (not in manifest): exits 1, reports orphan", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      packVersion: "v0.8.0", pack: "next-react", mode: "warn", removed: [],
+    }, null, 2));
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system", "my-hand-rolled.ts"), "export const x = 1;");
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain("my-hand-rolled.ts");
+    expect(r.stdout).toContain("Orphan files");
+  });
+
+  it("consumer with exception missing issue link: exits 1, reports lint warning", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/Button.tsx", reason: "legacy" },
+      ],
+    }, null, 2));
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain("Button.tsx");
+    expect(r.stdout).toContain("no issue link");
+  });
+
+  it("consumer with workaround comment without issue ref: exits 1, reports workaround", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    await writeFile(join(dir, "design-system/atoms/Input.tsx"), [
+      "import React from 'react';",
+      "// WORKAROUND: something janky here",
+      "export const Input = () => <input />;",
+    ].join("\n"));
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain("Input.tsx");
+    expect(r.stdout).toContain("WORKAROUND");
+    expect(r.stdout).toContain("removal trigger");
+  });
+
+  it("workaround comment WITH issue ref is not flagged", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    await writeFile(join(dir, "design-system/atoms/Button.tsx"), [
+      "import React from 'react';",
+      "// WORKAROUND: something janky here (#99)",
+      "export const Button = () => <button />;",
+    ].join("\n"));
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.stdout).not.toContain("removal trigger");
+    expect(r.code).toBe(0);
+  });
+
+  it("no .claude-ds.json and no --pack: exits 2", async () => {
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/--pack required/);
+  });
+});
