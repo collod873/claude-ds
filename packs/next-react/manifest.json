@@ -310,6 +310,10 @@
     {
       "path": ".github/workflows/claude-ds-governance.yml",
       "category": "seeded"
+    },
+    {
+      "path": ".github/workflows/claude-ds-audit.yml",
+      "category": "managed"
     }
   ],
   "deprecated_paths": [

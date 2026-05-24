@@ -332,6 +332,31 @@ describe("adopt", () => {
     expect(content).toContain("ci:consistency");
   });
 
+  // #107: pack manifest lists claude-ds-audit.yml as managed
+  it("#107 pack manifest lists .github/workflows/claude-ds-audit.yml as managed", async () => {
+    const { fileURLToPath } = await import("node:url");
+    const { resolve: res, dirname: dn } = await import("node:path");
+    const manifestRaw = await readFile(
+      res(dn(fileURLToPath(import.meta.url)), "..", "..", "packs", "next-react", "manifest.json"),
+      "utf8"
+    );
+    const manifest = JSON.parse(manifestRaw);
+    const entry = manifest.files.find((f: { path: string }) => f.path === ".github/workflows/claude-ds-audit.yml");
+    expect(entry).toBeDefined();
+    expect(entry.category).toBe("managed");
+  });
+
+  // #107: adopt installs the claude-ds-audit workflow
+  it("#107 adopt installs .github/workflows/claude-ds-audit.yml with correct content", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    await stat(join(dir, ".github/workflows/claude-ds-audit.yml"));
+    const content = await readFile(join(dir, ".github/workflows/claude-ds-audit.yml"), "utf8");
+    expect(content).toContain("push");
+    expect(content).toContain("pull_request");
+    expect(content).toContain("claude-ds audit");
+  });
+
   // #86: seedClaudeMdMarkers — markerless pre-existing CLAUDE.md target
   it("#86 adopting against a markerless CLAUDE.md injects both user content and managed block", async () => {
     // Pre-existing markerless CLAUDE.md (consumer-authored, no markers)
