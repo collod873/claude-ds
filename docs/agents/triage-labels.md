@@ -23,5 +23,7 @@ The `agent:*` labels track an issue or PR's position in the AFK-agent workflow:
 | `agent:implement` | Ready for the implement workflow to run (issues and PRs). |
 | `agent:review` | PR is ready for the automated review workflow. |
 | `agent:update-branch` | PR branch needs merge/rebase against its base. |
+| `agent:to-issues` | PRD is ready for automated breakdown into sub-issues. |
+| `agent:queued` | Issue is waiting on blocker issues to close before auto-promoting to `agent:implement`. |
 | `agent:in-progress` | A workflow run is currently active. |
 | `agent:blocked` | A run failed or was refused; needs human attention before retry. |
