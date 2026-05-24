@@ -298,3 +298,163 @@ export function BadWrapper() { return <AppShell />; }`,
     expect(findings.find(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS")).toBeDefined();
   });
 });
+
+describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
+  it("registry exposes DRIFT-INLINE-STATIC-STYLE", () => {
+    expect(allRuleIds()).toContain("DRIFT-INLINE-STATIC-STYLE");
+  });
+
+  it("fires on style={{ color: 'red' }} (literal string value)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/badge.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Badge() {
+  return <span style={{ color: 'red' }}>alert</span>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE");
+    expect(hit).toBeDefined();
+    expect(hit!.file).toBe("design-system/atoms/badge.tsx");
+    expect(hit!.message).toContain("literal");
+  });
+
+  it("fires on style={{ color: '#fff', padding: '8px' }} (multiple literal values)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/card.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Card() {
+  return <div style={{ color: '#fff', padding: '8px' }}>content</div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.find(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toBeDefined();
+  });
+
+  it("fires on numeric literal values", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/spacer.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Spacer() {
+  return <div style={{ marginTop: 4, marginBottom: 4 }} />;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.find(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toBeDefined();
+  });
+
+  it("does NOT fire on style={{ width: dynamicWidth }} (computed value)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/skeleton.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Skeleton({ width: dynamicWidth }: { width: number }) {
+  return <div style={{ width: dynamicWidth }} />;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toHaveLength(0);
+  });
+
+  it("does NOT fire on template literal with expression", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/positioner.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: "export function Positioner({ y }: { y: number }) {\n  return <div style={{ transform: `translateY(${y}px)` }} />;\n}",
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toHaveLength(0);
+  });
+
+  it("does NOT fire on mixed literal and computed values", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/indicator.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Indicator({ size }: { size: number }) {
+  return <div style={{ color: 'red', width: size }} />;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toHaveLength(0);
+  });
+
+  it("does NOT fire when source is undefined", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/badge.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toHaveLength(0);
+  });
+
+  it("does NOT fire for files outside design-system (locationTier null)", () => {
+    const input: DriftRuleInput = {
+      file: "src/components/widget.tsx",
+      locationTier: null,
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Widget() {
+  return <div style={{ color: 'red' }}>widget</div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toHaveLength(0);
+  });
+
+  it("does NOT fire on spread in style object", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/box.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Box({ extraStyle }: { extraStyle: React.CSSProperties }) {
+  return <div style={{ ...extraStyle, color: 'red' }} />;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toHaveLength(0);
+  });
+
+  it("does NOT fire when no style attribute exists", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/label.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Label({ text }: { text: string }) {
+  return <span className="label">{text}</span>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toHaveLength(0);
+  });
+
+  it("fires on double-quoted literal strings", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/tag.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Tag() {
+  return <span style={{ color: "blue" }}>tag</span>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.find(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toBeDefined();
+  });
+
+  it("does NOT fire on function call values", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/dynamic.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Dynamic() {
+  return <div style={{ color: getColor() }} />;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toHaveLength(0);
+  });
+});
