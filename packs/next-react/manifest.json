@@ -4,7 +4,8 @@
     { "root": ".claude/hooks/", "strict": true },
     { "root": "design-system/", "strict": true },
     { "root": "design-system/atoms/", "strict": false },
-    { "root": "design-system/composites/", "strict": false }
+    { "root": "design-system/composites/", "strict": false },
+    { "root": "design-system/patterns/", "strict": false }
   ],
   "lookalike_ignore": [
     ".next/**",

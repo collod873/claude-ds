@@ -1,4 +1,5 @@
 import type { Tier, TierVerdict } from "./classifier.js";
+import { hasSlotExports } from "./classifier.js";
 
 /**
  * Stable public vocabulary for drift rule IDs (ADR-0006).
@@ -34,6 +35,8 @@ export interface DriftRuleInput {
   classifierVerdict: TierVerdict;
   /** Tier inferred from the file's folder location, or null if not under a known DS tier dir. */
   locationTier: Tier | null;
+  /** Full source text — required for source-level drift rules (DRIFT-PATTERN-NO-SLOTS). */
+  source?: string;
 }
 
 const RULE_REGISTRY: Record<DriftRuleId, string> = {
@@ -93,6 +96,31 @@ function evalDsImportsFeature(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
+/** DRIFT-PATTERN-NO-SLOTS: file under patterns/ does not export children or named slot props. */
+function evalPatternNoSlots(input: DriftRuleInput): DriftFinding | null {
+  const { file, locationTier, source } = input;
+  if (locationTier !== "pattern") return null;
+  if (source === undefined) return null;
+  if (hasSlotExports(source)) return null;
+  return {
+    ruleId: "DRIFT-PATTERN-NO-SLOTS",
+    file,
+    message: "file under design-system/patterns/ does not export children or named slot props",
+  };
+}
+
+/** DRIFT-PATTERN-IMPORTS-PATTERN: pattern-tier file imports from another pattern. */
+function evalPatternImportsPattern(input: DriftRuleInput): DriftFinding | null {
+  const { file, locationTier, classifierVerdict } = input;
+  if (locationTier !== "pattern") return null;
+  if (!classifierVerdict.signals.some(s => s.includes("design-system/patterns/"))) return null;
+  return {
+    ruleId: "DRIFT-PATTERN-IMPORTS-PATTERN",
+    file,
+    message: "pattern-tier file imports from design-system/patterns/ — patterns must not nest other patterns",
+  };
+}
+
 /** Evaluate all registered drift rules against a single file's signals. */
 export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   const findings: DriftFinding[] = [];
@@ -100,5 +128,9 @@ export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   if (misplaced) findings.push(misplaced);
   const dsImportsFeature = evalDsImportsFeature(input);
   if (dsImportsFeature) findings.push(dsImportsFeature);
+  const patternNoSlots = evalPatternNoSlots(input);
+  if (patternNoSlots) findings.push(patternNoSlots);
+  const patternImportsPattern = evalPatternImportsPattern(input);
+  if (patternImportsPattern) findings.push(patternImportsPattern);
   return findings;
 }

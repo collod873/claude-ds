@@ -195,3 +195,101 @@ export function UserStatus() { return <div />; }`;
     expect(classifySource(src, ["api", "services"]).tier).toBe("feature");
   });
 });
+
+// ── Pattern fixtures ──────────────────────────────────────────────────────────
+
+describe("classifySource — pattern predicate", () => {
+  it("pattern positive: component with children prop (React.ReactNode)", () => {
+    const src = `
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return <div className="app-shell">{children}</div>;
+}`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("pattern");
+  });
+
+  it("pattern positive: component with multiple named ReactNode slot props", () => {
+    const src = `
+export function Layout({ sidebar, main }: { sidebar: React.ReactNode; main: React.ReactNode }) {
+  return <div><aside>{sidebar}</aside><main>{main}</main></div>;
+}`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("pattern");
+  });
+
+  it("pattern positive: children + named slots together", () => {
+    const src = `
+export function Dashboard({ children, sidebar, topbar }: {
+  children: React.ReactNode;
+  sidebar?: React.ReactNode;
+  topbar?: React.ReactNode;
+}) {
+  return <div><header>{topbar}</header><aside>{sidebar}</aside><main>{children}</main></div>;
+}`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("pattern");
+  });
+
+  it("pattern positive: signal includes slot/children mention", () => {
+    const src = `
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return <main>{children}</main>;
+}`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("pattern");
+    expect(v.signals.some(s => s.includes("children") || s.includes("slot"))).toBe(true);
+  });
+
+  it("pattern positive: pattern with inline sample helpers", () => {
+    const src = `
+export function AppShell({ children, sidebar }: { children: React.ReactNode; sidebar: React.ReactNode }) {
+  return <div><aside>{sidebar}</aside><main>{children}</main></div>;
+}
+export function SampleNav() { return <nav>Navigation</nav>; }
+export function SamplePage() { return <div>Page content</div>; }`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("pattern");
+  });
+
+  it("pattern negative: importing from design-system/patterns/ blocks pattern classification (returns unknown)", () => {
+    const src = `
+import { AppShell } from "@/design-system/patterns/app-shell";
+export function PageLayout({ children }: { children: React.ReactNode }) {
+  return <AppShell>{children}</AppShell>;
+}`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("unknown");
+    expect(v.tier).not.toBe("pattern");
+  });
+
+  it("pattern negative: domain imports override slot detection (feature-tier wins)", () => {
+    const src = `
+import { useRoute } from "@/features/routing/use-route";
+export function AppShell({ children }: { children: React.ReactNode }) {
+  const route = useRoute();
+  return <div>{children}</div>;
+}`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("feature");
+  });
+
+  it("pattern negative: composite with no children prop stays composite", () => {
+    const src = `
+import { Button } from "@/design-system/atoms/button";
+import { Input } from "@/design-system/atoms/input";
+export function SearchBar({ onSearch }: { onSearch: (q: string) => void }) {
+  return <div><Input /><Button label="Go" /></div>;
+}`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("composite");
+  });
+
+  it("pattern negative: atom with no children prop stays atom", () => {
+    const src = `
+export function Badge({ label }: { label: string }) {
+  return <span className="badge">{label}</span>;
+}`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("atom");
+  });
+});

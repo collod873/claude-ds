@@ -11,6 +11,18 @@ const DS_PATTERN_RE = /from\s+["'][^"']*(?:@\/)?design-system\/patterns\//;
 const DS_COMPONENT_IMPORT_RE = /from\s+["']([^"']*(?:@\/)?design-system\/(?:atoms|composites)\/[^"']+)["']/g;
 const REGEX_META_RE = /[.*+?^${}()|[\]\\]/g;
 
+/**
+ * Matches files that export children or named ReactNode slot props — the
+ * mechanical predicate for pattern tier (ADR-0004).
+ * Matches `children` anywhere in the source (destructured prop signal) OR
+ * any prop typed as `: React.ReactNode` / `: ReactNode`.
+ */
+const SLOT_EXPORT_RE = /\bchildren\b|:\s*(?:React\.)?ReactNode\b/;
+
+export function hasSlotExports(source: string): boolean {
+  return SLOT_EXPORT_RE.test(source);
+}
+
 function countDistinctDsComponentImports(source: string): number {
   const seen = new Set<string>();
   for (const m of source.matchAll(DS_COMPONENT_IMPORT_RE)) seen.add(m[1]);
@@ -27,11 +39,12 @@ function domainRootRegex(root: string): RegExp {
  * @param domainRoots - Domain folder names that mark a file as feature-tier.
  *   Defaults to ["features", "lib"]. Pass custom roots to use project-specific config.
  *
- * Predicates:
+ * Predicates (evaluated in priority order):
  * - Feature: imports from any configured domain root (default: features/, lib/)
+ * - Unknown: imports from design-system/patterns/ (blocks pattern classification)
+ * - Pattern: exports children or named ReactNode slot props; no pattern imports (ADR-0004)
  * - Composite: imports from design-system/atoms/ or composites/ (any count)
  * - Atom: no DS tier imports, no domain root imports
- * - Unknown: imports from patterns/ (patterns predicate lands in a later slice)
  */
 export function classifySource(source: string, domainRoots: string[] = DEFAULT_DOMAIN_ROOTS): TierVerdict {
   const signals: string[] = [];
@@ -44,6 +57,11 @@ export function classifySource(source: string, domainRoots: string[] = DEFAULT_D
   if (DS_PATTERN_RE.test(source)) {
     signals.push("imports from design-system/patterns/");
     return { tier: "unknown", signals };
+  }
+
+  if (SLOT_EXPORT_RE.test(source)) {
+    signals.push("exports children or named slots");
+    return { tier: "pattern", signals };
   }
 
   const dsCount = countDistinctDsComponentImports(source);

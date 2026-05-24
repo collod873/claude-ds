@@ -167,3 +167,134 @@ describe("DRIFT-DS-IMPORTS-FEATURE rule", () => {
     expect(findings.find(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE")).toBeDefined();
   });
 });
+
+describe("DRIFT-PATTERN-NO-SLOTS rule", () => {
+  it("registry exposes DRIFT-PATTERN-NO-SLOTS", () => {
+    expect(allRuleIds()).toContain("DRIFT-PATTERN-NO-SLOTS");
+  });
+
+  it("fires when pattern-tier file source has no children or slot props", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/patterns/app-layout.tsx",
+      locationTier: "pattern",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function AppLayout({ title }: { title: string }) {
+  return <div><h1>{title}</h1></div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS");
+    expect(hit).toBeDefined();
+    expect(hit!.file).toBe("design-system/patterns/app-layout.tsx");
+  });
+
+  it("does not fire when pattern-tier file has children prop", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/patterns/app-shell.tsx",
+      locationTier: "pattern",
+      classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
+      source: `export function AppShell({ children }: { children: React.ReactNode }) {
+  return <div>{children}</div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS")).toHaveLength(0);
+  });
+
+  it("does not fire when pattern-tier file has ReactNode-typed slot props", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/patterns/layout.tsx",
+      locationTier: "pattern",
+      classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
+      source: `export function Layout({ sidebar, main }: { sidebar: React.ReactNode; main: React.ReactNode }) {
+  return <div><aside>{sidebar}</aside><main>{main}</main></div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS")).toHaveLength(0);
+  });
+
+  it("does not fire for atoms (locationTier is not pattern)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/button.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Button({ label }: { label: string }) { return <button>{label}</button>; }`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS")).toHaveLength(0);
+  });
+
+  it("does not fire when source is undefined", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/patterns/app-layout.tsx",
+      locationTier: "pattern",
+      classifierVerdict: { tier: "atom", signals: [] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS")).toHaveLength(0);
+  });
+});
+
+describe("DRIFT-PATTERN-IMPORTS-PATTERN rule", () => {
+  it("registry exposes DRIFT-PATTERN-IMPORTS-PATTERN", () => {
+    expect(allRuleIds()).toContain("DRIFT-PATTERN-IMPORTS-PATTERN");
+  });
+
+  it("fires when pattern-tier file's classifier signals contain a pattern import", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/patterns/app-wrapper.tsx",
+      locationTier: "pattern",
+      classifierVerdict: {
+        tier: "unknown",
+        signals: ["imports from design-system/patterns/"],
+      },
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-PATTERN-IMPORTS-PATTERN");
+    expect(hit).toBeDefined();
+    expect(hit!.file).toBe("design-system/patterns/app-wrapper.tsx");
+  });
+
+  it("does not fire for non-pattern location files (locationTier is not pattern)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/nav.tsx",
+      locationTier: "composite",
+      classifierVerdict: {
+        tier: "unknown",
+        signals: ["imports from design-system/patterns/"],
+      },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-PATTERN-IMPORTS-PATTERN")).toHaveLength(0);
+  });
+
+  it("does not fire when pattern-tier file has no pattern import signal", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/patterns/app-shell.tsx",
+      locationTier: "pattern",
+      classifierVerdict: {
+        tier: "pattern",
+        signals: ["exports children or named slots"],
+      },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-PATTERN-IMPORTS-PATTERN")).toHaveLength(0);
+  });
+
+  it("is independent of DRIFT-PATTERN-NO-SLOTS: both fire when pattern imports pattern AND has no slots", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/patterns/bad-wrapper.tsx",
+      locationTier: "pattern",
+      classifierVerdict: {
+        tier: "unknown",
+        signals: ["imports from design-system/patterns/"],
+      },
+      source: `import { AppShell } from "@/design-system/patterns/app-shell";
+export function BadWrapper() { return <AppShell />; }`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.find(f => f.ruleId === "DRIFT-PATTERN-IMPORTS-PATTERN")).toBeDefined();
+    expect(findings.find(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS")).toBeDefined();
+  });
+});

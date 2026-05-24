@@ -196,4 +196,54 @@ describe("audit", () => {
     expect(r.stdout).toMatch(/DRIFT-DS-IMPORTS-FEATURE/);
     expect(r.stdout).toMatch(/invoice-label\.tsx/);
   });
+
+  // #100: patterns tier drift rules
+  it("fires DRIFT-PATTERN-NO-SLOTS for pattern-tier file without children/slots", async () => {
+    await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/patterns/app-layout.tsx"),
+      `export function AppLayout({ title }: { title: string }) { return <div><h1>{title}</h1></div>; }`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/DRIFT-PATTERN-NO-SLOTS/);
+    expect(r.stdout).toMatch(/app-layout\.tsx/);
+  });
+
+  it("does NOT fire DRIFT-PATTERN-NO-SLOTS for valid pattern with children prop", async () => {
+    await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/patterns/app-shell.tsx"),
+      `export function AppShell({ children }: { children: React.ReactNode }) { return <main>{children}</main>; }`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/DRIFT-PATTERN-NO-SLOTS/);
+  });
+
+  it("fires DRIFT-PATTERN-IMPORTS-PATTERN when one pattern imports another", async () => {
+    await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/patterns/app-shell.tsx"),
+      `export function AppShell({ children }: { children: React.ReactNode }) { return <main>{children}</main>; }`,
+    );
+    await writeFile(
+      join(dir, "design-system/patterns/page-wrapper.tsx"),
+      `import { AppShell } from "@/design-system/patterns/app-shell";\nexport function PageWrapper({ children }: { children: React.ReactNode }) { return <AppShell>{children}</AppShell>; }`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/DRIFT-PATTERN-IMPORTS-PATTERN/);
+    expect(r.stdout).toMatch(/page-wrapper\.tsx/);
+  });
+
+  it("does NOT flag user-authored patterns as unexpected (open root)", async () => {
+    await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/patterns/app-shell.tsx"),
+      `export function AppShell({ children }: { children: React.ReactNode }) { return <main>{children}</main>; }`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.stdout).not.toMatch(/unexpected: design-system\/patterns\/app-shell\.tsx/);
+  });
 });

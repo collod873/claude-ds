@@ -166,3 +166,66 @@ export const meta = { kind: "atom" };`;
     expect(hit).toBeDefined();
   });
 });
+
+// ── checkThreeSignals — patterns tier ────────────────────────────────────────
+
+describe("checkThreeSignals — patterns tier", () => {
+  it("fires DRIFT-PATTERN-NO-SLOTS when pattern-tier file has no children/slots", () => {
+    const src = `
+export function AppLayout({ title }: { title: string }) {
+  return <div><h1>{title}</h1></div>;
+}
+export const meta = { kind: "pattern" };`;
+    const result = checkThreeSignals("design-system/patterns/app-layout.tsx", src);
+    expect(result.signals.locationTier).toBe("pattern");
+    const hit = result.findings.find(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS");
+    expect(hit).toBeDefined();
+  });
+
+  it("fires DRIFT-PATTERN-IMPORTS-PATTERN when pattern-tier file imports another pattern", () => {
+    const src = `
+import { AppShell } from "@/design-system/patterns/app-shell";
+export function PageWrapper({ children }: { children: React.ReactNode }) {
+  return <AppShell>{children}</AppShell>;
+}
+export const meta = { kind: "pattern" };`;
+    const result = checkThreeSignals("design-system/patterns/page-wrapper.tsx", src);
+    expect(result.signals.locationTier).toBe("pattern");
+    const hit = result.findings.find(f => f.ruleId === "DRIFT-PATTERN-IMPORTS-PATTERN");
+    expect(hit).toBeDefined();
+  });
+
+  it("valid pattern with children slot: no pattern-tier drift findings", () => {
+    const src = `
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return <main className="app-shell">{children}</main>;
+}
+export const meta = { kind: "pattern" };`;
+    const result = checkThreeSignals("design-system/patterns/app-shell.tsx", src);
+    expect(result.signals.locationTier).toBe("pattern");
+    expect(result.signals.classifierVerdict.tier).toBe("pattern");
+    expect(result.findings.filter(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS")).toHaveLength(0);
+    expect(result.findings.filter(f => f.ruleId === "DRIFT-PATTERN-IMPORTS-PATTERN")).toHaveLength(0);
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it("valid pattern with named ReactNode slots: no pattern-tier drift findings", () => {
+    const src = `
+export function Dashboard({ sidebar, main }: { sidebar: React.ReactNode; main: React.ReactNode }) {
+  return <div><aside>{sidebar}</aside><main>{main}</main></div>;
+}
+export const meta = { kind: "pattern" };`;
+    const result = checkThreeSignals("design-system/patterns/dashboard.tsx", src);
+    expect(result.signals.classifierVerdict.tier).toBe("pattern");
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it("exposes pattern locationTier in signals", () => {
+    const src = `
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return <main>{children}</main>;
+}`;
+    const result = checkThreeSignals("design-system/patterns/app-shell.tsx", src);
+    expect(result.signals.locationTier).toBe("pattern");
+  });
+});

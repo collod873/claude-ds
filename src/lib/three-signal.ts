@@ -54,7 +54,7 @@ export function checkThreeSignals(filePath: string, source: string, domainRoots?
 
   const signals: ThreeSignals = { locationTier, metaKind, classifierVerdict };
 
-  const findings = evaluateDrift({ file: filePath, classifierVerdict, locationTier });
+  const findings = evaluateDrift({ file: filePath, classifierVerdict, locationTier, source });
 
   return { signals, findings };
 }

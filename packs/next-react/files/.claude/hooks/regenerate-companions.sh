@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PostToolUse hook: regenerate-companions.sh
-# Fires on Write/Edit/MultiEdit for .tsx files under design-system/atoms/, composites/, references/.
+# Fires on Write/Edit/MultiEdit for .tsx files under design-system/{atoms,composites,patterns,references}/
 # Pipeline (short-circuits on first blocking step):
 #   1. REGEN-001  — regenerate .showcase.tsx and .states.json via generate-showcase-companion.ts
 #   2. CLASS-001  — block atom importing @/design-system/* (classification violation)
@@ -13,14 +13,14 @@ set -euo pipefail
 file="$1"
 
 # ── Scope gate ─────────────────────────────────────────────────────────────────
-# Only fire for .tsx files under design-system/{atoms,composites,references}/
+# Only fire for .tsx files under design-system/{atoms,composites,patterns,references}/
 case "$file" in
   *.tsx) ;;
   *) exit 0 ;;
 esac
 
 case "$file" in
-  *design-system/atoms/*|*design-system/composites/*|*design-system/references/*) ;;
+  *design-system/atoms/*|*design-system/composites/*|*design-system/patterns/*|*design-system/references/*) ;;
   *) exit 0 ;;
 esac
 
