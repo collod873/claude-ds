@@ -40,7 +40,7 @@ export async function upgradeCmd(opts: {
   info(`migration chain: ${chain.map((mv) => mv.version).join(" → ")}`);
 
   // Dry-run to preview changes (Runner prints diffs to stdout)
-  const { report: dryReport } = await runMigrations(ctx, from, to, MIGRATION_REGISTRY, "dry-run");
+  const dryReport = await runMigrations(ctx, chain, "dry-run");
 
   const planErrors = dryReport.ops.filter((o) => o.error);
   if (planErrors.length > 0) {
@@ -63,7 +63,7 @@ export async function upgradeCmd(opts: {
     return;
   }
 
-  const { report } = await runMigrations(ctx, from, to, MIGRATION_REGISTRY, "apply");
+  const report = await runMigrations(ctx, chain, "apply");
 
   if (report.failed) {
     err(`apply failed: ${report.failed.error}`);

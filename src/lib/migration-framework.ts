@@ -7,23 +7,18 @@ export interface MigrationVersion {
   ops: Operation[];
 }
 
-/** Parse semver string (strips pre-release suffix) → [major, minor, patch] */
+/** Parse semver string (strips pre-release suffix) → [major, minor, patch]. */
 function parseSemver(v: string): [number, number, number] {
   const m = v.replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
   if (!m) return [0, 0, 0];
-  return [parseInt(m[1]), parseInt(m[2]), parseInt(m[3])];
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
 }
 
-function semverLte(a: string, b: string): boolean {
+/** Numeric semver comparator: negative if a < b, 0 if equal, positive if a > b. */
+function semverCompare(a: string, b: string): number {
   const [a1, a2, a3] = parseSemver(a);
   const [b1, b2, b3] = parseSemver(b);
-  if (a1 !== b1) return a1 < b1;
-  if (a2 !== b2) return a2 < b2;
-  return a3 <= b3;
-}
-
-function semverGt(a: string, b: string): boolean {
-  return !semverLte(a, b);
+  return a1 - b1 || a2 - b2 || a3 - b3;
 }
 
 /**
@@ -38,30 +33,22 @@ export function computeMigrationChain(
   to: string,
   registry: MigrationVersion[],
 ): MigrationVersion[] {
-  const sorted = [...registry].sort((a, b) => {
-    if (semverLte(a.version, b.version) && a.version !== b.version) return -1;
-    if (a.version === b.version) return 0;
-    return 1;
-  });
-
-  return sorted.filter((mv) =>
-    semverGt(mv.version, from) && semverLte(mv.version, to),
-  );
+  return [...registry]
+    .sort((a, b) => semverCompare(a.version, b.version))
+    .filter((mv) =>
+      semverCompare(mv.version, from) > 0 && semverCompare(mv.version, to) <= 0,
+    );
 }
 
 /**
- * Run migration chain from `from` to `to` through the Runner in the given mode.
- * All ops across all versions in the chain are batched into a single Runner call.
+ * Run all ops in the given migration chain through the Runner in the given mode.
+ * Ops across every version in the chain are batched into a single Runner call.
  */
 export async function runMigrations(
   ctx: ProjectContext,
-  from: string,
-  to: string,
-  registry: MigrationVersion[],
+  chain: MigrationVersion[],
   mode: RunMode,
-): Promise<{ chain: MigrationVersion[]; report: RunReport }> {
-  const chain = computeMigrationChain(from, to, registry);
+): Promise<RunReport> {
   const allOps: Operation[] = chain.flatMap((mv) => mv.ops);
-  const report = await run(ctx, allOps, mode);
-  return { chain, report };
+  return run(ctx, allOps, mode);
 }
