@@ -52,9 +52,9 @@ export const rewriteDsImports: Operation = {
         let content: string;
         try { content = await readFile(absChild, "utf8"); } catch { continue; }
 
-        // Apply both rewrites. Order matters: alias first so relative re-match is impossible.
-        let updated = content.replace(ALIAS_IMPORT_RE, "$1@ds/$2$3");
-        updated = updated.replace(RELATIVE_IMPORT_RE, "$1@ds/$2$3");
+        const updated = content
+          .replace(ALIAS_IMPORT_RE, "$1@ds/$2$3")
+          .replace(RELATIVE_IMPORT_RE, "$1@ds/$2$3");
 
         if (updated !== content) {
           changes.push({
