@@ -1,5 +1,5 @@
 import type { MigrationVersion } from "./migration-framework.js";
-import { noopMigration } from "./ops/migrations/v0.8.0/noop.js";
+import { manageForceState } from "./ops/migrations/v0.8.0/manage-force-state.js";
 import { metaKindHardMigration } from "./ops/migrations/v0.9.0/meta-kind-hard.js";
 
 /**
@@ -8,6 +8,6 @@ import { metaKindHardMigration } from "./ops/migrations/v0.9.0/meta-kind-hard.js
  * pinned packVersion and the target version.
  */
 export const MIGRATION_REGISTRY: MigrationVersion[] = [
-  { version: "v0.8.0", ops: [noopMigration] },
+  { version: "v0.8.0", ops: [manageForceState] },
   { version: "v0.9.0", ops: [metaKindHardMigration] },
 ];

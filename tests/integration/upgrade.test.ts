@@ -62,7 +62,7 @@ describe("upgrade", () => {
     expect(cfg.packVersion).toBe("v0.7.0");
   });
 
-  it("apply: runs noop migration and updates packVersion to target", async () => {
+  it("apply: runs v0.8.0 migration and updates packVersion to target", async () => {
     await writeFile(
       join(dir, ".claude-ds.json"),
       JSON.stringify(BASE_CFG),
@@ -73,6 +73,35 @@ describe("upgrade", () => {
     expect(r.stdout).toMatch(/upgrade complete → v0\.8\.0/);
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.packVersion).toBe("v0.8.0");
+  });
+
+  it("apply: manage-force-state installs force-state.css into consumer project", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify(BASE_CFG),
+    );
+    const r = await runCli(["upgrade", "--to", "v0.8.0", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const installed = await readFile(join(dir, "design-system/utils/force-state.css"), "utf8");
+    expect(installed).toMatch(/@custom-variant hover/);
+  });
+
+  it("apply: manage-force-state is idempotent when force-state.css already matches", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify(BASE_CFG),
+    );
+    // First upgrade installs the file
+    await runCli(["upgrade", "--to", "v0.8.0", "--yes"], { cwd: dir });
+    const firstContent = await readFile(join(dir, "design-system/utils/force-state.css"), "utf8");
+    // Bump packVersion back so we can run upgrade again
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v0.7.0" }),
+    );
+    await runCli(["upgrade", "--to", "v0.8.0", "--yes"], { cwd: dir });
+    const secondContent = await readFile(join(dir, "design-system/utils/force-state.css"), "utf8");
+    expect(secondContent).toBe(firstContent);
   });
 
   it("apply: chains multiple versions when upgrading across several releases", async () => {
