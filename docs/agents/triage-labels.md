@@ -13,3 +13,18 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
 Edit the right-hand column to match whatever vocabulary you actually use.
+
+## Agent state labels
+
+The `agent:*` labels track an issue or PR's position in the AFK-agent workflow:
+
+| Label | Meaning |
+| ----- | ------- |
+| `agent:implement` | Ready for the implement workflow to run. |
+| `agent:in-progress` | An implement or PRD-implement run is currently active. |
+| `agent:blocked` | A run failed or was refused; needs human attention before retry. |
+| `agent:review` | PR is ready for the automated review workflow. |
+| `agent:reviewing` | A review run is currently active. |
+| `agent:review-blocked` | Review run failed; needs human attention. |
+| `agent:update-branch` | PR branch needs merge/rebase against its base. |
+| `agent:updating-branch` | Update-branch run is currently active. |

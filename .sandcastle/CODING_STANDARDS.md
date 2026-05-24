@@ -43,3 +43,11 @@ PRs address their stated intent and nothing else. Reject drive-by refactors, spe
 ## Completeness principle (ADR-0003)
 
 Anything a consumer hand-rolls for design-system concerns is a claude-ds defect. Reject workarounds that lack both a tracking GitHub issue and a removal trigger. If a PR introduces a consumer-side patch, it must reference an upstream issue.
+
+## Pre-existing test failures
+
+If you encounter test failures that existed before your change (i.e. `git stash && npm run test` reproduces them), do not block your work on fixing them. Complete your implementation, then:
+
+1. Create a `ready-for-agent` issue describing the pre-existing failure
+2. Reference that issue in your PR description
+3. Do not suppress, skip, or weaken the failing assertions
