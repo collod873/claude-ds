@@ -29,17 +29,6 @@ describe("next-react hooks (fixture)", () => {
     expect(r.code).toBe(0);
   });
 
-  // STATE-* tests
-  it("pre-write-ds-states: blocks atom tsx missing states.json", () => {
-    const r = runHook("pre-write-ds-states.sh", "states-bad/design-system/atoms/Card.tsx");
-    expect(r.code).toBe(2);
-    expect(r.stderr).toMatch(/^[^:]+:\d+: [A-Z]+-\d+: /);
-  });
-  it("pre-write-ds-states: allows atom tsx with sibling states.json", () => {
-    const r = runHook("pre-write-ds-states.sh", "states-ok/design-system/atoms/Button.tsx");
-    expect(r.code).toBe(0);
-  });
-
   // MAN-* tests
   it("pre-write-ds-manifest: blocks hand-edit of design-system/manifest.json", () => {
     const r = runHook("pre-write-ds-manifest.sh", "manifest-bad/design-system/manifest.json");

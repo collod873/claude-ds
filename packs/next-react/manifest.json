@@ -39,10 +39,6 @@
       "category": "seeded"
     },
     {
-      "path": ".claude/hooks/pre-write-ds-states.sh",
-      "category": "managed"
-    },
-    {
       "path": ".claude/hooks/pre-write-ds-manifest.sh",
       "category": "managed"
     },
@@ -72,10 +68,6 @@
     },
     {
       "path": ".claude/hooks/pre-write-ds-tokens.sh.verify-fixture.json",
-      "category": "seeded"
-    },
-    {
-      "path": ".claude/hooks/pre-write-ds-states.sh.verify-fixture.json",
       "category": "seeded"
     },
     {
@@ -400,6 +392,16 @@
       "path": "scripts/generate-showcase.ts",
       "since_version": "v0.6.0",
       "reason": "Per-component route generation replaced by manifest-driven catch-all under app/design/[...slug] (issue #44)"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-states.sh",
+      "since_version": "v0.8.0",
+      "reason": "STATE-001 contract retired per ADR-0007; states inferred from CVA cross-product + force-state.css + reserved meta.examples names (issue #105)"
+    },
+    {
+      "path": ".claude/hooks/pre-write-ds-states.sh.verify-fixture.json",
+      "since_version": "v0.8.0",
+      "reason": "Companion fixture for retired pre-write-ds-states.sh (issue #105)"
     }
   ],
   "canonical_paths": [
@@ -419,7 +421,6 @@
     ".claude/hooks/lib/log-failure.sh",
     ".claude/hooks/README.md",
     ".claude/hooks/atom-imports.sh",
-    ".claude/hooks/pre-write-ds-states.sh",
     ".claude/hooks/pre-write-ds-manifest.sh",
     ".claude/hooks/pre-write-ds-similarity.sh",
     "app/design/page.tsx",

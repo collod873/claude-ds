@@ -36,16 +36,15 @@ async function scaffold(): Promise<void> {
 }
 
 describe("backfillCompanions op", () => {
-  it("first-run: missing companions emit 3 write Changes per component", async () => {
+  it("first-run: missing companions emit 2 write Changes per component", async () => {
     await scaffold();
     await writeFile(join(cwd, "design-system", "atoms", "button.tsx"), `export const button = () => null;\n`);
 
     const changes = await backfillCompanions.plan(fakeCtx());
-    expect(changes).toHaveLength(3);
+    expect(changes).toHaveLength(2);
     const paths = changes.map(c => (c.kind === "write" ? c.path : "")).sort();
     expect(paths).toEqual([
       "design-system/atoms/button.showcase.tsx",
-      "design-system/atoms/button.states.json",
       "design-system/atoms/button.test.tsx",
     ]);
     // All creates (before === null)
@@ -74,7 +73,7 @@ describe("backfillCompanions op", () => {
     const ctx = fakeCtx();
     const report = await run(ctx, [backfillCompanions], "apply");
     expect(report.failed).toBeUndefined();
-    expect(report.applied).toHaveLength(3);
+    expect(report.applied).toHaveLength(2);
 
     const second = await backfillCompanions.plan(ctx);
     expect(second).toEqual([]);
@@ -85,7 +84,6 @@ describe("backfillCompanions op", () => {
     await writeFile(join(cwd, "design-system", "atoms", "button.tsx"), `x`);
     await writeFile(join(cwd, "design-system", "atoms", "button.showcase.tsx"), `x`);
     await writeFile(join(cwd, "design-system", "atoms", "button.test.tsx"), `x`);
-    await writeFile(join(cwd, "design-system", "atoms", "button.states.json"), `[]`);
     await writeFile(join(cwd, "design-system", "atoms", "index.ts"), `x`);
     await writeFile(join(cwd, "design-system", "atoms", "helper.logic.ts"), `x`);
 
@@ -98,7 +96,7 @@ describe("backfillCompanions op", () => {
     await writeFile(join(cwd, "design-system", "atoms", "a.tsx"), `x`);
     await writeFile(join(cwd, "design-system", "composites", "c.tsx"), `x`);
     const changes = await backfillCompanions.plan(fakeCtx());
-    expect(changes).toHaveLength(6);
+    expect(changes).toHaveLength(4);
     expect(changes.some(c => c.kind === "write" && c.path.startsWith("design-system/atoms/"))).toBe(true);
     expect(changes.some(c => c.kind === "write" && c.path.startsWith("design-system/composites/"))).toBe(true);
   });
@@ -114,11 +112,10 @@ describe("backfillCompanions op", () => {
     await writeFile(join(cwd, "design-system", "atoms", "badge.test.tsx"), `pre-existing`);
 
     const changes = await backfillCompanions.plan(fakeCtx());
-    expect(changes).toHaveLength(2);
+    expect(changes).toHaveLength(1);
     const paths = changes.map(c => c.kind === "write" ? c.path : "").sort();
     expect(paths).toEqual([
       "design-system/atoms/badge.showcase.tsx",
-      "design-system/atoms/badge.states.json",
     ]);
 
     // Existing .test.tsx not clobbered

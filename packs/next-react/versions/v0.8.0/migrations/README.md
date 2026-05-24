@@ -19,3 +19,9 @@ pinned `packVersion` and the installed CLI version.
 - `manage-force-state@v0.8.0` (`src/lib/ops/migrations/v0.8.0/manage-force-state.ts`)
   — installs the managed `design-system/utils/force-state.css` file, replacing
   any consumer-side hand-rolled copy. Idempotent once installed.
+
+- `retire-states@v0.8.0` (`src/lib/ops/migrations/v0.8.0/retire-states.ts`)
+  — retires the `.states.json` contract per ADR-0007. Deletes `*.states.json`
+  files under `design-system/{atoms,composites,references}/`, removes `STATE-001`
+  entries from `design-system/exceptions.json`, and strips `states: { ... }` from
+  component meta blocks. Idempotent once complete.

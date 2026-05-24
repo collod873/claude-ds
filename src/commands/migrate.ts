@@ -42,9 +42,7 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   await mkdir(dirname(dest), { recursive: true });
   await rename(abs, dest);
   const showcase = dest.replace(/\.tsx$/, ".showcase.tsx");
-  const states = dest.replace(/\.tsx$/, ".states.json");
   await writeFile(showcase, `// auto-generated showcase stub for ${destName}\nexport default function Showcase(){ return null; }\n`, "utf8");
-  await writeFile(states, `[]`, "utf8");
   const exPath = join(cwd, "design-system/exceptions.json");
   const cur = parseExceptions(await readFile(exPath, "utf8"));
   cur.push({ rule: "DRIFT-MISPLACED", path: dest.replace(cwd + "/", ""), reason: opts.reason });

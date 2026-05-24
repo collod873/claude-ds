@@ -7,7 +7,7 @@ import type { ProjectContext } from "../project.js";
 const TIER_DIRS = ["design-system/atoms", "design-system/composites"];
 
 /** Suffixes used to recognise companions so we don't treat them as components. */
-const COMPANION_SUFFIXES = [".showcase.tsx", ".states.json", ".test.tsx", ".stories.tsx"];
+const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 
 /** Filenames that are never component sources (flat layout). */
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
@@ -35,11 +35,6 @@ export function showcaseStub(displayName: string, fileBase: string): string {
   ].join("\n");
 }
 
-export function statesStub(): string {
-  // .states.json must be valid JSON; the stub-warning is printed by reconform.
-  return `[]`;
-}
-
 export function testStub(displayName: string, fileBase: string): string {
   return [
     `// TODO(claude-ds): reconform stub — replace with real assertions`,
@@ -58,9 +53,8 @@ export function testStub(displayName: string, fileBase: string): string {
 /**
  * Plan companion-file backfill for atoms/composites in flat-layout. For every
  * component `<name>.tsx` under `design-system/{atoms,composites}/`, ensure a
- * sibling `<name>.showcase.tsx`, `<name>.states.json`, and `<name>.test.tsx`
- * exists. Missing siblings are emitted as `write` Changes carrying the canonical
- * stub bytes.
+ * sibling `<name>.showcase.tsx` and `<name>.test.tsx` exists. Missing siblings
+ * are emitted as `write` Changes carrying the canonical stub bytes.
  *
  * Idempotent: after apply, all expected companions exist → re-plan returns `[]`.
  * `.snapshot.png` is intentionally skipped (the post-write hook in the consumer
@@ -102,7 +96,6 @@ export const backfillCompanions: Operation = {
 
         const companions: Array<{ relPath: string; bytes: string }> = [
           { relPath: join(tierRel, `${componentName}.showcase.tsx`), bytes: showcaseStub(displayName, componentName) },
-          { relPath: join(tierRel, `${componentName}.states.json`),  bytes: statesStub() },
           { relPath: join(tierRel, `${componentName}.test.tsx`),     bytes: testStub(displayName, componentName) },
         ];
 
