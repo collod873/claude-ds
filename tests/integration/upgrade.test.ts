@@ -40,10 +40,10 @@ describe("upgrade", () => {
   it("reports no migrations when no registered migrations exist for the range", async () => {
     await writeFile(
       join(dir, ".claude-ds.json"),
-      JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v0.9.0" }),
     );
     // Upgrading to a version beyond any registered migration
-    const r = await runCli(["upgrade", "--to", "v0.9.0", "--yes"], { cwd: dir });
+    const r = await runCli(["upgrade", "--to", "v1.0.0", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/no registered migrations/);
   });

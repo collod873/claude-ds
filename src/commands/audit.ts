@@ -169,6 +169,7 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
 
   // Drift check: collect findings across all DS tier dirs.
   const domainRoots = cfg?.domain_roots;
+  const metaKindStrict = cfg?.meta_kind_strict ?? false;
   const driftTierDirs = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
   const allFindings: DriftFinding[] = [];
   for (const tierDir of driftTierDirs) {
@@ -181,7 +182,7 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
       const filePath = `${tierDir}/${entry}`;
       let source: string;
       try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
-      const { findings } = checkThreeSignals(filePath, source, domainRoots);
+      const { findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict);
       allFindings.push(...findings);
     }
   }
