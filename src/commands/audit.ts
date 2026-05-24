@@ -8,6 +8,8 @@ import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
+import { parseExceptions, type Exception } from "../lib/exceptions.js";
+import type { DriftFinding } from "../lib/drift-rules.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -152,10 +154,23 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
 
   if (opts.suggestRemovals) info("--suggest-removals: (heuristic) no ad-hoc removals detected at v1");
 
-  // Drift check: scan DS tier dirs for DRIFT-MISPLACED and DRIFT-DS-IMPORTS-FEATURE.
+  // Load exceptions.json (best-effort — missing file is not an error).
+  const exceptionsPath = join(cwd, "design-system/exceptions.json");
+  let exceptions: Exception[] = [];
+  if (await exists(exceptionsPath)) {
+    try {
+      exceptions = parseExceptions(await readFile(exceptionsPath, "utf8"));
+    } catch {
+      err("exceptions.json could not be parsed — all drift findings will be reported");
+    }
+  }
+  const suppressedKey = (rule: string, path: string) => `${rule}:${path}`;
+  const suppressedSet = new Set(exceptions.map(e => suppressedKey(e.rule, e.path)));
+
+  // Drift check: collect findings across all DS tier dirs.
   const domainRoots = cfg?.domain_roots;
   const driftTierDirs = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
-  let driftCount = 0;
+  const allFindings: DriftFinding[] = [];
   for (const tierDir of driftTierDirs) {
     const abs = join(cwd, tierDir);
     let entries: string[];
@@ -167,14 +182,33 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
       let source: string;
       try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
       const { findings } = checkThreeSignals(filePath, source, domainRoots);
-      for (const f of findings) {
-        info(`[${f.ruleId}] ${f.file}: ${f.message}`);
-        driftCount++;
-      }
+      allFindings.push(...findings);
     }
   }
-  if (driftCount > 0) {
-    info(`${driftCount} drift finding(s) — add to design-system/exceptions.json to suppress`);
+
+  // Filter out suppressed findings.
+  const activeFindings = allFindings.filter(
+    f => !suppressedSet.has(suppressedKey(f.ruleId, f.file))
+  );
+
+  // Group remaining findings by rule ID and output.
+  const byRule = new Map<string, DriftFinding[]>();
+  for (const f of activeFindings) {
+    const group = byRule.get(f.ruleId);
+    if (group) group.push(f);
+    else byRule.set(f.ruleId, [f]);
+  }
+  for (const [ruleId, ruleFindings] of byRule) {
+    const noun = ruleFindings.length === 1 ? "finding" : "findings";
+    info(`[${ruleId}] (${ruleFindings.length} ${noun})`);
+    for (const f of ruleFindings) {
+      info(`  ${f.file}: ${f.message}`);
+    }
+  }
+
+  if (activeFindings.length > 0) {
+    info(`${activeFindings.length} drift finding(s) — add to design-system/exceptions.json to suppress`);
+    process.exit(1);
   } else {
     info("drift check: no drift findings");
   }

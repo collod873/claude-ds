@@ -90,7 +90,11 @@ describe("audit", () => {
 
   it("does NOT flag user-authored composites as unexpected (open root)", async () => {
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
-    await writeFile(join(dir, "design-system/composites/data-table.tsx"), "export {}");
+    // Import from atoms/ so the classifier agrees with composites/ location (no drift).
+    await writeFile(
+      join(dir, "design-system/composites/data-table.tsx"),
+      `import { Button } from "@/design-system/atoms/button";\nexport function DataTable() { return <Button />; }`,
+    );
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).not.toMatch(/unexpected: design-system\/composites\/data-table\.tsx/);
@@ -102,5 +106,94 @@ describe("audit", () => {
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/unexpected: \.claude\/skills\/badge-system\/SKILL\.md/);
+  });
+
+  // #106: graduated audit — drift findings, exceptions, exit codes, grouped output
+  it("exits 1 when unsuppressed drift findings exist", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    // No DS imports in composites/ → classifier says atom → DRIFT-MISPLACED
+    await writeFile(
+      join(dir, "design-system/composites/solo-label.tsx"),
+      "export function SoloLabel() { return <span />; }",
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/DRIFT-MISPLACED/);
+    expect(r.stdout).toMatch(/solo-label\.tsx/);
+  });
+
+  it("exits 0 when all drift findings suppressed by exceptions.json", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/composites/solo-label.tsx"),
+      "export function SoloLabel() { return <span />; }",
+    );
+    await writeFile(
+      join(dir, "design-system/exceptions.json"),
+      JSON.stringify({
+        exceptions: [
+          { rule: "DRIFT-MISPLACED", path: "design-system/composites/solo-label.tsx", issue: "#1" },
+        ],
+      }),
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/solo-label\.tsx/);
+    expect(r.stdout).toMatch(/no drift findings/);
+  });
+
+  it("groups findings by rule ID in output", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/composites/solo-label.tsx"),
+      "export function SoloLabel() { return <span />; }",
+    );
+    await writeFile(
+      join(dir, "design-system/composites/another-solo.tsx"),
+      "export function AnotherSolo() { return <div />; }",
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    // Single [DRIFT-MISPLACED] header groups both findings
+    expect(r.stdout).toMatch(/\[DRIFT-MISPLACED\]/);
+    expect(r.stdout).toMatch(/solo-label\.tsx/);
+    expect(r.stdout).toMatch(/another-solo\.tsx/);
+  });
+
+  it("suppresses only matching rule+path combo from exceptions.json", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/composites/solo-label.tsx"),
+      "export function SoloLabel() { return <span />; }",
+    );
+    await writeFile(
+      join(dir, "design-system/composites/another-solo.tsx"),
+      "export function AnotherSolo() { return <div />; }",
+    );
+    // Suppress only solo-label, not another-solo
+    await writeFile(
+      join(dir, "design-system/exceptions.json"),
+      JSON.stringify({
+        exceptions: [
+          { rule: "DRIFT-MISPLACED", path: "design-system/composites/solo-label.tsx", issue: "#1" },
+        ],
+      }),
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).not.toMatch(/solo-label\.tsx/);
+    expect(r.stdout).toMatch(/another-solo\.tsx/);
+  });
+
+  it("fires DRIFT-DS-IMPORTS-FEATURE for DS file importing from features/", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/invoice-label.tsx"),
+      `import { fmt } from "../../features/billing/format";\nexport function InvoiceLabel() { return <span />; }`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/DRIFT-DS-IMPORTS-FEATURE/);
+    expect(r.stdout).toMatch(/invoice-label\.tsx/);
   });
 });
