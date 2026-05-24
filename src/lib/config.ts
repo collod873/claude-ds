@@ -13,10 +13,13 @@ export interface Config {
   /** Domain folder names whose imports mark a file as feature-tier (used by classifier + DRIFT-DS-IMPORTS-FEATURE).
    *  Defaults to ["features", "lib"]. */
   domain_roots: string[];
+  /** Root where TypeScript source files live, relative to cwd. Used to locate tsconfig.json.
+   *  Defaults to "src". Set to "." for projects with source at repo root. */
+  srcRoot: string;
 }
 const ALLOWED = new Set([
   "packVersion","version","pack","mode","enforce_threshold","removed","lookalike_ignore",
-  "app_dir","claude_md_target","domain_roots",
+  "app_dir","claude_md_target","domain_roots","srcRoot",
 ]);
 const VERSION_RE = /^v\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/;
 export function parseConfig(raw: string): Config {
@@ -45,9 +48,11 @@ export function parseConfig(raw: string): Config {
   if (typeof claude_md_target !== "string" || claude_md_target.length === 0) throw new ConfigError(`claude_md_target must be non-empty string`);
   const domain_roots = o.domain_roots === undefined ? ["features", "lib"] : o.domain_roots;
   if (!Array.isArray(domain_roots) || domain_roots.some((x) => typeof x !== "string")) throw new ConfigError(`domain_roots must be string[]`);
+  const srcRoot = o.srcRoot === undefined ? "src" : o.srcRoot;
+  if (typeof srcRoot !== "string" || srcRoot.length === 0) throw new ConfigError(`srcRoot must be non-empty string`);
   return {
     packVersion: rawPackVersion, pack: o.pack, mode: o.mode, enforce_threshold,
     removed: removed as string[], lookalike_ignore: lookalike_ignore as string[],
-    app_dir, claude_md_target, domain_roots: domain_roots as string[],
+    app_dir, claude_md_target, domain_roots: domain_roots as string[], srcRoot,
   };
 }

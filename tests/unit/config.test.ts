@@ -67,4 +67,25 @@ describe("parseConfig", () => {
     expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","lookalike_ignore":".vercel/**"}`))
       .toThrow(ConfigError);
   });
+
+  // srcRoot field (v0.9.0)
+  it("defaults srcRoot to 'src' when absent", () => {
+    const c = parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"warn"}`);
+    expect(c.srcRoot).toBe("src");
+  });
+
+  it("accepts srcRoot '.'", () => {
+    const c = parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"warn","srcRoot":"."}`);
+    expect(c.srcRoot).toBe(".");
+  });
+
+  it("accepts srcRoot 'src'", () => {
+    const c = parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"warn","srcRoot":"src"}`);
+    expect(c.srcRoot).toBe("src");
+  });
+
+  it("rejects empty string srcRoot", () => {
+    expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","srcRoot":""}`))
+      .toThrow(ConfigError);
+  });
 });
