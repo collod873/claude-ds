@@ -1,32 +1,36 @@
 # TASK
 
-Create a pull request for branch `{{BRANCH}}` targeting `main`. This branch implements work from PRD #{{PRD_NUMBER}}.
+Write the title and description for a pull request that delivers PRD #{{PRD_NUMBER}}: {{PRD_TITLE}}.
+
+The PRD ships as a chain of sub-issue runs, all committing to the same
+branch. This PR will be reused across every sub-issue run, so the
+title and description must describe the **whole PRD**, not any
+individual sub-issue. You are NOT implementing anything.
 
 # CONTEXT
 
-## Parent PRD
+Read the PRD and its sub-issues:
 
-!`gh issue view {{PRD_NUMBER}} --json title,body -q '"\(.title)\n\n\(.body)"'`
+```
+gh issue view {{PRD_NUMBER}} --comments
+gh api repos/$GH_REPO/issues/{{PRD_NUMBER}}/sub_issues
+```
 
-## Branch diff
+# OUTPUT
 
-!`git diff main...{{BRANCH}}`
+Emit a single block as the last thing in your response:
 
-## Commits on this branch
+<output>
+{
+  "prTitle": "feat: short imperative summary of the PRD as a whole",
+  "prDescription": "## Summary\n\nWhat the PRD delivers, in 1–3 paragraphs framed around the whole effort.\n\n## Sub-issues\n\n- #N — title\n- #M — title\n\nCloses #{{PRD_NUMBER}}"
+}
+</output>
 
-!`git log main..{{BRANCH}} --oneline`
+Rules:
 
-# STEPS
-
-1. Read the PRD, diff, and commits to understand the full scope of changes
-2. Push the branch: `git push origin {{BRANCH}}`
-3. Create the PR using `gh pr create` with:
-   - A clear, descriptive title referencing the PRD
-   - A body that explains:
-     - Which sub-issues from the PRD are addressed
-     - What changed and why
-     - How it was tested
-     - `Part of #{{PRD_NUMBER}}`
-   - Appropriate labels if any exist
-
-Once complete, output <promise>COMPLETE</promise>.
+- `prTitle` must be a single line, under 70 characters, conventional-commit style (`feat:`, `fix:`, `refactor:`, etc.), framed around the PRD as a whole.
+- `prDescription` must:
+  - describe the PRD's overall intent (restate the goal from the PRD body),
+  - list every sub-issue with its number and title,
+  - end with `Closes #{{PRD_NUMBER}}` so the PR auto-closes the PRD on merge.

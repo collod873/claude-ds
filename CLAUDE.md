@@ -26,6 +26,10 @@ The `npx github:collod873/claude-ds#vX.Y.Z` install path now works via a `prepar
 
 Canonical triage labels, plus `agent:*` state labels for the AFK-agent workflow. See `docs/agents/triage-labels.md`.
 
+### Issue tracker
+
+Issues and PRDs live as GitHub issues. See `docs/agents/issue-tracker.md`.
+
 ### Domain docs
 
 Single-context layout: `CONTEXT.md` at the repo root (if present), ADRs under `docs/adr/`. See `docs/agents/domain.md`.

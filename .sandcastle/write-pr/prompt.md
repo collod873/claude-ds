@@ -1,27 +1,41 @@
 # TASK
 
-Create a pull request for branch `{{BRANCH}}` targeting `main`.
+Write the title and description for a pull request that closes issue #{{ISSUE_NUMBER}}: {{ISSUE_TITLE}}.
+
+The implementation is already done — commits sit on branch
+`{{BRANCH}}`. You are NOT implementing anything. You are NOT running
+tests. You are summarising work that already exists.
 
 # CONTEXT
 
-## Branch diff
+Read the issue:
 
-!`git diff main...{{BRANCH}}`
+```
+gh issue view {{ISSUE_NUMBER}} --comments
+```
 
-## Commits on this branch
+Read what changed on the branch:
 
-!`git log main..{{BRANCH}} --oneline`
+```
+git log main..{{BRANCH}} --reverse
+git diff main..{{BRANCH}} --stat
+git diff main..{{BRANCH}}
+```
 
-# STEPS
+If the diff is large, focus on the commit messages and the `--stat`
+summary; only `git diff` specific files when a commit message is
+unclear.
 
-1. Read the diff and commits to understand the full scope of changes
-2. Push the branch: `git push origin {{BRANCH}}`
-3. Create the PR using `gh pr create` with:
-   - A clear, descriptive title
-   - A body that explains:
-     - What changed and why
-     - How it was tested
-     - Any relevant issue references (use `Closes #N` or `Part of #N`)
-   - Appropriate labels if any exist
+# OUTPUT
 
-Once complete, output <promise>COMPLETE</promise>.
+Emit a single block as the last thing in your response:
+
+<output>
+{
+  "prTitle": "feat: short imperative summary",
+  "prDescription": "## Summary\n\n- bullet 1\n- bullet 2\n\nCloses #{{ISSUE_NUMBER}}"
+}
+</output>
+
+- `prTitle` must be a single line, under 70 characters, conventional-commit style (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`).
+- `prDescription` must include `Closes #{{ISSUE_NUMBER}}` so the PR closes the issue on merge.

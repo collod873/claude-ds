@@ -1,11 +1,6 @@
 name: Agent Review
 
 on:
-  # pull_request_target rather than pull_request: the standard pull_request
-  # trigger depends on a generated merge commit, which GitHub fails to
-  # produce when the PR is out-of-date or conflicting. pull_request_target
-  # runs in the base context and does not need the merge commit, so the
-  # labeled event fires reliably.
   pull_request_target:
     types: [labeled]
 
@@ -77,8 +72,6 @@ jobs:
         id: push
         if: success()
         run: |
-          # Lease against the SHA we checked out — fails cleanly if anything
-          # pushed to the branch during our run.
           set +e
           git push --force-with-lease="refs/heads/$BRANCH:$BRANCH_HEAD_SHA" origin "$BRANCH" 2> push_err.txt
           status=$?
@@ -117,7 +110,6 @@ jobs:
           for i in $(seq 0 $((count - 1))); do
             commentId=$(jq -r ".[$i].commentId" "$REPLIES")
             body=$(jq -r ".[$i].body" "$REPLIES")
-            # GraphQL node ID → numeric REST id via the node lookup.
             rest_id=$(gh api graphql -f query="query(\$id:ID!){ node(id:\$id){ ... on PullRequestReviewComment { databaseId } } }" -F id="$commentId" --jq '.data.node.databaseId')
             if [ -z "$rest_id" ] || [ "$rest_id" = "null" ]; then
               echo "Could not resolve REST id for $commentId — skipping" >&2

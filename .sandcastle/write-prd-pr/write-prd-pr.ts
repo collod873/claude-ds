@@ -1,19 +1,52 @@
-import { run, claudeCode } from "@ai-hero/sandcastle";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { z } from "zod";
+import * as sandcastle from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 
-const branch = process.env.BRANCH;
-if (!branch) throw new Error("BRANCH is required");
+const PRD_NUMBER = required("PRD_NUMBER");
+const PRD_TITLE = required("PRD_TITLE");
+const OUTPUT_DIR = process.env.OUTPUT_DIR ?? "/tmp";
 
-const prdNumber = process.env.PRD_NUMBER;
-if (!prdNumber) throw new Error("PRD_NUMBER is required");
-
-const result = await run({
-  agent: claudeCode("claude-opus-4-6"),
-  sandbox: noSandbox(),
-  promptFile: ".sandcastle/write-prd-pr/prompt.md",
-  promptArgs: { BRANCH: branch, PRD_NUMBER: prdNumber },
-  maxIterations: 1,
-  completionSignal: "<promise>COMPLETE</promise>",
+const PromptOutput = z.object({
+  prTitle: z.string().min(1).max(256),
+  prDescription: z.string().min(1),
 });
 
-console.log(`PRD PR created from branch ${branch}.`);
+const result = await sandcastle.run({
+  name: `write-prd-pr-#${PRD_NUMBER}`,
+  agent: sandcastle.claudeCode("claude-opus-4-6", {
+    env: {
+      CLAUDE_CODE_OAUTH_TOKEN: required("CLAUDE_CODE_OAUTH_TOKEN"),
+    },
+  }),
+  sandbox: noSandbox(),
+  logging: { type: "stdout" },
+  promptFile: path.join(import.meta.dirname, "prompt.md"),
+  promptArgs: {
+    PRD_NUMBER,
+    PRD_TITLE,
+  },
+  output: sandcastle.Output.object({
+    tag: "output",
+    schema: PromptOutput,
+  }),
+});
+
+fs.writeFileSync(path.join(OUTPUT_DIR, "pr_title.txt"), result.output.prTitle);
+fs.writeFileSync(
+  path.join(OUTPUT_DIR, "pr_description.txt"),
+  result.output.prDescription
+);
+
+console.log(`\nWrote PR metadata to ${OUTPUT_DIR}`);
+console.log(`  title: ${result.output.prTitle}`);
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`Missing required env var: ${name}`);
+    process.exit(1);
+  }
+  return value;
+}

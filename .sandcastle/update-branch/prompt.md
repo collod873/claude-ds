@@ -1,24 +1,53 @@
 # TASK
 
-Update branch `{{BRANCH}}` by rebasing it onto the latest `main`.
+PR #{{PR_NUMBER}} (branch `{{BRANCH}}`) has merge conflicts against its base `{{BASE_REF}}`. A `git merge origin/{{BASE_REF}} --no-edit` has already been attempted and left the working tree in a conflicted state. Your job is to resolve every conflict, finish the merge, and write a PR comment describing what you did.
 
-# PRE-FLIGHT
+# CONTEXT
 
-Read `CONTEXT.md` if it exists — it contains domain language and architecture decisions.
+Read `CONTEXT.md` and any relevant ADRs under `docs/adr/` before resolving anything substantive.
 
-# STEPS
+<pr-view>
 
-1. Fetch the latest changes: `git fetch origin main`
-2. Rebase the branch onto main: `git rebase origin/main`
-3. If there are conflicts:
-   - Resolve them carefully, preserving the intent of both sides
-   - Read `.sandcastle/CODING_STANDARDS.md` for project conventions
-   - Run `npm run typecheck` and `npm run test` after resolving
-4. If there are no conflicts, verify the branch still builds and tests pass
+!`gh pr view {{PR_NUMBER}}`
 
-## Rules
+</pr-view>
 
-- Never pipe test or typecheck output through `tail`, `head`, or redirect to a temp file. Run commands directly so streaming output keeps the session alive.
-- Never use sleep-loops or polling patterns. Run commands synchronously.
+<merge-status>
 
-Once complete, output <promise>COMPLETE</promise>.
+!`git status`
+
+</merge-status>
+
+<conflicting-files>
+
+!`git diff --name-only --diff-filter=U`
+
+</conflicting-files>
+
+# RESOLUTION POLICY
+
+Always resolve. Do not abort the merge. Do not leave the branch in a half-finished state.
+
+For each conflicting hunk:
+
+1. **Investigate intent on both sides** before choosing a resolution. Use `git log -p --follow -- <path>` on both `origin/{{BASE_REF}}` and `{{BRANCH}}` to see how each side reached this state. Read the commit messages. If a commit references an issue, pull it with `gh issue view <n>`.
+2. **Pick the resolution that preserves both intents** wherever possible. Where the intents are incompatible, pick the one that best matches the PR's stated goal (in `<pr-view>` above) and note the trade-off in your comment.
+3. **Do not invent new behaviour.** Your job is reconciliation, not feature work. If a sensible resolution requires writing new logic that wasn't on either side, that's a signal to flag uncertainty rather than to be creative.
+
+After resolving, run whatever checks you think are warranted — `npm run typecheck` is fast and catches most resolution mistakes; `npm run test` if you want stronger confidence. You decide. If something is broken, fix what you can; if you can't, push what you have and flag it clearly in the comment.
+
+# COMMIT
+
+Stage everything and finish the merge with a single commit. Conventional-commit style, e.g. `chore: merge origin/{{BASE_REF}} into {{BRANCH}}`. The wrapper will push whatever you commit.
+
+# OUTPUT
+
+Emit a single block as the last thing in your response:
+
+<output>
+{
+  "comment": "Markdown body posted as a PR comment. Free-form prose. Describe which conflicts existed, how you resolved each, and flag any uncertainty or remaining problems (e.g. typecheck failures, ambiguous intent). Reference commit SHAs or file paths where useful."
+}
+</output>
+
+The comment is the only safety net for the human author. Write it like you're handing the branch back to them and want them to be able to spot any bad call you made in 30 seconds.

@@ -189,7 +189,6 @@ jobs:
         if: steps.shape.outputs.mode == 'run' && success()
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
-        # NOT force-push: the branch accumulates commits across sub-issue runs.
         run: git push origin "$BRANCH"
 
       - name: Close completed sub-issue
