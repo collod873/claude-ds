@@ -13,6 +13,8 @@ export type DriftRuleId =
   | "DRIFT-MISPLACED"
   | "DRIFT-MISCLASSIFIED-ATOM"
   | "DRIFT-MISCLASSIFIED-COMPOSITE"
+  // Meta declaration rule (requires meta_kind_strict in config)
+  | "DRIFT-META-KIND-MISSING"
   // Feature-boundary rule
   | "DRIFT-DS-IMPORTS-FEATURE"
   // Patterns-tier rules
@@ -37,6 +39,10 @@ export interface DriftRuleInput {
   locationTier: Tier | null;
   /** Full source text — required for source-level drift rules (DRIFT-PATTERN-NO-SLOTS). */
   source?: string;
+  /** Tier from the file's exported meta.kind, null if absent. */
+  metaKind: Tier | null;
+  /** When true, DRIFT-META-KIND-MISSING fires on DS files that lack meta.kind. */
+  metaKindStrict?: boolean;
 }
 
 const RULE_REGISTRY: Record<DriftRuleId, string> = {
@@ -46,6 +52,8 @@ const RULE_REGISTRY: Record<DriftRuleId, string> = {
     "File declares meta.kind=atom but classifier says otherwise",
   "DRIFT-MISCLASSIFIED-COMPOSITE":
     "File declares meta.kind=composite but classifier says otherwise",
+  "DRIFT-META-KIND-MISSING":
+    "Design-system file is missing a meta.kind declaration (required after classify backfill)",
   "DRIFT-DS-IMPORTS-FEATURE":
     "Design-system file imports from a domain root (features/, lib/, or configured domain root) — domain code must not pollute the DS",
   "DRIFT-PATTERN-NO-SLOTS":
@@ -79,6 +87,19 @@ function evalMisplaced(input: DriftRuleInput): DriftFinding | null {
     message:
       `located in ${locationTier}s/ but classifier says ${classifierVerdict.tier}` +
       ` (${classifierVerdict.signals.join("; ")})`,
+  };
+}
+
+/** DRIFT-META-KIND-MISSING: DS file with no meta.kind when strict mode is on. */
+function evalMetaKindMissing(input: DriftRuleInput): DriftFinding | null {
+  if (!input.metaKindStrict) return null;
+  const { file, locationTier, metaKind } = input;
+  if (locationTier === null) return null;
+  if (metaKind !== null) return null;
+  return {
+    ruleId: "DRIFT-META-KIND-MISSING",
+    file,
+    message: "missing meta.kind declaration — run `claude-ds classify` to backfill",
   };
 }
 
@@ -124,6 +145,8 @@ function evalPatternImportsPattern(input: DriftRuleInput): DriftFinding | null {
 /** Evaluate all registered drift rules against a single file's signals. */
 export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   const findings: DriftFinding[] = [];
+  const metaKindMissing = evalMetaKindMissing(input);
+  if (metaKindMissing) findings.push(metaKindMissing);
   const misplaced = evalMisplaced(input);
   if (misplaced) findings.push(misplaced);
   const dsImportsFeature = evalDsImportsFeature(input);

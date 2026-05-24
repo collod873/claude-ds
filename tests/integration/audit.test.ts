@@ -246,4 +246,49 @@ describe("audit", () => {
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.stdout).not.toMatch(/unexpected: design-system\/patterns\/app-shell\.tsx/);
   });
+
+  // meta_kind_strict — DRIFT-META-KIND-MISSING fires when meta.kind absent + strict mode on
+  it("does NOT fire DRIFT-META-KIND-MISSING when meta_kind_strict is false (default)", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      "export function Button() { return <button />; }",
+    );
+    // No .claude-ds.json → meta_kind_strict defaults to false
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/DRIFT-META-KIND-MISSING/);
+  });
+
+  it("fires DRIFT-META-KIND-MISSING when meta_kind_strict=true and meta.kind absent", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      "export function Button() { return <button />; }",
+    );
+    const r = await runCli(["audit"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/DRIFT-META-KIND-MISSING/);
+    expect(r.stdout).toMatch(/button\.tsx/);
+  });
+
+  it("does NOT fire DRIFT-META-KIND-MISSING when meta.kind is declared", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <button />; }
+export const meta = { kind: "atom", examples: [] };`,
+    );
+    const r = await runCli(["audit"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/DRIFT-META-KIND-MISSING/);
+  });
 });

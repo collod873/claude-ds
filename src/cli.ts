@@ -14,6 +14,7 @@ import { migrateLayoutCmd } from "./commands/migrate-layout.js";
 import { reconformCmd } from "./commands/reconform.js";
 import { reconcileCmd } from "./commands/reconcile.js";
 import { upgradeCmd } from "./commands/upgrade.js";
+import { classifyCmd } from "./commands/classify.js";
 
 export interface ProgramDefaults {
   cwd?: string;
@@ -135,6 +136,15 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--yes", "skip confirmation prompt")
     .action(async (opts: { to?: string; dryRun?: boolean; yes?: boolean }) => {
       await upgradeCmd({ to: opts.to, dryRun: opts.dryRun, yes: opts.yes, cwd: defaults.cwd });
+    });
+
+  program
+    .command("classify")
+    .requiredOption("--src <dir>", "source directory to walk for components")
+    .option("--dry-run", "show classification plan without moving any files")
+    .option("--yes", "skip per-domain-bucket prompts for feature relocations")
+    .action(async (opts: { src: string; dryRun?: boolean; yes?: boolean }) => {
+      await classifyCmd({ src: opts.src, dryRun: opts.dryRun, yes: opts.yes, cwd: defaults.cwd });
     });
 
   return program;

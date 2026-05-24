@@ -46,15 +46,21 @@ export function metaKindFromSource(source: string): Tier | null {
  *
  * Pure: no I/O. Pass the file's relative path and its full source text.
  * @param domainRoots - Domain folder names that mark a file as feature-tier (passed to classifier).
+ * @param metaKindStrict - When true, DRIFT-META-KIND-MISSING fires on DS files lacking meta.kind.
  */
-export function checkThreeSignals(filePath: string, source: string, domainRoots?: string[]): ThreeSignalResult {
+export function checkThreeSignals(
+  filePath: string,
+  source: string,
+  domainRoots?: string[],
+  metaKindStrict?: boolean,
+): ThreeSignalResult {
   const locationTier = locationTierFromPath(filePath);
   const metaKind = metaKindFromSource(source);
   const classifierVerdict = classifySource(source, domainRoots);
 
   const signals: ThreeSignals = { locationTier, metaKind, classifierVerdict };
 
-  const findings = evaluateDrift({ file: filePath, classifierVerdict, locationTier, source });
+  const findings = evaluateDrift({ file: filePath, classifierVerdict, locationTier, source, metaKind, metaKindStrict });
 
   return { signals, findings };
 }
