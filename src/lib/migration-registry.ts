@@ -4,6 +4,7 @@ import { retireStates } from "./ops/migrations/v0.8.0/retire-states.js";
 import { metaKindHardMigration } from "./ops/migrations/v0.9.0/meta-kind-hard.js";
 import { dsFolderAlias } from "./ops/migrations/v0.9.0/ds-folder-alias.js";
 import { rewriteDsImports } from "./ops/migrations/v0.9.0/rewrite-ds-imports.js";
+import { manageManifestMigration } from "./ops/migrations/v0.9.0/manage-manifest.js";
 
 /**
  * All known pack migration sets, keyed by release version.
@@ -12,5 +13,5 @@ import { rewriteDsImports } from "./ops/migrations/v0.9.0/rewrite-ds-imports.js"
  */
 export const MIGRATION_REGISTRY: MigrationVersion[] = [
   { version: "v0.8.0", ops: [manageForceState, retireStates] },
-  { version: "v0.9.0", ops: [metaKindHardMigration, dsFolderAlias, rewriteDsImports] },
+  { version: "v0.9.0", ops: [metaKindHardMigration, dsFolderAlias, rewriteDsImports, manageManifestMigration] },
 ];

@@ -48,6 +48,49 @@ describe("upgrade", () => {
     expect(r.stdout).toMatch(/no registered migrations/);
   });
 
+  it("v0.9.0: installs build-manifest.ts and deletes hand-built manifest.generated.ts", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }),
+    );
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/manifest.generated.ts"), "// hand-built\n", "utf8");
+
+    const r = await runCli(["upgrade", "--to", "v0.9.0", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/upgrade complete → v0\.9\.0/);
+
+    // build-manifest.ts installed from pack
+    const script = await readFile(join(dir, "scripts/build-manifest.ts"), "utf8");
+    expect(script).toContain("build-manifest.ts");
+
+    // hand-built manifest.generated.ts removed
+    await expect(readFile(join(dir, "design-system/manifest.generated.ts"))).rejects.toThrow();
+
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.packVersion).toBe("v0.9.0");
+  });
+
+  it("v0.9.0: dry-run shows manage-manifest op and does not delete generated file", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }),
+    );
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/manifest.generated.ts"), "// hand-built\n", "utf8");
+
+    const r = await runCli(["upgrade", "--to", "v0.9.0", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/dry-run complete/);
+
+    // packVersion must NOT change in dry-run
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.packVersion).toBe("v0.8.0");
+    // file must still be present
+    const content = await readFile(join(dir, "design-system/manifest.generated.ts"), "utf8");
+    expect(content).toBe("// hand-built\n");
+  });
+
   it("dry-run: shows migration chain and exits without applying", async () => {
     await writeFile(
       join(dir, ".claude-ds.json"),
