@@ -19,3 +19,8 @@ pinned `packVersion` and the installed CLI version.
 - `manage-manifest@v0.9.0` (`src/lib/ops/migrations/v0.9.0/manage-manifest.ts`) —
   installs pack-managed `scripts/build-manifest.ts` and deletes the consumer's
   hand-built `design-system/manifest.generated.ts` (closes #52, #110).
+
+- `widen-tokens@v0.9.0` (`src/lib/ops/migrations/v0.9.0/widen-tokens.ts`) —
+  additive merge of `motion`, `mask`, `shadow`, and `z` default values into the
+  consumer's `design-system/tokens.json`. Groups already present are left untouched.
+  Returns `abort` if `tokens.json` does not exist (consumer must run `adopt` first).

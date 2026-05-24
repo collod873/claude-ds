@@ -1,6 +1,6 @@
 export class ManifestError extends Error {}
 export type Category = "managed" | "seeded" | "generated" | "hybrid";
-export type Format = "markdown" | "shell" | "json";
+export type Format = "markdown" | "shell" | "json" | "javascript";
 export interface ManifestEntry { path: string; category: Category; format?: Format; owned_keys?: string[]; }
 /** A path written by a prior pack version that should no longer exist in consumer repos. */
 export interface DeprecatedPath { path: string; since_version: string; reason: string; }
@@ -20,7 +20,7 @@ export interface Manifest {
   managed_roots: ManagedRoot[];
 }
 const CATS = new Set<Category>(["managed","seeded","generated","hybrid"]);
-const FMTS = new Set<Format>(["markdown","shell","json"]);
+const FMTS = new Set<Format>(["markdown","shell","json","javascript"]);
 export function parseManifest(raw: string): Manifest {
   const o = JSON.parse(raw) as { files?: unknown; canonical_paths?: unknown; lookalike_ignore?: unknown; deprecated_paths?: unknown; managed_roots?: unknown };
   if (!Array.isArray(o.files)) throw new ManifestError("files: array required");

@@ -1,8 +1,9 @@
 export class MarkerError extends Error {}
-export type Format = "markdown" | "shell";
+export type Format = "markdown" | "shell" | "javascript";
 const PAIRS: Record<Format, [string, string]> = {
-  markdown: ["<!-- >>> claude-ds managed >>> -->", "<!-- <<< claude-ds managed <<< -->"],
-  shell:    ["# >>> claude-ds managed >>>",         "# <<< claude-ds managed <<<"],
+  markdown:   ["<!-- >>> claude-ds managed >>> -->", "<!-- <<< claude-ds managed <<< -->"],
+  shell:      ["# >>> claude-ds managed >>>",         "# <<< claude-ds managed <<<"],
+  javascript: ["// >>> claude-ds managed >>>",        "// <<< claude-ds managed <<<"],
 };
 export function mergeMarkers(current: string, desiredInner: string, fmt: Format): string {
   const [open, close] = PAIRS[fmt];
