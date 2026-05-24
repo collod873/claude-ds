@@ -1,18 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, writeFile, copyFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 
-const PACK_CONFIG_PATH = resolve(
-  import.meta.dirname ?? new URL(import.meta.url).pathname.replace(/\/[^/]+$/, ""),
-  "../../packs/next-react/files/tailwind.config.cjs",
-);
-
-const PACK_TOKENS_PATH = resolve(
-  import.meta.dirname ?? new URL(import.meta.url).pathname.replace(/\/[^/]+$/, ""),
-  "../../packs/next-react/files/design-system/tokens.json",
-);
+const HERE = dirname(fileURLToPath(import.meta.url));
+const PACK_CONFIG_PATH = resolve(HERE, "../../packs/next-react/files/tailwind.config.cjs");
 
 let tmpDir: string;
 beforeEach(async () => {
@@ -22,15 +16,14 @@ beforeEach(async () => {
 afterEach(async () => { await cleanup(tmpDir); });
 
 async function loadConfig(tokens: object): Promise<Record<string, unknown>> {
-  await writeFile(join(tmpDir, "design-system/tokens.json"), JSON.stringify(tokens, null, 2) + "\n");
+  const tokensPath = join(tmpDir, "design-system/tokens.json");
   const configDest = join(tmpDir, "tailwind.config.cjs");
+  await writeFile(tokensPath, JSON.stringify(tokens, null, 2) + "\n");
   await copyFile(PACK_CONFIG_PATH, configDest);
-  // Clear require cache so each test gets a fresh load
+  // Bust require cache so each test sees fresh tokens
   const req = createRequire(configDest);
-  // Bust cache entries for this config and the tokens file it requires
-  const tokensKey = join(tmpDir, "design-system/tokens.json");
-  delete (req as unknown as { cache: Record<string, unknown> }).cache?.[configDest];
-  delete (req as unknown as { cache: Record<string, unknown> }).cache?.[tokensKey];
+  delete req.cache[configDest];
+  delete req.cache[tokensPath];
   return req(configDest) as Record<string, unknown>;
 }
 
