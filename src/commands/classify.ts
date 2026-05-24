@@ -4,7 +4,7 @@ import type { Dirent } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { info, err, confirm } from "../lib/log.js";
-import { loadProject } from "../lib/project.js";
+import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
 import { run } from "../lib/runner.js";
 
@@ -14,7 +14,6 @@ const SOURCE_EXTS = [".tsx", ".ts"];
 
 interface ClassifiedFile {
   srcRel: string; // relative to cwd, e.g. "src/components/button.tsx"
-  name: string;   // basename without extension
   tier: Tier;
   domainBucket: string | null; // set for feature-tier: "features/invoicing"
 }
@@ -102,7 +101,7 @@ export async function classifyCmd(opts: {
   const srcRel = opts.src;
 
   // Require .claude-ds.json (post-adopt state)
-  let ctx;
+  let ctx: ProjectContext;
   try {
     ctx = await loadProject(cwd);
   } catch (e) {
@@ -142,9 +141,8 @@ export async function classifyCmd(opts: {
     }
     const verdict = classifySource(source, domainRoots);
     const tier = verdict.tier;
-    const name = basename(fileRel, fileRel.endsWith(".tsx") ? ".tsx" : ".ts");
     const domainBucket = tier === "feature" ? inferDomainBucket(source, domainRoots) : null;
-    classified.push({ srcRel: fileRel, name, tier, domainBucket });
+    classified.push({ srcRel: fileRel, tier, domainBucket });
   }
 
   if (classified.length === 0) {
@@ -156,44 +154,10 @@ export async function classifyCmd(opts: {
   const atoms = classified.filter(f => f.tier === "atom");
   const composites = classified.filter(f => f.tier === "composite");
   const features = classified.filter(f => f.tier === "feature");
-  const unknowns = classified.filter(f => f.tier !== "atom" && f.tier !== "composite" && f.tier !== "feature");
+  const unknowns = classified.filter(f => f.tier === "pattern" || f.tier === "unknown");
 
-  // Print dry-run summary (grouped by tier)
-  const printSummary = () => {
-    if (atoms.length > 0) {
-      info(`atoms/ (${atoms.length} file${atoms.length === 1 ? "" : "s"} → design-system/atoms/):`);
-      for (const f of atoms) info(`  ${basename(f.srcRel)}`);
-    }
-    if (composites.length > 0) {
-      info(`composites/ (${composites.length} file${composites.length === 1 ? "" : "s"} → design-system/composites/):`);
-      for (const f of composites) info(`  ${basename(f.srcRel)}`);
-    }
-    // Group features by domain bucket
-    const byBucket = new Map<string, ClassifiedFile[]>();
-    for (const f of features) {
-      const bucket = f.domainBucket ?? "features/unknown";
-      const group = byBucket.get(bucket) ?? [];
-      group.push(f);
-      byBucket.set(bucket, group);
-    }
-    for (const [bucket, group] of byBucket) {
-      info(`feature (${group.length} file${group.length === 1 ? "" : "s"} → ${bucket}/):`);
-      for (const f of group) info(`  ${basename(f.srcRel)}`);
-    }
-    if (unknowns.length > 0) {
-      info(`skipped/${unknowns.length} file${unknowns.length === 1 ? "" : "s"} (unknown tier — patterns or unresolved):`);
-      for (const f of unknowns) info(`  ${basename(f.srcRel)}`);
-    }
-  };
-
-  printSummary();
-
-  if (dryRun) {
-    info(`[dry-run] ${classified.length} file(s) classified — run without --dry-run to apply`);
-    return;
-  }
-
-  // Determine which feature buckets to proceed with (prompt once per bucket)
+  // Group features by domain bucket — reused below for both the summary and the
+  // per-bucket apply confirmation.
   const byBucket = new Map<string, ClassifiedFile[]>();
   for (const f of features) {
     const bucket = f.domainBucket ?? "features/unknown";
@@ -202,6 +166,30 @@ export async function classifyCmd(opts: {
     byBucket.set(bucket, group);
   }
 
+  // Print summary (grouped by tier)
+  if (atoms.length > 0) {
+    info(`atoms/ (${atoms.length} file${atoms.length === 1 ? "" : "s"} → design-system/atoms/):`);
+    for (const f of atoms) info(`  ${basename(f.srcRel)}`);
+  }
+  if (composites.length > 0) {
+    info(`composites/ (${composites.length} file${composites.length === 1 ? "" : "s"} → design-system/composites/):`);
+    for (const f of composites) info(`  ${basename(f.srcRel)}`);
+  }
+  for (const [bucket, group] of byBucket) {
+    info(`feature (${group.length} file${group.length === 1 ? "" : "s"} → ${bucket}/):`);
+    for (const f of group) info(`  ${basename(f.srcRel)}`);
+  }
+  if (unknowns.length > 0) {
+    info(`skipped/${unknowns.length} file${unknowns.length === 1 ? "" : "s"} (unknown tier — patterns or unresolved):`);
+    for (const f of unknowns) info(`  ${basename(f.srcRel)}`);
+  }
+
+  if (dryRun) {
+    info(`[dry-run] ${classified.length} file(s) classified — run without --dry-run to apply`);
+    return;
+  }
+
+  // Determine which feature buckets to proceed with (prompt once per bucket)
   const confirmedBuckets = new Set<string>();
   for (const [bucket, group] of byBucket) {
     if (yes) {
@@ -216,9 +204,9 @@ export async function classifyCmd(opts: {
 
   // Apply: move DS-tier files (atoms + composites)
   let moved = 0;
-  const dsMoves: ClassifiedFile[] = [...atoms, ...composites];
-  for (const f of dsMoves) {
-    const tier = f.tier as "atom" | "composite";
+  for (const f of [...atoms, ...composites]) {
+    if (f.tier !== "atom" && f.tier !== "composite") continue; // narrows tier
+    const tier = f.tier;
     const destDir = tierToDir(tier);
     const destRel = `${destDir}/${basename(f.srcRel)}`;
 
