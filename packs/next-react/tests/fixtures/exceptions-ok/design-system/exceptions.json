@@ -2,8 +2,9 @@
   "exceptions": [
     {
       "rule": "TOKEN-001",
+      "path": "src/components/legacy-brand.tsx",
       "reason": "Legacy brand color approved by design team",
-      "expiry": "2027-01-01"
+      "issue": "#42"
     }
   ]
 }

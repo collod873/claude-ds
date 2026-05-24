@@ -33,7 +33,7 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 2
   fi
   # Can't validate further without jq — allow and warn
-  echo "$file:0: EXC-000: jq not installed; skipping deep EXC-001/EXC-002 validation" >&2
+  echo "$file:0: EXC-000: jq not installed; skipping deep validation" >&2
   exit 0
 fi
 
@@ -50,17 +50,10 @@ while [ "$i" -lt "$entries" ]; do
     exit 2
   fi
 
-  # EXC-002: missing or invalid expiry ISO date
-  expiry="$(jq -r ".exceptions[$i].expiry // empty" "$file")"
-  if [ -z "$expiry" ]; then
-    hint="entry $i missing required field 'expiry' (ISO date, e.g. 2026-12-31)"
-    echo "$file:0: EXC-002: $hint" >&2
-    bash .claude/hooks/lib/log-failure.sh "EXC-002" "$file" "0" "$hint" || true
-    exit 2
-  fi
-  # Validate ISO date format YYYY-MM-DD
-  if ! echo "$expiry" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
-    hint="entry $i 'expiry' is not a valid ISO date (YYYY-MM-DD): $expiry"
+  # EXC-002: missing path
+  path="$(jq -r ".exceptions[$i].path // empty" "$file")"
+  if [ -z "$path" ]; then
+    hint="entry $i missing required field 'path'"
     echo "$file:0: EXC-002: $hint" >&2
     bash .claude/hooks/lib/log-failure.sh "EXC-002" "$file" "0" "$hint" || true
     exit 2

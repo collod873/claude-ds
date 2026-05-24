@@ -2,7 +2,7 @@
   "pass": {
     "arg": "design-system/exceptions.json",
     "setup": [
-      { "path": "design-system/exceptions.json", "content": "{\n  \"exceptions\": [\n    {\n      \"rule\": \"TOKEN-001\",\n      \"reason\": \"Legacy brand color approved by design team\",\n      \"expiry\": \"2027-01-01\"\n    }\n  ]\n}\n" }
+      { "path": "design-system/exceptions.json", "content": "{\n  \"exceptions\": [\n    {\n      \"rule\": \"TOKEN-001\",\n      \"path\": \"src/components/legacy-brand.tsx\",\n      \"reason\": \"Legacy brand color approved by design team\",\n      \"issue\": \"#42\"\n    }\n  ]\n}\n" }
     ]
   }
 }

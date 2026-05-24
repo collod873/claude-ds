@@ -2280,6 +2280,7 @@ async function main(): Promise<void> {
 
   let processed = 0;
   let skipped = 0;
+  let errors = 0;
 
   for (const tier of TIERS) {
     const tierDir = join(cwd, "design-system", tier);
@@ -2347,7 +2348,7 @@ async function main(): Promise<void> {
           `Either (a) hand-author \`${componentName}.showcase.tsx\` beside this file (it will be preserved across runs), ` +
           `or (b) export a top-level callable \`${displayName}\` component alongside the namespace object.\n`
         );
-        skipped++;
+        errors++;
         continue;
       } else {
         // Compute full example list (explicit + CVA cross-product) for states.json
@@ -2378,8 +2379,10 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `generate-showcase-companion: done — ${processed} component(s) processed, ${skipped} skipped`
+    `generate-showcase-companion: done — ${processed} component(s) processed, ${skipped} skipped` +
+    (errors > 0 ? `, ${errors} error(s)` : "")
   );
+  if (errors > 0) process.exit(1);
 }
 
 main().catch((err) => {
