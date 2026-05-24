@@ -4,6 +4,7 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
+import { execSync } from "node:child_process";
 
 const MAX_ITERATIONS = 10;
 
@@ -12,6 +13,36 @@ const hooks = {
 };
 
 const copyToWorktree = ["node_modules"];
+
+// Prune stale worktrees and branches from prior SIGKILL'd runs
+const staleWorktrees = execSync("git worktree list --porcelain", {
+  encoding: "utf8",
+})
+  .split("\n\n")
+  .filter((block) => block.includes("/.sandcastle/worktrees/"));
+
+for (const block of staleWorktrees) {
+  const pathLine = block.match(/^worktree (.+)$/m);
+  if (pathLine) {
+    console.log(`Pruning stale worktree: ${pathLine[1]}`);
+    execSync(`git worktree remove --force "${pathLine[1]}"`, {
+      stdio: "inherit",
+    });
+  }
+}
+
+const staleBranches = execSync("git branch --list sandcastle/*", {
+  encoding: "utf8",
+})
+  .trim()
+  .split("\n")
+  .map((b) => b.trim())
+  .filter(Boolean);
+
+if (staleBranches.length > 0) {
+  console.log(`Deleting ${staleBranches.length} stale sandcastle branch(es)`);
+  execSync(`git branch -D ${staleBranches.join(" ")}`, { stdio: "inherit" });
+}
 
 for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
