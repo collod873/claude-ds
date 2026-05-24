@@ -8,7 +8,7 @@ import { parseManifest, type ManagedRoot } from "../lib/manifest.js";
 import { parseConfig } from "../lib/config.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
-import { parseExceptions, openCount, lintExceptions, type IssueChecker } from "../lib/exceptions.js";
+import { parseExceptions, openCount, lintExceptions, type ExceptionLint, type IssueChecker } from "../lib/exceptions.js";
 import { detectLookalikes, Finding } from "../lib/lookalike.js";
 import { detectPackageManager, PackageManager } from "../lib/package-manager.js";
 import { scanRootDupes, RootDupeFinding } from "../lib/root-dupes.js";
@@ -37,57 +37,59 @@ const COMPLETENESS_FALLBACK_ROOTS: ManagedRoot[] = [
 ];
 
 const WORKAROUND_RE = /(?:\/\/|\/\*|\*)\s*(?:WORKAROUND|HACK|FIXME)\b/i;
-const SHELL_WORKAROUND_RE = /^[\s]*#\s+(?:WORKAROUND|HACK|FIXME)\b/im;
-const ISSUE_REF_RE = /#\d+|https?:\/\/github\.com\/[^\s]+\/issues\/\d+/;
+const SHELL_WORKAROUND_RE = /^\s*#\s+(?:WORKAROUND|HACK|FIXME)\b/i;
+const ISSUE_REF_RE = /#\d+|https?:\/\/github\.com\/\S+\/issues\/\d+/;
 const SCANNABLE_EXTS = new Set([".ts", ".tsx", ".css", ".md", ".sh"]);
 
-interface CompletenessOrphan { path: string; }
 interface CompletenessWorkaround { file: string; line: number; text: string; }
+
+function stripTrailingSlash(p: string): string {
+  return p.endsWith("/") ? p.slice(0, -1) : p;
+}
+
+/** Returns the configured managed roots, or the fallback list if none are declared. */
+function resolveRoots(managedRoots: ManagedRoot[]): ManagedRoot[] {
+  return managedRoots.length > 0 ? managedRoots : COMPLETENESS_FALLBACK_ROOTS;
+}
 
 async function findOrphanFiles(
   cwd: string,
   manifestPaths: Set<string>,
-  managedRoots: ManagedRoot[],
-): Promise<CompletenessOrphan[]> {
-  const roots = managedRoots.length > 0 ? managedRoots : COMPLETENESS_FALLBACK_ROOTS;
+  roots: ManagedRoot[],
+): Promise<string[]> {
   const openPrefixes = roots
     .filter(r => !r.strict)
-    .map(r => r.root.endsWith("/") ? r.root : `${r.root}/`);
+    .map(r => `${stripTrailingSlash(r.root)}/`);
 
-  const orphans: CompletenessOrphan[] = [];
+  const orphans: string[] = [];
   for (const { root, strict } of roots) {
     if (!strict) continue;
-    const rootDir = root.endsWith("/") ? root.slice(0, -1) : root;
-    const files = await walkDir(cwd, rootDir);
+    const files = await walkDir(cwd, stripTrailingSlash(root));
     for (const f of files) {
       if (openPrefixes.some(prefix => f.startsWith(prefix))) continue;
-      if (!manifestPaths.has(f)) orphans.push({ path: f });
+      if (!manifestPaths.has(f)) orphans.push(f);
     }
   }
   return orphans;
 }
 
-async function scanWorkaroundComments(cwd: string, managedRoots: ManagedRoot[]): Promise<CompletenessWorkaround[]> {
-  const roots = managedRoots.length > 0 ? managedRoots : COMPLETENESS_FALLBACK_ROOTS;
-  const allRootDirs = roots.map(r => r.root.endsWith("/") ? r.root.slice(0, -1) : r.root);
-
+async function scanWorkaroundComments(cwd: string, roots: ManagedRoot[]): Promise<CompletenessWorkaround[]> {
   const seen = new Set<string>();
   const results: CompletenessWorkaround[] = [];
 
-  for (const rootDir of allRootDirs) {
-    const files = await walkDir(cwd, rootDir);
+  for (const { root } of roots) {
+    const files = await walkDir(cwd, stripTrailingSlash(root));
     for (const f of files) {
       if (seen.has(f)) continue;
       seen.add(f);
       if (!SCANNABLE_EXTS.has(extname(f))) continue;
       let content: string;
       try { content = await readFile(join(cwd, f), "utf8"); } catch { continue; }
-      const isShell = f.endsWith(".sh");
+      const re = f.endsWith(".sh") ? SHELL_WORKAROUND_RE : WORKAROUND_RE;
       const lines = content.split("\n");
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        const isWorkaround = isShell ? SHELL_WORKAROUND_RE.test(line) : WORKAROUND_RE.test(line);
-        if (isWorkaround && !ISSUE_REF_RE.test(line)) {
+        if (re.test(line) && !ISSUE_REF_RE.test(line)) {
           results.push({ file: f, line: i + 1, text: line.trim() });
         }
       }
@@ -105,8 +107,10 @@ function makeGhIssueChecker(): IssueChecker {
           if (err) rej(err); else res(out);
         });
       });
-      const parsed = JSON.parse(stdout) as { state: string };
-      return parsed.state === "OPEN" ? "open" : parsed.state === "CLOSED" ? "closed" : "unknown";
+      const { state } = JSON.parse(stdout) as { state: string };
+      if (state === "OPEN") return "open";
+      if (state === "CLOSED") return "closed";
+      return "unknown";
     } catch {
       return "unknown";
     }
@@ -130,27 +134,28 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
   const packDir = join(repoRoot, "packs", pack);
   const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
   const manifestPaths = new Set(manifest.files.map(f => f.path));
+  const roots = resolveRoots(manifest.managed_roots);
 
-  const orphans = await findOrphanFiles(cwd, manifestPaths, manifest.managed_roots);
+  const orphans = await findOrphanFiles(cwd, manifestPaths, roots);
 
   const exceptionsPath = join(cwd, "design-system/exceptions.json");
-  let exceptionWarnings: Awaited<ReturnType<typeof lintExceptions>> = [];
+  let exceptionWarnings: ExceptionLint[] = [];
   if (await exists(exceptionsPath)) {
     try {
       const exceptions = parseExceptions(await readFile(exceptionsPath, "utf8"));
       exceptionWarnings = await lintExceptions(exceptions, makeGhIssueChecker());
     } catch {
-      // malformed exceptions.json — not a completeness finding; audit catches parse errors
+      // malformed exceptions.json — audit catches parse errors, not completeness's concern
     }
   }
 
-  const workarounds = await scanWorkaroundComments(cwd, manifest.managed_roots);
+  const workarounds = await scanWorkaroundComments(cwd, roots);
 
   const lines: string[] = ["## claude-ds doctor --completeness\n"];
 
   if (orphans.length > 0) {
     lines.push(`### Orphan files (${orphans.length} found — under DS scope but not pack-managed)\n`);
-    for (const o of orphans) lines.push(`- \`${o.path}\``);
+    for (const o of orphans) lines.push(`- \`${o}\``);
     lines.push("");
   }
 
