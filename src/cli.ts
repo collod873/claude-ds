@@ -13,6 +13,7 @@ import { doctorCmd } from "./commands/doctor.js";
 import { migrateLayoutCmd } from "./commands/migrate-layout.js";
 import { reconformCmd } from "./commands/reconform.js";
 import { reconcileCmd } from "./commands/reconcile.js";
+import { upgradeCmd } from "./commands/upgrade.js";
 
 export interface ProgramDefaults {
   cwd?: string;
@@ -125,6 +126,15 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--force", "delete all findings without prompting")
     .action(async (opts: { dryRun?: boolean; force?: boolean }) => {
       await reconcileCmd({ dryRun: opts.dryRun, force: opts.force, cwd: defaults.cwd });
+    });
+
+  program
+    .command("upgrade")
+    .option("--to <version>", "target pack version (default: installed CLI version)")
+    .option("--dry-run", "preview migration changes without applying them")
+    .option("--yes", "skip confirmation prompt")
+    .action(async (opts: { to?: string; dryRun?: boolean; yes?: boolean }) => {
+      await upgradeCmd({ to: opts.to, dryRun: opts.dryRun, yes: opts.yes, cwd: defaults.cwd });
     });
 
   return program;
