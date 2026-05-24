@@ -195,7 +195,7 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   // subsequent file mutation in this command flows through the Runner chokepoint.
   const version = await getVersion(join(repoRoot, "package.json"));
   const cfg: Record<string, unknown> = {
-    version: `v${version}`,
+    packVersion: `v${version}`,
     pack,
     mode: "warn",
     enforce_threshold: 10,

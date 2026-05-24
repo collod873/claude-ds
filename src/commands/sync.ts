@@ -106,7 +106,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
     await runFormatter(formatter, rewrittenPaths, cwd);
   }
 
-  const nextCfg = { ...cfg, version: target };
+  const nextCfg = { ...cfg, packVersion: target };
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(nextCfg, null, 2) + "\n", "utf8");
   info(`sync complete → ${target}`);
 }
