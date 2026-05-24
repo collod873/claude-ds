@@ -1,0 +1,37 @@
+/*
+ * portal-scope.module.css — display: contents wrapper for Radix UI portal elements.
+ *
+ * Radix UI portals (Popover.Content, Dialog.Content, Select.Content, etc.) render
+ * into document.body by default, severing the CSS cascade from the enclosing component
+ * tree. CSS custom properties set on an ancestor (e.g. .dark, [data-theme="brand"])
+ * are not inherited by portal-rendered content because it has no DOM ancestor
+ * relationship with the component that opened it.
+ *
+ * Wrap the atom component root with `.portalScope` so that CSS variables and other
+ * inherited properties cascade into the portal. The wrapper has display: contents —
+ * it has no layout box of its own and does not affect the visual layout.
+ *
+ * Usage in an atom component:
+ *   import styles from '@/design-system/utils/portal-scope.module.css';
+ *
+ *   export default function ComboBox(props: ComboBoxProps) {
+ *     return (
+ *       <div className={styles.portalScope}>
+ *         <Popover.Root>
+ *           <Popover.Trigger>…</Popover.Trigger>
+ *           <Popover.Portal>
+ *             <Popover.Content>…</Popover.Content>
+ *           </Popover.Portal>
+ *         </Popover.Root>
+ *       </div>
+ *     );
+ *   }
+ *
+ * Each atom that uses a Radix portal should wrap its root with this class.
+ * Do not skip it to avoid the wrapper element — display: contents makes it
+ * invisible to layout while preserving the cascade.
+ */
+
+.portalScope {
+  display: contents;
+}

@@ -152,6 +152,10 @@
       "format": "javascript"
     },
     {
+      "path": "design-system/utils/portal-scope.module.css",
+      "category": "managed"
+    },
+    {
       "path": "commitlint.config.js",
       "category": "seeded"
     },
@@ -424,6 +428,7 @@
     "design-system/hooks",
     "design-system/utils",
     "design-system/utils/force-state.css",
+    "design-system/utils/portal-scope.module.css",
     "design-system/README.md",
     "design-system/exceptions.json",
     "design-system/failure-log.md",

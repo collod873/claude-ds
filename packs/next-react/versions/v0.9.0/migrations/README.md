@@ -24,3 +24,9 @@ pinned `packVersion` and the installed CLI version.
   additive merge of `motion`, `mask`, `shadow`, and `z` default values into the
   consumer's `design-system/tokens.json`. Groups already present are left untouched.
   Returns `abort` if `tokens.json` does not exist (consumer must run `adopt` first).
+
+- `manage-portal-scope@v0.9.0` (`src/lib/ops/migrations/v0.9.0/manage-portal-scope.ts`) —
+  installs `design-system/utils/portal-scope.module.css` as a managed pack file.
+  Atoms that consume Radix portals (Popover, Dialog, Select, etc.) should wrap their
+  root with `.portalScope` from this module to preserve CSS cascade into portal-rendered
+  content. Idempotent: produces zero Changes if the file already matches pack content.

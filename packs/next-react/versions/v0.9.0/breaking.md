@@ -36,11 +36,19 @@ instead of `@/design-system/...` paths, so the generated module works in both
 
 If a consumer already has a `tailwind.config.cjs`, the marker block is inserted into it; content outside the markers is preserved.
 
+## Layout and tokens
+
+- `design-system/utils/portal-scope.module.css` is now a managed pack file.
+  Atoms that wrap Radix portals should use this utility instead of hand-rolling
+  `display: contents` wrappers. The `manage-portal-scope` migration Op installs it.
+
 ## Migration Ops
 
 - `manage-manifest@v0.9.0` — installs pack-managed `scripts/build-manifest.ts`;
   deletes any consumer hand-built `design-system/manifest.generated.ts`.
 - `widen-tokens@v0.9.0` — additive merge of motion/mask/shadow/z token defaults.
+- `manage-portal-scope@v0.9.0` — installs `design-system/utils/portal-scope.module.css`
+  as a managed pack file. Idempotent: no-op if the file already matches pack content.
 
 ## Verification
 
