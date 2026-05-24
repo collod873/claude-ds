@@ -47,8 +47,9 @@ Review the code changes on branch `{{BRANCH}}` and improve code clarity, consist
 If you find improvements to make:
 
 1. Make the changes directly on this branch
-2. Run tests and type checking to ensure nothing is broken
-3. Commit describing the refinements
+2. Run tests and type checking to ensure nothing is broken — never pipe output through `tail`, `head`, or redirect to a temp file; run commands directly so streaming output keeps the session alive
+3. Never use sleep-loops or polling patterns — run commands synchronously
+4. Commit describing the refinements
 
 If the code is already clean and well-structured, do nothing.
 

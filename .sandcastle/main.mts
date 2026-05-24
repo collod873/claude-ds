@@ -21,6 +21,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     sandbox: podman(),
     name: "planner",
     maxIterations: 1,
+    idleTimeoutSeconds: 900,
     agent: sandcastle.claudeCode("claude-sonnet-4-6"),
     promptFile: "./.sandcastle/plan-prompt.md",
   });
@@ -61,6 +62,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         const implement = await sandbox.run({
           name: "implementer",
           maxIterations: 100,
+          idleTimeoutSeconds: 900,
           agent: sandcastle.claudeCode("claude-sonnet-4-6"),
           promptFile: "./.sandcastle/implement-prompt.md",
           promptArgs: {
@@ -74,6 +76,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           const review = await sandbox.run({
             name: "reviewer",
             maxIterations: 1,
+            idleTimeoutSeconds: 900,
             agent: sandcastle.claudeCode("claude-opus-4-7"),
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {
@@ -130,6 +133,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     sandbox: podman(),
     name: "merger",
     maxIterations: 1,
+    idleTimeoutSeconds: 900,
     agent: sandcastle.claudeCode("claude-sonnet-4-6"),
     promptFile: "./.sandcastle/merge-prompt.md",
     promptArgs: {

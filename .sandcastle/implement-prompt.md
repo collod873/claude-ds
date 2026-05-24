@@ -8,6 +8,13 @@ Only work on the issue specified.
 
 Work on branch {{BRANCH}}. Make commits and run tests.
 
+# PRE-FLIGHT
+
+Before starting any work, check whether the issue is already resolved on main:
+1. Read the issue description and acceptance criteria.
+2. Check recent commits and current code to see if the work is already done.
+3. If it is, comment on the issue explaining which commit(s) resolved it, output `<promise>COMPLETE</promise>`, and stop.
+
 # CONTEXT
 
 Here are the last 10 commits:
@@ -36,6 +43,11 @@ If applicable, use RGR to complete the task.
 # FEEDBACK LOOPS
 
 Before committing, run `npm run typecheck` and `npm run test` to ensure the tests pass.
+
+## Rules
+
+- Never pipe test or typecheck output through `tail`, `head`, or redirect to a temp file. Run commands directly so streaming output keeps the session alive.
+- Never use sleep-loops or polling patterns (e.g. `until [ -s /tmp/foo ]; do sleep 2; done`). Run commands synchronously.
 
 # COMMIT
 
