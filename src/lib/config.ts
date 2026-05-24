@@ -16,10 +16,13 @@ export interface Config {
   /** When true, audit errors (exit 1) on DS files missing a meta.kind declaration.
    *  Set by the meta-kind-hard migration Op after classify guarantees backfill. */
   meta_kind_strict: boolean;
+  /** Root where TypeScript source files live, relative to cwd. Used to locate tsconfig.json.
+   *  Defaults to "src". Set to "." for projects with source at repo root. */
+  srcRoot: string;
 }
 const ALLOWED = new Set([
   "packVersion","version","pack","mode","enforce_threshold","removed","lookalike_ignore",
-  "app_dir","claude_md_target","domain_roots","meta_kind_strict",
+  "app_dir","claude_md_target","domain_roots","meta_kind_strict","srcRoot",
 ]);
 const VERSION_RE = /^v\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/;
 export function parseConfig(raw: string): Config {
@@ -49,9 +52,11 @@ export function parseConfig(raw: string): Config {
   const domain_roots = o.domain_roots === undefined ? ["features", "lib"] : o.domain_roots;
   if (!Array.isArray(domain_roots) || domain_roots.some((x) => typeof x !== "string")) throw new ConfigError(`domain_roots must be string[]`);
   const meta_kind_strict = o.meta_kind_strict === undefined ? false : Boolean(o.meta_kind_strict);
+  const srcRoot = o.srcRoot === undefined ? "src" : o.srcRoot;
+  if (typeof srcRoot !== "string" || srcRoot.length === 0) throw new ConfigError(`srcRoot must be non-empty string`);
   return {
     packVersion: rawPackVersion, pack: o.pack, mode: o.mode, enforce_threshold,
     removed: removed as string[], lookalike_ignore: lookalike_ignore as string[],
-    app_dir, claude_md_target, domain_roots: domain_roots as string[], meta_kind_strict,
+    app_dir, claude_md_target, domain_roots: domain_roots as string[], meta_kind_strict, srcRoot,
   };
 }
