@@ -18,7 +18,7 @@ export const manageForceState: Operation = {
     return [{
       kind: "write",
       path: FILE_PATH,
-      before: current !== null ? Buffer.from(current, "utf8") : null,
+      before: current === null ? null : Buffer.from(current, "utf8"),
       after: Buffer.from(upstream, "utf8"),
     }];
   },

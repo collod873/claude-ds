@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { manageForceState } from "../../../../src/lib/ops/migrations/v0.8.0/manage-force-state";
 import type { ProjectContext } from "../../../../src/lib/project";
@@ -33,7 +33,7 @@ function makeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
     manifest: {} as ProjectContext["manifest"],
     exists: async (p: string) => {
       try {
-        await (await import("node:fs/promises")).stat(join(cwd, p));
+        await stat(join(cwd, p));
         return true;
       } catch {
         return false;

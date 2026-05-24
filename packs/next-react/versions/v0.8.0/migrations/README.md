@@ -16,5 +16,6 @@ pinned `packVersion` and the installed CLI version.
 
 ## Ops in this version
 
-- `noop@v0.8.0` (`src/lib/ops/migrations/v0.8.0/noop.ts`) — proves framework
-  wiring end-to-end; produces zero Changes.
+- `manage-force-state@v0.8.0` (`src/lib/ops/migrations/v0.8.0/manage-force-state.ts`)
+  — installs the managed `design-system/utils/force-state.css` file, replacing
+  any consumer-side hand-rolled copy. Idempotent once installed.
