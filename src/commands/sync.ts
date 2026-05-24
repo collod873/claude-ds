@@ -46,12 +46,12 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
     const repoRoot = resolve(here, "..", "..");
     opOpts.packDir = resolve(repoRoot, opts.offlineFixture);
     opOpts.manifest = parseManifest(await readFile(join(opOpts.packDir, "manifest.json"), "utf8"));
-    target = cfg.version;
+    target = cfg.packVersion;
   } else {
     const r = spawnSync("git", ["ls-remote", "--tags", "https://github.com/collod873/claude-ds"], { encoding: "utf8" });
     if (r.status !== 0) { err("network: cannot reach upstream"); process.exit(2); }
     const tags = parseLsRemote(r.stdout);
-    target = tags[tags.length - 1] ?? cfg.version;
+    target = tags[tags.length - 1] ?? cfg.packVersion;
   }
 
   // Plan once. The Runner is the only thing that writes; we just stage Changes here.
@@ -63,11 +63,11 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
     info(`${d.displayAction}: ${d.displayPath} — ${d.verdict.reason}`);
   }
 
-  // #18d: summarise whether .claude-ds.json config keys (aside from version) will change.
+  // #18d: summarise whether .claude-ds.json config keys (aside from packVersion) will change.
   {
-    const nonVersionKeys = Object.keys(cfg).filter(k => k !== "version") as Array<keyof typeof cfg>;
+    const nonVersionKeys = Object.keys(cfg).filter(k => k !== "packVersion") as Array<keyof typeof cfg>;
     const nextVersion = target;
-    const changedKeys = nonVersionKeys.filter(k => JSON.stringify(cfg[k]) !== JSON.stringify({ ...cfg, version: nextVersion }[k]));
+    const changedKeys = nonVersionKeys.filter(k => JSON.stringify(cfg[k]) !== JSON.stringify({ ...cfg, packVersion: nextVersion }[k]));
     if (changedKeys.length > 0) {
       info(`config will change: ${changedKeys.join(", ")}`);
     } else {

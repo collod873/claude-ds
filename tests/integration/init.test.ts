@@ -15,6 +15,7 @@ describe("init", () => {
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.pack).toBe("next-react");
     expect(cfg.mode).toBe("block");
+    expect(cfg.packVersion).toMatch(/^v\d+\.\d+\.\d+/);
     await stat(join(dir, ".claude/settings.json"));
     await stat(join(dir, "design-system/contracts.md"));
     await stat(join(dir, ".claude/hooks/lib/log-failure.sh"));

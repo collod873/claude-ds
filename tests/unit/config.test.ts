@@ -7,6 +7,18 @@ describe("parseConfig", () => {
     expect(c.enforce_threshold).toBe(10);
     expect(c.removed).toEqual([]);
   });
+  it("accepts packVersion as the primary version key", () => {
+    const c = parseConfig(`{"packVersion":"v1.0.0","pack":"next-react","mode":"warn"}`);
+    expect(c.packVersion).toBe("v1.0.0");
+  });
+  it("maps legacy version key to packVersion field", () => {
+    const c = parseConfig(`{"version":"v0.7.0","pack":"next-react","mode":"warn"}`);
+    expect(c.packVersion).toBe("v0.7.0");
+  });
+  it("accepts pre-release version suffixes (RC tags)", () => {
+    const c = parseConfig(`{"packVersion":"v0.8.0-rc.1","pack":"next-react","mode":"warn"}`);
+    expect(c.packVersion).toBe("v0.8.0-rc.1");
+  });
   it("rejects unknown keys", () => {
     expect(() => parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"warn","extra":1}`))
       .toThrow(ConfigError);

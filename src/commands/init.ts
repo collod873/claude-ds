@@ -52,7 +52,7 @@ export async function initCmd(opts: { pack: string; yes?: boolean; cwd?: string 
     }
   }
   const version = await getVersion(join(repoRoot, "package.json"));
-  const cfg = { version: `v${version}`, pack: opts.pack, mode: "block", enforce_threshold: 10, removed: [] };
+  const cfg = { packVersion: `v${version}`, pack: opts.pack, mode: "block", enforce_threshold: 10, removed: [] };
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
   info(`initialized claude-ds (${opts.pack} @ v${version}, mode=block)`);
 }

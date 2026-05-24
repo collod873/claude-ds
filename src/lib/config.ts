@@ -1,6 +1,8 @@
 export class ConfigError extends Error {}
 export interface Config {
-  version: string; pack: string; mode: "warn" | "block";
+  /** Pack version this consumer was last initialized/synced against. Written by `init`; read by `upgrade`. */
+  packVersion: string;
+  pack: string; mode: "warn" | "block";
   enforce_threshold: number; removed: string[]; lookalike_ignore: string[];
   /** Where Next.js app router lives in this project. Manifest stays canonical (`app/...`);
    *  CLI rewrites the `app/` prefix to this dir at every I/O boundary. */
@@ -13,17 +15,19 @@ export interface Config {
   domain_roots: string[];
 }
 const ALLOWED = new Set([
-  "version","pack","mode","enforce_threshold","removed","lookalike_ignore",
+  "packVersion","version","pack","mode","enforce_threshold","removed","lookalike_ignore",
   "app_dir","claude_md_target","domain_roots",
 ]);
-const VERSION_RE = /^v\d+\.\d+\.\d+$/;
+const VERSION_RE = /^v\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/;
 export function parseConfig(raw: string): Config {
   let obj: unknown;
   try { obj = JSON.parse(raw); } catch (e) { throw new ConfigError(`invalid JSON: ${(e as Error).message}`); }
   if (typeof obj !== "object" || obj === null) throw new ConfigError("config must be an object");
   const o = obj as Record<string, unknown>;
   for (const k of Object.keys(o)) if (!ALLOWED.has(k)) throw new ConfigError(`unknown field: ${k}`);
-  if (typeof o.version !== "string" || !VERSION_RE.test(o.version)) throw new ConfigError(`version must match vX.Y.Z`);
+  // Accept `packVersion` (new) or `version` (legacy key written by pre-v0.8 init).
+  const rawPackVersion = o.packVersion ?? o.version;
+  if (typeof rawPackVersion !== "string" || !VERSION_RE.test(rawPackVersion)) throw new ConfigError(`packVersion must match vX.Y.Z`);
   if (typeof o.pack !== "string" || o.pack.length === 0) throw new ConfigError(`pack required`);
   if (o.mode !== "warn" && o.mode !== "block") throw new ConfigError(`mode must be warn|block`);
   const enforce_threshold = o.enforce_threshold === undefined ? 10 : Number(o.enforce_threshold);
@@ -42,7 +46,7 @@ export function parseConfig(raw: string): Config {
   const domain_roots = o.domain_roots === undefined ? ["features", "lib"] : o.domain_roots;
   if (!Array.isArray(domain_roots) || domain_roots.some((x) => typeof x !== "string")) throw new ConfigError(`domain_roots must be string[]`);
   return {
-    version: o.version, pack: o.pack, mode: o.mode, enforce_threshold,
+    packVersion: rawPackVersion, pack: o.pack, mode: o.mode, enforce_threshold,
     removed: removed as string[], lookalike_ignore: lookalike_ignore as string[],
     app_dir, claude_md_target, domain_roots: domain_roots as string[],
   };

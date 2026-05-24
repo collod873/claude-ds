@@ -69,7 +69,7 @@ export function extractChangelogSections(changelog: string, pinned: string, inst
 export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
   const raw = await readIfExistsLocal(join(cwd, ".claude-ds.json"));
-  const pinned = raw ? parseConfig(raw).version : null;
+  const pinned = raw ? parseConfig(raw).packVersion : null;
   const installedVer = `v${pkg.version}`;
 
   if (opts.check) {
