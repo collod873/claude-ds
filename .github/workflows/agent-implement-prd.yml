@@ -95,6 +95,7 @@ jobs:
           PARENT_NUMBER: ${{ steps.shape.outputs.parent_number }}
         run: |
           gh issue edit "$PRD_NUMBER" --remove-label "agent:implement" || true
+          gh issue edit "$PRD_NUMBER" --remove-label "ready-for-agent" || true
           gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
           gh issue comment "$PRD_NUMBER" --body "Refused to run: this issue has sub-issues but is itself a sub-issue of #${PARENT_NUMBER}. Nested PRDs are not supported in v1. Flatten the structure before retrying."
 
@@ -104,6 +105,7 @@ jobs:
           NESTED_CHILD: ${{ steps.shape.outputs.nested_child_number }}
         run: |
           gh issue edit "$PRD_NUMBER" --remove-label "agent:implement" || true
+          gh issue edit "$PRD_NUMBER" --remove-label "ready-for-agent" || true
           gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
           gh issue comment "$PRD_NUMBER" --body "Refused to run: sub-issue #${NESTED_CHILD} itself has sub-issues. Nested sub-issues are not supported in v1 — each sub-issue must be a leaf. Flatten the structure before retrying."
 
@@ -111,6 +113,7 @@ jobs:
         if: steps.shape.outputs.mode == 'refuse-all-closed'
         run: |
           gh issue edit "$PRD_NUMBER" --remove-label "agent:implement" || true
+          gh issue edit "$PRD_NUMBER" --remove-label "ready-for-agent" || true
           gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
           gh issue comment "$PRD_NUMBER" --body "Refused to run: all sub-issues are already closed; nothing to implement. If you want to do more work on this PRD, reopen or add a sub-issue first."
 
