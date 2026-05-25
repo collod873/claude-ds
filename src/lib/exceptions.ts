@@ -66,6 +66,11 @@ export function gate(ex: Exception[], threshold: number): void {
   if (n > threshold) throw new ExceptionError(`exceptions (${n}) exceed threshold (${threshold})`);
 }
 
+/** Serialize exceptions array to the canonical JSON format. */
+export function serializeExceptions(exceptions: Exception[]): string {
+  return JSON.stringify({ exceptions }, null, 2) + "\n";
+}
+
 /**
  * Lint exceptions for missing or closed issue links.
  * Returns a warning for each entry that lacks an issue link, or whose

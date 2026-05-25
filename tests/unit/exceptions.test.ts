@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { parseExceptions, openCount, gate, lintExceptions, ExceptionError, type IssueChecker } from "../../src/lib/exceptions";
+import { parseExceptions, serializeExceptions, openCount, gate, lintExceptions, ExceptionError, type IssueChecker } from "../../src/lib/exceptions";
 
 describe("exceptions — parseExceptions", () => {
   it("accepts a valid entry with rule, path, and issue", () => {
@@ -312,5 +312,31 @@ describe("lintExceptions", () => {
     const checker: IssueChecker = vi.fn().mockResolvedValue("open");
     const warnings = await lintExceptions(ex, checker);
     expect(warnings).toHaveLength(0);
+  });
+});
+
+describe("exceptions — serializeExceptions", () => {
+  it("produces valid wrapped JSON with trailing newline", () => {
+    const exceptions = [
+      { rule: "DRIFT-MISPLACED" as const, path: "design-system/atoms/foo.tsx", issue: "#42", reason: "tracked" },
+    ];
+    const output = serializeExceptions(exceptions);
+    expect(output).toMatch(/^\{/);
+    expect(output).toMatch(/\n$/);
+    const parsed = JSON.parse(output);
+    expect(parsed.exceptions).toHaveLength(1);
+    expect(parsed.exceptions[0].rule).toBe("DRIFT-MISPLACED");
+  });
+
+  it("round-trips through parseExceptions", () => {
+    const exceptions = [
+      { rule: "DRIFT-MISPLACED" as const, path: "design-system/atoms/foo.tsx", issue: "#42" },
+      { rule: "DRIFT-DS-IMPORTS-FEATURE" as const, path: "design-system/atoms/bar.tsx", reason: "wontfix", permanent: true },
+    ];
+    const serialized = serializeExceptions(exceptions);
+    const parsed = parseExceptions(serialized);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].rule).toBe("DRIFT-MISPLACED");
+    expect(parsed[1].permanent).toBe(true);
   });
 });
