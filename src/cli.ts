@@ -91,8 +91,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
   program
     .command("sync")
     .option("--offline-fixture <path>", "use local pack directory instead of fetching upstream")
-    .action(async (opts: { offlineFixture?: string }) => {
-      await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd });
+    .option("-y, --yes", "skip confirmation prompt")
+    .action(async (opts: { offlineFixture?: string; yes?: boolean }) => {
+      await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd, yes: opts.yes });
     });
 
   program
