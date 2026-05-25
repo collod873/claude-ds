@@ -19,10 +19,14 @@ export interface Config {
   /** Root where TypeScript source files live, relative to cwd. Used to locate tsconfig.json.
    *  Defaults to "src". Set to "." for projects with source at repo root. */
   srcRoot: string;
+  /** Import paths that DS files are allowed to use without triggering DRIFT-DS-IMPORTS-FEATURE.
+   *  Entries are path prefixes matched against import specifiers (e.g. "@/lib/utils").
+   *  Auto-detected during upgrade when a shared utility is imported by many DS files. */
+  allowed_imports: string[];
 }
 const ALLOWED = new Set([
   "packVersion","version","pack","mode","enforce_threshold","removed","lookalike_ignore",
-  "app_dir","claude_md_target","domain_roots","meta_kind_strict","srcRoot",
+  "app_dir","claude_md_target","domain_roots","meta_kind_strict","srcRoot","allowed_imports",
 ]);
 const VERSION_RE = /^v\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/;
 export function parseConfig(raw: string): Config {
@@ -54,9 +58,12 @@ export function parseConfig(raw: string): Config {
   const meta_kind_strict = o.meta_kind_strict === undefined ? false : Boolean(o.meta_kind_strict);
   const srcRoot = o.srcRoot === undefined ? "src" : o.srcRoot;
   if (typeof srcRoot !== "string" || srcRoot.length === 0) throw new ConfigError(`srcRoot must be non-empty string`);
+  const allowed_imports = o.allowed_imports === undefined ? [] : o.allowed_imports;
+  if (!Array.isArray(allowed_imports) || allowed_imports.some((x) => typeof x !== "string")) throw new ConfigError(`allowed_imports must be string[]`);
   return {
     packVersion: rawPackVersion, pack: o.pack, mode: o.mode, enforce_threshold,
     removed: removed as string[], lookalike_ignore: lookalike_ignore as string[],
     app_dir, claude_md_target, domain_roots: domain_roots as string[], meta_kind_strict, srcRoot,
+    allowed_imports: allowed_imports as string[],
   };
 }

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { writeFile, stat } from "node:fs/promises";
+import { readdir, readFile, writeFile, stat } from "node:fs/promises";
 import { info, err, confirm } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
 import { computeMigrationChain, runMigrations } from "../lib/migration-framework.js";
@@ -70,7 +70,51 @@ export async function upgradeCmd(opts: {
     process.exit(2);
   }
 
-  const nextCfg = { ...ctx.cfg, packVersion: to };
+  // Auto-detect shared utility imports used by many DS files
+  const detectedImports = await detectAllowedImports(cwd, ctx.cfg.domain_roots);
+  const nextCfg = { ...ctx.cfg, packVersion: to, allowed_imports: detectedImports };
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(nextCfg, null, 2) + "\n", "utf8");
+  if (detectedImports.length > 0) {
+    info(`auto-detected allowed_imports: ${detectedImports.join(", ")}`);
+  }
   info(`upgrade complete → ${to}`);
+}
+
+const DS_TIERS = ["atoms", "composites", "references"] as const;
+const IMPORT_SPECIFIER_RE = /from\s+["']([^"']+)["']/g;
+
+/**
+ * Scan DS files for external imports that appear frequently (≥5 files).
+ * These are shared utilities that should not trigger DRIFT-DS-IMPORTS-FEATURE.
+ * Returns the unique import specifiers that cross the threshold.
+ */
+async function detectAllowedImports(cwd: string, domainRoots: string[]): Promise<string[]> {
+  const importCounts = new Map<string, number>();
+  const rootPatterns = domainRoots.map(r => `/${r}/`);
+
+  for (const tier of DS_TIERS) {
+    const dir = join(cwd, "design-system", tier);
+    let entries: string[];
+    try { entries = await readdir(dir); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.endsWith(".tsx") && !entry.endsWith(".ts")) continue;
+      let source: string;
+      try { source = await readFile(join(dir, entry), "utf8"); } catch { continue; }
+      const seenInFile = new Set<string>();
+      for (const m of source.matchAll(IMPORT_SPECIFIER_RE)) {
+        const spec = m[1];
+        if (rootPatterns.some(p => spec.includes(p))) {
+          if (!seenInFile.has(spec)) {
+            seenInFile.add(spec);
+            importCounts.set(spec, (importCounts.get(spec) ?? 0) + 1);
+          }
+        }
+      }
+    }
+  }
+
+  // Imports used by ≥5 DS files are considered shared utilities
+  return [...importCounts.entries()]
+    .filter(([, count]) => count >= 5)
+    .map(([spec]) => spec);
 }

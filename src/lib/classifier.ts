@@ -46,11 +46,18 @@ function domainRootRegex(root: string): RegExp {
  * - Composite: imports from design-system/atoms/ or composites/ (any count)
  * - Atom: no DS tier imports, no domain root imports
  */
-export function classifySource(source: string, domainRoots: string[] = DEFAULT_DOMAIN_ROOTS): TierVerdict {
+export function classifySource(source: string, domainRoots: string[] = DEFAULT_DOMAIN_ROOTS, allowedImports: string[] = []): TierVerdict {
   const signals: string[] = [];
 
   for (const root of domainRoots) {
-    if (domainRootRegex(root).test(source)) signals.push(`imports from ${root}/`);
+    if (!domainRootRegex(root).test(source)) continue;
+    // Check if all imports from this root are in the allowed list
+    const importRe = new RegExp(`from\\s+["']([^"']*\\/${root.replace(REGEX_META_RE, "\\$&")}\\/[^"']*)["']`, "g");
+    const imports = [...source.matchAll(importRe)].map(m => m[1]);
+    const allAllowed = imports.length > 0 && imports.every(imp =>
+      allowedImports.some(allowed => imp.includes(allowed))
+    );
+    if (!allAllowed) signals.push(`imports from ${root}/`);
   }
   if (signals.length > 0) return { tier: "feature", signals };
 
