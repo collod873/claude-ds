@@ -198,6 +198,10 @@ jobs:
           fi
           GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh pr edit "$PR_NUMBER" --add-label "agent:review"
 
+      - name: Mark issue as having a PR
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
+        run: gh issue edit "$ISSUE_NUMBER" --add-label "has-pr" || true
+
       - name: Mark blocked on failure
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && failure()
         env:

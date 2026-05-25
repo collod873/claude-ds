@@ -247,6 +247,10 @@ jobs:
             echo "created=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Mark PRD issue as having a PR
+        if: steps.shape.outputs.mode == 'run' && success() && steps.open_pr.outputs.created == 'true'
+        run: gh issue edit "$PRD_NUMBER" --add-label "has-pr" || true
+
       - name: Re-check remaining open sub-issues
         if: steps.shape.outputs.mode == 'run' && success()
         id: remaining
