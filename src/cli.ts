@@ -45,8 +45,13 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .command("audit")
     .option("--pack <name>", "pack to audit against")
     .option("--suggest-removals", "suggest ad-hoc files for removal")
-    .action(async (opts: { pack?: string; suggestRemovals?: boolean }) => {
-      await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals, cwd: defaults.cwd });
+    .option("--fix", "auto-fix fixable drift findings")
+    .option("--except", "write exceptions for unresolved drift findings")
+    .option("--reason <text>", "reason for exception (used with --except)")
+    .option("--issue <ref>", "tracking issue link (used with --except)")
+    .option("--permanent", "mark exceptions as permanent (used with --except)")
+    .action(async (opts: { pack?: string; suggestRemovals?: boolean; fix?: boolean; except?: boolean; reason?: string; issue?: string; permanent?: boolean }) => {
+      await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals, fix: opts.fix, except: opts.except, reason: opts.reason, issue: opts.issue, permanent: opts.permanent, cwd: defaults.cwd });
     });
 
   program

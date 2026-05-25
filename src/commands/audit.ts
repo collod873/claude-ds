@@ -1,4 +1,4 @@
-import { readFile, stat, readdir } from "node:fs/promises";
+import { readFile, writeFile, stat, readdir, mkdir } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest, isManifestOrKeepfile } from "../lib/manifest.js";
@@ -8,9 +8,10 @@ import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
-import { parseExceptions, type Exception } from "../lib/exceptions.js";
+import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import type { DriftFinding } from "../lib/drift-rules.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
+import { isFixable, getFixer, type FixResult } from "../lib/drift-fixers.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -90,7 +91,18 @@ async function findUnexpectedFiles(
   return unexpected;
 }
 
-export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean; cwd?: string }) {
+export interface AuditOpts {
+  pack?: string;
+  suggestRemovals?: boolean;
+  fix?: boolean;
+  except?: boolean;
+  reason?: string;
+  issue?: string;
+  permanent?: boolean;
+  cwd?: string;
+}
+
+export async function auditCmd(opts: AuditOpts) {
   const cwd = opts.cwd ?? process.cwd();
   let pack = opts.pack;
   let cfg: Config | null = null;
@@ -200,9 +212,53 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
   }
 
   // Filter out suppressed findings.
-  const activeFindings = allFindings.filter(
+  let activeFindings = allFindings.filter(
     f => !suppressedSet.has(suppressedKey(f.ruleId, f.file))
   );
+
+  // --fix: attempt auto-fix for fixable rules.
+  if (opts.fix && activeFindings.length > 0) {
+    const fixResults: FixResult[] = [];
+    const fixerOpts = { domainRoots: domainRoots, allowedImports, dsAliases };
+    for (const f of activeFindings) {
+      const fixer = getFixer(f.ruleId);
+      if (fixer) {
+        const result = await fixer(f, cwd, fixerOpts);
+        fixResults.push(result);
+      }
+    }
+    for (const r of fixResults) {
+      if (r.fixed) {
+        info(`fixed [${r.finding.ruleId}]: ${r.message}`);
+      }
+    }
+    const fixedKeys = new Set(
+      fixResults.filter(r => r.fixed).map(r => suppressedKey(r.finding.ruleId, r.finding.file))
+    );
+    activeFindings = activeFindings.filter(
+      f => !fixedKeys.has(suppressedKey(f.ruleId, f.file))
+    );
+  }
+
+  // --except: write exception entries for remaining active findings.
+  if (opts.except && activeFindings.length > 0) {
+    const newExceptions: Exception[] = activeFindings.map(f => {
+      const entry: Exception = { rule: f.ruleId, path: f.file };
+      if (opts.reason) entry.reason = opts.reason;
+      if (opts.permanent) {
+        entry.permanent = true;
+      } else if (opts.issue) {
+        entry.issue = opts.issue;
+      }
+      return entry;
+    });
+    const merged = [...exceptions, ...newExceptions];
+    const exceptionsPath = join(cwd, "design-system/exceptions.json");
+    await mkdir(dirname(exceptionsPath), { recursive: true });
+    await writeFile(exceptionsPath, serializeExceptions(merged), "utf8");
+    info(`${newExceptions.length} exception(s) written to design-system/exceptions.json`);
+    activeFindings = [];
+  }
 
   // Group remaining findings by rule ID and output.
   const byRule = new Map<string, DriftFinding[]>();
@@ -220,7 +276,11 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
   }
 
   if (activeFindings.length > 0) {
-    info(`${activeFindings.length} drift finding(s) — add to design-system/exceptions.json to suppress`);
+    if (opts.fix) {
+      info(`${activeFindings.length} unfixable drift finding(s) require manual intervention`);
+    } else {
+      info(`${activeFindings.length} drift finding(s) — add to design-system/exceptions.json to suppress`);
+    }
     process.exit(1);
   } else {
     info("drift check: no drift findings");

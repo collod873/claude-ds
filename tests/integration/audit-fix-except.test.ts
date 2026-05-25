@@ -1,0 +1,193 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { runCli } from "../helpers/runcli";
+import { freshTmpDir, cleanup } from "../helpers/tmpdir";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+describe("audit --fix", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("auto-fixes DRIFT-META-KIND-MISSING by appending meta.kind export", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <button />; }\n`,
+    );
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/fixed.*DRIFT-META-KIND-MISSING/i);
+    expect(r.stdout).toMatch(/button\.tsx/);
+    // Verify file was actually modified
+    const content = await readFile(join(dir, "design-system/atoms/button.tsx"), "utf8");
+    expect(content).toMatch(/export const meta.*kind.*atom/);
+  });
+
+  it("reports unfixable findings as requiring manual intervention", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    // No DS imports → classifier says atom → DRIFT-MISPLACED (not auto-fixable)
+    await writeFile(
+      join(dir, "design-system/composites/solo-label.tsx"),
+      "export function SoloLabel() { return <span />; }",
+    );
+    const r = await runCli(["audit", "--pack", "next-react", "--fix"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/manual/i);
+    expect(r.stdout).toMatch(/DRIFT-MISPLACED/);
+  });
+
+  it("exits 0 when --fix resolves all findings", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/tag.tsx"),
+      `export function Tag() { return <span />; }\n`,
+    );
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+  });
+
+  it("exits 1 when unfixable findings remain after --fix", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/composites/orphan.tsx"),
+      "export function Orphan() { return <span />; }",
+    );
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).toBe(1);
+    // Both DRIFT-META-KIND-MISSING (fixable) and DRIFT-MISPLACED (not fixable) fire,
+    // but the meta-kind one should be fixed, leaving DRIFT-MISPLACED unresolved.
+    expect(r.stdout).toMatch(/DRIFT-MISPLACED/);
+  });
+
+  it("does not mutate files when --fix is not passed", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    const original = `export function Button() { return <button />; }\n`;
+    await writeFile(join(dir, "design-system/atoms/button.tsx"), original);
+    const r = await runCli(["audit"], { cwd: dir });
+    expect(r.code).toBe(1);
+    const content = await readFile(join(dir, "design-system/atoms/button.tsx"), "utf8");
+    expect(content).toBe(original);
+  });
+});
+
+describe("audit --except", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("creates exceptions.json with entries for each finding (non-interactive fallback)", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/composites/solo-label.tsx"),
+      "export function SoloLabel() { return <span />; }",
+    );
+    const r = await runCli(["audit", "--pack", "next-react", "--except", "--reason", "tracked workaround", "--issue", "#42"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/exception.*written/i);
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.exceptions).toHaveLength(1);
+    expect(parsed.exceptions[0].rule).toBe("DRIFT-MISPLACED");
+    expect(parsed.exceptions[0].path).toBe("design-system/composites/solo-label.tsx");
+    expect(parsed.exceptions[0].issue).toBe("#42");
+    expect(parsed.exceptions[0].reason).toBe("tracked workaround");
+  });
+
+  it("supports --permanent flag to create permanent exceptions (no issue required)", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/composites/solo-label.tsx"),
+      "export function SoloLabel() { return <span />; }",
+    );
+    const r = await runCli(["audit", "--pack", "next-react", "--except", "--permanent", "--reason", "architectural decision"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.exceptions[0].permanent).toBe(true);
+    expect(parsed.exceptions[0].reason).toBe("architectural decision");
+  });
+
+  it("appends to existing exceptions.json without overwriting", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/composites/solo-label.tsx"),
+      "export function SoloLabel() { return <span />; }",
+    );
+    await writeFile(
+      join(dir, "design-system/composites/another.tsx"),
+      "export function Another() { return <div />; }",
+    );
+    // Pre-existing exceptions.json with one entry
+    await writeFile(
+      join(dir, "design-system/exceptions.json"),
+      JSON.stringify({
+        exceptions: [
+          { rule: "DRIFT-MISPLACED", path: "design-system/composites/another.tsx", issue: "#10", reason: "existing" },
+        ],
+      }),
+    );
+    const r = await runCli(["audit", "--pack", "next-react", "--except", "--reason", "new workaround", "--issue", "#99"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    // Should have original + newly added
+    expect(parsed.exceptions.length).toBeGreaterThanOrEqual(2);
+    expect(parsed.exceptions.find((e: { path: string }) => e.path === "design-system/composites/solo-label.tsx")).toBeTruthy();
+    expect(parsed.exceptions.find((e: { path: string }) => e.path === "design-system/composites/another.tsx")).toBeTruthy();
+  });
+
+  it("exits 0 after writing exceptions (all findings suppressed)", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/composites/solo.tsx"),
+      "export function Solo() { return <span />; }",
+    );
+    const r = await runCli(["audit", "--pack", "next-react", "--except", "--reason", "wontfix", "--issue", "#1"], { cwd: dir });
+    expect(r.code).toBe(0);
+  });
+});
+
+describe("audit --fix --except", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("fixes fixable items first, then writes exceptions for the rest", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    // This file triggers both DRIFT-META-KIND-MISSING (fixable) and DRIFT-MISPLACED (not fixable)
+    await writeFile(
+      join(dir, "design-system/composites/orphan.tsx"),
+      "export function Orphan() { return <span />; }",
+    );
+    const r = await runCli(["audit", "--fix", "--except", "--reason", "pending move", "--issue", "#55"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Verify the file got the meta.kind fix
+    const content = await readFile(join(dir, "design-system/composites/orphan.tsx"), "utf8");
+    expect(content).toMatch(/export const meta.*kind/);
+    // Verify DRIFT-MISPLACED was excepted
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.exceptions.some((e: { rule: string }) => e.rule === "DRIFT-MISPLACED")).toBe(true);
+  });
+});
