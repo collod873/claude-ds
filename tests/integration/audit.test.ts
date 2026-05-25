@@ -247,6 +247,46 @@ describe("audit", () => {
     expect(r.stdout).not.toMatch(/unexpected: design-system\/patterns\/app-shell\.tsx/);
   });
 
+  // #129: generated showcase companions must not be flagged as unexpected
+  it("does NOT flag generated showcase companions under references/ as unexpected", async () => {
+    await mkdir(join(dir, "design-system/references"), { recursive: true });
+    await writeFile(join(dir, "design-system/references/tokens.showcase.tsx"), "export {}");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.stdout).not.toMatch(/unexpected: design-system\/references\/tokens\.showcase\.tsx/);
+  });
+
+  // #129: user-authored fixtures must not be flagged as unexpected
+  it("does NOT flag user-authored files under _fixtures/ as unexpected", async () => {
+    await mkdir(join(dir, "design-system/_fixtures"), { recursive: true });
+    await writeFile(join(dir, "design-system/_fixtures/mock-data.ts"), "export const x = 1;");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.stdout).not.toMatch(/unexpected: design-system\/_fixtures\/mock-data\.ts/);
+  });
+
+  // #129: user-authored hooks must not be flagged as unexpected
+  it("does NOT flag user-authored hooks as unexpected", async () => {
+    await mkdir(join(dir, ".claude/hooks"), { recursive: true });
+    await writeFile(join(dir, ".claude/hooks/drizzle-where-validator.sh"), "#!/bin/bash\nexit 0");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.stdout).not.toMatch(/unexpected: \.claude\/hooks\/drizzle-where-validator\.sh/);
+  });
+
+  // #129: .gitkeep must not be flagged when manifest declares .keep
+  it("does NOT flag .gitkeep as unexpected when manifest declares .keep", async () => {
+    await mkdir(join(dir, "design-system/icons"), { recursive: true });
+    await writeFile(join(dir, "design-system/icons/.gitkeep"), "");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.stdout).not.toMatch(/unexpected: design-system\/icons\/\.gitkeep/);
+  });
+
+  // #129: drift-audit.md should be flagged as deprecated-path orphan
+  it("flags drift-audit.md as deprecated-path orphan", async () => {
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/drift-audit.md"), "# Drift Audit");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.stdout).toMatch(/orphan.*drift-audit\.md/);
+  });
+
   // meta_kind_strict — DRIFT-META-KIND-MISSING fires when meta.kind absent + strict mode on
   it("does NOT fire DRIFT-META-KIND-MISSING when meta_kind_strict is false (default)", async () => {
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });

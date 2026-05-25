@@ -297,4 +297,36 @@ describe("doctor --completeness", () => {
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/--pack required/);
   });
+
+  // #129: generated showcase companions must not be flagged as orphans
+  it("does NOT flag generated showcase companions as orphans", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+    await mkdir(join(dir, "design-system/references"), { recursive: true });
+    await writeFile(join(dir, "design-system/references/tokens.showcase.tsx"), "export {}");
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.stdout).not.toMatch(/tokens\.showcase\.tsx/);
+    expect(r.code).toBe(0);
+  });
+
+  // #129: user-authored fixtures must not be flagged as orphans
+  it("does NOT flag user-authored files under _fixtures/ as orphans", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+    await writeFile(join(dir, "design-system/_fixtures/mock-data.ts"), "export const x = 1;");
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.stdout).not.toMatch(/mock-data\.ts/);
+    expect(r.code).toBe(0);
+  });
+
+  // #129: .gitkeep must not be flagged as orphan when manifest declares .keep
+  it("does NOT flag .gitkeep as orphan when manifest declares .keep", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+    await mkdir(join(dir, "design-system/icons"), { recursive: true });
+    await writeFile(join(dir, "design-system/icons/.gitkeep"), "");
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.stdout).not.toMatch(/icons\/\.gitkeep/);
+    expect(r.code).toBe(0);
+  });
 });

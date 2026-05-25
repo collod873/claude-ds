@@ -61,7 +61,7 @@ describe("parseManifest — deprecated_paths", () => {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "packs", "next-react");
     const raw = await readFile(resolve(root, "manifest.json"), "utf8");
     const m = parseManifest(raw);
-    expect(m.deprecated_paths).toHaveLength(19);
+    expect(m.deprecated_paths).toHaveLength(20);
     const paths = m.deprecated_paths.map(d => d.path);
     expect(paths).toContain("contracts.md");
     expect(paths).toContain("exceptions.json");

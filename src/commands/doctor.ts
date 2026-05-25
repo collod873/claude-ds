@@ -52,14 +52,32 @@ function resolveRoots(managedRoots: ManagedRoot[]): ManagedRoot[] {
   return managedRoots.length > 0 ? managedRoots : COMPLETENESS_FALLBACK_ROOTS;
 }
 
+function isManifestOrKeepfile(path: string, manifestPaths: Set<string>): boolean {
+  if (manifestPaths.has(path)) return true;
+  if (path.endsWith("/.gitkeep")) {
+    return manifestPaths.has(path.slice(0, -".gitkeep".length) + ".keep");
+  }
+  if (path.endsWith("/.keep")) {
+    return manifestPaths.has(path.slice(0, -".keep".length) + ".gitkeep");
+  }
+  return false;
+}
+
 async function findOrphanFiles(
   cwd: string,
   manifestPaths: Set<string>,
   roots: ManagedRoot[],
+  generatedPatterns: string[],
 ): Promise<string[]> {
   const openPrefixes = roots
     .filter(r => !r.strict)
     .map(r => `${stripTrailingSlash(r.root)}/`);
+
+  let isGenerated: ((path: string) => boolean) | null = null;
+  if (generatedPatterns.length > 0) {
+    const { default: picomatch } = await import("picomatch");
+    isGenerated = picomatch(generatedPatterns, { dot: true });
+  }
 
   const orphans: string[] = [];
   for (const { root, strict } of roots) {
@@ -67,7 +85,9 @@ async function findOrphanFiles(
     const files = await walkDir(cwd, stripTrailingSlash(root));
     for (const f of files) {
       if (openPrefixes.some(prefix => f.startsWith(prefix))) continue;
-      if (!manifestPaths.has(f)) orphans.push(f);
+      if (isManifestOrKeepfile(f, manifestPaths)) continue;
+      if (isGenerated && isGenerated(f)) continue;
+      orphans.push(f);
     }
   }
   return orphans;
@@ -136,7 +156,7 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
   const manifestPaths = new Set(manifest.files.map(f => f.path));
   const roots = resolveRoots(manifest.managed_roots);
 
-  const orphans = await findOrphanFiles(cwd, manifestPaths, roots);
+  const orphans = await findOrphanFiles(cwd, manifestPaths, roots, manifest.generated_patterns);
 
   const exceptionsPath = join(cwd, "design-system/exceptions.json");
   let exceptionWarnings: ExceptionLint[] = [];

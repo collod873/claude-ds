@@ -1,8 +1,12 @@
 {
+  "generated_patterns": [
+    "design-system/references/*.showcase.tsx"
+  ],
   "managed_roots": [
     { "root": ".claude/skills/", "strict": true },
-    { "root": ".claude/hooks/", "strict": true },
+    { "root": ".claude/hooks/", "strict": false },
     { "root": "design-system/", "strict": true },
+    { "root": "design-system/_fixtures/", "strict": false },
     { "root": "design-system/atoms/", "strict": false },
     { "root": "design-system/composites/", "strict": false },
     { "root": "design-system/patterns/", "strict": false }
@@ -424,6 +428,11 @@
       "path": ".claude/skills/scaffold-component/SKILL.md",
       "since_version": "v0.8.0",
       "reason": "Replaced by component/ and pattern/ skills covering all four tiers (issue #94)"
+    },
+    {
+      "path": "design-system/drift-audit.md",
+      "since_version": "v1.0.0",
+      "reason": "Pre-adopt planning doc superseded by claude-ds audit; safe to remove (issue #129)"
     }
   ],
   "canonical_paths": [

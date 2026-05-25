@@ -51,11 +51,23 @@ const FALLBACK_MANAGED_ROOTS = [
  * Per-root strictness (#57): roots marked strict:false are open for user growth —
  * files under those roots are never flagged as unexpected.
  */
+function isManifestOrKeepfile(path: string, manifestPaths: Set<string>): boolean {
+  if (manifestPaths.has(path)) return true;
+  if (path.endsWith("/.gitkeep")) {
+    return manifestPaths.has(path.slice(0, -".gitkeep".length) + ".keep");
+  }
+  if (path.endsWith("/.keep")) {
+    return manifestPaths.has(path.slice(0, -".keep".length) + ".gitkeep");
+  }
+  return false;
+}
+
 async function findUnexpectedFiles(
   cwd: string,
   manifestPaths: Set<string>,
   ignoreGlobs: string[],
   managedRoots: { root: string; strict: boolean }[],
+  generatedPatterns: string[],
 ): Promise<string[]> {
   const roots = managedRoots.length > 0 ? managedRoots : FALLBACK_MANAGED_ROOTS;
 
@@ -63,6 +75,10 @@ async function findUnexpectedFiles(
   const openPrefixes = roots
     .filter(r => !r.strict)
     .map(r => r.root.endsWith("/") ? r.root : `${r.root}/`);
+
+  const isGenerated = generatedPatterns.length > 0
+    ? picomatch(generatedPatterns, { dot: true })
+    : null;
 
   const unexpected: string[] = [];
   for (const { root, strict } of roots) {
@@ -75,7 +91,8 @@ async function findUnexpectedFiles(
     for (const f of files) {
       // Skip files that fall under a non-strict (open) sub-root.
       if (openPrefixes.some(prefix => f.startsWith(prefix))) continue;
-      if (manifestPaths.has(f)) continue;
+      if (isManifestOrKeepfile(f, manifestPaths)) continue;
+      if (isGenerated && isGenerated(f)) continue;
       // Check against ignore globs (same engine as lookalike.ts)
       const suppressed = ignoreGlobs.length > 0 && picomatch(ignoreGlobs, { dot: true })(f);
       if (!suppressed) unexpected.push(f);
@@ -143,7 +160,7 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
   // not in the manifest. Per-root strictness: strict roots flag extras; open roots allow
   // user growth (e.g. design-system/atoms/, design-system/composites/).
   const manifestFilePaths = new Set(manifest.files.map(f => f.path));
-  const unexpectedFiles = await findUnexpectedFiles(cwd, manifestFilePaths, unexpectedIgnoreGlobs, manifest.managed_roots);
+  const unexpectedFiles = await findUnexpectedFiles(cwd, manifestFilePaths, unexpectedIgnoreGlobs, manifest.managed_roots, manifest.generated_patterns);
   let unexpectedCount = 0;
   for (const f of unexpectedFiles) {
     info(`unexpected: ${f} — not in manifest (may be user-authored extension, pre-adopt orphan, or drift)`);
