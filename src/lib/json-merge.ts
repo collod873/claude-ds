@@ -178,6 +178,65 @@ function mergeHooks(
  * @param ownedKeys - top-level keys the CLI manages; `hooks` gets special treatment
  * @returns Formatted JSON string (2-space indent, trailing newline)
  */
+export function extractScriptPath(command: string): string {
+  return command.split(/\s+/)[0];
+}
+
+/**
+ * Prunes pack-owned hook entries from a settings JSON string based on a predicate
+ * applied to the extracted script path. Only pack-owned hooks (command starts with
+ * `.claude/hooks/`) are candidates; user hooks are never touched.
+ *
+ * @param current       - JSON string currently on disk (e.g. `.claude/settings.json`)
+ * @param shouldPrune   - receives the script path (without args); return true to remove
+ * @param indent        - JSON indent (default 2)
+ * @returns             - new JSON string, or null if nothing changed
+ */
+export function pruneHooksJson(
+  current: string,
+  shouldPrune: (scriptPath: string) => boolean,
+  indent: number | string = 2,
+): string | null {
+  let obj: Record<string, unknown>;
+  try { obj = JSON.parse(current); } catch { return null; }
+
+  const hooks = obj.hooks;
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return null;
+
+  let changed = false;
+  const pruned: Record<string, MatcherBlock[]> = {};
+
+  for (const [event, blocks] of Object.entries(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(blocks)) { pruned[event] = blocks as MatcherBlock[]; continue; }
+    const kept: MatcherBlock[] = [];
+    for (const block of blocks as MatcherBlock[]) {
+      if (!block || typeof block !== "object" || !Array.isArray(block.hooks)) {
+        kept.push(block);
+        continue;
+      }
+      const keptHooks: HookEntry[] = [];
+      for (const entry of block.hooks) {
+        if (isPackOwned(entry) && shouldPrune(extractScriptPath(entry.command!))) {
+          changed = true;
+        } else {
+          keptHooks.push(entry);
+        }
+      }
+      if (keptHooks.length > 0) {
+        kept.push({ ...block, hooks: keptHooks });
+      } else if (keptHooks.length < block.hooks.length) {
+        changed = true;
+      }
+    }
+    if (kept.length > 0) {
+      pruned[event] = kept;
+    }
+  }
+
+  if (!changed) return null;
+  return JSON.stringify({ ...obj, hooks: pruned }, null, indent) + "\n";
+}
+
 export function mergeJsonKeys(upstream: string, current: string, ownedKeys: string[], indent: number | string = 2): string {
   let upstreamObj: Record<string, unknown>;
   let currentObj: Record<string, unknown>;

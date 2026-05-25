@@ -212,6 +212,142 @@ describe("reconcile — root-dupe handling (#23)", () => {
   });
 });
 
+describe("reconcile — dangling hook pruning (#136)", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  async function setupDanglingHooks(opts?: { noExistingScript?: boolean }): Promise<void> {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      version: "v0.8.0", pack: "next-react", mode: "warn", removed: [],
+    }, null, 2) + "\n");
+
+    await mkdir(join(dir, ".claude", "hooks"), { recursive: true });
+    // Deprecated script on disk — reconcile will delete it
+    await writeFile(join(dir, ".claude/hooks/pre-write-ds-states.sh"), "#!/bin/bash\nexit 0\n");
+    // Non-deprecated script that should survive
+    if (!opts?.noExistingScript) {
+      await writeFile(join(dir, ".claude/hooks/atom-imports.sh"), "#!/bin/bash\nexit 0\n");
+    }
+
+    // settings.json with dangling + valid + user hooks
+    const settings = {
+      permissions: { allow: ["Bash(npm test:*)"] },
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Edit|Write",
+            hooks: [
+              { type: "command", command: ".claude/hooks/pre-write-ds-states.sh $CLAUDE_FILE_PATHS" },
+            ],
+          },
+        ],
+        PostToolUse: [
+          {
+            matcher: "Edit|Write",
+            hooks: [
+              { type: "command", command: ".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS" },
+              { type: "command", command: ".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS" },
+              { type: "command", command: "scripts/my-linter.sh $CLAUDE_FILE_PATHS" },
+            ],
+          },
+        ],
+      },
+    };
+    await writeFile(join(dir, ".claude/settings.json"), JSON.stringify(settings, null, 2) + "\n");
+  }
+
+  it("--force prunes dangling hook entries from settings.json after deleting deprecated scripts", async () => {
+    await setupDanglingHooks();
+    const r = await runCli(["reconcile", "--force"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // Deprecated script deleted from disk
+    expect(await exists(join(dir, ".claude/hooks/pre-write-ds-states.sh"))).toBe(false);
+    // Non-deprecated script preserved
+    expect(await exists(join(dir, ".claude/hooks/atom-imports.sh"))).toBe(true);
+
+    // settings.json updated
+    const settings = JSON.parse(await readFile(join(dir, ".claude/settings.json"), "utf8"));
+
+    // Dangling references removed: pre-write-ds-states.sh (just deleted) and token-only.sh (never existed)
+    const allCommands = extractAllCommands(settings.hooks);
+    expect(allCommands).not.toContain(".claude/hooks/pre-write-ds-states.sh $CLAUDE_FILE_PATHS");
+    expect(allCommands).not.toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
+
+    // Valid pack hook preserved
+    expect(allCommands).toContain(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
+    // User hook preserved
+    expect(allCommands).toContain("scripts/my-linter.sh $CLAUDE_FILE_PATHS");
+
+    // Non-hooks settings preserved
+    expect(settings.permissions).toEqual({ allow: ["Bash(npm test:*)"] });
+  });
+
+  it("--dry-run reports dangling hooks without modifying settings.json", async () => {
+    await setupDanglingHooks();
+    const r = await runCli(["reconcile", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // Report mentions dangling hooks
+    expect(r.stdout).toMatch(/token-only\.sh/);
+
+    // settings.json unchanged
+    const settings = JSON.parse(await readFile(join(dir, ".claude/settings.json"), "utf8"));
+    const allCommands = extractAllCommands(settings.hooks);
+    expect(allCommands).toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
+    expect(allCommands).toContain(".claude/hooks/pre-write-ds-states.sh $CLAUDE_FILE_PATHS");
+  });
+
+  it("idempotent: second reconcile --force finds nothing to prune", async () => {
+    await setupDanglingHooks();
+    await runCli(["reconcile", "--force"], { cwd: dir });
+
+    const r2 = await runCli(["reconcile", "--force"], { cwd: dir });
+    expect(r2.code).toBe(0);
+    expect(r2.stdout).toContain("no orphans or collisions found");
+  });
+
+  it("empty matcher blocks and event keys removed after pruning", async () => {
+    await setupDanglingHooks();
+    const r = await runCli(["reconcile", "--force"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const settings = JSON.parse(await readFile(join(dir, ".claude/settings.json"), "utf8"));
+    // PreToolUse had only the deprecated hook — entire event key should be removed
+    expect(settings.hooks.PreToolUse).toBeUndefined();
+    // PostToolUse still has atom-imports.sh and user hook
+    expect(settings.hooks.PostToolUse).toBeDefined();
+  });
+
+  it("no settings.json does not crash", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      version: "v0.8.0", pack: "next-react", mode: "warn", removed: [],
+    }, null, 2) + "\n");
+    // Plant a deprecated script but no settings.json
+    await mkdir(join(dir, ".claude", "hooks"), { recursive: true });
+    await writeFile(join(dir, ".claude/hooks/pre-write-ds-states.sh"), "#!/bin/bash\n");
+
+    const r = await runCli(["reconcile", "--force"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(await exists(join(dir, ".claude/hooks/pre-write-ds-states.sh"))).toBe(false);
+  });
+});
+
+function extractAllCommands(hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>): string[] {
+  const commands: string[] = [];
+  for (const blocks of Object.values(hooks)) {
+    if (!Array.isArray(blocks)) continue;
+    for (const block of blocks) {
+      if (!block?.hooks) continue;
+      for (const entry of block.hooks) {
+        if (entry.command) commands.push(entry.command);
+      }
+    }
+  }
+  return commands;
+}
+
 describe("audit — deprecated-path orphan reporting", () => {
   let dir: string;
   beforeEach(async () => { dir = await freshTmpDir(); });

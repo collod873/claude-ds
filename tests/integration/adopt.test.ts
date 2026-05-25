@@ -93,7 +93,7 @@ describe("adopt", () => {
     expect(settings.hooks.PostToolUse).toBeDefined();
     const postCommands = settings.hooks.PostToolUse[0].hooks.map((h: { command: string }) => h.command);
     expect(postCommands).toContain(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
-    expect(postCommands).toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
+    expect(postCommands).toContain(".claude/hooks/regenerate-companions.sh $CLAUDE_FILE_PATHS");
   });
 
   it("v0.1.3 regression: refuses adopt when lookalikes exist (CrewOps-shaped fixture)", async () => {

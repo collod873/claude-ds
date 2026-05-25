@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeJsonKeys } from "../../src/lib/json-merge";
+import { mergeJsonKeys, pruneHooksJson } from "../../src/lib/json-merge";
 
 // Helper to build a pack hook entry (uses .claude/hooks/ namespace)
 function packHook(event: string, matcher: string, commands: string[]) {
@@ -279,5 +279,138 @@ describe("mergeJsonKeys — hooks namespace-aware merge (CrewOps regression)", (
     const parsed = JSON.parse(result);
     expect(parsed.hooks.PostToolUse).toBeDefined();
     expect(parsed.permissions).toEqual({ allow: ["Bash(git:*)"] });
+  });
+});
+
+describe("pruneHooksJson — remove dangling pack-owned hook entries", () => {
+  it("removes pack-owned entries matching the predicate", () => {
+    const current = JSON.stringify({
+      hooks: {
+        PostToolUse: [
+          {
+            matcher: "Edit|Write",
+            hooks: [
+              { type: "command", command: ".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS" },
+              { type: "command", command: ".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS" },
+            ],
+          },
+        ],
+      },
+    });
+    const result = pruneHooksJson(current, (cmd) => cmd === ".claude/hooks/token-only.sh");
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!);
+    const commands = parsed.hooks.PostToolUse[0].hooks.map((h: { command: string }) => h.command);
+    expect(commands).toContain(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
+    expect(commands).not.toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
+  });
+
+  it("preserves user hooks even when all pack hooks are pruned", () => {
+    const current = JSON.stringify({
+      hooks: {
+        PostToolUse: [
+          {
+            matcher: "Edit|Write",
+            hooks: [
+              { type: "command", command: "scripts/my-linter.sh" },
+              { type: "command", command: ".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS" },
+            ],
+          },
+        ],
+      },
+    });
+    const result = pruneHooksJson(current, (cmd) => cmd === ".claude/hooks/token-only.sh");
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!);
+    expect(parsed.hooks.PostToolUse[0].hooks).toHaveLength(1);
+    expect(parsed.hooks.PostToolUse[0].hooks[0].command).toBe("scripts/my-linter.sh");
+  });
+
+  it("drops empty matcher blocks when all hooks pruned", () => {
+    const current = JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Edit|Write",
+            hooks: [
+              { type: "command", command: ".claude/hooks/pre-write-ds-states.sh $CLAUDE_FILE_PATHS" },
+            ],
+          },
+        ],
+        PostToolUse: [
+          {
+            matcher: "Edit|Write",
+            hooks: [
+              { type: "command", command: ".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS" },
+            ],
+          },
+        ],
+      },
+    });
+    const result = pruneHooksJson(current, (cmd) => cmd === ".claude/hooks/pre-write-ds-states.sh");
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!);
+    expect(parsed.hooks.PreToolUse).toBeUndefined();
+    expect(parsed.hooks.PostToolUse).toBeDefined();
+  });
+
+  it("returns null when nothing to prune", () => {
+    const current = JSON.stringify({
+      hooks: {
+        PostToolUse: [
+          {
+            matcher: "Edit|Write",
+            hooks: [
+              { type: "command", command: ".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS" },
+            ],
+          },
+        ],
+      },
+    });
+    const result = pruneHooksJson(current, () => false);
+    expect(result).toBeNull();
+  });
+
+  it("preserves non-hooks settings keys", () => {
+    const current = JSON.stringify({
+      permissions: { allow: ["Bash(npm test:*)"] },
+      hooks: {
+        PostToolUse: [
+          {
+            matcher: "Edit|Write",
+            hooks: [
+              { type: "command", command: ".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS" },
+            ],
+          },
+        ],
+      },
+    });
+    const result = pruneHooksJson(current, (cmd) => cmd === ".claude/hooks/token-only.sh");
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!);
+    expect(parsed.permissions).toEqual({ allow: ["Bash(npm test:*)"] });
+  });
+
+  it("returns null when no hooks key exists", () => {
+    const current = JSON.stringify({ permissions: { allow: [] } });
+    const result = pruneHooksJson(current, () => true);
+    expect(result).toBeNull();
+  });
+
+  it("does not prune user hooks even if predicate would match their path", () => {
+    const current = JSON.stringify({
+      hooks: {
+        PostToolUse: [
+          {
+            matcher: "Edit|Write",
+            hooks: [
+              { type: "command", command: "scripts/token-only.sh $CLAUDE_FILE_PATHS" },
+            ],
+          },
+        ],
+      },
+    });
+    const result = pruneHooksJson(current, () => true);
+    expect(result).toBeNull();
   });
 });
