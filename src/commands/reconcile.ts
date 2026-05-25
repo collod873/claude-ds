@@ -6,12 +6,14 @@ import { info, err, confirm } from "../lib/log.js";
 import { createInterface } from "node:readline/promises";
 import { scanRootDupes, RootDupeFinding } from "../lib/root-dupes.js";
 import { run, type Operation } from "../lib/runner.js";
-import { makeDeleteFiles, makeMergeRootToCanonical } from "../lib/ops/reconcile-mutations.js";
+import { makeDeleteFiles, makeMergeRootToCanonical, makePruneDanglingHooks } from "../lib/ops/reconcile-mutations.js";
+import { extractScriptPath } from "../lib/json-merge.js";
+import { readFile } from "node:fs/promises";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
 export interface ReconcileFinding {
-  kind: "deprecated" | "collision";
+  kind: "deprecated" | "collision" | "dangling-hook";
   path: string;
   detail: string;
 }
@@ -59,6 +61,64 @@ export async function scanClaudeMdCollision(cwd: string): Promise<ReconcileFindi
 }
 
 
+/**
+ * Scan `.claude/settings.json` for pack-owned hook entries whose referenced
+ * script does not exist on disk or is about to be deleted (in deprecatedPaths).
+ */
+export async function scanDanglingHooks(
+  cwd: string,
+  deprecatedPaths: DeprecatedPath[],
+): Promise<ReconcileFinding[]> {
+  const settingsPath = join(cwd, ".claude", "settings.json");
+  let raw: string;
+  try {
+    raw = await readFile(settingsPath, "utf8");
+  } catch {
+    return [];
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+
+  const hooks = parsed.hooks;
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return [];
+
+  const deprecatedSet = new Set(deprecatedPaths.map((d) => d.path));
+  const findings: ReconcileFinding[] = [];
+
+  for (const blocks of Object.values(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(blocks)) continue;
+    for (const block of blocks as Array<{ hooks?: Array<{ command?: string }> }>) {
+      if (!block?.hooks) continue;
+      for (const entry of block.hooks) {
+        if (typeof entry.command !== "string") continue;
+        if (!entry.command.startsWith(".claude/hooks/")) continue;
+        const scriptPath = extractScriptPath(entry.command);
+        const scriptExists = await exists(join(cwd, scriptPath));
+        const isDeprecated = deprecatedSet.has(scriptPath);
+        if (!scriptExists || isDeprecated) {
+          const detail = !scriptExists
+            ? "hook references non-existent script"
+            : "hook references deprecated script (will be deleted)";
+          findings.push({ kind: "dangling-hook", path: scriptPath, detail });
+        }
+      }
+    }
+  }
+
+  // Deduplicate — same script may appear in multiple hooks
+  const seen = new Set<string>();
+  return findings.filter((f) => {
+    if (seen.has(f.path)) return false;
+    seen.add(f.path);
+    return true;
+  });
+}
+
 export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cwd?: string }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const dryRun = opts.dryRun ?? false;
@@ -94,7 +154,9 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     : [];
   // #23: root-dupe scan — deprecated root files where canonical design-system/ copy also exists
   const rootDupeFindings = await scanRootDupes(cwd, manifest.deprecated_paths);
-  const allFindings = [...deprecatedFindings, ...collisionFindings];
+  // #136: dangling hook references in settings.json
+  const danglingHookFindings = await scanDanglingHooks(cwd, manifest.deprecated_paths);
+  const allFindings = [...deprecatedFindings, ...collisionFindings, ...danglingHookFindings];
 
   if (allFindings.length === 0 && rootDupeFindings.length === 0) {
     info("reconcile: no orphans or collisions found — tree is clean");
@@ -106,16 +168,19 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   const rootDupeMap = new Map(rootDupeFindings.map(f => [f.rootPath, f]));
   const lines: string[] = ["", "reconcile: found the following issues:", ""];
   for (const f of allFindings) {
-    const tag = f.kind === "collision" ? "[collision]" : "[orphan]  ";
+    const tag =
+      f.kind === "collision"     ? "[collision]    " :
+      f.kind === "dangling-hook" ? "[dangling-hook]" :
+                                   "[orphan]       ";
     lines.push(`  ${tag}  ${f.path}`);
-    lines.push(`             ${f.detail}`);
+    lines.push(`                  ${f.detail}`);
     // Annotate deprecated orphans that are also root-dupes (#23)
     const dupe = rootDupeMap.get(f.path);
     if (dupe) {
       const note = dupe.contentDiffers
         ? `content differs from ${dupe.canonicalPath} — merge required before deleting root`
         : `content identical to ${dupe.canonicalPath} — safe to delete root`;
-      lines.push(`             [root-dupe] ${note}`);
+      lines.push(`                  [root-dupe] ${note}`);
     }
   }
   // Report root-dupes that aren't already in deprecated findings (edge case)
@@ -252,5 +317,21 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     }
   }
 
-  info(`reconcile complete — ${deleted} deleted, ${skipped} skipped`);
+  // ── Prune dangling hook references (#136) ────────────────────────────────
+  // Runs after file deletions so that just-deleted scripts are caught alongside
+  // hooks that referenced never-shipped scripts.
+  let pruned = 0;
+  if (danglingHookFindings.length > 0) {
+    const pruneReport = await run(ctx, [makePruneDanglingHooks()], "apply");
+    pruned = pruneReport.applied.filter(c => c.kind === "write").length;
+    if (pruneReport.failed) {
+      info(`warning: could not prune hooks from settings.json: ${pruneReport.failed.error}`);
+    }
+  }
+
+  const parts: string[] = [];
+  if (deleted > 0) parts.push(`${deleted} deleted`);
+  if (pruned > 0) parts.push(`settings.json pruned`);
+  if (skipped > 0) parts.push(`${skipped} skipped`);
+  info(`reconcile complete — ${parts.length > 0 ? parts.join(", ") : "nothing to do"}`);
 }
