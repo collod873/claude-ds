@@ -1,6 +1,5 @@
 import { join } from "node:path";
 import { readdir, readFile, writeFile, stat } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import { info, err, confirm } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
 import { computeMigrationChain, runMigrations } from "../lib/migration-framework.js";
@@ -80,19 +79,6 @@ export async function upgradeCmd(opts: {
     info(`auto-detected allowed_imports: ${detectedImports.join(", ")}`);
   }
   info(`upgrade complete → ${to}`);
-
-  // Regenerate manifest.generated.ts if the build script exists —
-  // manage-manifest deletes the old generated file but nothing recreates it
-  // until a hook fires on the next .tsx write.
-  const buildManifest = join(cwd, "scripts", "build-manifest.ts");
-  try {
-    await stat(buildManifest);
-    info("regenerating manifest…");
-    spawnSync("node", ["--experimental-strip-types", buildManifest], {
-      cwd,
-      stdio: "inherit",
-    });
-  } catch { /* script doesn't exist yet — sync will deliver it */ }
 
   info("running sync to deliver pack files…");
   await syncCmd({ cwd, yes: opts.yes });
