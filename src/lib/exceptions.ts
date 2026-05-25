@@ -5,8 +5,9 @@ export class ExceptionError extends Error {}
 export interface Exception {
   rule: DriftRuleId;
   path: string;
-  issue?: string;   // URL or "#N" — required by lint, optional at parse time
-  reason?: string;  // human-readable note
+  issue?: string;      // URL or "#N" — required by lint, optional at parse time
+  reason?: string;     // human-readable note
+  permanent?: boolean; // skip issue-link lint when true
 }
 
 export interface ExceptionLint {
@@ -47,6 +48,7 @@ export function parseExceptions(raw: string): Exception[] {
     const exception: Exception = { rule: entry.rule as DriftRuleId, path: entry.path };
     if (typeof entry.issue === "string") exception.issue = entry.issue;
     if (typeof entry.reason === "string") exception.reason = entry.reason;
+    if (entry.permanent === true) exception.permanent = true;
     result.push(exception);
   }
 
@@ -76,6 +78,8 @@ export async function lintExceptions(
   const warnings: ExceptionLint[] = [];
 
   for (const e of exceptions) {
+    if (e.permanent) continue;
+
     if (!e.issue || !e.issue.trim()) {
       warnings.push({
         rule: e.rule,

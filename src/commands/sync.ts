@@ -1,9 +1,7 @@
 import { readFile, writeFile, stat, chmod } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { parseLsRemote } from "../lib/tags.js";
 import { info, err, confirm } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
 import { run } from "../lib/runner.js";
@@ -11,7 +9,7 @@ import { detectFormatter, runFormatter } from "../lib/formatter.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 
-export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; skipFetch?: boolean; yes?: boolean }) {
+export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean }) {
   const cwd = opts.cwd ?? process.cwd();
   try { await stat(join(cwd, ".claude-ds.json")); } catch { err(".claude-ds.json absent"); process.exit(2); }
 
@@ -37,23 +35,14 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; ski
   const ctx = await loadProject(cwd);
   const cfg = ctx.cfg;
 
-  // Resolve upstream target version and (in offline mode) override the pack source.
-  let target: string;
+  // Version is always the consumer's packVersion — never fetched from remote tags.
+  const target = cfg.packVersion;
   const opOpts: Parameters<typeof makeSyncPackFiles>[0] = {};
   if (opts.offlineFixture) {
-    // Relative fixture paths are resolved from repo root (same as how pack names work in init).
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..", "..");
     opOpts.packDir = resolve(repoRoot, opts.offlineFixture);
     opOpts.manifest = parseManifest(await readFile(join(opOpts.packDir, "manifest.json"), "utf8"));
-    target = cfg.packVersion;
-  } else if (opts.skipFetch) {
-    target = cfg.packVersion;
-  } else {
-    const r = spawnSync("git", ["ls-remote", "--tags", "https://github.com/collod873/claude-ds"], { encoding: "utf8" });
-    if (r.status !== 0) { err("network: cannot reach upstream"); process.exit(2); }
-    const tags = parseLsRemote(r.stdout);
-    target = tags[tags.length - 1] ?? cfg.packVersion;
   }
 
   // Plan once. The Runner is the only thing that writes; we just stage Changes here.

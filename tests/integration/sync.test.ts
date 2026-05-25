@@ -138,7 +138,7 @@ describe("settings.json hybrid+json preservation", () => {
     expect(settings.hooks.PostToolUse).toBeDefined();
     const postCommands = settings.hooks.PostToolUse[0].hooks.map((h: { command: string }) => h.command);
     expect(postCommands).toContain(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
-    expect(postCommands).toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
+    expect(postCommands).toContain(".claude/hooks/regenerate-companions.sh $CLAUDE_FILE_PATHS");
   });
 });
 
@@ -187,6 +187,34 @@ describe("Issue #18c — sync preview create: vs rewrite: labels", () => {
     const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "n\n" });
     expect(r.stdout).toMatch(/rewrite: \.claude\/hooks\/atom-imports\.sh/);
   }, 30_000);
+});
+
+describe("Issue #138 — sync reports packVersion from .claude-ds.json", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("#138 sync complete message shows packVersion from config", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ packVersion: "v2.0.0", pack: "next-react", mode: "warn" }));
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/sync complete → v2\.0\.0/);
+  });
+
+  it("#138 legacy 'version' key is reported correctly in completion message", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version: "v1.5.0", pack: "next-react", mode: "warn" }));
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/sync complete → v1\.5\.0/);
+  });
+
+  it("#138 .claude-ds.json retains packVersion after sync", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ packVersion: "v2.0.0", pack: "next-react", mode: "warn" }));
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
+    expect(r.code).toBe(0);
+    const cfgAfter = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfgAfter.packVersion).toBe("v2.0.0");
+  });
 });
 
 describe("Issue #18d — sync preview config line", () => {

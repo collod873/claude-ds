@@ -162,6 +162,55 @@ function mergeHooks(
   return base;
 }
 
+export function extractScriptPath(command: string): string {
+  return command.split(/\s+/)[0];
+}
+
+export function pruneHooksJson(
+  current: string,
+  shouldPrune: (scriptPath: string) => boolean,
+  indent: number | string = 2,
+): string | null {
+  let obj: Record<string, unknown>;
+  try { obj = JSON.parse(current); } catch { return null; }
+
+  const hooks = obj.hooks;
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return null;
+
+  let changed = false;
+  const pruned: Record<string, unknown> = {};
+
+  for (const [event, blocks] of Object.entries(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(blocks)) { pruned[event] = blocks; continue; }
+    const kept: MatcherBlock[] = [];
+    for (const block of blocks as MatcherBlock[]) {
+      if (!block || typeof block !== "object" || !Array.isArray(block.hooks)) {
+        kept.push(block);
+        continue;
+      }
+      const keptHooks: HookEntry[] = [];
+      for (const entry of block.hooks) {
+        if (isPackOwned(entry) && shouldPrune(extractScriptPath(entry.command!))) {
+          changed = true;
+        } else {
+          keptHooks.push(entry);
+        }
+      }
+      if (keptHooks.length > 0) {
+        kept.push({ ...block, hooks: keptHooks });
+      } else if (keptHooks.length < block.hooks.length) {
+        changed = true;
+      }
+    }
+    if (kept.length > 0) {
+      pruned[event] = kept;
+    }
+  }
+
+  if (!changed) return null;
+  return JSON.stringify({ ...obj, hooks: pruned }, null, indent) + "\n";
+}
+
 /**
  * Merges two JSON strings, with special namespace-aware handling for the `hooks` key.
  *
