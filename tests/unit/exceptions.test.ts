@@ -277,6 +277,7 @@ describe("lintExceptions", () => {
     const checker: IssueChecker = vi.fn().mockResolvedValue("closed");
     const warnings = await lintExceptions(ex, checker);
     expect(warnings).toHaveLength(0);
+    expect(checker).not.toHaveBeenCalled();
   });
 
   it("still warns on non-permanent exception without issue link", async () => {
@@ -289,6 +290,17 @@ describe("lintExceptions", () => {
     const warnings = await lintExceptions(ex);
     expect(warnings).toHaveLength(1);
     expect(warnings[0].path).toBe("design-system/atoms/foo.tsx");
+  });
+
+  it("permanent:false is not treated as permanent — still warns on missing issue", async () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/foo.tsx", permanent: false, reason: "not actually permanent" },
+      ],
+    }));
+    const warnings = await lintExceptions(ex);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].warning).toMatch(/no issue link/i);
   });
 
   it("permanent exception with both permanent:true and issue link is valid (no conflict)", async () => {
