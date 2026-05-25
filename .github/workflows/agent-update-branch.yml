@@ -15,7 +15,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      checks: read
 
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
