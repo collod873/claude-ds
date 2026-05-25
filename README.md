@@ -2,11 +2,11 @@
 
 Shared design-system governance + scaffold CLI.
 
-Install (per-project, no global): `npx github:collod873/claude-ds#v0.8.0 init --pack next-react`
+Install (per-project, no global): `npx github:collod873/claude-ds#v1.0.0 init --pack next-react`
 
-Pin to a specific release: `npx github:collod873/claude-ds#v0.8.0 <subcommand>`
+Pin to a specific release: `npx github:collod873/claude-ds#v1.0.0 <subcommand>`
 
-Subcommands: `init`, `audit`, `adopt`, `classify`, `migrate`, `reconform`, `enforce`, `sync`, `upgrade`, `version`.
+Subcommands: `init`, `adopt`, `classify`, `audit`, `doctor`, `sync`, `upgrade`, `enforce`, `reconform`, `migrate`, `version`.
 
 See `.claude/spec.md` for the full surface.
 

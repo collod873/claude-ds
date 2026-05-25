@@ -1,6 +1,6 @@
 {
   "name": "claude-ds",
-  "version": "0.7.16",
+  "version": "1.0.0",
   "type": "module",
   "bin": {
     "claude-ds": "dist/cli.js"
