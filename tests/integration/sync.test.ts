@@ -137,8 +137,8 @@ describe("settings.json hybrid+json preservation", () => {
     // Pack's PostToolUse hooks added
     expect(settings.hooks.PostToolUse).toBeDefined();
     const postCommands = settings.hooks.PostToolUse[0].hooks.map((h: { command: string }) => h.command);
-    expect(postCommands).toContain(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
-    expect(postCommands).toContain(".claude/hooks/regenerate-companions.sh $CLAUDE_FILE_PATHS");
+    expect(postCommands).toContain(".claude/hooks/atom-imports.sh");
+    expect(postCommands).toContain(".claude/hooks/regenerate-companions.sh");
   });
 });
 

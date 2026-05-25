@@ -10,6 +10,7 @@ const VALIDATORS_LIB = resolve("packs/next-react/files/scripts/lib/ds-validators
 const COMPANION_SCRIPT = resolve("packs/next-react/files/scripts/generate-showcase-companion.ts");
 const BUILD_MANIFEST_SCRIPT = resolve("packs/next-react/files/scripts/build-manifest.ts");
 const LOG_FAILURE = resolve("packs/next-react/files/.claude/hooks/lib/log-failure.sh");
+const READ_HOOK_INPUT = resolve("packs/next-react/files/.claude/hooks/lib/read-hook-input.sh");
 
 const FIXTURE_ATOM_IMPORTS_DS = resolve(
   "packs/next-react/tests/fixtures/regenerate-companions-atom-imports-ds"
@@ -49,6 +50,7 @@ async function scaffold(dir: string, fixtureSrc: string): Promise<void> {
   const hooksDir = join(dir, ".claude", "hooks", "lib");
   mkdirSync(hooksDir, { recursive: true });
   copyFileSync(LOG_FAILURE, join(hooksDir, "log-failure.sh"));
+  copyFileSync(READ_HOOK_INPUT, join(hooksDir, "read-hook-input.sh"));
 
   const hookDest = join(dir, ".claude", "hooks", "regenerate-companions.sh");
   copyFileSync(HOOK, hookDest);
@@ -76,10 +78,12 @@ function runHook(
   relFile: string
 ): { status: number | null; stderr: string; stdout: string } {
   const absFile = join(dir, relFile);
-  const r = spawnSync("bash", [".claude/hooks/regenerate-companions.sh", absFile], {
+  const input = JSON.stringify({ tool_name: "Write", tool_input: { file_path: absFile } });
+  const r = spawnSync("bash", [".claude/hooks/regenerate-companions.sh"], {
     cwd: dir,
     encoding: "utf8",
     timeout: 15_000,
+    input,
   });
   return { status: r.status, stderr: r.stderr ?? "", stdout: r.stdout ?? "" };
 }

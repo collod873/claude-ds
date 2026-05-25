@@ -39,6 +39,10 @@
       "category": "managed"
     },
     {
+      "path": ".claude/hooks/lib/read-hook-input.sh",
+      "category": "managed"
+    },
+    {
       "path": ".claude/hooks/README.md",
       "category": "seeded"
     },

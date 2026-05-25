@@ -7,9 +7,8 @@ Tier B (`design-system/**`) hooks run in this order per scaffold authority:
 1. `pre-write-ds-exceptions.sh` — EXC-*
 2. `pre-write-ds-tokens.sh` — TOK-*
 3. `pre-write-ds-tier-imports.sh` — TIER-*
-4. `pre-write-ds-states.sh` — STATE-*
-5. `pre-write-ds-manifest.sh` — MAN-*
-6. `pre-write-ds-similarity.sh` — SIM-*
+4. `pre-write-ds-manifest.sh` — MAN-*
+5. `pre-write-ds-similarity.sh` — SIM-*
 
 Tier B PostToolUse:
 
@@ -35,6 +34,18 @@ exit 2
 
 `lib/log-failure.sh` is the single sanctioned path for appending to `design-system/failure-log.md`.
 CI (`scripts/check-hook-contract.sh`) enforces that no hook exits 2 without routing through it.
+
+## Input contract
+
+The Claude Code hook runner pipes JSON to stdin containing the tool invocation:
+
+```json
+{"tool_name":"Write","tool_input":{"file_path":"/abs/path/to/file.tsx"}}
+```
+
+Every hook sources `lib/read-hook-input.sh` which parses this JSON (via `jq`) and
+sets `HOOK_FILE_PATH` (Edit/Write matchers) or `HOOK_BASH_COMMAND` (Bash matcher).
+Falls back to positional `$1` for direct invocation / `doctor --verify-hooks`.
 
 ## Matcher wiring
 

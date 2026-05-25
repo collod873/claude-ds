@@ -5,7 +5,9 @@
 # AESTH-003: no raw spacing literals (px/rem integers) in padding/margin/gap or Tailwind arbitrary values
 set -euo pipefail
 
-file="$1"
+source "$(dirname "$0")/lib/read-hook-input.sh"
+file="$HOOK_FILE_PATH"
+if [ -z "$file" ]; then exit 0; fi
 
 # Skip non-.tsx files
 case "$file" in

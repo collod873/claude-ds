@@ -5,7 +5,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync } from "nod
 import { tmpdir } from "node:os";
 
 function runHook(script: string, file: string) {
-  const r = spawnSync("bash", [resolve("packs/next-react/files/.claude/hooks", script), resolve("packs/next-react/tests/fixtures", file)], { encoding: "utf8" });
+  const absFile = resolve("packs/next-react/tests/fixtures", file);
+  const input = JSON.stringify({ tool_name: "Write", tool_input: { file_path: absFile } });
+  const r = spawnSync("bash", [resolve("packs/next-react/files/.claude/hooks", script)], { encoding: "utf8", input });
   return { code: r.status ?? 1, stderr: r.stderr };
 }
 
@@ -74,19 +76,20 @@ describe("next-react hooks (fixture)", () => {
 
   // COMMIT-* tests
   it("pre-commit-global: skips non-git-commit bash commands (exit 0)", () => {
+    const input = JSON.stringify({ tool_name: "Bash", tool_input: { command: "npm run build" } });
     const r = spawnSync(
       "bash",
-      [resolve("packs/next-react/files/.claude/hooks", "pre-commit-global.sh"), "npm run build"],
-      { encoding: "utf8" }
+      [resolve("packs/next-react/files/.claude/hooks", "pre-commit-global.sh")],
+      { encoding: "utf8", input }
     );
     expect(r.status).toBe(0);
   });
   it("pre-commit-global: exits 1 with COMMIT-000 when commitlint not in PATH", () => {
-    // Use a PATH that has bash/coreutils but no commitlint binary
+    const input = JSON.stringify({ tool_name: "Bash", tool_input: { command: "git commit -m 'test'" } });
     const r = spawnSync(
       "bash",
-      [resolve("packs/next-react/files/.claude/hooks", "pre-commit-global.sh"), "git commit -m 'test'"],
-      { encoding: "utf8", env: { ...process.env, PATH: "/bin:/usr/bin" } }
+      [resolve("packs/next-react/files/.claude/hooks", "pre-commit-global.sh")],
+      { encoding: "utf8", input, env: { ...process.env, PATH: "/bin:/usr/bin" } }
     );
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/COMMIT-000/);
@@ -103,7 +106,6 @@ describe("next-react hooks (fixture)", () => {
     expect(r.stderr).toMatch(/SIM-000/);
   });
   it("pre-write-ds-similarity: exits 0 when similarity-check.ts present and no near-duplicates found", () => {
-    // Build a temp dir with scripts/ + clean design-system/ so hook can delegate successfully.
     const tmp = mkdtempSync(join(tmpdir(), "sim-hook-"));
     try {
       mkdirSync(join(tmp, "scripts"), { recursive: true });
@@ -112,13 +114,63 @@ describe("next-react hooks (fixture)", () => {
         resolve("packs/next-react/files/scripts/similarity-check.ts"),
         join(tmp, "scripts", "similarity-check.ts")
       );
-      writeFileSync(join(tmp, "design-system", "atoms", "Button.tsx"), "");
+      const targetFile = join(tmp, "design-system", "atoms", "Button.tsx");
+      writeFileSync(targetFile, "");
+      const input = JSON.stringify({ tool_name: "Write", tool_input: { file_path: targetFile } });
       const r = spawnSync(
         "bash",
-        [resolve("packs/next-react/files/.claude/hooks/pre-write-ds-similarity.sh"),
-         join(tmp, "design-system", "atoms", "Button.tsx")],
-        { encoding: "utf8", cwd: tmp }
+        [resolve("packs/next-react/files/.claude/hooks/pre-write-ds-similarity.sh")],
+        { encoding: "utf8", cwd: tmp, input }
       );
+      expect(r.status).toBe(0);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("hook stdin contract", () => {
+  it("hooks exit 0 gracefully when invoked with no stdin and no args", () => {
+    const hooks = [
+      "pre-write-tsx.sh",
+      "pre-write-ds-manifest.sh",
+      "pre-write-ds-exceptions.sh",
+      "pre-write-ds-tokens.sh",
+      "pre-write-ds-tier-imports.sh",
+      "pre-write-ds-similarity.sh",
+      "regenerate-companions.sh",
+      "atom-imports.sh",
+    ];
+    for (const hook of hooks) {
+      const r = spawnSync("bash", [resolve("packs/next-react/files/.claude/hooks", hook)], {
+        encoding: "utf8",
+        input: "",
+      });
+      expect(r.status, `${hook} should exit 0 with no input`).toBe(0);
+    }
+  });
+
+  it("pre-commit-global: exits 0 when invoked with no stdin and no args", () => {
+    const input = JSON.stringify({ tool_name: "Bash", tool_input: { command: "" } });
+    const r = spawnSync("bash", [resolve("packs/next-react/files/.claude/hooks", "pre-commit-global.sh")], {
+      encoding: "utf8",
+      input,
+    });
+    expect(r.status).toBe(0);
+  });
+
+  it("hooks work with paths containing spaces", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "hook-spaces-test-"));
+    try {
+      const dir = join(tmp, "My Project", "design-system", "atoms");
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, "Button.tsx");
+      writeFileSync(file, "export const Button = () => <button>click</button>;\n");
+      const input = JSON.stringify({ tool_name: "Write", tool_input: { file_path: file } });
+      const r = spawnSync("bash", [resolve("packs/next-react/files/.claude/hooks", "pre-write-ds-tokens.sh")], {
+        encoding: "utf8",
+        input,
+      });
       expect(r.status).toBe(0);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
