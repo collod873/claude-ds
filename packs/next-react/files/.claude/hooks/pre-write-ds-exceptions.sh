@@ -3,7 +3,9 @@
 # Only fires when $1 is design-system/exceptions.json (path-suffix match).
 set -euo pipefail
 
-file="$1"
+source "$(dirname "$0")/lib/read-hook-input.sh"
+file="$HOOK_FILE_PATH"
+if [ -z "$file" ]; then exit 0; fi
 
 # Only fire for exceptions.json
 case "$file" in

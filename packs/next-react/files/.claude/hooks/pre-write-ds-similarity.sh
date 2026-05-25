@@ -4,7 +4,9 @@
 # Until Slice F ships, exits 1 (self-error) so the absence is visible without blocking.
 set -euo pipefail
 
-file="$1"
+source "$(dirname "$0")/lib/read-hook-input.sh"
+file="$HOOK_FILE_PATH"
+if [ -z "$file" ]; then exit 0; fi
 
 similarity_script="scripts/similarity-check.ts"
 

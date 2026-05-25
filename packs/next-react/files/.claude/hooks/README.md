@@ -36,6 +36,18 @@ exit 2
 `lib/log-failure.sh` is the single sanctioned path for appending to `design-system/failure-log.md`.
 CI (`scripts/check-hook-contract.sh`) enforces that no hook exits 2 without routing through it.
 
+## Input contract
+
+The Claude Code hook runner pipes JSON to stdin containing the tool invocation:
+
+```json
+{"tool_name":"Write","tool_input":{"file_path":"/abs/path/to/file.tsx"}}
+```
+
+Every hook sources `lib/read-hook-input.sh` which parses this JSON (via `jq`) and
+sets `HOOK_FILE_PATH` (Edit/Write matchers) or `HOOK_BASH_COMMAND` (Bash matcher).
+Falls back to positional `$1` for direct invocation / `doctor --verify-hooks`.
+
 ## Matcher wiring
 
 Hooks are registered in `.claude/settings.json` under `hooks.PreToolUse` or `hooks.PostToolUse`,

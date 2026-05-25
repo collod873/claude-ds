@@ -128,8 +128,8 @@ describe("mergeJsonKeys — hooks namespace-aware merge (CrewOps regression)", (
         {
           matcher: "Edit|Write",
           hooks: [
-            { type: "command", command: ".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS" },
-            { type: "command", command: ".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS" },
+            { type: "command", command: ".claude/hooks/atom-imports.sh" },
+            { type: "command", command: ".claude/hooks/token-only.sh" },
           ],
         },
       ],
@@ -183,7 +183,7 @@ describe("mergeJsonKeys — hooks namespace-aware merge (CrewOps regression)", (
     expect(postEntry).toBeDefined();
     const commands = postEntry.hooks.map((h: { command: string }) => h.command);
     expect(commands).toContain("scripts/my-linter.sh");
-    expect(commands).toContain(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
+    expect(commands).toContain(".claude/hooks/atom-imports.sh");
   });
 
   it("same matcher: user's hooks come first, pack's appended after", () => {
@@ -201,7 +201,7 @@ describe("mergeJsonKeys — hooks namespace-aware merge (CrewOps regression)", (
     const parsed = JSON.parse(result);
     const postEntry = parsed.hooks.PostToolUse.find((e: { matcher: string }) => e.matcher === "Edit|Write");
     expect(postEntry.hooks[0].command).toBe("scripts/my-linter.sh");
-    expect(postEntry.hooks[1].command).toBe(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
+    expect(postEntry.hooks[1].command).toBe(".claude/hooks/atom-imports.sh");
   });
 
   it("claude-ds entries deduplicated by command when upstream resends on re-merge", () => {
@@ -213,7 +213,7 @@ describe("mergeJsonKeys — hooks namespace-aware merge (CrewOps regression)", (
     const parsed = JSON.parse(secondMerge);
     const postEntry = parsed.hooks.PostToolUse.find((e: { matcher: string }) => e.matcher === "Edit|Write");
     const atomCount = postEntry.hooks.filter(
-      (h: { command: string }) => h.command === ".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS"
+      (h: { command: string }) => h.command === ".claude/hooks/atom-imports.sh"
     ).length;
     expect(atomCount).toBe(1);
   });

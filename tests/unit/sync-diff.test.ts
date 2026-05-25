@@ -32,7 +32,7 @@ describe("sync-diff (hybrid json)", () => {
   // Realistic pack hook shape — commands under .claude/hooks/ namespace
   const packHookEntry = {
     matcher: "Edit|Write",
-    hooks: [{ type: "command", command: ".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS" }],
+    hooks: [{ type: "command", command: ".claude/hooks/atom-imports.sh" }],
   };
 
   const makeSettings = (hooks: unknown, extra?: Record<string, unknown>) =>

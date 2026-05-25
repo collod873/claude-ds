@@ -3,7 +3,8 @@
 # Only acts on `git commit` invocations; skips all others.
 # Enforces commitlint + runs axe-core WCAG AA scan on changed design-system components.
 
-cmd="${CLAUDE_BASH_COMMAND:-${1:-}}"
+source "$(dirname "$0")/lib/read-hook-input.sh"
+cmd="$HOOK_BASH_COMMAND"
 
 # Skip non-git-commit commands
 case "$cmd" in

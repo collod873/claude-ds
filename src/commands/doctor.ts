@@ -318,7 +318,7 @@ function runHookWithTimeout(
   timeoutMs: number,
 ): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve) => {
-    execFile("bash", [hookPath, arg], { cwd, timeout: timeoutMs }, (err, _stdout, stderr) => {
+    const child = execFile("bash", [hookPath, arg], { cwd, timeout: timeoutMs }, (err, _stdout, stderr) => {
       // When hook exits non-zero, err is set. err.code holds numeric exit code for ChildProcessError.
       const code = err
         ? (typeof (err as NodeJS.ErrnoException & { code?: unknown }).code === "number"
@@ -327,6 +327,7 @@ function runHookWithTimeout(
         : 0;
       resolve({ code, stderr });
     });
+    child.stdin?.end();
   });
 }
 
