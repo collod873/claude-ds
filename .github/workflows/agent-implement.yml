@@ -93,6 +93,7 @@ jobs:
         run: |
           gh issue edit "$ISSUE_NUMBER" --remove-label "agent:implement" || true
           gh issue edit "$ISSUE_NUMBER" --remove-label "agent:blocked" || true
+          gh issue edit "$ISSUE_NUMBER" --remove-label "ready-for-agent" || true
           gh issue edit "$ISSUE_NUMBER" --add-label "agent:in-progress"
 
       - name: Checkout main
