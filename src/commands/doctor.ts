@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { parseManifest, type ManagedRoot } from "../lib/manifest.js";
+import { parseManifest, isManifestOrKeepfile, type ManagedRoot } from "../lib/manifest.js";
 import { parseConfig } from "../lib/config.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
@@ -50,17 +50,6 @@ function stripTrailingSlash(p: string): string {
 /** Returns the configured managed roots, or the fallback list if none are declared. */
 function resolveRoots(managedRoots: ManagedRoot[]): ManagedRoot[] {
   return managedRoots.length > 0 ? managedRoots : COMPLETENESS_FALLBACK_ROOTS;
-}
-
-function isManifestOrKeepfile(path: string, manifestPaths: Set<string>): boolean {
-  if (manifestPaths.has(path)) return true;
-  if (path.endsWith("/.gitkeep")) {
-    return manifestPaths.has(path.slice(0, -".gitkeep".length) + ".keep");
-  }
-  if (path.endsWith("/.keep")) {
-    return manifestPaths.has(path.slice(0, -".keep".length) + ".gitkeep");
-  }
-  return false;
 }
 
 async function findOrphanFiles(

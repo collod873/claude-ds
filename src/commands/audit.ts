@@ -1,7 +1,7 @@
 import { readFile, stat, readdir } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseManifest } from "../lib/manifest.js";
+import { parseManifest, isManifestOrKeepfile } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
 import { info, err } from "../lib/log.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
@@ -51,17 +51,6 @@ const FALLBACK_MANAGED_ROOTS = [
  * Per-root strictness (#57): roots marked strict:false are open for user growth —
  * files under those roots are never flagged as unexpected.
  */
-function isManifestOrKeepfile(path: string, manifestPaths: Set<string>): boolean {
-  if (manifestPaths.has(path)) return true;
-  if (path.endsWith("/.gitkeep")) {
-    return manifestPaths.has(path.slice(0, -".gitkeep".length) + ".keep");
-  }
-  if (path.endsWith("/.keep")) {
-    return manifestPaths.has(path.slice(0, -".keep".length) + ".gitkeep");
-  }
-  return false;
-}
-
 async function findUnexpectedFiles(
   cwd: string,
   manifestPaths: Set<string>,

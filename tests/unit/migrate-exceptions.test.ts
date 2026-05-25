@@ -128,6 +128,61 @@ describe("migrate-exceptions v1.0.0", () => {
     expect(written.exceptions[0].path).toBe("design-system/atoms/button.tsx");
   });
 
+  it("handles mixed old-shape and new-shape entries in the same file", async () => {
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [
+        {
+          rule_id: "DRIFT-MISPLACED",
+          file: "design-system/composites/top-bar.tsx",
+          reason: "legacy",
+        },
+        {
+          rule: "DRIFT-MISPLACED",
+          path: "design-system/composites/sidebar.tsx",
+          reason: "singleton",
+          issue: "#50",
+        },
+      ],
+    }, null, 2));
+
+    const changes = await migrateExceptions.plan(mockCtx(dir));
+    expect(changes).toHaveLength(1);
+    const written = JSON.parse((changes[0] as { after: Buffer }).after.toString("utf8"));
+    expect(written.exceptions).toHaveLength(2);
+    expect(written.exceptions[0].rule).toBe("DRIFT-MISPLACED");
+    expect(written.exceptions[0].path).toBe("design-system/composites/top-bar.tsx");
+    expect(written.exceptions[1].rule).toBe("DRIFT-MISPLACED");
+    expect(written.exceptions[1].path).toBe("design-system/composites/sidebar.tsx");
+    expect(written.exceptions[1].issue).toBe("#50");
+  });
+
+  it("silently drops entries missing both rule/rule_id", async () => {
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [
+        { file: "design-system/atoms/foo.tsx", reason: "no rule" },
+        { rule_id: "DRIFT-MISPLACED", file: "design-system/atoms/bar.tsx" },
+      ],
+    }, null, 2));
+
+    const changes = await migrateExceptions.plan(mockCtx(dir));
+    expect(changes).toHaveLength(1);
+    const written = JSON.parse((changes[0] as { after: Buffer }).after.toString("utf8"));
+    expect(written.exceptions).toHaveLength(1);
+    expect(written.exceptions[0].path).toBe("design-system/atoms/bar.tsx");
+  });
+
+  it("no-ops on empty exceptions array with wrapped shape", async () => {
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [],
+    }, null, 2));
+
+    const changes = await migrateExceptions.plan(mockCtx(dir));
+    expect(changes).toHaveLength(0);
+  });
+
   it("preserves existing issue field during migration", async () => {
     await mkdir(join(dir, "design-system"), { recursive: true });
     await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
