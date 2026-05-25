@@ -189,6 +189,27 @@ describe("Issue #18c — sync preview create: vs rewrite: labels", () => {
   }, 30_000);
 });
 
+describe("Issue #138 — sync reports packVersion from .claude-ds.json", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("#138 sync complete message shows packVersion from config", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ packVersion: "v2.0.0", pack: "next-react", mode: "warn" }));
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/sync complete → v2\.0\.0/);
+  });
+
+  it("#138 .claude-ds.json retains packVersion after sync", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ packVersion: "v2.0.0", pack: "next-react", mode: "warn" }));
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
+    expect(r.code).toBe(0);
+    const cfgAfter = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfgAfter.packVersion).toBe("v2.0.0");
+  });
+});
+
 describe("Issue #18d — sync preview config line", () => {
   let dir: string;
   beforeEach(async () => { dir = await freshTmpDir(); });
