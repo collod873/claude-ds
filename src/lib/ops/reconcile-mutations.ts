@@ -31,11 +31,6 @@ export function makeDeleteFiles(relPaths: string[]): Operation {
 }
 
 /**
- * Merges a root file's content into its canonical counterpart, then deletes the
- * root. Emits a `write` Change (canonical update) followed by a `delete` Change
- * (root removal) so the Runner applies them atomically through its chokepoint.
- */
-/**
  * Prunes pack-owned hook entries from `.claude/settings.json` whose referenced
  * script does not exist on disk. Run this AFTER file deletions so that
  * just-deleted deprecated scripts are caught alongside never-shipped ones.
@@ -49,13 +44,14 @@ export function makePruneDanglingHooks(): Operation {
       let raw: Buffer;
       try {
         raw = await readFile(settingsAbs);
-      } catch (e: any) {
-        if (e.code === "ENOENT") return [];
+      } catch (e: unknown) {
+        if (e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "ENOENT") return [];
         throw e;
       }
 
+      const rawStr = raw.toString("utf8");
       const missing = new Set<string>();
-      const parsed = JSON.parse(raw.toString("utf8"));
+      const parsed = JSON.parse(rawStr);
       const hooks = parsed.hooks;
       if (!hooks || typeof hooks !== "object") return [];
 
@@ -79,7 +75,7 @@ export function makePruneDanglingHooks(): Operation {
       if (missing.size === 0) return [];
 
       const pruned = pruneHooksJson(
-        raw.toString("utf8"),
+        rawStr,
         (scriptPath) => missing.has(scriptPath),
       );
       if (pruned === null) return [];
@@ -89,6 +85,11 @@ export function makePruneDanglingHooks(): Operation {
   };
 }
 
+/**
+ * Merges a root file's content into its canonical counterpart, then deletes the
+ * root. Emits a `write` Change (canonical update) followed by a `delete` Change
+ * (root removal) so the Runner applies them atomically through its chokepoint.
+ */
 export function makeMergeRootToCanonical(rootPath: string, canonicalPath: string): Operation {
   return {
     name: "reconcile-merge",

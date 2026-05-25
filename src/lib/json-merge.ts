@@ -162,36 +162,10 @@ function mergeHooks(
   return base;
 }
 
-/**
- * Merges two JSON strings, with special namespace-aware handling for the `hooks` key.
- *
- * For `hooks`: applies the namespace-aware merge — claude-ds owns only hooks whose
- * `command` starts with `.claude/hooks/`. User hooks are preserved unchanged across merges.
- *
- * For any other owned key: upstream value replaces current wholesale (original behavior).
- *
- * Keys in upstream that are not in ownedKeys are ignored. All other top-level keys
- * from current are preserved unchanged.
- *
- * @param upstream  - JSON string from the pack/upstream source
- * @param current   - JSON string currently on disk
- * @param ownedKeys - top-level keys the CLI manages; `hooks` gets special treatment
- * @returns Formatted JSON string (2-space indent, trailing newline)
- */
 export function extractScriptPath(command: string): string {
   return command.split(/\s+/)[0];
 }
 
-/**
- * Prunes pack-owned hook entries from a settings JSON string based on a predicate
- * applied to the extracted script path. Only pack-owned hooks (command starts with
- * `.claude/hooks/`) are candidates; user hooks are never touched.
- *
- * @param current       - JSON string currently on disk (e.g. `.claude/settings.json`)
- * @param shouldPrune   - receives the script path (without args); return true to remove
- * @param indent        - JSON indent (default 2)
- * @returns             - new JSON string, or null if nothing changed
- */
 export function pruneHooksJson(
   current: string,
   shouldPrune: (scriptPath: string) => boolean,
@@ -204,10 +178,10 @@ export function pruneHooksJson(
   if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return null;
 
   let changed = false;
-  const pruned: Record<string, MatcherBlock[]> = {};
+  const pruned: Record<string, unknown> = {};
 
   for (const [event, blocks] of Object.entries(hooks as Record<string, unknown>)) {
-    if (!Array.isArray(blocks)) { pruned[event] = blocks as MatcherBlock[]; continue; }
+    if (!Array.isArray(blocks)) { pruned[event] = blocks; continue; }
     const kept: MatcherBlock[] = [];
     for (const block of blocks as MatcherBlock[]) {
       if (!block || typeof block !== "object" || !Array.isArray(block.hooks)) {
@@ -237,6 +211,22 @@ export function pruneHooksJson(
   return JSON.stringify({ ...obj, hooks: pruned }, null, indent) + "\n";
 }
 
+/**
+ * Merges two JSON strings, with special namespace-aware handling for the `hooks` key.
+ *
+ * For `hooks`: applies the namespace-aware merge — claude-ds owns only hooks whose
+ * `command` starts with `.claude/hooks/`. User hooks are preserved unchanged across merges.
+ *
+ * For any other owned key: upstream value replaces current wholesale (original behavior).
+ *
+ * Keys in upstream that are not in ownedKeys are ignored. All other top-level keys
+ * from current are preserved unchanged.
+ *
+ * @param upstream  - JSON string from the pack/upstream source
+ * @param current   - JSON string currently on disk
+ * @param ownedKeys - top-level keys the CLI manages; `hooks` gets special treatment
+ * @returns Formatted JSON string (2-space indent, trailing newline)
+ */
 export function mergeJsonKeys(upstream: string, current: string, ownedKeys: string[], indent: number | string = 2): string {
   let upstreamObj: Record<string, unknown>;
   let currentObj: Record<string, unknown>;

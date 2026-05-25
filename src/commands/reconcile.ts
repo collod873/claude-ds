@@ -168,7 +168,10 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   const rootDupeMap = new Map(rootDupeFindings.map(f => [f.rootPath, f]));
   const lines: string[] = ["", "reconcile: found the following issues:", ""];
   for (const f of allFindings) {
-    const tag = f.kind === "collision" ? "[collision]    " : f.kind === "dangling-hook" ? "[dangling-hook]" : "[orphan]       ";
+    const tag =
+      f.kind === "collision"     ? "[collision]    " :
+      f.kind === "dangling-hook" ? "[dangling-hook]" :
+                                   "[orphan]       ";
     lines.push(`  ${tag}  ${f.path}`);
     lines.push(`                  ${f.detail}`);
     // Annotate deprecated orphans that are also root-dupes (#23)
