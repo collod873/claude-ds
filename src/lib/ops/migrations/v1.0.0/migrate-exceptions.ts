@@ -57,7 +57,7 @@ export const migrateExceptions: Operation = {
 
     if (!needsMigration) return [];
 
-    const migrated: Array<{ rule: string; path: string; reason?: string; issue?: string }> = [];
+    const migrated: Array<{ rule: string; path: string; reason?: string; issue?: string; permanent?: boolean }> = [];
 
     for (const e of entries) {
       const ruleRaw = e.rule ?? e.rule_id;
@@ -74,9 +74,14 @@ export const migrateExceptions: Operation = {
         continue;
       }
 
-      const out: { rule: string; path: string; reason?: string; issue?: string } = { rule, path: pathRaw };
-      if (e.reason) out.reason = e.reason;
-      if (e.issue) out.issue = e.issue;
+      const out: { rule: string; path: string; reason?: string; issue?: string; permanent?: boolean } = { rule, path: pathRaw };
+      if (e.issue) {
+        out.issue = e.issue;
+      } else {
+        out.permanent = true;
+      }
+      out.reason = e.reason || (out.permanent ? "Carried forward from pre-v1.0.0 exception" : undefined);
+      if (!out.reason) delete out.reason;
       migrated.push(out);
     }
 
