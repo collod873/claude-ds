@@ -14,5 +14,6 @@ export async function confirm(question: string): Promise<boolean> {
   } finally {
     rl.close();
   }
-  return ans.trim().toLowerCase() === "y" || ans.trim().toLowerCase() === "yes";
+  const v = ans.trim().toLowerCase();
+  return v === "y" || v === "yes";
 }

@@ -117,9 +117,21 @@ describe("upgrade", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/migration chain:.*v0\.8\.0/);
     expect(r.stdout).toMatch(/dry-run complete/);
+    expect(r.stdout).not.toMatch(/running sync/);
     // packVersion must NOT be updated in dry-run
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.packVersion).toBe("v0.7.0");
+  });
+
+  it("does not auto-sync when no migrations exist for the range", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v0.9.0" }),
+    );
+    const r = await runCli(["upgrade", "--to", "v1.0.0", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/no registered migrations/);
+    expect(r.stdout).not.toMatch(/running sync/);
   });
 
   it("apply: runs v0.8.0 migration and updates packVersion to target", async () => {
