@@ -10,6 +10,7 @@ import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, type Exception } from "../lib/exceptions.js";
 import type { DriftFinding } from "../lib/drift-rules.js";
+import { detectDsAliases } from "../lib/ds-aliases.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -171,6 +172,10 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
   const domainRoots = cfg?.domain_roots;
   const metaKindStrict = cfg?.meta_kind_strict ?? false;
   const allowedImports = cfg?.allowed_imports ?? [];
+  let dsAliases = cfg?.ds_aliases ?? [];
+  if (dsAliases.length === 0) {
+    dsAliases = await detectDsAliases(cwd, cfg?.srcRoot ?? "src");
+  }
   const driftTierDirs = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
   const allFindings: DriftFinding[] = [];
   for (const tierDir of driftTierDirs) {
@@ -183,7 +188,7 @@ export async function auditCmd(opts: { pack?: string; suggestRemovals?: boolean;
       const filePath = `${tierDir}/${entry}`;
       let source: string;
       try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
-      const { findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports);
+      const { findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
       allFindings.push(...findings);
     }
   }

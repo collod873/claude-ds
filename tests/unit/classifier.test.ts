@@ -293,3 +293,81 @@ export function Badge({ label }: { label: string }) {
     expect(v.tier).toBe("atom");
   });
 });
+
+// ── DS alias fixtures ───────────────────────────────────────────────────────
+
+describe("classifySource — DS path aliases", () => {
+  it("@ds alias: import from @ds/atoms/ classifies as composite", () => {
+    const src = `
+import { Button } from "@ds/atoms/button";
+export function SubmitButton() {
+  return <Button label="Submit" />;
+}`;
+    const v = classifySource(src, undefined, undefined, ["@ds"]);
+    expect(v.tier).toBe("composite");
+  });
+
+  it("@ds alias: import from @ds/composites/ classifies as composite", () => {
+    const src = `
+import { DataTable } from "@ds/composites/data-table";
+export function ProjectView() {
+  return <DataTable rows={[]} />;
+}`;
+    const v = classifySource(src, undefined, undefined, ["@ds"]);
+    expect(v.tier).toBe("composite");
+  });
+
+  it("@ds alias: import from @ds/patterns/ classifies as unknown", () => {
+    const src = `
+import { AppShell } from "@ds/patterns/app-shell";
+export function PageLayout({ children }: { children: React.ReactNode }) {
+  return <AppShell>{children}</AppShell>;
+}`;
+    const v = classifySource(src, undefined, undefined, ["@ds"]);
+    expect(v.tier).toBe("unknown");
+  });
+
+  it("@ds alias: multiple distinct atom imports counted correctly", () => {
+    const src = `
+import { Button } from "@ds/atoms/button";
+import { Input } from "@ds/atoms/input";
+export function SearchBar() {
+  return <div><Input /><Button label="Go" /></div>;
+}`;
+    const v = classifySource(src, undefined, undefined, ["@ds"]);
+    expect(v.tier).toBe("composite");
+    expect(v.signals.some(s => s.includes("2"))).toBe(true);
+  });
+
+  it("@ds alias: mixed literal and alias imports both counted", () => {
+    const src = `
+import { Button } from "@/design-system/atoms/button";
+import { Input } from "@ds/atoms/input";
+export function SearchBar() {
+  return <div><Input /><Button label="Go" /></div>;
+}`;
+    const v = classifySource(src, undefined, undefined, ["@ds"]);
+    expect(v.tier).toBe("composite");
+    expect(v.signals.some(s => s.includes("2"))).toBe(true);
+  });
+
+  it("no alias passed: @ds import not recognized (falls to atom)", () => {
+    const src = `
+import { Button } from "@ds/atoms/button";
+export function SubmitButton() {
+  return <Button label="Submit" />;
+}`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("atom");
+  });
+
+  it("custom alias: @design/ prefix works when configured", () => {
+    const src = `
+import { Button } from "@design/atoms/button";
+export function SubmitButton() {
+  return <Button label="Submit" />;
+}`;
+    const v = classifySource(src, undefined, undefined, ["@design"]);
+    expect(v.tier).toBe("composite");
+  });
+});

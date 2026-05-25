@@ -23,10 +23,14 @@ export interface Config {
    *  Entries are path prefixes matched against import specifiers (e.g. "@/lib/utils").
    *  Auto-detected during upgrade when a shared utility is imported by many DS files. */
   allowed_imports: string[];
+  /** Path alias prefixes that resolve to the design-system/ folder (e.g. "@ds").
+   *  When empty, auto-detected from tsconfig.json paths at classification time. */
+  ds_aliases: string[];
 }
 const ALLOWED = new Set([
   "packVersion","version","pack","mode","enforce_threshold","removed","lookalike_ignore",
   "app_dir","claude_md_target","domain_roots","meta_kind_strict","srcRoot","allowed_imports",
+  "ds_aliases",
 ]);
 const VERSION_RE = /^v\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/;
 export function parseConfig(raw: string): Config {
@@ -60,10 +64,13 @@ export function parseConfig(raw: string): Config {
   if (typeof srcRoot !== "string" || srcRoot.length === 0) throw new ConfigError(`srcRoot must be non-empty string`);
   const allowed_imports = o.allowed_imports === undefined ? [] : o.allowed_imports;
   if (!Array.isArray(allowed_imports) || allowed_imports.some((x) => typeof x !== "string")) throw new ConfigError(`allowed_imports must be string[]`);
+  const ds_aliases = o.ds_aliases === undefined ? [] : o.ds_aliases;
+  if (!Array.isArray(ds_aliases) || ds_aliases.some((x) => typeof x !== "string")) throw new ConfigError(`ds_aliases must be string[]`);
   return {
     packVersion: rawPackVersion, pack: o.pack, mode: o.mode, enforce_threshold,
     removed: removed as string[], lookalike_ignore: lookalike_ignore as string[],
     app_dir, claude_md_target, domain_roots: domain_roots as string[], meta_kind_strict, srcRoot,
     allowed_imports: allowed_imports as string[],
+    ds_aliases: ds_aliases as string[],
   };
 }
