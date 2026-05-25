@@ -7,6 +7,7 @@ import { rewriteDsImports } from "./ops/migrations/v0.9.0/rewrite-ds-imports.js"
 import { manageManifestMigration } from "./ops/migrations/v0.9.0/manage-manifest.js";
 import { widenTokensMigration } from "./ops/migrations/v0.9.0/widen-tokens.js";
 import { managePortalScope } from "./ops/migrations/v0.9.0/manage-portal-scope.js";
+import { rewritePortalStyles } from "./ops/migrations/v0.9.0/rewrite-portal-styles.js";
 
 /**
  * All known pack migration sets, keyed by release version.
@@ -15,5 +16,5 @@ import { managePortalScope } from "./ops/migrations/v0.9.0/manage-portal-scope.j
  */
 export const MIGRATION_REGISTRY: MigrationVersion[] = [
   { version: "v0.8.0", ops: [manageForceState, retireStates] },
-  { version: "v0.9.0", ops: [metaKindHardMigration, dsFolderAlias, rewriteDsImports, manageManifestMigration, widenTokensMigration, managePortalScope] },
+  { version: "v0.9.0", ops: [metaKindHardMigration, dsFolderAlias, rewriteDsImports, manageManifestMigration, widenTokensMigration, managePortalScope, rewritePortalStyles] },
 ];
