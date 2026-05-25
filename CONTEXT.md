@@ -86,10 +86,12 @@ migration Op.
 
 ### Exception
 An entry in `design-system/exceptions.json` sanctioning a specific drift
-rule on a specific path with a `reason` and a linked upstream `issue`. Per
-ADR-0003 workaround discipline, every exception must reference a live issue
-— it's a tracked workaround with a removal trigger, not a permanent
-license.
+rule on a specific path with a `reason` and a linked upstream `issue`. By
+default, every exception must reference a live issue — it's a tracked
+workaround with a removal trigger. Exceptions marked `permanent: true`
+skip issue-link validation and appear as informational in doctor output;
+these represent intentional architectural decisions (e.g. an app-chrome
+singleton exceeding atom-import limits).
 
 ### Migration Op
 A versioned `Op` shipped in `pack/versions/<version>/migrations/` that

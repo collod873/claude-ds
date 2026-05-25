@@ -47,6 +47,26 @@ describe("exceptions — parseExceptions", () => {
     expect(ex[0].issue).toBeUndefined();
   });
 
+  it("accepts entry with permanent:true and round-trips the field", () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/AppShell.tsx", permanent: true, reason: "app chrome singleton" },
+      ],
+    }));
+    expect(ex).toHaveLength(1);
+    expect(ex[0].permanent).toBe(true);
+    expect(ex[0].reason).toBe("app chrome singleton");
+  });
+
+  it("permanent defaults to undefined when not present", () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "a.tsx", issue: "#1" },
+      ],
+    }));
+    expect(ex[0].permanent).toBeUndefined();
+  });
+
   it("errors on unknown rule ID with a clear message naming the bad ID", () => {
     try {
       parseExceptions(JSON.stringify({
@@ -236,5 +256,61 @@ describe("lintExceptions", () => {
     expect(warnings[0].rule).toBe("DRIFT-MISPLACED");
     expect(warnings[0].path).toBe("design-system/atoms/x.tsx");
     expect(warnings[0].issue).toBeUndefined();
+  });
+
+  it("does not warn on permanent exception without issue link", async () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/AppShell.tsx", permanent: true, reason: "intentional architectural decision" },
+      ],
+    }));
+    const warnings = await lintExceptions(ex);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("does not warn on permanent exception even when issue is closed", async () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/AppShell.tsx", permanent: true, issue: "#7", reason: "app chrome singleton" },
+      ],
+    }));
+    const checker: IssueChecker = vi.fn().mockResolvedValue("closed");
+    const warnings = await lintExceptions(ex, checker);
+    expect(warnings).toHaveLength(0);
+    expect(checker).not.toHaveBeenCalled();
+  });
+
+  it("still warns on non-permanent exception without issue link", async () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/foo.tsx" },
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/AppShell.tsx", permanent: true, reason: "app chrome" },
+      ],
+    }));
+    const warnings = await lintExceptions(ex);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].path).toBe("design-system/atoms/foo.tsx");
+  });
+
+  it("permanent:false is not treated as permanent — still warns on missing issue", async () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/foo.tsx", permanent: false, reason: "not actually permanent" },
+      ],
+    }));
+    const warnings = await lintExceptions(ex);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].warning).toMatch(/no issue link/i);
+  });
+
+  it("permanent exception with both permanent:true and issue link is valid (no conflict)", async () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/AppShell.tsx", permanent: true, issue: "#42", reason: "app chrome" },
+      ],
+    }));
+    const checker: IssueChecker = vi.fn().mockResolvedValue("open");
+    const warnings = await lintExceptions(ex, checker);
+    expect(warnings).toHaveLength(0);
   });
 });
