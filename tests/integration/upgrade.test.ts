@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
-import { writeFile, readFile, mkdir } from "node:fs/promises";
+import { writeFile, readFile, mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 const BASE_CFG = {
@@ -117,9 +117,21 @@ describe("upgrade", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/migration chain:.*v0\.8\.0/);
     expect(r.stdout).toMatch(/dry-run complete/);
+    expect(r.stdout).not.toMatch(/running sync/);
     // packVersion must NOT be updated in dry-run
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.packVersion).toBe("v0.7.0");
+  });
+
+  it("does not auto-sync when no migrations exist for the range", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v0.9.0" }),
+    );
+    const r = await runCli(["upgrade", "--to", "v1.0.0", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/no registered migrations/);
+    expect(r.stdout).not.toMatch(/running sync/);
   });
 
   it("apply: runs v0.8.0 migration and updates packVersion to target", async () => {
@@ -176,6 +188,34 @@ describe("upgrade", () => {
     expect(r.stdout).toMatch(/upgrade complete → v0\.8\.0/);
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.packVersion).toBe("v0.8.0");
+  });
+
+  it("auto-syncs pack files after migrations apply", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify(BASE_CFG),
+    );
+    // --yes skips upgrade prompt; stdin "y\n" answers sync confirmation
+    const r = await runCli(["upgrade", "--to", "v0.8.0", "--yes"], { cwd: dir, stdin: "y\n" });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/upgrade complete → v0\.8\.0/);
+    expect(r.stdout).toMatch(/sync complete/);
+    // Pack-delivered hook file should exist after upgrade+sync
+    const hookStat = await stat(join(dir, ".claude/hooks/atom-imports.sh"));
+    expect(hookStat.mode & 0o111).not.toBe(0);
+  });
+
+  it("sync prompt appears after upgrade even with --yes", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify(BASE_CFG),
+    );
+    // --yes skips upgrade prompt; no stdin → sync prompt declines automatically
+    const r = await runCli(["upgrade", "--to", "v0.8.0", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/upgrade complete → v0\.8\.0/);
+    // Sync ran but user declined (empty stdin → "n")
+    expect(r.stdout).toMatch(/aborted/);
   });
 
   it("aborts without applying when confirmation is declined", async () => {

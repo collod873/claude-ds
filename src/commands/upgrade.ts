@@ -4,6 +4,7 @@ import { info, err, confirm } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
 import { computeMigrationChain, runMigrations } from "../lib/migration-framework.js";
 import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
+import { syncCmd } from "./sync.js";
 import pkg from "../../package.json" with { type: "json" };
 
 export async function upgradeCmd(opts: {
@@ -78,6 +79,9 @@ export async function upgradeCmd(opts: {
     info(`auto-detected allowed_imports: ${detectedImports.join(", ")}`);
   }
   info(`upgrade complete → ${to}`);
+
+  info("running sync to deliver pack files…");
+  await syncCmd({ cwd, skipFetch: true });
 }
 
 const DS_TIERS = ["atoms", "composites", "references"] as const;
