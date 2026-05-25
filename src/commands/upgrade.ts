@@ -1,6 +1,11 @@
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { readdir, readFile, writeFile, stat } from "node:fs/promises";
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import { info, err, confirm } from "../lib/log.js";
+
+const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
 import { computeMigrationChain, runMigrations } from "../lib/migration-framework.js";
 import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
@@ -82,6 +87,23 @@ export async function upgradeCmd(opts: {
 
   info("running sync to deliver pack files…");
   await syncCmd({ cwd, yes: opts.yes });
+
+  // Regenerate manifest.generated.ts — migrations may delete it (e.g.
+  // manage-manifest@v0.9.0) and the PostToolUse hook won't fire until the
+  // next .tsx edit, leaving the build broken in the meantime.
+  const buildScript = join(cwd, "scripts", "build-manifest.ts");
+  if (existsSync(buildScript)) {
+    try {
+      await execFile("node", ["--experimental-strip-types", buildScript], {
+        cwd,
+        timeout: 30_000,
+      });
+      info("regenerated design-system/manifest.generated.ts");
+    } catch (e: unknown) {
+      const exitCode = (e as { code?: number }).code ?? "?";
+      info(`warning: build-manifest failed (exit ${exitCode}). Run manually: node --experimental-strip-types scripts/build-manifest.ts`);
+    }
+  }
 }
 
 const DS_TIERS = ["atoms", "composites", "references"] as const;

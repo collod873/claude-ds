@@ -64,8 +64,11 @@ describe("upgrade", () => {
     const script = await readFile(join(dir, "scripts/build-manifest.ts"), "utf8");
     expect(script).toContain("build-manifest.ts");
 
-    // hand-built manifest.generated.ts removed
-    await expect(readFile(join(dir, "design-system/manifest.generated.ts"))).rejects.toThrow();
+    // hand-built manifest.generated.ts replaced by regenerated version
+    const generated = await readFile(join(dir, "design-system/manifest.generated.ts"), "utf8");
+    expect(generated).not.toContain("hand-built");
+    expect(generated).toContain("DO NOT EDIT");
+    expect(generated).toContain("showcases");
 
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.packVersion).toBe("v0.9.0");
