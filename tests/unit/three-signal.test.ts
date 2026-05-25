@@ -229,3 +229,44 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     expect(result.signals.locationTier).toBe("pattern");
   });
 });
+
+// ── DS alias support ────────────────────────────────────────────────────────
+
+describe("checkThreeSignals — DS aliases", () => {
+  it("@ds alias composite import avoids DRIFT-MISPLACED in composites/", () => {
+    const src = `
+import { Button } from "@ds/atoms/button";
+export const meta = { kind: "composite", examples: [] } as const;
+export function SubmitButton() { return <Button label="Submit" />; }`;
+    const result = checkThreeSignals(
+      "design-system/composites/submit-button.tsx", src,
+      undefined, false, undefined, ["@ds"],
+    );
+    expect(result.signals.classifierVerdict.tier).toBe("composite");
+    expect(result.findings.some(f => f.ruleId === "DRIFT-MISPLACED")).toBe(false);
+  });
+
+  it("@ds alias pattern import returns unknown classifier tier", () => {
+    const src = `
+import { AppShell } from "@ds/patterns/app-shell";
+export const meta = { kind: "composite", examples: [] } as const;
+export function PageLayout() { return <AppShell />; }`;
+    const result = checkThreeSignals(
+      "design-system/composites/page-layout.tsx", src,
+      undefined, false, undefined, ["@ds"],
+    );
+    expect(result.signals.classifierVerdict.tier).toBe("unknown");
+  });
+
+  it("without alias, @ds import not recognized — classifier sees atom", () => {
+    const src = `
+import { Button } from "@ds/atoms/button";
+export const meta = { kind: "composite", examples: [] } as const;
+export function SubmitButton() { return <Button label="Submit" />; }`;
+    const result = checkThreeSignals(
+      "design-system/composites/submit-button.tsx", src,
+    );
+    expect(result.signals.classifierVerdict.tier).toBe("atom");
+    expect(result.findings.some(f => f.ruleId === "DRIFT-MISPLACED")).toBe(true);
+  });
+});

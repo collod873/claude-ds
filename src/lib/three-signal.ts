@@ -54,10 +54,11 @@ export function checkThreeSignals(
   domainRoots?: string[],
   metaKindStrict?: boolean,
   allowedImports?: string[],
+  dsAliases?: string[],
 ): ThreeSignalResult {
   const locationTier = locationTierFromPath(filePath);
   const metaKind = metaKindFromSource(source);
-  const classifierVerdict = classifySource(source, domainRoots, allowedImports);
+  const classifierVerdict = classifySource(source, domainRoots, allowedImports, dsAliases);
 
   const signals: ThreeSignals = { locationTier, metaKind, classifierVerdict };
 

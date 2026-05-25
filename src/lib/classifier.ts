@@ -11,6 +11,18 @@ const DS_PATTERN_RE = /from\s+["'][^"']*(?:@\/)?design-system\/patterns\//;
 const DS_COMPONENT_IMPORT_RE = /from\s+["']([^"']*(?:@\/)?design-system\/(?:atoms|composites)\/[^"']+)["']/g;
 const REGEX_META_RE = /[.*+?^${}()|[\]\\]/g;
 
+function buildDsPatternRe(dsAliases: string[]): RegExp {
+  const escaped = dsAliases.map(a => a.replace(REGEX_META_RE, "\\$&"));
+  const alt = `(?:(?:@\\/)?design-system|${escaped.join("|")})`;
+  return new RegExp(`from\\s+["'][^"']*${alt}\\/patterns\\/`);
+}
+
+function buildDsComponentImportRe(dsAliases: string[]): RegExp {
+  const escaped = dsAliases.map(a => a.replace(REGEX_META_RE, "\\$&"));
+  const alt = `(?:(?:@\\/)?design-system|${escaped.join("|")})`;
+  return new RegExp(`from\\s+["']([^"']*${alt}\\/(?:atoms|composites)\\/[^"']+)["']`, "g");
+}
+
 /**
  * Matches files that export children or named ReactNode slot props — the
  * mechanical predicate for pattern tier (ADR-0004).
@@ -23,9 +35,12 @@ export function hasSlotExports(source: string): boolean {
   return SLOT_EXPORT_RE.test(source);
 }
 
-function countDistinctDsComponentImports(source: string): number {
+function countDistinctDsComponentImports(source: string, dsAliases: string[]): number {
+  const re = dsAliases.length > 0
+    ? buildDsComponentImportRe(dsAliases)
+    : DS_COMPONENT_IMPORT_RE;
   const seen = new Set<string>();
-  for (const m of source.matchAll(DS_COMPONENT_IMPORT_RE)) seen.add(m[1]);
+  for (const m of source.matchAll(re)) seen.add(m[1]);
   return seen.size;
 }
 
@@ -46,12 +61,11 @@ function domainRootRegex(root: string): RegExp {
  * - Composite: imports from design-system/atoms/ or composites/ (any count)
  * - Atom: no DS tier imports, no domain root imports
  */
-export function classifySource(source: string, domainRoots: string[] = DEFAULT_DOMAIN_ROOTS, allowedImports: string[] = []): TierVerdict {
+export function classifySource(source: string, domainRoots: string[] = DEFAULT_DOMAIN_ROOTS, allowedImports: string[] = [], dsAliases: string[] = []): TierVerdict {
   const signals: string[] = [];
 
   for (const root of domainRoots) {
     if (!domainRootRegex(root).test(source)) continue;
-    // Check if all imports from this root are in the allowed list
     const importRe = new RegExp(`from\\s+["']([^"']*\\/${root.replace(REGEX_META_RE, "\\$&")}\\/[^"']*)["']`, "g");
     const imports = [...source.matchAll(importRe)].map(m => m[1]);
     const allAllowed = imports.length > 0 && imports.every(imp =>
@@ -61,7 +75,8 @@ export function classifySource(source: string, domainRoots: string[] = DEFAULT_D
   }
   if (signals.length > 0) return { tier: "feature", signals };
 
-  if (DS_PATTERN_RE.test(source)) {
+  const patternRe = dsAliases.length > 0 ? buildDsPatternRe(dsAliases) : DS_PATTERN_RE;
+  if (patternRe.test(source)) {
     signals.push("imports from design-system/patterns/");
     return { tier: "unknown", signals };
   }
@@ -71,7 +86,7 @@ export function classifySource(source: string, domainRoots: string[] = DEFAULT_D
     return { tier: "pattern", signals };
   }
 
-  const dsCount = countDistinctDsComponentImports(source);
+  const dsCount = countDistinctDsComponentImports(source, dsAliases);
   if (dsCount > 0) {
     const noun = dsCount === 1 ? "component" : "components";
     signals.push(`composes ${dsCount} design-system ${noun}`);

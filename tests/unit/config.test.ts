@@ -88,4 +88,30 @@ describe("parseConfig", () => {
     expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","srcRoot":""}`))
       .toThrow(ConfigError);
   });
+
+  // ds_aliases field
+  it("defaults ds_aliases to [] when absent", () => {
+    const c = parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"warn"}`);
+    expect(c.ds_aliases).toEqual([]);
+  });
+
+  it("accepts valid ds_aliases string array", () => {
+    const c = parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"warn","ds_aliases":["@ds"]}`);
+    expect(c.ds_aliases).toEqual(["@ds"]);
+  });
+
+  it("rejects ds_aliases with non-string elements", () => {
+    expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","ds_aliases":["@ds",42]}`))
+      .toThrow(ConfigError);
+  });
+
+  it("rejects ds_aliases that is not an array", () => {
+    expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","ds_aliases":"@ds"}`))
+      .toThrow(ConfigError);
+  });
+
+  it("rejects ds_aliases with empty string elements", () => {
+    expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","ds_aliases":[""]}`))
+      .toThrow(ConfigError);
+  });
 });

@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { info, err, confirm } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
+import { detectDsAliases } from "../lib/ds-aliases.js";
 import { run } from "../lib/runner.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
@@ -114,6 +115,10 @@ export async function classifyCmd(opts: {
   }
 
   const domainRoots = ctx.cfg.domain_roots ?? DEFAULT_DOMAIN_ROOTS;
+  let dsAliases = ctx.cfg.ds_aliases ?? [];
+  if (dsAliases.length === 0) {
+    dsAliases = await detectDsAliases(cwd, ctx.cfg.srcRoot ?? "src");
+  }
 
   // Check source dir exists
   const srcAbs = join(cwd, srcRel);
@@ -139,7 +144,7 @@ export async function classifyCmd(opts: {
     } catch {
       continue;
     }
-    const verdict = classifySource(source, domainRoots);
+    const verdict = classifySource(source, domainRoots, undefined, dsAliases);
     const tier = verdict.tier;
     const domainBucket = tier === "feature" ? inferDomainBucket(source, domainRoots) : null;
     classified.push({ srcRel: fileRel, tier, domainBucket });
