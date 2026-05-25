@@ -95,6 +95,10 @@ jobs:
             gh pr comment "$PR_NUMBER" --body-file "$COMMENT_FILE"
           fi
 
+      - name: Add ready-to-merge label
+        if: success()
+        run: gh pr edit "$PR_NUMBER" --add-label "ready-to-merge" || true
+
       - name: Mark blocked on failure
         if: failure()
         env:
