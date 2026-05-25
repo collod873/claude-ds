@@ -95,7 +95,7 @@ export async function upgradeCmd(opts: {
   } catch { /* script doesn't exist yet — sync will deliver it */ }
 
   info("running sync to deliver pack files…");
-  await syncCmd({ cwd });
+  await syncCmd({ cwd, yes: opts.yes });
 }
 
 const DS_TIERS = ["atoms", "composites", "references"] as const;
