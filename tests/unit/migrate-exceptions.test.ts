@@ -199,4 +199,84 @@ describe("migrate-exceptions v1.0.0", () => {
     const written = JSON.parse((changes[0] as { after: Buffer }).after.toString("utf8"));
     expect(written.exceptions[0].issue).toBe("#42");
   });
+
+  it("marks entries without issue as permanent: true", async () => {
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [{
+        rule_id: "DRIFT-MISPLACED",
+        file: "design-system/composites/top-bar.tsx",
+        reason: "app-chrome singleton",
+      }],
+    }, null, 2));
+
+    const changes = await migrateExceptions.plan(mockCtx(dir));
+    expect(changes).toHaveLength(1);
+    const written = JSON.parse((changes[0] as { after: Buffer }).after.toString("utf8"));
+    expect(written.exceptions[0].permanent).toBe(true);
+  });
+
+  it("does not mark entries with issue as permanent", async () => {
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [{
+        rule_id: "DRIFT-MISPLACED",
+        file: "design-system/composites/top-bar.tsx",
+        reason: "singleton",
+        issue: "#42",
+      }],
+    }, null, 2));
+
+    const changes = await migrateExceptions.plan(mockCtx(dir));
+    expect(changes).toHaveLength(1);
+    const written = JSON.parse((changes[0] as { after: Buffer }).after.toString("utf8"));
+    expect(written.exceptions[0].permanent).toBeUndefined();
+  });
+
+  it("adds default reason when entry has no issue and no reason", async () => {
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [{
+        rule_id: "DRIFT-MISPLACED",
+        file: "design-system/composites/top-bar.tsx",
+      }],
+    }, null, 2));
+
+    const changes = await migrateExceptions.plan(mockCtx(dir));
+    expect(changes).toHaveLength(1);
+    const written = JSON.parse((changes[0] as { after: Buffer }).after.toString("utf8"));
+    expect(written.exceptions[0].permanent).toBe(true);
+    expect(written.exceptions[0].reason).toBe("Carried forward from pre-v1.0.0 exception");
+  });
+
+  it("preserves existing reason on entries marked permanent", async () => {
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [{
+        rule_id: "DRIFT-MISPLACED",
+        file: "design-system/composites/top-bar.tsx",
+        reason: "app-chrome singleton",
+      }],
+    }, null, 2));
+
+    const changes = await migrateExceptions.plan(mockCtx(dir));
+    expect(changes).toHaveLength(1);
+    const written = JSON.parse((changes[0] as { after: Buffer }).after.toString("utf8"));
+    expect(written.exceptions[0].reason).toBe("app-chrome singleton");
+  });
+
+  it("is idempotent — does not re-mark already-permanent entries", async () => {
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [{
+        rule: "DRIFT-MISPLACED",
+        path: "design-system/composites/top-bar.tsx",
+        reason: "app-chrome singleton",
+        permanent: true,
+      }],
+    }, null, 2));
+
+    const changes = await migrateExceptions.plan(mockCtx(dir));
+    expect(changes).toHaveLength(0);
+  });
 });
