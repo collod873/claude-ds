@@ -11,7 +11,7 @@ import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import type { DriftFinding } from "../lib/drift-rules.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
-import { isFixable, getFixer, type FixResult } from "../lib/drift-fixers.js";
+import { getFixer, type FixResult } from "../lib/drift-fixers.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -230,6 +230,8 @@ export async function auditCmd(opts: AuditOpts) {
     for (const r of fixResults) {
       if (r.fixed) {
         info(`fixed [${r.finding.ruleId}]: ${r.message}`);
+      } else {
+        info(`skipped [${r.finding.ruleId}]: ${r.message}`);
       }
     }
     const fixedKeys = new Set(
@@ -253,7 +255,6 @@ export async function auditCmd(opts: AuditOpts) {
       return entry;
     });
     const merged = [...exceptions, ...newExceptions];
-    const exceptionsPath = join(cwd, "design-system/exceptions.json");
     await mkdir(dirname(exceptionsPath), { recursive: true });
     await writeFile(exceptionsPath, serializeExceptions(merged), "utf8");
     info(`${newExceptions.length} exception(s) written to design-system/exceptions.json`);

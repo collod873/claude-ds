@@ -124,6 +124,21 @@ describe("audit --except", () => {
     expect(parsed.exceptions[0].reason).toBe("architectural decision");
   });
 
+  it("creates bare exceptions when --except is used without --issue or --permanent", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/composites/solo-label.tsx"),
+      "export function SoloLabel() { return <span />; }",
+    );
+    const r = await runCli(["audit", "--pack", "next-react", "--except", "--reason", "just a reason"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.exceptions[0].issue).toBeUndefined();
+    expect(parsed.exceptions[0].permanent).toBeUndefined();
+    expect(parsed.exceptions[0].reason).toBe("just a reason");
+  });
+
   it("appends to existing exceptions.json without overwriting", async () => {
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
     await writeFile(
@@ -151,6 +166,29 @@ describe("audit --except", () => {
     expect(parsed.exceptions.length).toBeGreaterThanOrEqual(2);
     expect(parsed.exceptions.find((e: { path: string }) => e.path === "design-system/composites/solo-label.tsx")).toBeTruthy();
     expect(parsed.exceptions.find((e: { path: string }) => e.path === "design-system/composites/another.tsx")).toBeTruthy();
+  });
+
+  it("is a no-op when --except is passed but all findings are already suppressed", async () => {
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/composites/solo.tsx"),
+      "export function Solo() { return <span />; }",
+    );
+    await writeFile(
+      join(dir, "design-system/exceptions.json"),
+      JSON.stringify({
+        exceptions: [
+          { rule: "DRIFT-MISPLACED", path: "design-system/composites/solo.tsx", issue: "#1", reason: "existing" },
+        ],
+      }),
+    );
+    const r = await runCli(["audit", "--pack", "next-react", "--except", "--reason", "unused", "--issue", "#2"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // exceptions.json should be unchanged — no new entries written
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.exceptions).toHaveLength(1);
+    expect(r.stdout).not.toMatch(/exception.*written/i);
   });
 
   it("exits 0 after writing exceptions (all findings suppressed)", async () => {
