@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { parseManifest, type ManagedRoot } from "../lib/manifest.js";
+import { parseManifest, isManifestOrKeepfile, type ManagedRoot } from "../lib/manifest.js";
 import { parseConfig } from "../lib/config.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
@@ -56,10 +56,17 @@ async function findOrphanFiles(
   cwd: string,
   manifestPaths: Set<string>,
   roots: ManagedRoot[],
+  generatedPatterns: string[],
 ): Promise<string[]> {
   const openPrefixes = roots
     .filter(r => !r.strict)
     .map(r => `${stripTrailingSlash(r.root)}/`);
+
+  let isGenerated: ((path: string) => boolean) | null = null;
+  if (generatedPatterns.length > 0) {
+    const { default: picomatch } = await import("picomatch");
+    isGenerated = picomatch(generatedPatterns, { dot: true });
+  }
 
   const orphans: string[] = [];
   for (const { root, strict } of roots) {
@@ -67,7 +74,9 @@ async function findOrphanFiles(
     const files = await walkDir(cwd, stripTrailingSlash(root));
     for (const f of files) {
       if (openPrefixes.some(prefix => f.startsWith(prefix))) continue;
-      if (!manifestPaths.has(f)) orphans.push(f);
+      if (isManifestOrKeepfile(f, manifestPaths)) continue;
+      if (isGenerated && isGenerated(f)) continue;
+      orphans.push(f);
     }
   }
   return orphans;
@@ -136,7 +145,7 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
   const manifestPaths = new Set(manifest.files.map(f => f.path));
   const roots = resolveRoots(manifest.managed_roots);
 
-  const orphans = await findOrphanFiles(cwd, manifestPaths, roots);
+  const orphans = await findOrphanFiles(cwd, manifestPaths, roots, manifest.generated_patterns);
 
   const exceptionsPath = join(cwd, "design-system/exceptions.json");
   let exceptionWarnings: ExceptionLint[] = [];
