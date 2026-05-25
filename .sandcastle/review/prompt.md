@@ -10,7 +10,7 @@ Read `CONTEXT.md`, `.sandcastle/CODING_STANDARDS.md`, and any relevant ADRs unde
 
 <linked-issue>
 
-!`gh issue view {{ISSUE_NUMBER}} --comments`
+{{ISSUE_BODY}}
 
 </linked-issue>
 

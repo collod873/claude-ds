@@ -12,7 +12,7 @@ Every change must be safe to drop into any consumer repo without breaking it. Th
 
 <linked-issue>
 
-!`gh issue view {{ISSUE_NUMBER}} --comments`
+{{ISSUE_BODY}}
 
 </linked-issue>
 

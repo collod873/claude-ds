@@ -35,6 +35,9 @@ const ISSUE_NUMBER = issueMatch?.[1] ?? "";
 const ISSUE_TITLE = ISSUE_NUMBER
   ? safeSh(`gh issue view ${ISSUE_NUMBER} --json title --jq .title`).trim()
   : "";
+const ISSUE_BODY = ISSUE_NUMBER
+  ? safeSh(`gh issue view ${ISSUE_NUMBER} --comments`)
+  : "(no linked issue)";
 
 const reviewsJson = sh(
   `gh api repos/{owner}/{repo}/pulls/${PR_NUMBER}/reviews`
@@ -171,6 +174,7 @@ const result = await sandcastle.run({
     BRANCH,
     ISSUE_NUMBER: ISSUE_NUMBER || "(none)",
     ISSUE_TITLE: ISSUE_TITLE || "(no linked issue)",
+    ISSUE_BODY,
     PR_COMMENTS_JSON: JSON.stringify(prComments, null, 2),
   },
   output: sandcastle.Output.object({
