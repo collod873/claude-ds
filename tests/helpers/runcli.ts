@@ -77,6 +77,7 @@ export async function runCli(args: string[], opts: RunOpts): Promise<RunResult> 
   let code = 0;
   try {
     const program = buildProgram({ cwd: opts.cwd });
+    program.exitOverride();
     await program.parseAsync(["node", "claude-ds", ...args]);
   } catch (e) {
     if (e instanceof ExitError) {

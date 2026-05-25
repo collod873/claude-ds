@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command, Option } from "commander";
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import pkg from "../package.json" with { type: "json" };
 import { versionCmd } from "./commands/version.js";
 import { initCmd } from "./commands/init.js";
@@ -22,10 +23,6 @@ export interface ProgramDefaults {
 
 export function buildProgram(defaults: ProgramDefaults = {}): Command {
   const program = new Command();
-  // exitOverride lets the in-process harness catch exits as exceptions instead
-  // of terminating the test runner. In CLI mode the wrapper at the bottom of
-  // this file re-throws as a real process.exit.
-  program.exitOverride();
   program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`, "-V");
 
   program
@@ -153,7 +150,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
 // Only auto-parse when executed as the main module (i.e. real CLI invocation).
 // Tests import buildProgram() directly to invoke in-process.
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+// Resolve argv[1] through symlinks so npm-link invocations match import.meta.url.
+const self = fileURLToPath(import.meta.url);
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === self;
 if (isMain) {
   buildProgram().parseAsync(process.argv).catch((e: unknown) => {
     const msg = e instanceof Error ? e.message : String(e);
