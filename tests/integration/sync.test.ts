@@ -201,6 +201,13 @@ describe("Issue #138 — sync reports packVersion from .claude-ds.json", () => {
     expect(r.stdout).toMatch(/sync complete → v2\.0\.0/);
   });
 
+  it("#138 legacy 'version' key is reported correctly in completion message", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version: "v1.5.0", pack: "next-react", mode: "warn" }));
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/sync complete → v1\.5\.0/);
+  });
+
   it("#138 .claude-ds.json retains packVersion after sync", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ packVersion: "v2.0.0", pack: "next-react", mode: "warn" }));
     const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });

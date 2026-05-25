@@ -35,9 +35,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
   const ctx = await loadProject(cwd);
   const cfg = ctx.cfg;
 
-  // #138: version is always the consumer's packVersion from .claude-ds.json.
-  // Previously sync fetched `git ls-remote --tags` and used the latest remote
-  // tag, which could disagree with (and overwrite!) the consumer's actual version.
+  // Version is always the consumer's packVersion — never fetched from remote tags.
   const target = cfg.packVersion;
   const opOpts: Parameters<typeof makeSyncPackFiles>[0] = {};
   if (opts.offlineFixture) {
