@@ -138,7 +138,7 @@ describe("settings.json hybrid+json preservation", () => {
     expect(settings.hooks.PostToolUse).toBeDefined();
     const postCommands = settings.hooks.PostToolUse[0].hooks.map((h: { command: string }) => h.command);
     expect(postCommands).toContain(".claude/hooks/atom-imports.sh");
-    expect(postCommands).toContain(".claude/hooks/token-only.sh");
+    expect(postCommands).toContain(".claude/hooks/regenerate-companions.sh");
   });
 });
 

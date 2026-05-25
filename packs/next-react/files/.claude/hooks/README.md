@@ -7,9 +7,8 @@ Tier B (`design-system/**`) hooks run in this order per scaffold authority:
 1. `pre-write-ds-exceptions.sh` — EXC-*
 2. `pre-write-ds-tokens.sh` — TOK-*
 3. `pre-write-ds-tier-imports.sh` — TIER-*
-4. `pre-write-ds-states.sh` — STATE-*
-5. `pre-write-ds-manifest.sh` — MAN-*
-6. `pre-write-ds-similarity.sh` — SIM-*
+4. `pre-write-ds-manifest.sh` — MAN-*
+5. `pre-write-ds-similarity.sh` — SIM-*
 
 Tier B PostToolUse:
 

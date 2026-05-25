@@ -4,7 +4,6 @@
       {
         "matcher": "Edit|Write",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/pre-write-ds-states.sh" },
           { "type": "command", "command": ".claude/hooks/pre-write-ds-manifest.sh" },
           { "type": "command", "command": ".claude/hooks/pre-write-ds-similarity.sh" },
           { "type": "command", "command": ".claude/hooks/pre-write-tsx.sh" },
@@ -24,7 +23,6 @@
         "matcher": "Edit|Write",
         "hooks": [
           { "type": "command", "command": ".claude/hooks/atom-imports.sh" },
-          { "type": "command", "command": ".claude/hooks/token-only.sh" },
           { "type": "command", "command": ".claude/hooks/regenerate-companions.sh" }
         ]
       }

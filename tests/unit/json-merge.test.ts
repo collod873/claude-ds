@@ -129,7 +129,7 @@ describe("mergeJsonKeys — hooks namespace-aware merge (CrewOps regression)", (
           matcher: "Edit|Write",
           hooks: [
             { type: "command", command: ".claude/hooks/atom-imports.sh" },
-            { type: "command", command: ".claude/hooks/token-only.sh" },
+            { type: "command", command: ".claude/hooks/regenerate-companions.sh" },
           ],
         },
       ],
