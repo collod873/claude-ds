@@ -11,7 +11,7 @@ import { detectFormatter, runFormatter } from "../lib/formatter.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 
-export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
+export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; skipFetch?: boolean }) {
   const cwd = opts.cwd ?? process.cwd();
   try { await stat(join(cwd, ".claude-ds.json")); } catch { err(".claude-ds.json absent"); process.exit(2); }
 
@@ -46,6 +46,8 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string }) {
     const repoRoot = resolve(here, "..", "..");
     opOpts.packDir = resolve(repoRoot, opts.offlineFixture);
     opOpts.manifest = parseManifest(await readFile(join(opOpts.packDir, "manifest.json"), "utf8"));
+    target = cfg.packVersion;
+  } else if (opts.skipFetch) {
     target = cfg.packVersion;
   } else {
     const r = spawnSync("git", ["ls-remote", "--tags", "https://github.com/collod873/claude-ds"], { encoding: "utf8" });
