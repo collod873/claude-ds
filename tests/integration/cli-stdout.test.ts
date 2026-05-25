@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { writeFile, symlink, mkdir } from "node:fs/promises";
+import { writeFile, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 
