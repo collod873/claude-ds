@@ -190,32 +190,20 @@ describe("upgrade", () => {
     expect(cfg.packVersion).toBe("v0.8.0");
   });
 
-  it("auto-syncs pack files after migrations apply", async () => {
+  it("auto-syncs pack files after migrations apply with --yes (no stdin needed)", async () => {
     await writeFile(
       join(dir, ".claude-ds.json"),
       JSON.stringify(BASE_CFG),
     );
-    // --yes skips upgrade prompt; stdin "y\n" answers sync confirmation
-    const r = await runCli(["upgrade", "--to", "v0.8.0", "--yes"], { cwd: dir, stdin: "y\n" });
-    expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/upgrade complete → v0\.8\.0/);
-    expect(r.stdout).toMatch(/sync complete/);
-    // Pack-delivered hook file should exist after upgrade+sync
-    const hookStat = await stat(join(dir, ".claude/hooks/atom-imports.sh"));
-    expect(hookStat.mode & 0o111).not.toBe(0);
-  });
-
-  it("sync prompt appears after upgrade even with --yes", async () => {
-    await writeFile(
-      join(dir, ".claude-ds.json"),
-      JSON.stringify(BASE_CFG),
-    );
-    // --yes skips upgrade prompt; no stdin → sync prompt declines automatically
+    // --yes propagates to sync — no interactive prompt at all
     const r = await runCli(["upgrade", "--to", "v0.8.0", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/upgrade complete → v0\.8\.0/);
-    // Sync ran but user declined (empty stdin → "n")
-    expect(r.stdout).toMatch(/aborted/);
+    expect(r.stdout).toMatch(/sync complete/);
+    expect(r.stdout).not.toMatch(/aborted/);
+    // Pack-delivered hook file should exist after upgrade+sync
+    const hookStat = await stat(join(dir, ".claude/hooks/atom-imports.sh"));
+    expect(hookStat.mode & 0o111).not.toBe(0);
   });
 
   it("aborts without applying when confirmation is declined", async () => {

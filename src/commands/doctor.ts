@@ -8,7 +8,7 @@ import { parseManifest, isManifestOrKeepfile, type ManagedRoot } from "../lib/ma
 import { parseConfig } from "../lib/config.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
-import { parseExceptions, openCount, lintExceptions, type ExceptionLint, type IssueChecker } from "../lib/exceptions.js";
+import { parseExceptions, openCount, lintExceptions, type Exception, type ExceptionLint, type IssueChecker } from "../lib/exceptions.js";
 import { detectLookalikes, Finding } from "../lib/lookalike.js";
 import { detectPackageManager, PackageManager } from "../lib/package-manager.js";
 import { scanRootDupes, RootDupeFinding } from "../lib/root-dupes.js";
@@ -149,10 +149,12 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
 
   const exceptionsPath = join(cwd, "design-system/exceptions.json");
   let exceptionWarnings: ExceptionLint[] = [];
+  let permanentExceptions: Exception[] = [];
   if (await exists(exceptionsPath)) {
     try {
       const exceptions = parseExceptions(await readFile(exceptionsPath, "utf8"));
       exceptionWarnings = await lintExceptions(exceptions, makeGhIssueChecker());
+      permanentExceptions = exceptions.filter(e => e.permanent);
     } catch {
       // malformed exceptions.json — audit catches parse errors, not completeness's concern
     }
@@ -177,6 +179,12 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
   if (workarounds.length > 0) {
     lines.push(`### Workaround comments without removal triggers (${workarounds.length} found)\n`);
     for (const w of workarounds) lines.push(`- \`${w.file}:${w.line}\`: ${w.text}`);
+    lines.push("");
+  }
+
+  if (permanentExceptions.length > 0) {
+    lines.push(`### Permanent exceptions (${permanentExceptions.length} — informational)\n`);
+    for (const e of permanentExceptions) lines.push(`- \`${e.path}\` (${e.rule}): ${e.reason ?? "no reason given"}`);
     lines.push("");
   }
 

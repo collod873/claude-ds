@@ -329,4 +329,43 @@ describe("doctor --completeness", () => {
     expect(r.stdout).not.toMatch(/icons\/\.gitkeep/);
     expect(r.code).toBe(0);
   });
+
+  // #133: permanent exceptions skip issue-link lint and are listed as informational
+  it("permanent exception does not trigger issue-link warning, exits 0", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/AppShell.tsx", permanent: true, reason: "app chrome singleton" },
+      ],
+    }, null, 2));
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toContain("no issue link");
+    expect(r.stdout).toContain("Permanent exceptions");
+    expect(r.stdout).toContain("informational");
+    expect(r.stdout).toContain("AppShell.tsx");
+  });
+
+  // #133: mix of permanent and non-permanent exceptions
+  it("non-permanent exception still warns while permanent one is informational", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/AppShell.tsx", permanent: true, reason: "app chrome singleton" },
+        { rule: "DRIFT-MISPLACED", path: "design-system/atoms/Button.tsx", reason: "temporary workaround" },
+      ],
+    }, null, 2));
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain("Button.tsx");
+    expect(r.stdout).toContain("no issue link");
+    expect(r.stdout).toContain("Permanent exceptions");
+    expect(r.stdout).toContain("AppShell.tsx");
+  });
 });

@@ -1,7 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
+import { pruneHooksJson, extractScriptPath } from "../json-merge.js";
 
 /**
  * Deletes a set of files (deprecated orphans, root-dupe copies, CLAUDE.md collision
@@ -25,6 +26,61 @@ export function makeDeleteFiles(relPaths: string[]): Operation {
         changes.push({ kind: "delete", path: p, before });
       }
       return changes;
+    },
+  };
+}
+
+/**
+ * Prunes pack-owned hook entries from `.claude/settings.json` whose referenced
+ * script does not exist on disk. Run this AFTER file deletions so that
+ * just-deleted deprecated scripts are caught alongside never-shipped ones.
+ */
+export function makePruneDanglingHooks(): Operation {
+  return {
+    name: "reconcile-prune-hooks",
+    async plan(ctx: ProjectContext): Promise<Change[]> {
+      const settingsRel = ".claude/settings.json";
+      const settingsAbs = join(ctx.cwd, settingsRel);
+      let raw: Buffer;
+      try {
+        raw = await readFile(settingsAbs);
+      } catch (e: unknown) {
+        if (e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw e;
+      }
+
+      const rawStr = raw.toString("utf8");
+      const missing = new Set<string>();
+      const parsed = JSON.parse(rawStr);
+      const hooks = parsed.hooks;
+      if (!hooks || typeof hooks !== "object") return [];
+
+      for (const blocks of Object.values(hooks as Record<string, unknown>)) {
+        if (!Array.isArray(blocks)) continue;
+        for (const block of blocks as Array<{ hooks?: Array<{ command?: string }> }>) {
+          if (!block?.hooks) continue;
+          for (const entry of block.hooks) {
+            if (typeof entry.command !== "string") continue;
+            if (!entry.command.startsWith(".claude/hooks/")) continue;
+            const scriptPath = extractScriptPath(entry.command);
+            try {
+              await stat(join(ctx.cwd, scriptPath));
+            } catch {
+              missing.add(scriptPath);
+            }
+          }
+        }
+      }
+
+      if (missing.size === 0) return [];
+
+      const pruned = pruneHooksJson(
+        rawStr,
+        (scriptPath) => missing.has(scriptPath),
+      );
+      if (pruned === null) return [];
+
+      return [{ kind: "write", path: settingsRel, before: raw, after: Buffer.from(pruned) }];
     },
   };
 }
