@@ -1,8 +1,13 @@
 import { readFile, writeFile, stat, chmod } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
 import { info, err, confirm } from "../lib/log.js";
+
+const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
 import { run } from "../lib/runner.js";
 import { detectFormatter, runFormatter } from "../lib/formatter.js";
@@ -99,5 +104,20 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
 
   const nextCfg = { ...cfg, packVersion: target };
   await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(nextCfg, null, 2) + "\n", "utf8");
+
+  const buildScript = join(cwd, "scripts", "build-manifest.ts");
+  if (existsSync(buildScript)) {
+    try {
+      await execFile("node", ["--experimental-strip-types", buildScript], {
+        cwd,
+        timeout: 30_000,
+      });
+      info("regenerated design-system/manifest.generated.ts");
+    } catch (e: unknown) {
+      const exitCode = (e as { code?: number }).code ?? "?";
+      info(`warning: build-manifest failed (exit ${exitCode}). Run manually: node --experimental-strip-types scripts/build-manifest.ts`);
+    }
+  }
+
   info(`sync complete → ${target}`);
 }
