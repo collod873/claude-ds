@@ -67,9 +67,9 @@ describe("retireStates migration op", () => {
       join(cwd, "design-system", "exceptions.json"),
       JSON.stringify({
         exceptions: [
-          { rule: "STATE-001", path: "design-system/atoms/Button.tsx", reason: "bulk bypass", issue: "#99" },
-          { rule: "STATE-001", path: "design-system/atoms/Badge.tsx", reason: "bulk bypass", issue: "#99" },
-          { rule: "DRIFT-MISPLACED", path: "design-system/atoms/Card.tsx", reason: "in progress", issue: "#42" },
+          { rule_id: "STATE-001", path: "design-system/atoms/Button.tsx", reason: "bulk bypass", issue: "#99" },
+          { rule_id: "STATE-001", path: "design-system/atoms/Badge.tsx", reason: "bulk bypass", issue: "#99" },
+          { rule_id: "DRIFT-MISPLACED", path: "design-system/atoms/Card.tsx", reason: "in progress", issue: "#42" },
         ],
       }, null, 2) + "\n",
       "utf8"
@@ -82,14 +82,14 @@ describe("retireStates migration op", () => {
     const after = JSON.parse(excWrite!.after.toString("utf8")) as { exceptions: unknown[] };
     expect(after.exceptions).toHaveLength(1);
     const remaining = after.exceptions[0] as Record<string, unknown>;
-    expect(remaining.rule).toBe("DRIFT-MISPLACED");
+    expect(remaining.rule_id).toBe("DRIFT-MISPLACED");
   });
 
   it("does not emit exceptions.json write when no STATE-001 entries present", async () => {
     await scaffoldTiers();
     await writeFile(
       join(cwd, "design-system", "exceptions.json"),
-      JSON.stringify({ exceptions: [{ rule: "DRIFT-MISPLACED", path: "x.tsx", reason: "r", issue: "#1" }] }, null, 2) + "\n",
+      JSON.stringify({ exceptions: [{ rule_id: "DRIFT-MISPLACED", path: "x.tsx", reason: "r", issue: "#1" }] }, null, 2) + "\n",
       "utf8"
     );
 

@@ -117,7 +117,7 @@ export const retireStates: Operation = {
       const arr = Array.isArray(parsed.exceptions)
         ? (parsed.exceptions as Array<Record<string, unknown>>)
         : [];
-      const filtered = arr.filter((e) => e.rule !== "STATE-001");
+      const filtered = arr.filter((e) => e.rule_id !== "STATE-001");
       if (filtered.length < arr.length) {
         const updated = { ...parsed, exceptions: filtered };
         changes.push({
