@@ -127,4 +127,17 @@ describe("detectDsAliases", () => {
       await teardown();
     }
   });
+
+  it("filters out empty prefix from bare /* path key", async () => {
+    await setup();
+    try {
+      await writeFile(join(tmp, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { paths: { "/*": ["./design-system/*"] } },
+      }));
+      const aliases = await detectDsAliases(tmp, "src");
+      expect(aliases).toEqual([]);
+    } finally {
+      await teardown();
+    }
+  });
 });

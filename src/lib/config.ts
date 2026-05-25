@@ -65,7 +65,7 @@ export function parseConfig(raw: string): Config {
   const allowed_imports = o.allowed_imports === undefined ? [] : o.allowed_imports;
   if (!Array.isArray(allowed_imports) || allowed_imports.some((x) => typeof x !== "string")) throw new ConfigError(`allowed_imports must be string[]`);
   const ds_aliases = o.ds_aliases === undefined ? [] : o.ds_aliases;
-  if (!Array.isArray(ds_aliases) || ds_aliases.some((x) => typeof x !== "string")) throw new ConfigError(`ds_aliases must be string[]`);
+  if (!Array.isArray(ds_aliases) || ds_aliases.some((x) => typeof x !== "string" || (x as string).length === 0)) throw new ConfigError(`ds_aliases must be non-empty string[]`);
   return {
     packVersion: rawPackVersion, pack: o.pack, mode: o.mode, enforce_threshold,
     removed: removed as string[], lookalike_ignore: lookalike_ignore as string[],

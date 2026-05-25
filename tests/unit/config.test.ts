@@ -109,4 +109,9 @@ describe("parseConfig", () => {
     expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","ds_aliases":"@ds"}`))
       .toThrow(ConfigError);
   });
+
+  it("rejects ds_aliases with empty string elements", () => {
+    expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","ds_aliases":[""]}`))
+      .toThrow(ConfigError);
+  });
 });

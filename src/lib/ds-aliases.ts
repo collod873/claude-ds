@@ -32,7 +32,9 @@ export async function detectDsAliases(cwd: string, srcRoot: string): Promise<str
       if (!key.endsWith("/*")) continue;
       if (!Array.isArray(values)) continue;
       const pointsToDs = values.some(v => /(?:^|[./])design-system\/\*$/.test(v));
-      if (pointsToDs) aliases.push(key.slice(0, -2));
+      if (!pointsToDs) continue;
+      const prefix = key.slice(0, -2);
+      if (prefix.length > 0) aliases.push(prefix);
     }
     return aliases;
   }
