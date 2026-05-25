@@ -76,11 +76,14 @@ export function allRuleIds(): DriftRuleId[] {
   return Object.keys(RULE_REGISTRY) as DriftRuleId[];
 }
 
-/** DRIFT-MISPLACED: file's folder tier ≠ classifier verdict. */
+/** DRIFT-MISPLACED: file's folder tier ≠ classifier verdict.
+ *  Pattern verdict is suppressed — pattern classification requires explicit
+ *  declaration (meta.kind or directory placement). Use `classify` for discovery. */
 function evalMisplaced(input: DriftRuleInput): DriftFinding | null {
   const { file, locationTier, classifierVerdict } = input;
   if (locationTier === null) return null;
   if (locationTier === classifierVerdict.tier) return null;
+  if (classifierVerdict.tier === "pattern") return null;
   return {
     ruleId: "DRIFT-MISPLACED",
     file,

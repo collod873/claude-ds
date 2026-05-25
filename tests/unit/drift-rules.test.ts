@@ -61,6 +61,16 @@ describe("DRIFT-MISPLACED rule", () => {
     expect(findings).toHaveLength(0);
   });
 
+  it("does not fire when classifier says pattern (discovery only, not enforcement)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/card.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISPLACED")).toHaveLength(0);
+  });
+
   it("includes classifier signals in the finding message", () => {
     const input: DriftRuleInput = {
       file: "design-system/atoms/combobox.tsx",
