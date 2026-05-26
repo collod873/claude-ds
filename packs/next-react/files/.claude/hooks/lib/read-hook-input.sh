@@ -11,7 +11,11 @@ fi
 HOOK_FILE_PATH=""
 HOOK_BASH_COMMAND=""
 
-if [ -n "$_hook_stdin" ] && command -v jq >/dev/null 2>&1; then
+if [ -n "$_hook_stdin" ]; then
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "claude-ds: jq is required for governance hooks — install it with: brew install jq" >&2
+    exit 1
+  fi
   HOOK_FILE_PATH="$(printf '%s' "$_hook_stdin" | jq -r '.tool_input.file_path // empty')"
   HOOK_BASH_COMMAND="$(printf '%s' "$_hook_stdin" | jq -r '.tool_input.command // empty')"
 fi
