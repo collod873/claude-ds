@@ -30,10 +30,10 @@ describe("audit --fix", () => {
 
   it("reports unfixable findings as requiring manual intervention", async () => {
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
-    // No DS imports → classifier says atom → DRIFT-MISPLACED (not auto-fixable)
+    // Feature import → classifier says feature → DRIFT-MISPLACED fixer declines (cannot relocate to feature tier)
     await writeFile(
       join(dir, "design-system/composites/solo-label.tsx"),
-      "export function SoloLabel() { return <span />; }",
+      'import { api } from "@/features/billing/api";\nexport function SoloLabel() { return <span>{api()}</span>; }',
     );
     const r = await runCli(["audit", "--pack", "next-react", "--fix"], { cwd: dir });
     expect(r.code).toBe(1);
@@ -61,14 +61,15 @@ describe("audit --fix", () => {
       JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
     );
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    // Feature import → classifier says feature → MISPLACED fixer declines
     await writeFile(
       join(dir, "design-system/composites/orphan.tsx"),
-      "export function Orphan() { return <span />; }",
+      'import { api } from "@/features/billing/api";\nexport function Orphan() { return <span>{api()}</span>; }',
     );
     const r = await runCli(["audit", "--fix"], { cwd: dir });
     expect(r.code).toBe(1);
-    // Both DRIFT-META-KIND-MISSING (fixable) and DRIFT-MISPLACED (not fixable) fire,
-    // but the meta-kind one should be fixed, leaving DRIFT-MISPLACED unresolved.
+    // DRIFT-META-KIND-MISSING (fixable) is fixed, but DRIFT-MISPLACED remains
+    // because the fixer cannot relocate to a feature tier.
     expect(r.stdout).toMatch(/DRIFT-MISPLACED/);
   });
 
@@ -213,10 +214,10 @@ describe("audit --fix --except", () => {
       JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
     );
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
-    // This file triggers both DRIFT-META-KIND-MISSING (fixable) and DRIFT-MISPLACED (not fixable)
+    // Feature import → DRIFT-META-KIND-MISSING (fixable) + DRIFT-MISPLACED (fixer declines for feature tier)
     await writeFile(
       join(dir, "design-system/composites/orphan.tsx"),
-      "export function Orphan() { return <span />; }",
+      'import { api } from "@/features/billing/api";\nexport function Orphan() { return <span>{api()}</span>; }',
     );
     const r = await runCli(["audit", "--fix", "--except", "--reason", "pending move", "--issue", "#55"], { cwd: dir });
     expect(r.code).toBe(0);
@@ -224,6 +225,77 @@ describe("audit --fix --except", () => {
     const content = await readFile(join(dir, "design-system/composites/orphan.tsx"), "utf8");
     expect(content).toMatch(/export const meta.*kind/);
     // Verify DRIFT-MISPLACED was excepted
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.exceptions.some((e: { rule: string }) => e.rule === "DRIFT-MISPLACED")).toBe(true);
+  });
+});
+
+describe("audit --fix stale exception cleanup", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("removes stale exceptions after a successful fix resolves the finding", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    // chip.tsx already has meta.kind → exception for DRIFT-META-KIND-MISSING is stale
+    await writeFile(
+      join(dir, "design-system/atoms/chip.tsx"),
+      `export function Chip() { return <span />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+    );
+    // tag.tsx has NO meta.kind → DRIFT-META-KIND-MISSING will fire and be fixed
+    await writeFile(
+      join(dir, "design-system/atoms/tag.tsx"),
+      `export function Tag() { return <span />; }\n`,
+    );
+    // Pre-existing stale exception (chip.tsx already has meta, so this exception is stale)
+    await writeFile(
+      join(dir, "design-system/exceptions.json"),
+      JSON.stringify({
+        exceptions: [
+          { rule: "DRIFT-META-KIND-MISSING", path: "design-system/atoms/chip.tsx", issue: "#10", reason: "tracked" },
+        ],
+      }),
+    );
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Verify tag.tsx got the fix (different file)
+    const tagContent = await readFile(join(dir, "design-system/atoms/tag.tsx"), "utf8");
+    expect(tagContent).toContain('kind: "atom"');
+    // Verify the stale exception for chip.tsx was removed
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.exceptions).toHaveLength(0);
+    expect(r.stdout).toMatch(/stale exception.*removed/i);
+  });
+
+  it("preserves exceptions that still fire after fixes", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    // This file triggers DRIFT-MISPLACED (fixer will decline because classifier says feature)
+    // and also DRIFT-META-KIND-MISSING (fixable)
+    await writeFile(
+      join(dir, "design-system/composites/orphan.tsx"),
+      'import { api } from "@/features/billing/api";\nexport function Orphan() { return <span>{api()}</span>; }',
+    );
+    // Pre-existing exception for DRIFT-MISPLACED — should be preserved
+    await writeFile(
+      join(dir, "design-system/exceptions.json"),
+      JSON.stringify({
+        exceptions: [
+          { rule: "DRIFT-MISPLACED", path: "design-system/composites/orphan.tsx", issue: "#20", reason: "known" },
+        ],
+      }),
+    );
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    // Even after fixing META-KIND-MISSING, MISPLACED still fires → exception stays
     const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
     const parsed = JSON.parse(raw);
     expect(parsed.exceptions.some((e: { rule: string }) => e.rule === "DRIFT-MISPLACED")).toBe(true);

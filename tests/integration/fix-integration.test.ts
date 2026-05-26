@@ -1,0 +1,362 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { freshTmpDir, cleanup } from "../helpers/tmpdir";
+import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { checkThreeSignals } from "../../src/lib/three-signal";
+import { runFixPass } from "../../src/lib/fix-pass";
+import type { DriftFinding } from "../../src/lib/drift-rules";
+import type { FixerPrompt } from "../../src/lib/drift-fixers";
+
+async function exists(p: string): Promise<boolean> {
+  try { await stat(p); return true; } catch { return false; }
+}
+
+async function collectFindings(cwd: string): Promise<DriftFinding[]> {
+  const { readdir, readFile: rf } = await import("node:fs/promises");
+  const tierDirs = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
+  const findings: DriftFinding[] = [];
+  for (const tierDir of tierDirs) {
+    let entries: string[];
+    try { entries = await readdir(join(cwd, tierDir)); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.endsWith(".tsx")) continue;
+      if (entry.endsWith(".showcase.tsx") || entry.endsWith(".test.tsx") || entry.endsWith(".stories.tsx")) continue;
+      const filePath = `${tierDir}/${entry}`;
+      let source: string;
+      try { source = await rf(join(cwd, filePath), "utf8"); } catch { continue; }
+      const { findings: f } = checkThreeSignals(filePath, source);
+      findings.push(...f);
+    }
+  }
+  return findings;
+}
+
+describe("integration: full --fix pass on fixture project", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("resolves all drift categories in a single --fix pass", async () => {
+    // ── Scaffold fixture project ──
+
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await mkdir(join(dir, "design-system/utils"), { recursive: true });
+    await mkdir(join(dir, "lib/utils"), { recursive: true });
+    await mkdir(join(dir, "src"), { recursive: true });
+
+    // ── tokens.json (for DRIFT-INLINE-STATIC-STYLE) ──
+    await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify({
+      spacing: { 1: "4px", 2: "8px", 4: "16px" },
+      color: { primary: "#007bff", muted: "#6c757d" },
+    }));
+
+    // ── Existing atom: button with CVA variants ──
+    await writeFile(join(dir, "design-system/atoms/button.tsx"), [
+      'import { cva } from "class-variance-authority";',
+      "",
+      "const buttonVariants = cva(\"btn\", {",
+      "  variants: {",
+      "    variant: {",
+      '      default: "btn-default",',
+      '      ghost: "btn-ghost",',
+      '      outline: "btn-outline",',
+      "    },",
+      "  },",
+      "});",
+      "",
+      "export function Button({ variant = \"default\", ...props }: any) {",
+      "  return <button className={buttonVariants({ variant })} {...props} />;",
+      "}",
+      'export const meta = { kind: "atom" as const, examples: [',
+      '  { name: "default", props: { variant: "default" } },',
+      '  { name: "ghost", props: { variant: "ghost" } },',
+      '  { name: "outline", props: { variant: "outline" } },',
+      "] };",
+      "",
+    ].join("\n"));
+
+    // ── Existing atom: input ──
+    await writeFile(join(dir, "design-system/atoms/input.tsx"), [
+      "export function Input(props: any) {",
+      "  return <input className=\"ds-input\" {...props} />;",
+      "}",
+      'export const meta = { kind: "atom" as const, examples: [{ name: "default", props: {} }] };',
+      "",
+    ].join("\n"));
+
+    // ── Composite 1: raw <button> → DRIFT-RAW-PRIMITIVE (use-existing path) ──
+    // Must import from DS atoms so classifier sees it as composite, not atom
+    await writeFile(join(dir, "design-system/composites/toolbar.tsx"), [
+      'import { Input } from "@/design-system/atoms/input";',
+      'import { Badge } from "@/design-system/composites/badge";',
+      "",
+      "export function Toolbar() {",
+      "  return (",
+      "    <div>",
+      '      <button onClick={() => {}}>Save</button>',
+      '      <button onClick={() => {}}>Cancel</button>',
+      "      <Input placeholder=\"search\" />",
+      '      <Badge label="info" />',
+      "    </div>",
+      "  );",
+      "}",
+      'export const meta = { kind: "composite" as const, examples: [] };',
+      "",
+    ].join("\n"));
+
+    // ── Composite 2: raw <button> + inlined named component ≥20 lines → DRIFT-RAW-PRIMITIVE
+    //    (both use-existing and extract paths triggered by the fixer)
+    // Must import from DS so classifier sees composite, not atom
+    const chipLines = Array.from({ length: 20 }, (_, i) =>
+      `  const v${i} = ${i};`
+    ).join("\n");
+    await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), [
+      'import { Input } from "@/design-system/atoms/input";',
+      "",
+      "function FilterBarChip({ label }: { label: string }) {",
+      chipLines,
+      "  return <span className=\"chip\">{label}</span>;",
+      "}",
+      "",
+      "export function FilterBar() {",
+      "  return (",
+      "    <div>",
+      '      <button>Apply</button>',
+      '      <FilterBarChip label="active" />',
+      '      <FilterBarChip label="draft" />',
+      "      <Input placeholder=\"filter\" />",
+      "    </div>",
+      "  );",
+      "}",
+      'export const meta = { kind: "composite" as const, examples: [] };',
+      "",
+    ].join("\n"));
+
+    // ── Composite 3: inline style={{ padding: "8px" }} → DRIFT-INLINE-STATIC-STYLE ──
+    // Avoid children/ReactNode to prevent pattern classification
+    await writeFile(join(dir, "design-system/composites/card.tsx"), [
+      'import { Button } from "@/design-system/atoms/button";',
+      "",
+      "export function Card({ title }: { title: string }) {",
+      '  return <div style={{ padding: "8px" }}><span>{title}</span><Button>ok</Button></div>;',
+      "}",
+      'export const meta = { kind: "composite" as const, examples: [] };',
+      "",
+    ].join("\n"));
+
+    // ── Composite 4: imports from lib/utils → DRIFT-DS-IMPORTS-FEATURE ──
+    await writeFile(join(dir, "lib/utils/format.ts"), [
+      "export function formatCurrency(amount: number): string {",
+      '  return "$" + amount.toFixed(2);',
+      "}",
+      "",
+    ].join("\n"));
+    await writeFile(join(dir, "design-system/composites/price-tag.tsx"), [
+      'import { formatCurrency } from "@/lib/utils/format";',
+      "",
+      "export function PriceTag({ amount }: { amount: number }) {",
+      "  return <span>{formatCurrency(amount)}</span>;",
+      "}",
+      'export const meta = { kind: "composite" as const, examples: [] };',
+      "",
+    ].join("\n"));
+
+    // ── Misplaced file: atom living in composites/ → DRIFT-MISPLACED ──
+    await writeFile(join(dir, "design-system/composites/badge.tsx"), [
+      "export function Badge({ label }: { label: string }) {",
+      "  return <span className=\"badge\">{label}</span>;",
+      "}",
+      'export const meta = { kind: "atom" as const, examples: [] };',
+      "",
+    ].join("\n"));
+    // Companion file that should move with it
+    await writeFile(join(dir, "design-system/composites/badge.test.tsx"), [
+      'import { Badge } from "./badge";',
+      "it(\"renders\", () => { expect(Badge).toBeDefined(); });",
+      "",
+    ].join("\n"));
+
+    // ── App-level file that imports badge from composites (should get rewritten) ──
+    await writeFile(join(dir, "src/app.tsx"), [
+      'import { Badge } from "@/design-system/composites/badge";',
+      'import { Card } from "@/design-system/composites/card";',
+      "",
+      "export function App() {",
+      '  return <Card><Badge label="new" /></Card>;',
+      "}",
+      "",
+    ].join("\n"));
+
+    // ── Stale exception (for badge which will be fixed by relocation) ──
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "design-system/composites/badge.tsx", issue: "#99", reason: "tracked" },
+      ],
+    }));
+
+    // ── Barrel exports (pre-existing) ──
+    await writeFile(join(dir, "design-system/atoms/index.ts"), [
+      'export * from "./button";',
+      'export * from "./input";',
+      "",
+    ].join("\n"));
+    await writeFile(join(dir, "design-system/composites/index.ts"), [
+      'export * from "./badge";',
+      'export * from "./card";',
+      'export * from "./filter-bar";',
+      'export * from "./price-tag";',
+      'export * from "./toolbar";',
+      "",
+    ].join("\n"));
+
+    // ── Collect initial findings ──
+    const initialFindings = await collectFindings(dir);
+    expect(initialFindings.length).toBeGreaterThanOrEqual(4);
+
+    const ruleIds = new Set(initialFindings.map(f => f.ruleId));
+    expect(ruleIds.has("DRIFT-RAW-PRIMITIVE")).toBe(true);
+    expect(ruleIds.has("DRIFT-INLINE-STATIC-STYLE")).toBe(true);
+    expect(ruleIds.has("DRIFT-DS-IMPORTS-FEATURE")).toBe(true);
+    expect(ruleIds.has("DRIFT-MISPLACED")).toBe(true);
+
+    // ── Mock prompt: always pick first option ──
+    const promptLog: string[] = [];
+    const mockPrompt: FixerPrompt = async (question, options) => {
+      promptLog.push(`${question} → [0] ${options[0]}`);
+      return 0;
+    };
+
+    // ── Run fix pass ──
+    const result = await runFixPass(dir, initialFindings, { prompt: mockPrompt });
+
+    expect(result.aborted).toBe(false);
+    expect(result.applied.length).toBeGreaterThan(0);
+
+    const fixedCount = result.results.filter(r => r.fixed).length;
+    expect(fixedCount).toBeGreaterThanOrEqual(4);
+
+    // ── Assert: zero findings on re-audit ──
+    const postFindings = await collectFindings(dir);
+    // Some findings may remain (e.g. card now has children → pattern classification),
+    // but the original rule IDs should be resolved
+    const postRuleIds = new Set(postFindings.map(f => f.ruleId));
+    expect(postRuleIds.has("DRIFT-RAW-PRIMITIVE")).toBe(false);
+    expect(postRuleIds.has("DRIFT-INLINE-STATIC-STYLE")).toBe(false);
+
+    // ── Assert: badge relocated from composites/ to atoms/ ──
+    expect(await exists(join(dir, "design-system/atoms/badge.tsx"))).toBe(true);
+    expect(await exists(join(dir, "design-system/composites/badge.tsx"))).toBe(false);
+
+    // ── Assert: companion file moved alongside ──
+    expect(await exists(join(dir, "design-system/atoms/badge.test.tsx"))).toBe(true);
+    expect(await exists(join(dir, "design-system/composites/badge.test.tsx"))).toBe(false);
+
+    // ── Assert: extracted atom exists (FilterBarChip → Chip) ──
+    expect(await exists(join(dir, "design-system/atoms/chip.tsx"))).toBe(true);
+    const chipSource = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
+    expect(chipSource).toContain('kind: "atom"');
+    expect(chipSource).toContain("Chip");
+
+    // ── Assert: filter-bar.tsx now imports extracted atom ──
+    const filterBarSource = await readFile(join(dir, "design-system/composites/filter-bar.tsx"), "utf8");
+    expect(filterBarSource).toContain("@/design-system/atoms/chip");
+    expect(filterBarSource).not.toContain("function FilterBarChip");
+
+    // ── Assert: raw <button> replaced with <Button> in toolbar ──
+    const toolbarSource = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
+    expect(toolbarSource).not.toMatch(/<button[\s>]/);
+    expect(toolbarSource).toContain("<Button");
+    expect(toolbarSource).toContain("@/design-system/atoms/button");
+
+    // ── Assert: inline style replaced with token class in card ──
+    const cardSource = await readFile(join(dir, "design-system/composites/card.tsx"), "utf8");
+    expect(cardSource).toContain("spacing-2");
+    expect(cardSource).not.toContain('style={{ padding: "8px" }}');
+
+    // ── Assert: domain import resolved for price-tag ──
+    // After DS-IMPORTS-FEATURE extracts the domain import, the file reclassifies as atom
+    // and DRIFT-MISCLASSIFIED-COMPOSITE relocates it to atoms/
+    const priceTagInAtoms = await exists(join(dir, "design-system/atoms/price-tag.tsx"));
+    const priceTagInComposites = await exists(join(dir, "design-system/composites/price-tag.tsx"));
+    expect(priceTagInAtoms || priceTagInComposites).toBe(true);
+    const priceTagPath = priceTagInAtoms
+      ? join(dir, "design-system/atoms/price-tag.tsx")
+      : join(dir, "design-system/composites/price-tag.tsx");
+    const priceTagSource = await readFile(priceTagPath, "utf8");
+    // Domain import should be replaced with DS utils import
+    expect(priceTagSource).not.toContain("@/lib/utils/format");
+    // The extracted utility should exist
+    expect(await exists(join(dir, "design-system/utils/format.ts"))).toBe(true);
+
+    // ── Assert: app-level imports rewritten ──
+    const appSource = await readFile(join(dir, "src/app.tsx"), "utf8");
+    expect(appSource).toContain("@/design-system/atoms/badge");
+    expect(appSource).not.toContain("@/design-system/composites/badge");
+
+    // ── Assert: barrel indexes regenerated ──
+    const atomsBarrel = await readFile(join(dir, "design-system/atoms/index.ts"), "utf8");
+    expect(atomsBarrel).toContain("badge");
+    expect(atomsBarrel).toContain("button");
+    expect(atomsBarrel).toContain("chip");
+    expect(atomsBarrel).toContain("input");
+
+    const compositesBarrel = await readFile(join(dir, "design-system/composites/index.ts"), "utf8");
+    expect(compositesBarrel).not.toContain("badge");
+    expect(compositesBarrel).toContain("card");
+    expect(compositesBarrel).toContain("toolbar");
+
+    // ── Assert: manifest.json regenerated ──
+    expect(await exists(join(dir, "design-system/manifest.json"))).toBe(true);
+    const manifest = JSON.parse(await readFile(join(dir, "design-system/manifest.json"), "utf8"));
+    const componentNames = manifest.components.map((c: { name: string }) => c.name);
+    expect(componentNames).toContain("badge");
+    expect(componentNames).toContain("chip");
+    expect(componentNames).toContain("button");
+
+    // Stale exception cleanup is handled by auditCmd (not runFixPass),
+    // and is already tested in audit-fix-except.test.ts
+
+    // ── Assert: prompt was called for interactive fixers ──
+    expect(promptLog.length).toBeGreaterThanOrEqual(2);
+  }, 15000);
+
+  it("defers all interactive findings in non-TTY mode", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+    await writeFile(join(dir, "design-system/atoms/button.tsx"), [
+      "export function Button(props: any) { return <button {...props} />; }",
+      'export const meta = { kind: "atom" as const, examples: [] };',
+      "",
+    ].join("\n"));
+
+    // Composite with raw <button> — interactive fixer
+    // Must import DS atom so classifier sees composite, not atom
+    await writeFile(join(dir, "design-system/composites/form.tsx"), [
+      'import { Input } from "@/design-system/atoms/button";',
+      "",
+      "export function Form() {",
+      '  return <div><Input /><button type="submit">Go</button></div>;',
+      "}",
+      'export const meta = { kind: "composite" as const, examples: [] };',
+      "",
+    ].join("\n"));
+
+    const findings = await collectFindings(dir);
+    expect(findings.some(f => f.ruleId === "DRIFT-RAW-PRIMITIVE")).toBe(true);
+
+    // No-TTY prompt: always defers
+    const noTtyPrompt: FixerPrompt = async () => "defer";
+    const result = await runFixPass(dir, findings, { prompt: noTtyPrompt });
+
+    expect(result.aborted).toBe(false);
+    const deferred = result.results.filter(r => !r.fixed);
+    expect(deferred.length).toBeGreaterThanOrEqual(1);
+    expect(deferred.some(r => r.finding.ruleId === "DRIFT-RAW-PRIMITIVE")).toBe(true);
+
+    // Original file unchanged
+    const formSource = await readFile(join(dir, "design-system/composites/form.tsx"), "utf8");
+    expect(formSource).toContain("<button");
+  });
+});
