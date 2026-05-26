@@ -317,9 +317,93 @@ describe("integration: full --fix pass on fixture project", () => {
     // Stale exception cleanup is handled by auditCmd (not runFixPass),
     // and is already tested in audit-fix-except.test.ts
 
-    // ── Assert: prompt was called for interactive fixers ──
-    expect(promptLog.length).toBeGreaterThanOrEqual(2);
+    // ��─ Assert: no prompts needed — all fixes were deterministic (Gap 1) ──
+    expect(promptLog).toHaveLength(0);
   }, 15000);
+
+  it("handles Button atom with compound variants and pseudo-states (Crewops fixture)", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+    // Button atom mirroring real Crewops structure: compound variants with pseudo-states
+    await writeFile(join(dir, "design-system/atoms/button.tsx"), [
+      'import { cva } from "class-variance-authority";',
+      "",
+      'const buttonVariants = cva("inline-flex items-center rounded-md font-medium", {',
+      "  variants: {",
+      '    variant: { default: "bg-primary text-white", destructive: "bg-red-500 text-white", ghost: "bg-transparent", outline: "border-2 bg-transparent", secondary: "bg-secondary text-white", link: "underline" },',
+      '    size: { default: "h-10 px-4 py-2", sm: "h-8 px-3 text-sm", lg: "h-12 px-6 text-lg", icon: "h-10 w-10" },',
+      '    hover: { true: "hover:opacity-90" },',
+      '    active: { true: "active:scale-95" },',
+      '    pressed: { true: "pressed:opacity-80" },',
+      '    focus: { true: "focus:ring-2 focus:ring-offset-2" },',
+      '    disabled: { true: "opacity-50 cursor-not-allowed pointer-events-none" },',
+      '    expanded: { true: "expanded:rotate-180" },',
+      '    dark: { true: "dark:bg-gray-800 dark:text-white" },',
+      '    visible: { true: "visible:opacity-100" },',
+      "  },",
+      "  compoundVariants: [",
+      '    { variant: "ghost", hover: true, class: "hover:bg-accent hover:text-accent-foreground" },',
+      '    { variant: "outline", focus: true, class: "focus:ring-primary" },',
+      '    { variant: "destructive", active: true, class: "active:bg-red-700" },',
+      "  ],",
+      '  defaultVariants: { variant: "default", size: "default" },',
+      "});",
+      "",
+      "export function Button({ variant, size, ...props }: any) {",
+      "  return <button className={buttonVariants({ variant, size })} {...props} />;",
+      "}",
+      'export const meta = { kind: "atom" as const, examples: [',
+      '  { name: "default", props: { variant: "default" } },',
+      '  { name: "ghost", props: { variant: "ghost" } },',
+      '  { name: "outline", props: { variant: "outline" } },',
+      '  { name: "destructive", props: { variant: "destructive" } },',
+      '  { name: "secondary", props: { variant: "secondary" } },',
+      '  { name: "link", props: { variant: "link" } },',
+      '  { name: "sm", props: { size: "sm" } },',
+      '  { name: "lg", props: { size: "lg" } },',
+      '  { name: "icon", props: { size: "icon" } },',
+      "] };",
+      "",
+    ].join("\n"));
+
+    // Composite with raw <button> including a className with a variant keyword
+    await writeFile(join(dir, "design-system/composites/toolbar.tsx"), [
+      'import { Button } from "@/design-system/atoms/button";',
+      "",
+      "export function Toolbar() {",
+      "  return (",
+      "    <div>",
+      '      <button className="ghost-action" onClick={() => {}}>Action</button>',
+      "    </div>",
+      "  );",
+      "}",
+      'export const meta = { kind: "composite" as const, examples: [] };',
+      "",
+    ].join("\n"));
+
+    const findings = await collectFindings(dir);
+    const rawPrimitiveFinding = findings.find(f => f.ruleId === "DRIFT-RAW-PRIMITIVE");
+    expect(rawPrimitiveFinding).toBeDefined();
+
+    const promptLog: string[] = [];
+    const mockPrompt: FixerPrompt = async (question, options) => {
+      promptLog.push(`${question} → opts: ${options.length}`);
+      return 0;
+    };
+
+    const result = await runFixPass(dir, findings, { prompt: mockPrompt });
+    expect(result.aborted).toBe(false);
+
+    const toolbar = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
+    expect(toolbar).toContain("<Button");
+    expect(toolbar).not.toContain("<button");
+    // Auto-inferred variant from className "ghost-action" → variant="ghost"
+    expect(toolbar).toContain('variant="ghost"');
+    // Should NOT have prompted — variant was auto-inferred from className
+    // (pseudo-states filtered out, so only variant+size remain, exactly one match)
+    expect(promptLog.filter(p => p.includes("raw <button>"))).toHaveLength(0);
+  });
 
   it("defers all interactive findings in non-TTY mode", async () => {
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });

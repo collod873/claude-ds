@@ -231,9 +231,17 @@ function evalRawPrimitive(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
+const PSEUDO_STATE_AXES = new Set([
+  "hover", "focus", "active", "disabled", "checked", "selected",
+  "visited", "pressed", "expanded", "visible", "open", "closed",
+  "dark", "light", "focusVisible", "focusWithin",
+]);
+
 /**
  * Extract CVA variant axis names and their values from source.
  * Matches the variants object inside a cva() call.
+ * Filters out pseudo-state axes (hover, focus, active, etc.) that are
+ * CSS state selectors, not settable props.
  */
 export function parseCvaVariants(source: string): Record<string, string[]> | null {
   if (!source.includes("cva(")) return null;
@@ -248,6 +256,7 @@ export function parseCvaVariants(source: string): Record<string, string[]> | nul
   let am: RegExpExecArray | null;
   while ((am = axisRe.exec(varBlock)) !== null) {
     const axisName = am[1];
+    if (PSEUDO_STATE_AXES.has(axisName)) continue;
     const valuesBlock = am[2];
     const valueKeys: string[] = [];
     const keyRe = /(\w+)\s*:/g;

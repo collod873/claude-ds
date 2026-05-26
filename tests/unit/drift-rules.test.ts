@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evaluateDrift, allRuleIds, ruleDescription, type DriftRuleInput } from "../../src/lib/drift-rules";
+import { evaluateDrift, allRuleIds, ruleDescription, parseCvaVariants, type DriftRuleInput } from "../../src/lib/drift-rules";
 
 describe("drift rule registry", () => {
   it("exposes a stable set of rule IDs including DRIFT-MISPLACED", () => {
@@ -841,5 +841,83 @@ export const meta = { kind: "atom" as const, examples: [] };`,
     };
     const findings = evaluateDrift(input);
     expect(findings.filter(f => f.ruleId === "DRIFT-CVA-VARIANT-UNRENDERED")).toHaveLength(0);
+  });
+});
+
+describe("parseCvaVariants", () => {
+  it("returns base variant axes and values", () => {
+    const source = `import { cva } from "class-variance-authority";
+const buttonVariants = cva("btn", {
+  variants: {
+    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline" },
+    size: { default: "btn-md", sm: "btn-sm", lg: "btn-lg" },
+  },
+  defaultVariants: { variant: "default", size: "default" },
+});`;
+    const result = parseCvaVariants(source);
+    expect(result).toEqual({
+      variant: ["default", "ghost", "outline"],
+      size: ["default", "sm", "lg"],
+    });
+  });
+
+  it("excludes pseudo-state variant axes (hover, active, pressed, etc.)", () => {
+    const source = `import { cva } from "class-variance-authority";
+const buttonVariants = cva("btn", {
+  variants: {
+    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline" },
+    size: { default: "btn-md", sm: "btn-sm", icon: "btn-icon" },
+    hover: { true: "hover:bg-accent" },
+    active: { true: "active:bg-accent/80" },
+    pressed: { true: "pressed:scale-95" },
+    expanded: { true: "expanded:rotate-180" },
+    visible: { true: "visible:opacity-100" },
+    dark: { true: "dark:bg-gray-800" },
+    focus: { true: "focus:ring-2" },
+    disabled: { true: "opacity-50 cursor-not-allowed" },
+    selected: { true: "bg-primary text-white" },
+    checked: { true: "checked:bg-primary" },
+  },
+  compoundVariants: [
+    { variant: "ghost", hover: true, class: "hover:bg-transparent" },
+    { variant: "outline", focus: true, class: "focus:ring-primary" },
+  ],
+  defaultVariants: { variant: "default", size: "default" },
+});`;
+    const result = parseCvaVariants(source);
+    expect(result).not.toBeNull();
+    expect(Object.keys(result!)).toEqual(["variant", "size"]);
+    expect(result!.variant).toEqual(["default", "ghost", "outline"]);
+    expect(result!.size).toEqual(["default", "sm", "icon"]);
+  });
+
+  it("excludes focusVisible and focusWithin pseudo-state axes", () => {
+    const source = `import { cva } from "class-variance-authority";
+const v = cva("base", {
+  variants: {
+    tone: { info: "i", warning: "w" },
+    focusVisible: { true: "ring-2" },
+    focusWithin: { true: "ring-1" },
+  },
+});`;
+    const result = parseCvaVariants(source);
+    expect(result).toEqual({ tone: ["info", "warning"] });
+  });
+
+  it("returns null when no non-pseudo-state variants remain", () => {
+    const source = `import { cva } from "class-variance-authority";
+const v = cva("base", {
+  variants: {
+    hover: { true: "hover-style" },
+    focus: { true: "focus-style" },
+  },
+});`;
+    const result = parseCvaVariants(source);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for source without cva()", () => {
+    const result = parseCvaVariants("export function Foo() { return <div />; }");
+    expect(result).toBeNull();
   });
 });
