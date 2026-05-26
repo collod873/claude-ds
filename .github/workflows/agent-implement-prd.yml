@@ -153,7 +153,7 @@ jobs:
 
       - name: Checkout — resume PRD branch if it exists, else create from main
         if: steps.shape.outputs.mode == 'run'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 0
@@ -179,7 +179,7 @@ jobs:
 
       - name: Setup Node.js 22
         if: steps.shape.outputs.mode == 'run'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
 

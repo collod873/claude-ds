@@ -100,7 +100,7 @@ jobs:
 
       - name: Checkout main
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 0
@@ -128,7 +128,7 @@ jobs:
 
       - name: Setup Node.js 22
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
 
