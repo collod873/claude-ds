@@ -11,7 +11,7 @@ import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import type { DriftFinding } from "../lib/drift-rules.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
-import { getFixer, type FixResult } from "../lib/drift-fixers.js";
+import { getFixer, makeNoTtyPrompt, makeTtyPrompt, type FixResult, type FixerPrompt } from "../lib/drift-fixers.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -219,7 +219,9 @@ export async function auditCmd(opts: AuditOpts) {
   // --fix: attempt auto-fix for fixable rules.
   if (opts.fix && activeFindings.length > 0) {
     const fixResults: FixResult[] = [];
-    const fixerOpts = { domainRoots: domainRoots, allowedImports, dsAliases };
+    const isTTY = process.stdin.isTTY === true;
+    const prompt: FixerPrompt = isTTY ? makeTtyPrompt() : makeNoTtyPrompt();
+    const fixerOpts = { domainRoots: domainRoots, allowedImports, dsAliases, prompt };
     for (const f of activeFindings) {
       const fixer = getFixer(f.ruleId);
       if (fixer) {

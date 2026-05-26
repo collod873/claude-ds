@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { isFixable, getFixer } from "../../src/lib/drift-fixers";
+import { isFixable, getFixer, isInteractive, makeNoTtyPrompt } from "../../src/lib/drift-fixers";
 import type { DriftRuleId } from "../../src/lib/drift-rules";
 import type { DriftFinding } from "../../src/lib/drift-rules";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
@@ -44,6 +44,53 @@ describe("drift-fixers", () => {
       ];
       for (const rule of unfixable) {
         expect(getFixer(rule)).toBeNull();
+      }
+    });
+  });
+
+  describe("isInteractive", () => {
+    it("returns false for DRIFT-META-KIND-MISSING (deterministic fixer)", () => {
+      expect(isInteractive("DRIFT-META-KIND-MISSING")).toBe(false);
+    });
+
+    it("returns false for rules with no fixer", () => {
+      expect(isInteractive("DRIFT-MISPLACED")).toBe(false);
+    });
+  });
+
+  describe("makeNoTtyPrompt", () => {
+    it("always returns 'defer'", async () => {
+      const prompt = makeNoTtyPrompt();
+      const result = await prompt("Which variant?", ["default", "ghost", "outline"]);
+      expect(result).toBe("defer");
+    });
+
+    it("returns 'defer' regardless of question or options", async () => {
+      const prompt = makeNoTtyPrompt();
+      expect(await prompt("Pick one", ["a"])).toBe("defer");
+      expect(await prompt("Another?", ["x", "y", "z"])).toBe("defer");
+    });
+  });
+
+  describe("FixerOpts.prompt", () => {
+    it("existing DRIFT-META-KIND-MISSING fixer works with prompt in opts", async () => {
+      const dir = await freshTmpDir();
+      try {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await writeFile(join(dir, "design-system/atoms/chip.tsx"), "export function Chip() { return <span />; }\n");
+        const fixer = getFixer("DRIFT-META-KIND-MISSING")!;
+        const finding: DriftFinding = {
+          ruleId: "DRIFT-META-KIND-MISSING",
+          file: "design-system/atoms/chip.tsx",
+          message: "missing meta.kind",
+        };
+        const mockPrompt = async () => 0 as number | "defer";
+        const result = await fixer(finding, dir, { prompt: mockPrompt });
+        expect(result.fixed).toBe(true);
+        const content = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
+        expect(content).toMatch(/meta/);
+      } finally {
+        await cleanup(dir);
       }
     });
   });

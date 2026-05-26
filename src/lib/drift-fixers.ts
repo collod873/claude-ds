@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import type { DriftFinding, DriftRuleId } from "./drift-rules.js";
 import { classifySource } from "./classifier.js";
 import { locationTierFromPath } from "./three-signal.js";
@@ -10,16 +11,24 @@ export interface FixResult {
   message: string;
 }
 
+export type FixerPrompt = (question: string, options: string[]) => Promise<number | "defer">;
+
 export type DriftFixer = (finding: DriftFinding, cwd: string, opts?: FixerOpts) => Promise<FixResult>;
 
 export interface FixerOpts {
   domainRoots?: string[];
   allowedImports?: string[];
   dsAliases?: string[];
+  prompt?: FixerPrompt;
 }
 
-const FIXABLE_RULES: Partial<Record<DriftRuleId, DriftFixer>> = {
-  "DRIFT-META-KIND-MISSING": fixMetaKindMissing,
+interface FixerEntry {
+  fixer: DriftFixer;
+  interactive: boolean;
+}
+
+const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
+  "DRIFT-META-KIND-MISSING": { fixer: fixMetaKindMissing, interactive: false },
 };
 
 export function isFixable(ruleId: DriftRuleId): boolean {
@@ -27,7 +36,35 @@ export function isFixable(ruleId: DriftRuleId): boolean {
 }
 
 export function getFixer(ruleId: DriftRuleId): DriftFixer | null {
-  return FIXABLE_RULES[ruleId] ?? null;
+  return FIXABLE_RULES[ruleId]?.fixer ?? null;
+}
+
+export function isInteractive(ruleId: DriftRuleId): boolean {
+  return FIXABLE_RULES[ruleId]?.interactive ?? false;
+}
+
+export function makeNoTtyPrompt(): FixerPrompt {
+  return async () => "defer";
+}
+
+export function makeTtyPrompt(): FixerPrompt {
+  return async (question: string, options: string[]): Promise<number | "defer"> => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      const lines = options.map((opt, i) => `  [${i + 1}] ${opt}`).join("\n");
+      const display = `${question}\n${lines}\n  [s] Skip/defer\n> `;
+      const answer = await new Promise<string>(resolve => {
+        rl.question(display, resolve);
+      });
+      const trimmed = answer.trim().toLowerCase();
+      if (trimmed === "s" || trimmed === "skip" || trimmed === "defer") return "defer";
+      const num = parseInt(trimmed, 10);
+      if (num >= 1 && num <= options.length) return num - 1;
+      return "defer";
+    } finally {
+      rl.close();
+    }
+  };
 }
 
 async function fixMetaKindMissing(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
