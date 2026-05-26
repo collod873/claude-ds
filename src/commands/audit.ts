@@ -9,7 +9,7 @@ import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
-import type { DriftFinding } from "../lib/drift-rules.js";
+import { ruleSeverity, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
 import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
 import { runFixPass } from "../lib/fix-pass.js";
@@ -110,6 +110,7 @@ export interface AuditOpts {
   reason?: string;
   issue?: string;
   permanent?: boolean;
+  verbose?: boolean;
   cwd?: string;
 }
 
@@ -139,17 +140,28 @@ export async function auditCmd(opts: AuditOpts) {
   const appDir = cfg?.app_dir ?? await detectAppDir(cwd);
   const claudeMdTarget = cfg?.claude_md_target ?? "CLAUDE.md";
 
+  const verbose = opts.verbose ?? false;
+  let scaffoldTotal = 0;
+  let scaffoldPresent = 0;
+  let warningCount = 0;
+
   // Build the set of suppression globs: manifest-level + project config lookalike_ignore
   const configIgnore: string[] = cfg?.lookalike_ignore ?? [];
   const unexpectedIgnoreGlobs = [...manifest.lookalike_ignore, ...configIgnore];
   for (const f of manifest.files) {
     if (f.category === "generated") continue;
+    scaffoldTotal++;
     const checkPath = f.path === "CLAUDE.md"
       ? claudeMdTarget
       : resolveManifestPath(f.path, appDir);
     const here = await exists(join(cwd, checkPath));
+    if (here) scaffoldPresent++;
     const display = (checkPath === f.path) ? f.path : `${f.path} (at ${checkPath})`;
-    info(`${here ? "present" : "missing"}: ${display} (${f.category})`);
+    if (here && verbose) {
+      info(`present: ${display} (${f.category})`);
+    } else if (!here) {
+      info(`missing: ${display} (${f.category})`);
+    }
   }
 
   // Deprecated-path scan: report any files on disk that should no longer exist.
@@ -160,10 +172,11 @@ export async function auditCmd(opts: AuditOpts) {
   let orphanCount = 0;
   for (const d of manifest.deprecated_paths) {
     if (await exists(join(cwd, d.path))) {
-      info(`orphan (deprecated since ${d.since_version}): ${d.path} — ${d.reason}`);
+      info(`WARNING  orphan (deprecated since ${d.since_version}): ${d.path} — ${d.reason}`);
       orphanCount++;
     }
   }
+  warningCount += orphanCount;
   if (orphanCount > 0) {
     info(`${orphanCount} deprecated-path orphan(s) found — run \`claude-ds reconcile\` to remove`);
   }
@@ -190,11 +203,12 @@ export async function auditCmd(opts: AuditOpts) {
   for (const f of dsRelatedUnexpected) {
     const isSkill = f.startsWith(".claude/skills/");
     if (isSkill) {
-      info(`unexpected (DS-related): ${f} — may conflict with pack skills, review for removal`);
+      info(`WARNING  unexpected (DS-related): ${f} — may conflict with pack skills, review for removal`);
     } else {
-      info(`unexpected: ${f} — not in manifest (may be user-authored extension, pre-adopt orphan, or drift)`);
+      info(`WARNING  unexpected: ${f} — not in manifest (may be user-authored extension, pre-adopt orphan, or drift)`);
     }
   }
+  warningCount += dsRelatedUnexpected.length;
   if (dsRelatedUnexpected.length > 0) {
     info(`${dsRelatedUnexpected.length} unexpected file(s) under managed roots — add to \`.claude-ds.json\` lookalike_ignore to suppress`);
   }
@@ -247,6 +261,8 @@ export async function auditCmd(opts: AuditOpts) {
     f => !suppressedSet.has(suppressedKey(f.ruleId, f.file))
   );
 
+  let fixedCount = 0;
+
   // --fix: attempt auto-fix for fixable rules.
   if (opts.fix && activeFindings.length > 0) {
     const isTTY = process.stdout.isTTY === true;
@@ -260,7 +276,7 @@ export async function auditCmd(opts: AuditOpts) {
       process.exit(1);
     }
 
-    const fixedCount = fixPassResult.results.filter(r => r.fixed).length;
+    fixedCount = fixPassResult.results.filter(r => r.fixed).length;
     const deferredCount = fixPassResult.results.filter(r => !r.fixed).length;
 
     for (const r of fixPassResult.results) {
@@ -360,7 +376,7 @@ export async function auditCmd(opts: AuditOpts) {
     activeFindings = [];
   }
 
-  // Group remaining findings by rule ID and output.
+  // Group remaining findings by rule ID and output with severity prefix.
   const byRule = new Map<string, DriftFinding[]>();
   for (const f of activeFindings) {
     const group = byRule.get(f.ruleId);
@@ -368,21 +384,28 @@ export async function auditCmd(opts: AuditOpts) {
     else byRule.set(f.ruleId, [f]);
   }
   for (const [ruleId, ruleFindings] of byRule) {
+    const severity = ruleSeverity(ruleId as DriftRuleId);
+    const prefix = severity === "error" ? "ERROR" : severity === "warning" ? "WARNING" : "INFO";
     const noun = ruleFindings.length === 1 ? "finding" : "findings";
-    info(`[${ruleId}] (${ruleFindings.length} ${noun})`);
+    info(`${prefix}  [${ruleId}] (${ruleFindings.length} ${noun})`);
     for (const f of ruleFindings) {
       info(`  ${f.file}: ${f.message}`);
     }
   }
 
+  // Scorecard
+  const parts: string[] = [];
+  parts.push(`Scaffold: ${scaffoldPresent}/${scaffoldTotal}`);
+  if (scaffoldPresent === scaffoldTotal) parts[0] += " ✓";
+  if (fixedCount > 0) parts.push(`Fixed: ${fixedCount}`);
+  if (warningCount > 0) parts.push(`Warnings: ${warningCount}`);
+  if (activeFindings.length > 0) parts.push(`Errors: ${activeFindings.length}`);
+  info(parts.join(" | "));
+
   if (activeFindings.length > 0) {
-    if (opts.fix) {
-      info(`${activeFindings.length} unfixable drift finding(s) require manual intervention`);
-    } else {
-      info(`${activeFindings.length} drift finding(s) — add to design-system/exceptions.json to suppress`);
-    }
+    info(`${activeFindings.length} error(s) require attention`);
     process.exit(1);
   } else {
-    info("drift check: no drift findings");
+    info("No action required.");
   }
 }

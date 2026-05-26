@@ -37,7 +37,7 @@ describe("audit --fix", () => {
     );
     const r = await runCli(["audit", "--pack", "next-react", "--fix"], { cwd: dir });
     expect(r.code).toBe(1);
-    expect(r.stdout).toMatch(/manual/i);
+    expect(r.stdout).toMatch(/error.*require/i);
     expect(r.stdout).toMatch(/DRIFT-MISPLACED/);
   });
 

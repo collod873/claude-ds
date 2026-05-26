@@ -138,7 +138,7 @@ describe("audit", () => {
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).not.toMatch(/solo-label\.tsx/);
-    expect(r.stdout).toMatch(/no drift findings/);
+    expect(r.stdout).toMatch(/No action required/i);
   });
 
   it("groups findings by rule ID in output", async () => {
