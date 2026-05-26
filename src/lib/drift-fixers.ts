@@ -1092,7 +1092,6 @@ function findLocalDeps(componentBody: string, source: string): { name: string; d
     if (!nameRe.test(componentBody)) continue;
 
     const declaration = extractUntilStatement(source, m.index);
-    const sourceWithoutComponent = source.slice(0, componentBody.indexOf(declName) < 0 ? source.length : 0);
     const remainingSource = source.replace(componentBody, "").replace(declaration, "");
     const usedElsewhere = nameRe.test(remainingSource);
 

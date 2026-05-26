@@ -1,8 +1,8 @@
-import { readFile, mkdir, writeFile, rename, unlink, stat } from "node:fs/promises";
+import { mkdir, writeFile, rename, unlink } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { DriftFinding } from "./drift-rules.js";
 import type { Change } from "./operation.js";
-import type { FixResult, FixerOpts, FixerPrompt } from "./drift-fixers.js";
+import type { FixResult, FixerOpts } from "./drift-fixers.js";
 import { getFixer, getFixerPriority } from "./drift-fixers.js";
 import { regenIndexes } from "./finalizers/regen-indexes.js";
 import { info } from "./log.js";
@@ -131,18 +131,9 @@ export async function runFixPass(
   const allChanges: Change[] = [];
   const appliedChanges: Change[] = [];
 
-  let currentPriority = -1;
-
   for (const finding of sorted) {
     const fixer = getFixer(finding.ruleId);
     if (!fixer) continue;
-
-    const priority = getFixerPriority(finding.ruleId);
-
-    if (priority !== currentPriority && appliedChanges.length > 0) {
-      // Priority boundary: earlier group's changes are already applied to disk
-    }
-    currentPriority = priority;
 
     const result = await fixer(finding, cwd, opts);
     results.push(result);
