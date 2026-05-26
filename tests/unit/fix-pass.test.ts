@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
-import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
+import { mkdir, writeFile, readFile, stat, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { runFixPass, sortFindingsByPriority } from "../../src/lib/fix-pass";
 import type { DriftFinding } from "../../src/lib/drift-rules";
@@ -325,6 +325,32 @@ describe("fix-pass", () => {
 
       const result = await runFixPass(dir, findings, {});
       expect(result.applied).toHaveLength(0);
+    });
+
+    it("rolls back all changes and aborts when finalizer change application fails", async () => {
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      const original = `export function Button() { return <button />; }\n`;
+      await writeFile(join(dir, "design-system/atoms/button.tsx"), original);
+
+      const findings: DriftFinding[] = [{
+        ruleId: "DRIFT-META-KIND-MISSING",
+        file: "design-system/atoms/button.tsx",
+        message: "missing meta.kind",
+      }];
+
+      // Make design-system/ read-only so finalizer can't write manifest.json.tmp
+      await chmod(join(dir, "design-system"), 0o555);
+
+      try {
+        const result = await runFixPass(dir, findings, {});
+        expect(result.aborted).toBe(true);
+        expect(result.applied).toHaveLength(0);
+        // Fixer changes should be rolled back
+        const content = await readFile(join(dir, "design-system/atoms/button.tsx"), "utf8");
+        expect(content).toBe(original);
+      } finally {
+        await chmod(join(dir, "design-system"), 0o755);
+      }
     });
 
     it("deduplicates Changes for the same path", async () => {

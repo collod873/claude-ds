@@ -255,6 +255,11 @@ export async function auditCmd(opts: AuditOpts) {
       domainRoots, allowedImports, dsAliases, prompt,
     });
 
+    if (fixPassResult.aborted) {
+      err("Fix pass failed — all changes rolled back. Re-run to retry.");
+      process.exit(1);
+    }
+
     const fixedCount = fixPassResult.results.filter(r => r.fixed).length;
     const deferredCount = fixPassResult.results.filter(r => !r.fixed).length;
 

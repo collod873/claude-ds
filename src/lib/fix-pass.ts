@@ -168,11 +168,21 @@ export async function runFixPass(
         await applyChange(cwd, change);
         appliedChanges.push(change);
         allChanges.push(change);
-      } catch (err) {
-        info(`error applying finalizer change: ${(err as Error).message}`);
+      } catch (applyErr) {
+        info(`error applying finalizer change: ${(applyErr as Error).message}`);
+        for (let i = appliedChanges.length - 1; i >= 0; i--) {
+          try { await rollbackChange(cwd, appliedChanges[i]); } catch { /* best effort */ }
+        }
+        return { results, applied: [], aborted: true };
       }
     }
-  } catch { /* finalizer failure is non-fatal */ }
+  } catch (finalizerErr) {
+    info(`finalizer failed: ${(finalizerErr as Error).message}`);
+    for (let i = appliedChanges.length - 1; i >= 0; i--) {
+      try { await rollbackChange(cwd, appliedChanges[i]); } catch { /* best effort */ }
+    }
+    return { results, applied: [], aborted: true };
+  }
 
   const deduped = deduplicateChanges(allChanges);
 
