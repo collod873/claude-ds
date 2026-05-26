@@ -30,10 +30,10 @@ describe("audit --fix", () => {
 
   it("reports unfixable findings as requiring manual intervention", async () => {
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
-    // No DS imports → classifier says atom → DRIFT-MISPLACED (not auto-fixable)
+    // Feature import → classifier says feature → DRIFT-MISPLACED fixer declines (cannot relocate to feature tier)
     await writeFile(
       join(dir, "design-system/composites/solo-label.tsx"),
-      "export function SoloLabel() { return <span />; }",
+      'import { api } from "@/features/billing/api";\nexport function SoloLabel() { return <span>{api()}</span>; }',
     );
     const r = await runCli(["audit", "--pack", "next-react", "--fix"], { cwd: dir });
     expect(r.code).toBe(1);
@@ -61,14 +61,15 @@ describe("audit --fix", () => {
       JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
     );
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    // Feature import → classifier says feature → MISPLACED fixer declines
     await writeFile(
       join(dir, "design-system/composites/orphan.tsx"),
-      "export function Orphan() { return <span />; }",
+      'import { api } from "@/features/billing/api";\nexport function Orphan() { return <span>{api()}</span>; }',
     );
     const r = await runCli(["audit", "--fix"], { cwd: dir });
     expect(r.code).toBe(1);
-    // Both DRIFT-META-KIND-MISSING (fixable) and DRIFT-MISPLACED (not fixable) fire,
-    // but the meta-kind one should be fixed, leaving DRIFT-MISPLACED unresolved.
+    // DRIFT-META-KIND-MISSING (fixable) is fixed, but DRIFT-MISPLACED remains
+    // because the fixer cannot relocate to a feature tier.
     expect(r.stdout).toMatch(/DRIFT-MISPLACED/);
   });
 
@@ -213,10 +214,10 @@ describe("audit --fix --except", () => {
       JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
     );
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
-    // This file triggers both DRIFT-META-KIND-MISSING (fixable) and DRIFT-MISPLACED (not fixable)
+    // Feature import → DRIFT-META-KIND-MISSING (fixable) + DRIFT-MISPLACED (fixer declines for feature tier)
     await writeFile(
       join(dir, "design-system/composites/orphan.tsx"),
-      "export function Orphan() { return <span />; }",
+      'import { api } from "@/features/billing/api";\nexport function Orphan() { return <span>{api()}</span>; }',
     );
     const r = await runCli(["audit", "--fix", "--except", "--reason", "pending move", "--issue", "#55"], { cwd: dir });
     expect(r.code).toBe(0);

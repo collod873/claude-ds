@@ -93,6 +93,36 @@ function evalMisplaced(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
+/** DRIFT-MISCLASSIFIED-ATOM: meta.kind=atom but classifier disagrees. */
+function evalMisclassifiedAtom(input: DriftRuleInput): DriftFinding | null {
+  const { file, metaKind, classifierVerdict } = input;
+  if (metaKind !== "atom") return null;
+  if (classifierVerdict.tier === "atom") return null;
+  if (classifierVerdict.tier === "pattern") return null;
+  return {
+    ruleId: "DRIFT-MISCLASSIFIED-ATOM",
+    file,
+    message:
+      `declares meta.kind=atom but classifier says ${classifierVerdict.tier}` +
+      ` (${classifierVerdict.signals.join("; ")})`,
+  };
+}
+
+/** DRIFT-MISCLASSIFIED-COMPOSITE: meta.kind=composite but classifier disagrees. */
+function evalMisclassifiedComposite(input: DriftRuleInput): DriftFinding | null {
+  const { file, metaKind, classifierVerdict } = input;
+  if (metaKind !== "composite") return null;
+  if (classifierVerdict.tier === "composite") return null;
+  if (classifierVerdict.tier === "pattern") return null;
+  return {
+    ruleId: "DRIFT-MISCLASSIFIED-COMPOSITE",
+    file,
+    message:
+      `declares meta.kind=composite but classifier says ${classifierVerdict.tier}` +
+      ` (${classifierVerdict.signals.join("; ")})`,
+  };
+}
+
 /** DRIFT-META-KIND-MISSING: DS file with no meta.kind when strict mode is on. */
 function evalMetaKindMissing(input: DriftRuleInput): DriftFinding | null {
   if (!input.metaKindStrict) return null;
@@ -308,6 +338,10 @@ export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   if (metaKindMissing) findings.push(metaKindMissing);
   const misplaced = evalMisplaced(input);
   if (misplaced) findings.push(misplaced);
+  const misclassifiedAtom = evalMisclassifiedAtom(input);
+  if (misclassifiedAtom) findings.push(misclassifiedAtom);
+  const misclassifiedComposite = evalMisclassifiedComposite(input);
+  if (misclassifiedComposite) findings.push(misclassifiedComposite);
   const dsImportsFeature = evalDsImportsFeature(input);
   if (dsImportsFeature) findings.push(dsImportsFeature);
   const patternNoSlots = evalPatternNoSlots(input);

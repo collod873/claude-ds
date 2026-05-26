@@ -587,6 +587,128 @@ export function Toolbar() {
   });
 });
 
+describe("DRIFT-MISCLASSIFIED-ATOM rule", () => {
+  it("fires when meta.kind=atom but classifier says composite", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/search-bar.tsx",
+      locationTier: "atom",
+      metaKind: "atom",
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-MISCLASSIFIED-ATOM");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("meta.kind=atom");
+    expect(hit!.message).toContain("composite");
+  });
+
+  it("does not fire when meta.kind=atom and classifier agrees", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/button.tsx",
+      locationTier: "atom",
+      metaKind: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISCLASSIFIED-ATOM")).toHaveLength(0);
+  });
+
+  it("does not fire when metaKind is null", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/button.tsx",
+      locationTier: "atom",
+      metaKind: null,
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISCLASSIFIED-ATOM")).toHaveLength(0);
+  });
+
+  it("does not fire when classifier says pattern (suppressed)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/card.tsx",
+      locationTier: "atom",
+      metaKind: "atom",
+      classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISCLASSIFIED-ATOM")).toHaveLength(0);
+  });
+
+  it("does not fire when meta.kind is composite (wrong rule ID for that)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/widget.tsx",
+      locationTier: "composite",
+      metaKind: "composite",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISCLASSIFIED-ATOM")).toHaveLength(0);
+  });
+
+  it("includes classifier signals in the finding message", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/search-bar.tsx",
+      locationTier: "atom",
+      metaKind: "atom",
+      classifierVerdict: { tier: "composite", signals: ["composes 3 design-system components"] },
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-MISCLASSIFIED-ATOM");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("composes 3 design-system components");
+  });
+});
+
+describe("DRIFT-MISCLASSIFIED-COMPOSITE rule", () => {
+  it("fires when meta.kind=composite but classifier says atom", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/chip.tsx",
+      locationTier: "composite",
+      metaKind: "composite",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-MISCLASSIFIED-COMPOSITE");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("meta.kind=composite");
+    expect(hit!.message).toContain("atom");
+  });
+
+  it("does not fire when meta.kind=composite and classifier agrees", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/search-bar.tsx",
+      locationTier: "composite",
+      metaKind: "composite",
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISCLASSIFIED-COMPOSITE")).toHaveLength(0);
+  });
+
+  it("does not fire when metaKind is null", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/widget.tsx",
+      locationTier: "composite",
+      metaKind: null,
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISCLASSIFIED-COMPOSITE")).toHaveLength(0);
+  });
+
+  it("does not fire when classifier says pattern (suppressed)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/layout.tsx",
+      locationTier: "composite",
+      metaKind: "composite",
+      classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISCLASSIFIED-COMPOSITE")).toHaveLength(0);
+  });
+});
+
 describe("DRIFT-CVA-VARIANT-UNRENDERED rule", () => {
   it("registry exposes DRIFT-CVA-VARIANT-UNRENDERED", () => {
     expect(allRuleIds()).toContain("DRIFT-CVA-VARIANT-UNRENDERED");
