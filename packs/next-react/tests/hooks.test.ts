@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
 import { resolve, join } from "node:path";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 function runHook(script: string, file: string) {
@@ -157,6 +157,34 @@ describe("hook stdin contract", () => {
       input,
     });
     expect(r.status).toBe(0);
+  });
+
+  it("hooks exit 1 with actionable error when jq is missing and stdin JSON is provided", () => {
+    // Build a minimal PATH that has bash/cat/grep but not jq
+    const binDir = mkdtempSync(join(tmpdir(), "no-jq-"));
+    try {
+      for (const bin of ["bash", "cat", "grep", "sed", "dirname", "printf"]) {
+        const real = spawnSync("which", [bin], { encoding: "utf8" }).stdout.trim();
+        if (real) {
+          symlinkSync(real, join(binDir, bin));
+        }
+      }
+      const input = JSON.stringify({ tool_name: "Write", tool_input: { file_path: "/tmp/test.tsx" } });
+      const r = spawnSync(
+        "bash",
+        [resolve("packs/next-react/files/.claude/hooks", "atom-imports.sh")],
+        {
+          encoding: "utf8",
+          input,
+          env: { ...process.env, PATH: binDir },
+        }
+      );
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/jq/i);
+      expect(r.stderr).toMatch(/install/i);
+    } finally {
+      rmSync(binDir, { recursive: true, force: true });
+    }
   });
 
   it("hooks work with paths containing spaces", () => {
