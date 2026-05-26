@@ -1,7 +1,7 @@
-import { readFile, writeFile, stat, readdir, mkdir } from "node:fs/promises";
+import { readFile, writeFile, stat, readdir, mkdir, unlink } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseManifest, isManifestOrKeepfile } from "../lib/manifest.js";
+import { parseManifest, isManifestOrKeepfile, type DeprecatedPath, type ManagedRoot } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
 import { info, err } from "../lib/log.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
@@ -57,50 +57,88 @@ const FALLBACK_MANAGED_ROOTS = [
   { root: "design-system/", strict: true },
 ];
 
+interface UnexpectedFileFinding {
+  path: string;
+  root: string;
+  strict: boolean;
+  deprecatedMatch: DeprecatedPath | null;
+}
+
+function findDeprecatedMatch(
+  filePath: string,
+  deprecatedPaths: DeprecatedPath[],
+  managedRootSet: Set<string>,
+): DeprecatedPath | null {
+  const fileDir = filePath.substring(0, filePath.lastIndexOf("/") + 1);
+  for (const dp of deprecatedPaths) {
+    if (filePath === dp.path) return dp;
+    const dpAsDir = dp.path.endsWith("/") ? dp.path : dp.path + "/";
+    if (filePath.startsWith(dpAsDir)) return dp;
+    const dpDir = dp.path.substring(0, dp.path.lastIndexOf("/") + 1);
+    if (dpDir && fileDir === dpDir && !managedRootSet.has(dpDir)) return dp;
+  }
+  return null;
+}
+
 /**
- * Scan managed roots and return file paths (relative to cwd) that are not in the
- * manifest file list and not suppressed by an ignore glob.
- *
- * Per-root strictness (#57): roots marked strict:false are open for user growth —
- * files under those roots are never flagged as unexpected.
+ * Scan managed roots and return enriched findings for files not in the manifest.
+ * Scans both strict and open roots — callers decide how to handle each type.
  */
 async function findUnexpectedFiles(
   cwd: string,
   manifestPaths: Set<string>,
   ignoreGlobs: string[],
-  managedRoots: { root: string; strict: boolean }[],
+  managedRoots: ManagedRoot[],
   generatedPatterns: string[],
-): Promise<string[]> {
+  deprecatedPaths: DeprecatedPath[],
+): Promise<UnexpectedFileFinding[]> {
   const roots = managedRoots.length > 0 ? managedRoots : FALLBACK_MANAGED_ROOTS;
 
-  // Build a set of open root prefixes so strict roots can skip files that fall under them.
   const openPrefixes = roots
     .filter(r => !r.strict)
     .map(r => r.root.endsWith("/") ? r.root : `${r.root}/`);
+
+  const managedRootSet = new Set(roots.map(r => r.root));
 
   const isGenerated = generatedPatterns.length > 0
     ? picomatch(generatedPatterns, { dot: true })
     : null;
 
-  const unexpected: string[] = [];
+  const unexpected: UnexpectedFileFinding[] = [];
   for (const { root, strict } of roots) {
-    // Open roots allow user growth — never flag unexpected files here.
-    if (!strict) continue;
-
-    // root has trailing slash; strip it for walkDir
     const rootDir = root.endsWith("/") ? root.slice(0, -1) : root;
     const files = await walkDir(cwd, rootDir);
     for (const f of files) {
-      // Skip files that fall under a non-strict (open) sub-root.
-      if (openPrefixes.some(prefix => f.startsWith(prefix))) continue;
+      if (strict && openPrefixes.some(prefix => f.startsWith(prefix))) continue;
       if (isManifestOrKeepfile(f, manifestPaths)) continue;
       if (isGenerated && isGenerated(f)) continue;
-      // Check against ignore globs (same engine as lookalike.ts)
       const suppressed = ignoreGlobs.length > 0 && picomatch(ignoreGlobs, { dot: true })(f);
-      if (!suppressed) unexpected.push(f);
+      if (suppressed) continue;
+      const deprecatedMatch = findDeprecatedMatch(f, deprecatedPaths, managedRootSet);
+      unexpected.push({ path: f, root, strict, deprecatedMatch });
     }
   }
   return unexpected;
+}
+
+async function addToConsumerManifest(cwd: string, packDir: string, paths: string[]): Promise<void> {
+  const consumerPath = join(cwd, "design-system/manifest.json");
+  let manifestJson: Record<string, unknown>;
+  try {
+    manifestJson = JSON.parse(await readFile(consumerPath, "utf8"));
+  } catch {
+    manifestJson = JSON.parse(await readFile(join(packDir, "manifest.json"), "utf8"));
+  }
+  const files = (manifestJson.files ?? []) as Array<{ path: string; category: string }>;
+  const existingPaths = new Set(files.map(f => f.path));
+  for (const p of paths) {
+    if (!existingPaths.has(p)) {
+      files.push({ path: p, category: "seeded" });
+    }
+  }
+  manifestJson.files = files;
+  await mkdir(dirname(consumerPath), { recursive: true });
+  await writeFile(consumerPath, JSON.stringify(manifestJson, null, 2) + "\n", "utf8");
 }
 
 export interface AuditOpts {
@@ -194,39 +232,78 @@ export async function auditCmd(opts: AuditOpts) {
     }
   }
 
-  // #29/#57: unexpected-file scan — enumerate files under managed roots and flag anything
-  // not in the manifest. Per-root strictness: strict roots flag extras; open roots allow
-  // user growth (e.g. design-system/atoms/, design-system/composites/).
+  // #29/#57/#174: unexpected-file scan — enumerate files under managed roots.
+  // Returns enriched findings with root context, strictness, and deprecated-path matches.
   const manifestFilePaths = new Set(manifest.files.map(f => f.path));
+  // Also read consumer manifest for user-tracked extensions
+  const consumerManifestPath = join(cwd, "design-system/manifest.json");
+  try {
+    const consumerManifest = parseManifest(await readFile(consumerManifestPath, "utf8"));
+    for (const f of consumerManifest.files) manifestFilePaths.add(f.path);
+  } catch { /* no consumer manifest or parse error — use pack manifest only */ }
   const orphanPaths = new Set(manifest.deprecated_paths.map(d => d.path));
-  const unexpectedFiles = await findUnexpectedFiles(cwd, manifestFilePaths, unexpectedIgnoreGlobs, manifest.managed_roots, manifest.generated_patterns);
-  const dsRelatedUnexpected: string[] = [];
+  const unexpectedFindings = await findUnexpectedFiles(
+    cwd, manifestFilePaths, unexpectedIgnoreGlobs,
+    manifest.managed_roots, manifest.generated_patterns, manifest.deprecated_paths,
+  );
+
+  const strictFindings: UnexpectedFileFinding[] = [];
+  const openFindings: UnexpectedFileFinding[] = [];
+  const deprecatedMatches: UnexpectedFileFinding[] = [];
   const nonDsUnexpected: string[] = [];
-  for (const f of unexpectedFiles) {
-    if (orphanPaths.has(f)) continue;
-    const isSkill = f.startsWith(".claude/skills/");
-    if (isSkill && await isDsRelatedSkill(cwd, f)) {
-      dsRelatedUnexpected.push(f);
-    } else if (isSkill) {
-      nonDsUnexpected.push(f);
+
+  for (const f of unexpectedFindings) {
+    if (orphanPaths.has(f.path)) continue;
+    if (f.deprecatedMatch) {
+      deprecatedMatches.push(f);
+    } else if (f.strict) {
+      const isSkill = f.path.startsWith(".claude/skills/");
+      if (isSkill && !(await isDsRelatedSkill(cwd, f.path))) {
+        nonDsUnexpected.push(f.path);
+      } else {
+        strictFindings.push(f);
+      }
     } else {
-      dsRelatedUnexpected.push(f);
+      openFindings.push(f);
     }
   }
-  for (const f of dsRelatedUnexpected) {
-    const isSkill = f.startsWith(".claude/skills/");
+
+  // Strict root: warn with specific remediation
+  for (const f of strictFindings) {
+    const isSkill = f.path.startsWith(".claude/skills/");
     if (isSkill) {
-      info(`WARNING  unexpected (DS-related): ${f} — may conflict with pack skills, review for removal`);
+      info(`WARNING  unexpected (DS-related): ${f.path} (in ${f.root}) — add to lookalike_ignore in .claude-ds.json, or delete if unintended`);
     } else {
-      info(`WARNING  unexpected: ${f} — not in manifest (may be user-authored extension, pre-adopt orphan, or drift)`);
+      info(`WARNING  unexpected: ${f.path} (in ${f.root}) — add to lookalike_ignore in .claude-ds.json, or delete if unintended`);
     }
   }
-  warningCount += dsRelatedUnexpected.length;
-  if (dsRelatedUnexpected.length > 0) {
-    info(`${dsRelatedUnexpected.length} unexpected file(s) under managed roots — add to \`.claude-ds.json\` lookalike_ignore to suppress`);
+  warningCount += strictFindings.length;
+  if (strictFindings.length > 0) {
+    info(`${strictFindings.length} unexpected file(s) under strict managed roots — add to lookalike_ignore in .claude-ds.json to suppress`);
   }
   if (nonDsUnexpected.length > 0) {
     info(`${nonDsUnexpected.length} non-DS skill(s) detected under .claude/skills/ (ignored: ${nonDsUnexpected.map(f => f.replace(".claude/skills/", "").replace(/\/.*/, "")).join(", ")})`);
+  }
+
+  // --fix: handle open roots and deprecated matches
+  if (opts.fix) {
+    if (openFindings.length > 0) {
+      try {
+        await addToConsumerManifest(cwd, packDir, openFindings.map(f => f.path));
+        info(`tracked ${openFindings.length} user extension(s) in consumer manifest`);
+      } catch { /* best-effort — consumer manifest may not be writable */ }
+    }
+    for (const f of deprecatedMatches) {
+      try {
+        await unlink(join(cwd, f.path));
+        info(`deleted (deprecated-related): ${f.path}`);
+      } catch { /* already gone */ }
+    }
+  } else {
+    for (const f of deprecatedMatches) {
+      info(`WARNING  unexpected (deprecated-related): ${f.path} — related to deprecated ${f.deprecatedMatch!.path}; run --fix to delete`);
+      warningCount++;
+    }
   }
 
   if (opts.suggestRemovals) info("--suggest-removals: (heuristic) no ad-hoc removals detected at v1");

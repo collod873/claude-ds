@@ -457,6 +457,71 @@ describe("audit --fix — reconcile integration (#171)", () => {
   });
 });
 
+// #174: Enrich unexpected-file findings with remediation and auto-fix
+describe("audit — unexpected-file enrichment (#174)", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("strict root findings show specific remediation message", async () => {
+    await mkdir(join(dir, ".claude/skills/custom-lint"), { recursive: true });
+    await writeFile(join(dir, ".claude/skills/custom-lint/SKILL.md"), "# custom-lint\nEnforces design-system token usage");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/add to lookalike_ignore.*or delete/i);
+  });
+
+  it("--fix in open root auto-adds unexpected file to consumer manifest", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      packVersion: "v0.9.0", pack: "next-react", mode: "warn",
+    }));
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(join(dir, "design-system/atoms/my-button.tsx"), "export function MyButton() { return <button />; }");
+
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Verify file tracked in consumer manifest
+    const consumerManifest = JSON.parse(await readFile(join(dir, "design-system/manifest.json"), "utf8"));
+    const tracked = consumerManifest.files.some((f: { path: string }) => f.path === "design-system/atoms/my-button.tsx");
+    expect(tracked).toBe(true);
+  });
+
+  it("--fix with deprecated-path sibling deletes the file", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      packVersion: "v0.9.0", pack: "next-react", mode: "warn",
+    }));
+    // badge-system/SKILL.md is a deprecated path → reconcile deletes it
+    // badge-system/README.md is a sibling → should be caught as deprecated-related and deleted
+    await mkdir(join(dir, ".claude/skills/badge-system"), { recursive: true });
+    await writeFile(join(dir, ".claude/skills/badge-system/SKILL.md"), "# badge-system");
+    await writeFile(join(dir, ".claude/skills/badge-system/README.md"), "# readme for badge-system");
+
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Both files should be gone: SKILL.md via reconcile, README.md via deprecated-match fix
+    expect(await exists(join(dir, ".claude/skills/badge-system/SKILL.md"))).toBe(false);
+    expect(await exists(join(dir, ".claude/skills/badge-system/README.md"))).toBe(false);
+  });
+
+  it("strict root findings include managed root context", async () => {
+    await mkdir(join(dir, "design-system/types"), { recursive: true });
+    await writeFile(join(dir, "design-system/types/helpers.ts"), "export const x = 1;");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Should mention which root the file is in
+    expect(r.stdout).toMatch(/design-system\//);
+    expect(r.stdout).toMatch(/unexpected/i);
+  });
+
+  it("open root findings are silent in read-only mode", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(join(dir, "design-system/atoms/switch.tsx"), "export {}");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/unexpected.*switch\.tsx/i);
+  });
+});
+
 function extractAllHookCommands(hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>): string[] {
   const commands: string[] = [];
   for (const blocks of Object.values(hooks)) {
