@@ -104,6 +104,10 @@ async function findUnexpectedFiles(
     ? picomatch(generatedPatterns, { dot: true })
     : null;
 
+  const isIgnored = ignoreGlobs.length > 0
+    ? picomatch(ignoreGlobs, { dot: true })
+    : null;
+
   const unexpected: UnexpectedFileFinding[] = [];
   for (const { root, strict } of roots) {
     const rootDir = root.endsWith("/") ? root.slice(0, -1) : root;
@@ -112,8 +116,7 @@ async function findUnexpectedFiles(
       if (strict && openPrefixes.some(prefix => f.startsWith(prefix))) continue;
       if (isManifestOrKeepfile(f, manifestPaths)) continue;
       if (isGenerated && isGenerated(f)) continue;
-      const suppressed = ignoreGlobs.length > 0 && picomatch(ignoreGlobs, { dot: true })(f);
-      if (suppressed) continue;
+      if (isIgnored && isIgnored(f)) continue;
       const deprecatedMatch = findDeprecatedMatch(f, deprecatedPaths, managedRootSet);
       unexpected.push({ path: f, root, strict, deprecatedMatch });
     }

@@ -205,9 +205,7 @@ export async function runReconcileActions(
   const collisionList = allFindings.filter(f => f.kind === "collision");
   const deprecatedList = allFindings.filter(f => f.kind === "deprecated");
 
-  // In standalone reconcile with non-TTY + non-force, caller bails before here.
-  // In audit --fix, force=true so orphans always get deleted.
-  const toDelete = (force || isTTY) ? deprecatedList : deprecatedList;
+  const toDelete = deprecatedList;
   for (const f of toDelete) {
     if (rootDupeMap.get(f.path)?.contentDiffers) continue;
     pathsToDelete.push(f.path);
