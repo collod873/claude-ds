@@ -13,6 +13,7 @@ import { ruleSeverity, type DriftFinding, type DriftRuleId } from "../lib/drift-
 import { detectDsAliases } from "../lib/ds-aliases.js";
 import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
 import { runFixPass } from "../lib/fix-pass.js";
+import { runReconcileActions } from "./reconcile.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -120,14 +121,15 @@ export async function auditCmd(opts: AuditOpts) {
   let cfg: Config | null = null;
   let packDir: string;
   let manifest;
+  let projectCtx: import("../lib/project.js").ProjectContext | null = null;
   const cfgPath = join(cwd, ".claude-ds.json");
   if (!pack) {
     if (!(await exists(cfgPath))) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
-    const ctx = await loadProject(cwd);
-    cfg = ctx.cfg;
+    projectCtx = await loadProject(cwd);
+    cfg = projectCtx.cfg;
     pack = cfg.pack;
-    packDir = ctx.packDir;
-    manifest = ctx.manifest;
+    packDir = projectCtx.packDir;
+    manifest = projectCtx.manifest;
   } else {
     // --pack override: parse config if present (best-effort), resolve packDir from --pack.
     if (await exists(cfgPath)) {
@@ -164,21 +166,32 @@ export async function auditCmd(opts: AuditOpts) {
     }
   }
 
-  // Deprecated-path scan: report any files on disk that should no longer exist.
-  // This catches orphans left by prior pack versions — the "lookalike at deprecated path" check
-  // from #26. We skip the lookalike.ts short-circuit here by checking deprecated paths directly
-  // rather than going through detectLookalikes (which returns present:true, lookalike:null for
-  // canonical paths that exist, never inspecting deprecated-path neighbours).
-  let orphanCount = 0;
-  for (const d of manifest.deprecated_paths) {
-    if (await exists(join(cwd, d.path))) {
-      info(`WARNING  orphan (deprecated since ${d.since_version}): ${d.path} — ${d.reason}`);
-      orphanCount++;
+  // #171: when --fix is active and we have a project context, run reconcile as a pre-step.
+  // This auto-deletes deprecated orphans, prunes dangling hooks, and handles collisions.
+  let reconciledCount = 0;
+  if (opts.fix && projectCtx) {
+    const reconcileResult = await runReconcileActions(projectCtx, { force: true });
+    reconciledCount = reconcileResult.deleted + reconcileResult.pruned;
+    if (reconciledCount > 0) {
+      const parts: string[] = [];
+      if (reconcileResult.deleted > 0) parts.push(`${reconcileResult.deleted} orphan(s) deleted`);
+      if (reconcileResult.pruned > 0) parts.push(`dangling hooks pruned`);
+      info(`reconcile: ${parts.join(", ")}`);
     }
-  }
-  warningCount += orphanCount;
-  if (orphanCount > 0) {
-    info(`${orphanCount} deprecated-path orphan(s) found — run \`claude-ds reconcile\` to remove`);
+    warningCount += reconcileResult.skipped;
+  } else {
+    // Read-only mode: report deprecated orphans and suggest reconcile
+    let orphanCount = 0;
+    for (const d of manifest.deprecated_paths) {
+      if (await exists(join(cwd, d.path))) {
+        info(`WARNING  orphan (deprecated since ${d.since_version}): ${d.path} — ${d.reason}`);
+        orphanCount++;
+      }
+    }
+    warningCount += orphanCount;
+    if (orphanCount > 0) {
+      info(`${orphanCount} deprecated-path orphan(s) found — run \`claude-ds reconcile\` to remove`);
+    }
   }
 
   // #29/#57: unexpected-file scan — enumerate files under managed roots and flag anything
@@ -397,6 +410,7 @@ export async function auditCmd(opts: AuditOpts) {
   const parts: string[] = [];
   parts.push(`Scaffold: ${scaffoldPresent}/${scaffoldTotal}`);
   if (scaffoldPresent === scaffoldTotal) parts[0] += " ✓";
+  if (reconciledCount > 0) parts.push(`Reconciled: ${reconciledCount}`);
   if (fixedCount > 0) parts.push(`Fixed: ${fixedCount}`);
   if (warningCount > 0) parts.push(`Warnings: ${warningCount}`);
   if (activeFindings.length > 0) parts.push(`Errors: ${activeFindings.length}`);

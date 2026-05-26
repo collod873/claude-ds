@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, stat, readFile } from "node:fs/promises";
 import { join } from "node:path";
+
+async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
 describe("audit", () => {
   let dir: string;
@@ -340,3 +342,131 @@ export const meta = { kind: "atom", examples: [] };`,
     expect(r.stdout).not.toMatch(/DRIFT-META-KIND-MISSING/);
   });
 });
+
+// #171: reconcile folded into audit --fix
+describe("audit --fix — reconcile integration (#171)", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("auto-deletes deprecated orphans without needing a separate reconcile call", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
+    }, null, 2) + "\n");
+    // Plant deprecated orphans
+    await writeFile(join(dir, "contracts.md"), "# legacy\n");
+    await writeFile(join(dir, "exceptions.json"), '{"exceptions":[]}\n');
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/contracts.md"), "# canonical\n");
+    await writeFile(join(dir, "design-system/exceptions.json"), '{"exceptions":[]}\n');
+
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Orphans should be deleted
+    expect(await exists(join(dir, "contracts.md"))).toBe(false);
+    expect(await exists(join(dir, "exceptions.json"))).toBe(false);
+    // Canonicals preserved
+    expect(await exists(join(dir, "design-system/contracts.md"))).toBe(true);
+    // Should NOT tell user to run reconcile separately
+    expect(r.stdout).not.toMatch(/run.*reconcile/i);
+  });
+
+  it("auto-prunes dangling hook scripts", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      version: "v0.8.0", pack: "next-react", mode: "warn", removed: [],
+    }, null, 2) + "\n");
+    await mkdir(join(dir, ".claude", "hooks"), { recursive: true });
+    // Deprecated script
+    await writeFile(join(dir, ".claude/hooks/pre-write-ds-states.sh"), "#!/bin/bash\nexit 0\n");
+    // Valid script
+    await writeFile(join(dir, ".claude/hooks/atom-imports.sh"), "#!/bin/bash\nexit 0\n");
+    // settings.json with dangling + valid hooks
+    const settings = {
+      hooks: {
+        PreToolUse: [{
+          matcher: "Edit|Write",
+          hooks: [{ type: "command", command: ".claude/hooks/pre-write-ds-states.sh $CLAUDE_FILE_PATHS" }],
+        }],
+        PostToolUse: [{
+          matcher: "Edit|Write",
+          hooks: [
+            { type: "command", command: ".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS" },
+            { type: "command", command: ".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS" },
+          ],
+        }],
+      },
+    };
+    await writeFile(join(dir, ".claude/settings.json"), JSON.stringify(settings, null, 2) + "\n");
+
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Deprecated script deleted
+    expect(await exists(join(dir, ".claude/hooks/pre-write-ds-states.sh"))).toBe(false);
+    // Valid script preserved
+    expect(await exists(join(dir, ".claude/hooks/atom-imports.sh"))).toBe(true);
+    // Dangling hook entries pruned from settings.json
+    const settingsAfter = JSON.parse(await readFile(join(dir, ".claude/settings.json"), "utf8"));
+    const allCmds = extractAllHookCommands(settingsAfter.hooks ?? {});
+    expect(allCmds).toContain(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
+    expect(allCmds).not.toContain(".claude/hooks/pre-write-ds-states.sh $CLAUDE_FILE_PATHS");
+    expect(allCmds).not.toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
+  });
+
+  it("warns about CLAUDE.md collision in non-TTY mode without auto-deleting", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
+      claude_md_target: "CLAUDE.md",
+    }, null, 2) + "\n");
+    await writeFile(join(dir, "CLAUDE.md"), "<!-- claude-ds managed -->\n# Project\n");
+    await mkdir(join(dir, ".claude"), { recursive: true });
+    await writeFile(join(dir, ".claude/CLAUDE.md"), "# Pre-existing project context\n");
+
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    // Both files preserved — non-TTY can't prompt
+    expect(await exists(join(dir, "CLAUDE.md"))).toBe(true);
+    expect(await exists(join(dir, ".claude/CLAUDE.md"))).toBe(true);
+    // Warning printed
+    expect(r.stdout).toMatch(/CLAUDE\.md collision/i);
+  });
+
+  it("standalone reconcile command still works independently", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
+    }, null, 2) + "\n");
+    await writeFile(join(dir, "contracts.md"), "# legacy\n");
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/contracts.md"), "# canonical\n");
+
+    const r = await runCli(["reconcile", "--force"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(await exists(join(dir, "contracts.md"))).toBe(false);
+  });
+
+  it("reconcile scorecard counts appear in audit output", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
+    }, null, 2) + "\n");
+    await writeFile(join(dir, "contracts.md"), "# legacy\n");
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/contracts.md"), "# canonical\n");
+
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Scorecard should reflect reconcile work
+    expect(r.stdout).toMatch(/Reconciled: \d+/);
+  });
+});
+
+function extractAllHookCommands(hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>): string[] {
+  const commands: string[] = [];
+  for (const blocks of Object.values(hooks)) {
+    if (!Array.isArray(blocks)) continue;
+    for (const block of blocks) {
+      if (!block?.hooks) continue;
+      for (const entry of block.hooks) {
+        if (entry.command) commands.push(entry.command);
+      }
+    }
+  }
+  return commands;
+}
