@@ -162,9 +162,11 @@ export async function auditCmd(opts: AuditOpts) {
   // not in the manifest. Per-root strictness: strict roots flag extras; open roots allow
   // user growth (e.g. design-system/atoms/, design-system/composites/).
   const manifestFilePaths = new Set(manifest.files.map(f => f.path));
+  const orphanPaths = new Set(manifest.deprecated_paths.map(d => d.path));
   const unexpectedFiles = await findUnexpectedFiles(cwd, manifestFilePaths, unexpectedIgnoreGlobs, manifest.managed_roots, manifest.generated_patterns);
   let unexpectedCount = 0;
   for (const f of unexpectedFiles) {
+    if (orphanPaths.has(f)) continue;
     info(`unexpected: ${f} — not in manifest (may be user-authored extension, pre-adopt orphan, or drift)`);
     unexpectedCount++;
   }
