@@ -235,7 +235,7 @@ function evalRawPrimitive(input: DriftRuleInput): DriftFinding | null {
  * Extract CVA variant axis names and their values from source.
  * Matches the variants object inside a cva() call.
  */
-function parseCvaVariants(source: string): Record<string, string[]> | null {
+export function parseCvaVariants(source: string): Record<string, string[]> | null {
   if (!source.includes("cva(")) return null;
 
   const broadMatch = source.match(/variants\s*:\s*\{([\s\S]*?)\}\s*(?:,\s*(?:defaultVariants|compoundVariants)|,?\s*\}\s*\))/);

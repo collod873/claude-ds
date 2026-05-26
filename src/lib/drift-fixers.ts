@@ -2,6 +2,7 @@ import { readFile, writeFile, readdir, rename, mkdir, stat } from "node:fs/promi
 import { join, basename, dirname, extname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { DriftFinding, DriftRuleId } from "./drift-rules.js";
+import { parseCvaVariants } from "./drift-rules.js";
 import type { Tier } from "./classifier.js";
 import { classifySource, DEFAULT_DOMAIN_ROOTS } from "./classifier.js";
 import { locationTierFromPath, metaKindFromSource } from "./three-signal.js";
@@ -36,6 +37,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-MISCLASSIFIED-COMPOSITE": { fixer: fixMisclassified, interactive: false },
   "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: true },
   "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: true },
+  "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: true },
 };
 
 export function isFixable(ruleId: DriftRuleId): boolean {
@@ -788,4 +790,359 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
   }
 
   return { finding, fixed: true, message: `resolved domain imports in ${finding.file}` };
+}
+
+// --- DRIFT-RAW-PRIMITIVE fixer ---
+
+const RAW_PRIMITIVE_RE_FIXER = /<(button|input)([\s>])/g;
+
+const ELEMENT_TO_ATOM: Record<string, string> = {
+  button: "button",
+  input: "input",
+};
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function kebabToPascal(s: string): string {
+  return s.split("-").map(capitalize).join("");
+}
+
+interface RawElementMatch {
+  element: string;
+  fullMatch: string;
+  index: number;
+}
+
+function findRawElements(source: string): RawElementMatch[] {
+  const matches: RawElementMatch[] = [];
+  RAW_PRIMITIVE_RE_FIXER.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = RAW_PRIMITIVE_RE_FIXER.exec(source)) !== null) {
+    matches.push({ element: m[1], fullMatch: m[0], index: m.index });
+  }
+  return matches;
+}
+
+async function atomFileExists(cwd: string, atomName: string): Promise<string | null> {
+  const candidates = [`design-system/atoms/${atomName}.tsx`, `design-system/atoms/${atomName}.ts`];
+  for (const c of candidates) {
+    try {
+      const s = await stat(join(cwd, c));
+      if (s.isFile()) return c;
+    } catch { /* not found */ }
+  }
+  return null;
+}
+
+function buildVariantOptions(cvaVariants: Record<string, string[]>): string[] {
+  const axes = Object.entries(cvaVariants);
+  if (axes.length === 0) return ["Use default"];
+
+  if (axes.length === 1) {
+    const [axis, values] = axes[0];
+    return values.map(v => `${axis}="${v}"`);
+  }
+
+  const firstAxis = axes[0];
+  return firstAxis[1].map(v => `${firstAxis[0]}="${v}"`);
+}
+
+function rewriteRawElement(
+  source: string,
+  element: string,
+  atomComponent: string,
+  variantProp: string | null,
+): string {
+  const openTagRe = new RegExp(
+    `<${element}(\\s[^>]*)?>`,
+    "g",
+  );
+  const closeTagRe = new RegExp(`</${element}>`, "g");
+
+  let result = source;
+
+  result = result.replace(openTagRe, (_match, attrs: string | undefined) => {
+    let cleanAttrs = (attrs ?? "").trim();
+    cleanAttrs = cleanAttrs.replace(/\bclassName\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\})\s*/g, "").trim();
+
+    const parts = [`<${atomComponent}`];
+    if (variantProp) parts.push(` ${variantProp}`);
+    if (cleanAttrs) parts.push(` ${cleanAttrs}`);
+    return parts.join("") + ">";
+  });
+
+  result = result.replace(closeTagRe, `</${atomComponent}>`);
+
+  const selfCloseRe = new RegExp(`<${element}(\\s[^>]*)\\s*/>`, "g");
+  result = result.replace(selfCloseRe, (_match, attrs: string) => {
+    let cleanAttrs = attrs.trim();
+    cleanAttrs = cleanAttrs.replace(/\bclassName\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\})\s*/g, "").trim();
+
+    const parts = [`<${atomComponent}`];
+    if (variantProp) parts.push(` ${variantProp}`);
+    if (cleanAttrs) parts.push(` ${cleanAttrs}`);
+    return parts.join("") + " />";
+  });
+
+  return result;
+}
+
+function addImportIfMissing(source: string, componentName: string, importPath: string): string {
+  const importRe = new RegExp(`import\\s+\\{[^}]*\\b${componentName}\\b[^}]*\\}\\s+from\\s+["']${importPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`);
+  if (importRe.test(source)) return source;
+
+  const importLine = `import { ${componentName} } from "${importPath}";\n`;
+  const firstImportMatch = source.match(/^import\s/m);
+  if (firstImportMatch && firstImportMatch.index !== undefined) {
+    return source.slice(0, firstImportMatch.index) + importLine + source.slice(firstImportMatch.index);
+  }
+  return importLine + source;
+}
+
+const NAMED_COMPONENT_START_RE = /^function\s+([A-Z][A-Za-z0-9]+)\s*\(/gm;
+
+const LOCAL_DECL_RE = /^(?:type|interface|const|let|var|function)\s+([A-Za-z_$][\w$]*)/gm;
+
+interface InternalComponent {
+  name: string;
+  startIndex: number;
+  endIndex: number;
+  body: string;
+}
+
+function extractFullFunction(source: string, start: number): string {
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let foundOpenParen = false;
+  let pastParams = false;
+  let foundBodyOpen = false;
+  for (let i = start; i < source.length; i++) {
+    const c = source[i];
+    if (!pastParams) {
+      if (c === "(") { parenDepth++; foundOpenParen = true; }
+      if (c === ")" && foundOpenParen) {
+        parenDepth--;
+        if (parenDepth === 0) pastParams = true;
+      }
+      continue;
+    }
+    if (c === "{") { braceDepth++; foundBodyOpen = true; }
+    if (c === "}") {
+      braceDepth--;
+      if (foundBodyOpen && braceDepth === 0) return source.slice(start, i + 1);
+    }
+  }
+  return source.slice(start);
+}
+
+function findInternalComponents(source: string): InternalComponent[] {
+  const components: InternalComponent[] = [];
+  NAMED_COMPONENT_START_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = NAMED_COMPONENT_START_RE.exec(source)) !== null) {
+    const lineStart = source.lastIndexOf("\n", m.index) + 1;
+    const beforeOnLine = source.slice(lineStart, m.index);
+    if (/export\s+/.test(beforeOnLine)) continue;
+
+    const funcBody = extractFullFunction(source, m.index);
+    const lineCount = funcBody.split("\n").length;
+    if (lineCount < 20) continue;
+
+    components.push({
+      name: m[1],
+      startIndex: m.index,
+      endIndex: m.index + funcBody.length,
+      body: funcBody,
+    });
+  }
+  return components;
+}
+
+function deriveAtomName(componentName: string, parentFileName: string): string {
+  const parentPascal = kebabToPascal(parentFileName.replace(/\.\w+$/, ""));
+  if (componentName.startsWith(parentPascal) && componentName.length > parentPascal.length) {
+    return componentName.slice(parentPascal.length);
+  }
+  return componentName;
+}
+
+function toKebab(pascal: string): string {
+  return pascal
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
+    .toLowerCase();
+}
+
+function findLocalDeps(componentBody: string, source: string): { name: string; declaration: string; usedOnlyByComponent: boolean }[] {
+  const deps: { name: string; declaration: string; usedOnlyByComponent: boolean }[] = [];
+  LOCAL_DECL_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = LOCAL_DECL_RE.exec(source)) !== null) {
+    const declName = m[1];
+    if (/^export\s/.test(source.slice(Math.max(0, source.lastIndexOf("\n", m.index) + 1), m.index + m[0].length))) continue;
+
+    const nameRe = new RegExp(`\\b${declName}\\b`);
+    if (!nameRe.test(componentBody)) continue;
+
+    const declaration = extractUntilStatement(source, m.index);
+    const sourceWithoutComponent = source.slice(0, componentBody.indexOf(declName) < 0 ? source.length : 0);
+    const remainingSource = source.replace(componentBody, "").replace(declaration, "");
+    const usedElsewhere = nameRe.test(remainingSource);
+
+    deps.push({
+      name: declName,
+      declaration,
+      usedOnlyByComponent: !usedElsewhere,
+    });
+  }
+  return deps;
+}
+
+async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(cwd, finding.file);
+  let source: string;
+  try {
+    source = await readFile(absPath, "utf8");
+  } catch {
+    return { finding, fixed: false, message: `could not read ${finding.file}` };
+  }
+
+  if (!opts?.prompt) {
+    return { finding, fixed: false, message: `DRIFT-RAW-PRIMITIVE requires interactive prompt` };
+  }
+
+  let currentSource = source;
+  let anyFixed = false;
+
+  // Path A: replace raw primitives with existing atoms
+  const rawElements = findRawElements(currentSource);
+  const uniqueElements = [...new Set(rawElements.map(m => m.element))];
+
+  for (const element of uniqueElements) {
+    const atomFileName = ELEMENT_TO_ATOM[element];
+    if (!atomFileName) continue;
+
+    const atomPath = await atomFileExists(cwd, atomFileName);
+    if (!atomPath) continue;
+
+    const atomComponent = capitalize(element);
+    let atomSource: string;
+    try {
+      atomSource = await readFile(join(cwd, atomPath), "utf8");
+    } catch {
+      continue;
+    }
+
+    const cvaVariants = parseCvaVariants(atomSource);
+    const options = cvaVariants
+      ? [...buildVariantOptions(cvaVariants), "Use default (no variant prop)", "Skip"]
+      : ["Replace with " + atomComponent, "Skip"];
+
+    const choice = await opts.prompt(
+      `${finding.file}: raw <${element}> — replace with <${atomComponent}>?`,
+      options,
+    );
+
+    if (choice === "defer") continue;
+    const selected = options[choice];
+    if (selected === "Skip") continue;
+
+    let variantProp: string | null = null;
+    if (cvaVariants && selected !== "Use default (no variant prop)") {
+      variantProp = selected;
+    }
+
+    currentSource = rewriteRawElement(currentSource, element, atomComponent, variantProp);
+    currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
+    anyFixed = true;
+  }
+
+  // Path B: extract internal components to new atoms
+  const internalComponents = findInternalComponents(currentSource);
+  const parentFileName = basename(finding.file);
+
+  for (const comp of internalComponents) {
+    const atomName = deriveAtomName(comp.name, parentFileName);
+    const atomFileKebab = toKebab(atomName);
+    const existingAtom = await atomFileExists(cwd, atomFileKebab);
+    if (existingAtom) continue;
+
+    const extractOptions = [
+      `Accept as "${atomName}"`,
+      "Rename",
+      "Skip",
+    ];
+
+    const choice = await opts.prompt(
+      `${finding.file}: extract internal component "${comp.name}" as atom "${atomName}"?`,
+      extractOptions,
+    );
+
+    if (choice === "defer") continue;
+    const selected = extractOptions[choice];
+    if (selected === "Skip") continue;
+
+    let finalAtomName = atomName;
+    if (selected === "Rename") {
+      continue;
+    }
+
+    const finalFileName = toKebab(finalAtomName);
+    const localDeps = findLocalDeps(comp.body, currentSource);
+
+    const depsToMove = localDeps.filter(d => d.usedOnlyByComponent);
+    const depsToKeep = localDeps.filter(d => !d.usedOnlyByComponent);
+
+    let atomFileContent = "";
+    for (const dep of depsToMove) {
+      atomFileContent += dep.declaration.trimEnd() + "\n\n";
+    }
+    for (const dep of depsToKeep) {
+      atomFileContent += dep.declaration.trimEnd() + "\n\n";
+    }
+
+    const renamedBody = comp.body.replace(
+      new RegExp(`\\b${comp.name}\\b`),
+      finalAtomName,
+    );
+    atomFileContent += `export ${renamedBody.trimEnd()}\n`;
+    atomFileContent += `\nexport const meta = { kind: "atom" as const, examples: [{ name: "default", props: {} }] };\n`;
+
+    const atomDir = join(cwd, "design-system/atoms");
+    await mkdir(atomDir, { recursive: true });
+    await writeFile(join(atomDir, `${finalFileName}.tsx`), atomFileContent, "utf8");
+
+    // Remove the component and its exclusive deps from the composite
+    let updatedSource = currentSource;
+    for (const dep of depsToMove) {
+      updatedSource = updatedSource.replace(dep.declaration, "");
+    }
+    updatedSource = updatedSource.replace(comp.body, "");
+    updatedSource = updatedSource.replace(/\n{3,}/g, "\n\n");
+
+    // Rename JSX references from old component name to new atom name
+    if (comp.name !== finalAtomName) {
+      updatedSource = updatedSource.replace(
+        new RegExp(`<${comp.name}(\\s|>|\\/)`, "g"),
+        `<${finalAtomName}$1`,
+      );
+      updatedSource = updatedSource.replace(
+        new RegExp(`</${comp.name}>`, "g"),
+        `</${finalAtomName}>`,
+      );
+    }
+
+    updatedSource = addImportIfMissing(updatedSource, finalAtomName, `@/design-system/atoms/${finalFileName}`);
+    currentSource = updatedSource;
+    anyFixed = true;
+  }
+
+  if (!anyFixed) {
+    return { finding, fixed: false, message: `deferred raw primitive fixes for ${finding.file}` };
+  }
+
+  await writeFile(absPath, currentSource, "utf8");
+  return { finding, fixed: true, message: `replaced raw primitives in ${finding.file}` };
 }

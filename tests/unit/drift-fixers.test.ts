@@ -31,6 +31,10 @@ describe("drift-fixers", () => {
     it("returns true for DRIFT-INLINE-STATIC-STYLE", () => {
       expect(isFixable("DRIFT-INLINE-STATIC-STYLE")).toBe(true);
     });
+
+    it("returns true for DRIFT-RAW-PRIMITIVE", () => {
+      expect(isFixable("DRIFT-RAW-PRIMITIVE")).toBe(true);
+    });
   });
 
   describe("getFixer", () => {
@@ -54,11 +58,14 @@ describe("drift-fixers", () => {
       expect(getFixer("DRIFT-DS-IMPORTS-FEATURE")).toBeTypeOf("function");
     });
 
+    it("returns a function for DRIFT-RAW-PRIMITIVE", () => {
+      expect(getFixer("DRIFT-RAW-PRIMITIVE")).toBeTypeOf("function");
+    });
+
     it("returns null for unfixable rules", () => {
       const unfixable: DriftRuleId[] = [
         "DRIFT-PATTERN-NO-SLOTS",
         "DRIFT-PATTERN-IMPORTS-PATTERN",
-        "DRIFT-RAW-PRIMITIVE",
         "DRIFT-CVA-VARIANT-UNRENDERED",
       ];
       for (const rule of unfixable) {
@@ -840,6 +847,398 @@ describe("drift-fixers", () => {
       expect(result.fixed).toBe(true);
       const content = await readFile(join(dir, "design-system/atoms/button.tsx"), "utf8");
       expect(content).toMatch(/export const meta = \{ kind: "atom" as const, examples: \[\] \}/);
+    });
+  });
+
+  describe("fixRawPrimitive", () => {
+    let dir: string;
+    beforeEach(async () => { dir = await freshTmpDir(); });
+    afterEach(async () => { await cleanup(dir); });
+
+    function makeFinding(file = "design-system/composites/toolbar.tsx"): DriftFinding {
+      return {
+        ruleId: "DRIFT-RAW-PRIMITIVE",
+        file,
+        message: "raw HTML primitive: 1 <button> — use design-system atoms instead",
+      };
+    }
+
+    describe("Path A — atom already exists", () => {
+      it("rewrites raw <button> to <Button> with variant from prompt", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const atomSource = [
+          `import { cva } from "class-variance-authority";`,
+          `const buttonVariants = cva("btn", {`,
+          `  variants: {`,
+          `    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline" },`,
+          `    size: { default: "btn-md", sm: "btn-sm", icon: "btn-icon" },`,
+          `  },`,
+          `  defaultVariants: { variant: "default", size: "default" },`,
+          `});`,
+          `export function Button({ variant, size, ...props }) {`,
+          `  return <button className={buttonVariants({ variant, size })} {...props} />;`,
+          `}`,
+          `export const meta = { kind: "atom" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/atoms/button.tsx"), atomSource);
+
+        const compositeSource = [
+          `export function Toolbar() {`,
+          `  return (`,
+          `    <div>`,
+          `      <button className="ghost-btn" onClick={handleClick}>Click</button>`,
+          `    </div>`,
+          `  );`,
+          `}`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
+
+        const mockPrompt = async () => 1 as number | "defer"; // select "ghost"
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        const result = await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+        expect(result.fixed).toBe(true);
+        const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
+        expect(content).toContain("<Button");
+        expect(content).toContain('variant="ghost"');
+        expect(content).toContain("@/design-system/atoms/button");
+        expect(content).not.toContain("<button");
+      });
+
+      it("adds import statement for the atom", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const atomSource = [
+          `export function Button(props) { return <button {...props} />; }`,
+          `export const meta = { kind: "atom" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/atoms/button.tsx"), atomSource);
+
+        const compositeSource = [
+          `export function Toolbar() {`,
+          `  return <div><button onClick={fn}>Go</button></div>;`,
+          `}`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
+
+        const mockPrompt = async () => 0 as number | "defer";
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+        const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
+        expect(content).toMatch(/import\s+\{\s*Button\s*\}\s+from\s+/);
+        expect(content).toContain("@/design-system/atoms/button");
+      });
+
+      it("handles multiple raw elements in the same file", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        await writeFile(join(dir, "design-system/atoms/button.tsx"), [
+          `export function Button(props) { return <button {...props} />; }`,
+          `export const meta = { kind: "atom" as const, examples: [] };`,
+        ].join("\n") + "\n");
+        await writeFile(join(dir, "design-system/atoms/input.tsx"), [
+          `export function Input(props) { return <input {...props} />; }`,
+          `export const meta = { kind: "atom" as const, examples: [] };`,
+        ].join("\n") + "\n");
+
+        const compositeSource = [
+          `export function SearchForm() {`,
+          `  return (`,
+          `    <form>`,
+          `      <input type="text" placeholder="Search..." />`,
+          `      <button type="submit">Go</button>`,
+          `    </form>`,
+          `  );`,
+          `}`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/search-form.tsx"), compositeSource);
+
+        const mockPrompt = async () => 0 as number | "defer";
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        const result = await fixer(
+          makeFinding("design-system/composites/search-form.tsx"),
+          dir,
+          { prompt: mockPrompt },
+        );
+
+        expect(result.fixed).toBe(true);
+        const content = await readFile(join(dir, "design-system/composites/search-form.tsx"), "utf8");
+        expect(content).toContain("<Button");
+        expect(content).toContain("<Input");
+        expect(content).not.toContain("<button");
+        expect(content).not.toContain("<input");
+        expect(content).toContain("@/design-system/atoms/button");
+        expect(content).toContain("@/design-system/atoms/input");
+      });
+
+      it("defers when prompt returns defer", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        await writeFile(join(dir, "design-system/atoms/button.tsx"), [
+          `export function Button(props) { return <button {...props} />; }`,
+          `export const meta = { kind: "atom" as const, examples: [] };`,
+        ].join("\n") + "\n");
+        await writeFile(join(dir, "design-system/composites/toolbar.tsx"), [
+          `export function Toolbar() { return <div><button>X</button></div>; }`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n");
+
+        const mockPrompt = async () => "defer" as number | "defer";
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        const result = await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+        expect(result.fixed).toBe(false);
+      });
+
+      it("preserves non-className attributes on raw elements", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        await writeFile(join(dir, "design-system/atoms/button.tsx"), [
+          `export function Button(props) { return <button {...props} />; }`,
+          `export const meta = { kind: "atom" as const, examples: [] };`,
+        ].join("\n") + "\n");
+        const compositeSource = [
+          `export function Toolbar() {`,
+          `  return <div><button onClick={handleClick} disabled aria-label="save">Save</button></div>;`,
+          `}`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
+
+        const mockPrompt = async () => 0 as number | "defer";
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+        const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
+        expect(content).toContain("onClick={handleClick}");
+        expect(content).toContain("disabled");
+        expect(content).toContain('aria-label="save"');
+        expect(content).toContain("<Button");
+      });
+    });
+
+    describe("Path B — extract to atom", () => {
+      it("extracts a named internal component ≥20 lines to a new atom", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const internalLines = Array.from({ length: 20 }, (_, i) =>
+          `    const x${i} = ${i};`,
+        ).join("\n");
+        const compositeSource = [
+          `function FilterBarChip({ label, onRemove }) {`,
+          internalLines,
+          `  return (`,
+          `    <span className="chip">`,
+          `      {label}`,
+          `      <button onClick={onRemove}>×</button>`,
+          `    </span>`,
+          `  );`,
+          `}`,
+          ``,
+          `export function FilterBar() {`,
+          `  return (`,
+          `    <div>`,
+          `      <FilterBarChip label="status" onRemove={() => {}} />`,
+          `    </div>`,
+          `  );`,
+          `}`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
+
+        const mockPrompt = async () => 0 as number | "defer"; // accept as "Chip"
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        const result = await fixer(
+          makeFinding("design-system/composites/filter-bar.tsx"),
+          dir,
+          { prompt: mockPrompt },
+        );
+
+        expect(result.fixed).toBe(true);
+
+        // New atom file should exist
+        const atomContent = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
+        expect(atomContent).toContain("export function Chip");
+        expect(atomContent).toContain('kind: "atom"');
+
+        // Composite should now import from atom
+        const compositeContent = await readFile(join(dir, "design-system/composites/filter-bar.tsx"), "utf8");
+        expect(compositeContent).toContain("@/design-system/atoms/chip");
+        expect(compositeContent).toContain("<Chip");
+        expect(compositeContent).not.toMatch(/^function FilterBarChip/m);
+      });
+
+      it("naming heuristic strips parent prefix", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const internalLines = Array.from({ length: 20 }, (_, i) =>
+          `    const x${i} = ${i};`,
+        ).join("\n");
+        const compositeSource = [
+          `function SearchBarInput({ value }) {`,
+          internalLines,
+          `  return <input value={value} />;`,
+          `}`,
+          ``,
+          `export function SearchBar() {`,
+          `  return <div><SearchBarInput value="" /></div>;`,
+          `}`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/search-bar.tsx"), compositeSource);
+
+        const promptQuestions: string[] = [];
+        const mockPrompt = async (q: string) => {
+          promptQuestions.push(q);
+          return 0 as number | "defer";
+        };
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        await fixer(
+          makeFinding("design-system/composites/search-bar.tsx"),
+          dir,
+          { prompt: mockPrompt },
+        );
+
+        // The prompt should mention "Input" (stripped from SearchBarInput)
+        expect(promptQuestions.some(q => q.includes("Input"))).toBe(true);
+        // Atom file should be named input.tsx
+        const atomContent = await readFile(join(dir, "design-system/atoms/input.tsx"), "utf8");
+        expect(atomContent).toContain("export function Input");
+      });
+
+      it("moves local deps used only by extracted component", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const internalLines = Array.from({ length: 18 }, (_, i) =>
+          `    const x${i} = ${i};`,
+        ).join("\n");
+        const compositeSource = [
+          `type ChipProps = { label: string; onRemove: () => void };`,
+          ``,
+          `function FilterBarChip({ label, onRemove }: ChipProps) {`,
+          internalLines,
+          `  return <span>{label}<button onClick={onRemove}>×</button></span>;`,
+          `}`,
+          ``,
+          `export function FilterBar() {`,
+          `  return <div><FilterBarChip label="hi" onRemove={() => {}} /></div>;`,
+          `}`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
+
+        const mockPrompt = async () => 0 as number | "defer";
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        await fixer(
+          makeFinding("design-system/composites/filter-bar.tsx"),
+          dir,
+          { prompt: mockPrompt },
+        );
+
+        const atomContent = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
+        expect(atomContent).toContain("ChipProps");
+
+        const compositeContent = await readFile(join(dir, "design-system/composites/filter-bar.tsx"), "utf8");
+        expect(compositeContent).not.toContain("ChipProps");
+      });
+
+      it("keeps local deps used by both extracted component and remaining code", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const internalLines = Array.from({ length: 18 }, (_, i) =>
+          `    const x${i} = ${i};`,
+        ).join("\n");
+        const compositeSource = [
+          `const SHARED_CLASS = "shared-style";`,
+          ``,
+          `function FilterBarChip({ label }) {`,
+          internalLines,
+          `  return <span className={SHARED_CLASS}>{label}</span>;`,
+          `}`,
+          ``,
+          `export function FilterBar() {`,
+          `  return <div className={SHARED_CLASS}><FilterBarChip label="hi" /></div>;`,
+          `}`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
+
+        const mockPrompt = async () => 0 as number | "defer";
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        await fixer(
+          makeFinding("design-system/composites/filter-bar.tsx"),
+          dir,
+          { prompt: mockPrompt },
+        );
+
+        // Shared dep should remain in composite
+        const compositeContent = await readFile(join(dir, "design-system/composites/filter-bar.tsx"), "utf8");
+        expect(compositeContent).toContain("SHARED_CLASS");
+
+        // Extracted atom should also have it (duplicated)
+        const atomContent = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
+        expect(atomContent).toContain("SHARED_CLASS");
+      });
+
+      it("skips extraction when component is <20 lines", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const compositeSource = [
+          `function FilterBarChip({ label }) {`,
+          `  return <span>{label}</span>;`,
+          `}`,
+          ``,
+          `export function FilterBar() {`,
+          `  return <div><FilterBarChip label="hi" /></div>;`,
+          `}`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
+
+        const mockPrompt = async () => 0 as number | "defer";
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        const result = await fixer(
+          makeFinding("design-system/composites/filter-bar.tsx"),
+          dir,
+          { prompt: mockPrompt },
+        );
+
+        // Should not have created an atom file (component too short)
+        await expect(stat(join(dir, "design-system/atoms/chip.tsx"))).rejects.toThrow();
+      });
+    });
+
+    it("returns fixed:false when the file does not exist", async () => {
+      const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+      const result = await fixer(makeFinding(), dir);
+      expect(result.fixed).toBe(false);
+    });
+
+    it("requires interactive prompt", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await writeFile(join(dir, "design-system/composites/toolbar.tsx"), [
+        `export function Toolbar() { return <div><button>X</button></div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n");
+
+      const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+      const result = await fixer(makeFinding(), dir);
+      expect(result.fixed).toBe(false);
     });
   });
 });
