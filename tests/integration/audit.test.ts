@@ -40,13 +40,12 @@ describe("audit", () => {
   // #29: unexpected-file detection under managed roots
 
   it("flags a file under managed root that is not in the manifest", async () => {
-    // Seed a skill dir not in the manifest (simulates Crewops pre-adopt extras)
-    await mkdir(join(dir, ".claude/skills/badge-system"), { recursive: true });
-    await writeFile(join(dir, ".claude/skills/badge-system/SKILL.md"), "# badge-system");
+    // Use a skill path NOT in deprecated_paths (badge-system is deprecated since v0.3.0)
+    await mkdir(join(dir, ".claude/skills/custom-lint"), { recursive: true });
+    await writeFile(join(dir, ".claude/skills/custom-lint/SKILL.md"), "# custom-lint\nEnforces design-system token usage");
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/unexpected: \.claude\/skills\/badge-system\/SKILL\.md/);
-    expect(r.stdout).toMatch(/may be user-authored extension/);
+    expect(r.stdout).toMatch(/unexpected.*\.claude\/skills\/custom-lint\/SKILL\.md/);
   });
 
   it("suppresses unexpected file when path matches lookalike_ignore in .claude-ds.json", async () => {
@@ -101,11 +100,11 @@ describe("audit", () => {
   });
 
   it("still flags unexpected files under strict roots (.claude/skills)", async () => {
-    await mkdir(join(dir, ".claude/skills/badge-system"), { recursive: true });
-    await writeFile(join(dir, ".claude/skills/badge-system/SKILL.md"), "# badge-system");
+    await mkdir(join(dir, ".claude/skills/custom-lint"), { recursive: true });
+    await writeFile(join(dir, ".claude/skills/custom-lint/SKILL.md"), "# custom-lint\nEnforces design-system token usage");
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/unexpected: \.claude\/skills\/badge-system\/SKILL\.md/);
+    expect(r.stdout).toMatch(/unexpected.*\.claude\/skills\/custom-lint\/SKILL\.md/);
   });
 
   // #106: graduated audit — drift findings, exceptions, exit codes, grouped output
@@ -245,6 +244,15 @@ describe("audit", () => {
     );
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.stdout).not.toMatch(/unexpected: design-system\/patterns\/app-shell\.tsx/);
+  });
+
+  // #169: design-system/utils/ is an open managed root
+  it("does NOT flag user-authored files under utils/ as unexpected (open root)", async () => {
+    await mkdir(join(dir, "design-system/utils"), { recursive: true });
+    await writeFile(join(dir, "design-system/utils/cn.ts"), "export function cn(...args: string[]) { return args.join(' '); }");
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/unexpected: design-system\/utils\/cn\.ts/);
   });
 
   // #129: generated showcase companions must not be flagged as unexpected
