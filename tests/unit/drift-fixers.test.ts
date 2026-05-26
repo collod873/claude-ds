@@ -84,11 +84,18 @@ describe("drift-fixers", () => {
       expect(getFixer("DRIFT-RAW-PRIMITIVE")).toBeTypeOf("function");
     });
 
+    it("returns true for DRIFT-CVA-VARIANT-UNRENDERED", () => {
+      expect(isFixable("DRIFT-CVA-VARIANT-UNRENDERED")).toBe(true);
+    });
+
+    it("returns a function for DRIFT-CVA-VARIANT-UNRENDERED", () => {
+      expect(getFixer("DRIFT-CVA-VARIANT-UNRENDERED")).toBeTypeOf("function");
+    });
+
     it("returns null for unfixable rules", () => {
       const unfixable: DriftRuleId[] = [
         "DRIFT-PATTERN-NO-SLOTS",
         "DRIFT-PATTERN-IMPORTS-PATTERN",
-        "DRIFT-CVA-VARIANT-UNRENDERED",
       ];
       for (const rule of unfixable) {
         expect(getFixer(rule)).toBeNull();
@@ -1595,6 +1602,169 @@ describe("drift-fixers", () => {
         // Should NOT have prompted — auto-extracted pure function
         expect(promptCalls).toHaveLength(0);
       });
+    });
+  });
+
+  describe("fixCvaVariantUnrendered", () => {
+    let dir: string;
+    beforeEach(async () => { dir = await freshTmpDir(); });
+    afterEach(async () => { await cleanup(dir); });
+
+    it("generates meta.examples stubs for all unrendered variants when no examples exist", async () => {
+      const source = `import { cva } from "class-variance-authority";
+const buttonVariants = cva("base", {
+  variants: {
+    variant: { default: "def", ghost: "gho", destructive: "des" },
+  },
+});
+export function Button() { return <button />; }
+export const meta = { kind: "atom" as const, examples: [] };
+`;
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(join(dir, "design-system/atoms/button.tsx"), source);
+
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-CVA-VARIANT-UNRENDERED",
+        file: "design-system/atoms/button.tsx",
+        message: "3 unexercised CVA variant values: variant=default, variant=ghost, variant=destructive",
+      };
+      const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+      const result = await fixAndApply(fixer, finding, dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/button.tsx"), "utf8");
+      expect(content).toContain('variant: "default"');
+      expect(content).toContain('variant: "ghost"');
+      expect(content).toContain('variant: "destructive"');
+      expect(content).toContain("examples:");
+    });
+
+    it("preserves existing examples and only adds missing variants", async () => {
+      const source = `import { cva } from "class-variance-authority";
+const buttonVariants = cva("base", {
+  variants: {
+    variant: { default: "def", ghost: "gho", destructive: "des" },
+  },
+});
+export function Button() { return <button />; }
+export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "default", props: { variant: "default" } },
+  ],
+};
+`;
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(join(dir, "design-system/atoms/button.tsx"), source);
+
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-CVA-VARIANT-UNRENDERED",
+        file: "design-system/atoms/button.tsx",
+        message: "2 unexercised CVA variant values: variant=ghost, variant=destructive",
+      };
+      const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+      const result = await fixAndApply(fixer, finding, dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/button.tsx"), "utf8");
+      // Original example preserved
+      expect(content).toContain('{ name: "default", props: { variant: "default" } }');
+      // New stubs added
+      expect(content).toContain('variant: "ghost"');
+      expect(content).toContain('variant: "destructive"');
+    });
+
+    it("handles multi-axis variants, generating stubs for each unexercised value", async () => {
+      const source = `import { cva } from "class-variance-authority";
+const chipVariants = cva("base", {
+  variants: {
+    variant: { solid: "s", outline: "o" },
+    size: { sm: "s", md: "m", lg: "l" },
+  },
+});
+export function Chip() { return <span />; }
+export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "solid-sm", props: { variant: "solid", size: "sm" } },
+  ],
+};
+`;
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(join(dir, "design-system/atoms/chip.tsx"), source);
+
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-CVA-VARIANT-UNRENDERED",
+        file: "design-system/atoms/chip.tsx",
+        message: "3 unexercised CVA variant values: variant=outline, size=md, size=lg",
+      };
+      const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+      const result = await fixAndApply(fixer, finding, dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
+      // Original preserved
+      expect(content).toContain('{ name: "solid-sm", props: { variant: "solid", size: "sm" } }');
+      // New stubs for unexercised values
+      expect(content).toContain('variant: "outline"');
+      expect(content).toContain('size: "md"');
+      expect(content).toContain('size: "lg"');
+    });
+
+    it("creates meta.examples export when file has no examples at all", async () => {
+      const source = `import { cva } from "class-variance-authority";
+const v = cva("base", {
+  variants: {
+    tone: { info: "i", warning: "w", error: "e" },
+  },
+});
+export function Alert() { return <div />; }
+export const meta = { kind: "atom" as const, examples: [] };
+`;
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(join(dir, "design-system/atoms/alert.tsx"), source);
+
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-CVA-VARIANT-UNRENDERED",
+        file: "design-system/atoms/alert.tsx",
+        message: "3 unexercised CVA variant values: tone=info, tone=warning, tone=error",
+      };
+      const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+      const result = await fixAndApply(fixer, finding, dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/alert.tsx"), "utf8");
+      expect(content).toContain('tone: "info"');
+      expect(content).toContain('tone: "warning"');
+      expect(content).toContain('tone: "error"');
+    });
+
+    it("returns fixed=false if file cannot be read", async () => {
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-CVA-VARIANT-UNRENDERED",
+        file: "design-system/atoms/missing.tsx",
+        message: "unexercised",
+      };
+      const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+      const result = await fixer(finding, dir);
+      expect(result.fixed).toBe(false);
+    });
+
+    it("returns fixed=false if source has no CVA variants", async () => {
+      const source = `export function Label() { return <span />; }
+export const meta = { kind: "atom" as const, examples: [] };
+`;
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(join(dir, "design-system/atoms/label.tsx"), source);
+
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-CVA-VARIANT-UNRENDERED",
+        file: "design-system/atoms/label.tsx",
+        message: "unexercised",
+      };
+      const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+      const result = await fixer(finding, dir);
+      expect(result.fixed).toBe(false);
     });
   });
 });
