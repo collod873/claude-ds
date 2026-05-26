@@ -245,6 +245,88 @@ describe("fix-pass", () => {
       expect(fixed!.changes[0].kind).toBe("write");
     });
 
+    it("regenerates barrel exports after fixes apply", async () => {
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+
+      await writeFile(
+        join(dir, "design-system/atoms/chip.tsx"),
+        `export function Chip() { return <span />; }\n`,
+      );
+      await writeFile(
+        join(dir, "design-system/atoms/button.tsx"),
+        `export function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+      );
+
+      const findings: DriftFinding[] = [{
+        ruleId: "DRIFT-META-KIND-MISSING",
+        file: "design-system/atoms/chip.tsx",
+        message: "missing meta.kind",
+      }];
+
+      const result = await runFixPass(dir, findings, {});
+      expect(result.aborted).toBe(false);
+
+      // Barrel should be regenerated
+      const barrelContent = await readFile(join(dir, "design-system/atoms/index.ts"), "utf8");
+      expect(barrelContent).toContain("button");
+      expect(barrelContent).toContain("chip");
+      expect(barrelContent).not.toContain("showcase");
+    });
+
+    it("regenerates manifest.json after fixes apply", async () => {
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+
+      await writeFile(
+        join(dir, "design-system/atoms/chip.tsx"),
+        `export function Chip() { return <span />; }\n`,
+      );
+
+      const findings: DriftFinding[] = [{
+        ruleId: "DRIFT-META-KIND-MISSING",
+        file: "design-system/atoms/chip.tsx",
+        message: "missing meta.kind",
+      }];
+
+      const result = await runFixPass(dir, findings, {});
+      expect(result.aborted).toBe(false);
+
+      const manifestRaw = await readFile(join(dir, "design-system/manifest.json"), "utf8");
+      const manifest = JSON.parse(manifestRaw);
+      expect(manifest.components).toHaveLength(1);
+      expect(manifest.components[0].name).toBe("chip");
+    });
+
+    it("includes finalizer changes in applied array", async () => {
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+
+      await writeFile(
+        join(dir, "design-system/atoms/chip.tsx"),
+        `export function Chip() { return <span />; }\n`,
+      );
+
+      const findings: DriftFinding[] = [{
+        ruleId: "DRIFT-META-KIND-MISSING",
+        file: "design-system/atoms/chip.tsx",
+        message: "missing meta.kind",
+      }];
+
+      const result = await runFixPass(dir, findings, {});
+      const paths = result.applied.map(c => c.path);
+      expect(paths).toContain("design-system/atoms/index.ts");
+      expect(paths).toContain("design-system/manifest.json");
+    });
+
+    it("does not run finalizer when no fixer changes applied", async () => {
+      const findings: DriftFinding[] = [{
+        ruleId: "DRIFT-PATTERN-NO-SLOTS",
+        file: "design-system/patterns/layout.tsx",
+        message: "pattern without slots",
+      }];
+
+      const result = await runFixPass(dir, findings, {});
+      expect(result.applied).toHaveLength(0);
+    });
+
     it("deduplicates Changes for the same path", async () => {
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });
 

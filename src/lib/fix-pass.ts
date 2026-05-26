@@ -4,6 +4,7 @@ import type { DriftFinding } from "./drift-rules.js";
 import type { Change } from "./operation.js";
 import type { FixResult, FixerOpts, FixerPrompt } from "./drift-fixers.js";
 import { getFixer, getFixerPriority } from "./drift-fixers.js";
+import { regenIndexes } from "./finalizers/regen-indexes.js";
 import { info } from "./log.js";
 
 export interface FixPassResult {
@@ -167,6 +168,20 @@ export async function runFixPass(
   if (allChanges.length === 0) {
     return { results, applied: [], aborted: false };
   }
+
+  // Finalizer: regenerate barrel exports and manifest.json from disk state
+  try {
+    const finalizerChanges = await regenIndexes(cwd);
+    for (const change of finalizerChanges) {
+      try {
+        await applyChange(cwd, change);
+        appliedChanges.push(change);
+        allChanges.push(change);
+      } catch (err) {
+        info(`error applying finalizer change: ${(err as Error).message}`);
+      }
+    }
+  } catch { /* finalizer failure is non-fatal */ }
 
   const deduped = deduplicateChanges(allChanges);
 

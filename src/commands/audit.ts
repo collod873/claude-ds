@@ -11,7 +11,7 @@ import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import type { DriftFinding } from "../lib/drift-rules.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
-import { makeNoTtyPrompt, makeTtyPrompt, type FixerPrompt } from "../lib/drift-fixers.js";
+import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
 import { runFixPass } from "../lib/fix-pass.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
@@ -219,17 +219,25 @@ export async function auditCmd(opts: AuditOpts) {
 
   // --fix: attempt auto-fix for fixable rules.
   if (opts.fix && activeFindings.length > 0) {
-    const isTTY = process.stdin.isTTY === true;
+    const isTTY = process.stdout.isTTY === true;
     const prompt: FixerPrompt = isTTY ? makeTtyPrompt() : makeNoTtyPrompt();
     const fixPassResult = await runFixPass(cwd, activeFindings, {
       domainRoots, allowedImports, dsAliases, prompt,
     });
+
+    const fixedCount = fixPassResult.results.filter(r => r.fixed).length;
+    const deferredCount = fixPassResult.results.filter(r => !r.fixed).length;
+
     for (const r of fixPassResult.results) {
       if (r.fixed) {
         info(`fixed [${r.finding.ruleId}]: ${r.message}`);
       } else {
-        info(`skipped [${r.finding.ruleId}]: ${r.message}`);
+        info(`deferred [${r.finding.ruleId}]: ${r.message}`);
       }
+    }
+
+    if (fixedCount > 0 || deferredCount > 0) {
+      info(`fix summary: ${fixedCount} fixed, ${deferredCount} deferred`);
     }
 
     // Clean stale exceptions after successful fixes
@@ -240,7 +248,6 @@ export async function auditCmd(opts: AuditOpts) {
         let source: string | null = null;
         try { source = await readFile(absFile, "utf8"); } catch { /* file may have moved */ }
         if (source === null) {
-          // File no longer exists at this path — exception is stale
           continue;
         }
         const { findings: reFindings } = checkThreeSignals(
@@ -257,7 +264,6 @@ export async function auditCmd(opts: AuditOpts) {
         await writeFile(exceptionsPath, serializeExceptions(remainingExceptions), "utf8");
         info(`${removed} stale exception(s) removed from exceptions.json`);
         exceptions = remainingExceptions;
-        // Rebuild suppression set
         suppressedSet.clear();
         for (const e of exceptions) suppressedSet.add(suppressedKey(e.rule, e.path));
       }
@@ -269,6 +275,35 @@ export async function auditCmd(opts: AuditOpts) {
     activeFindings = activeFindings.filter(
       f => !fixedKeys.has(suppressedKey(f.ruleId, f.file))
     );
+
+    // Non-TTY CI mode: auto-defer interactive findings to exceptions.json.
+    // Only when --except is not also passed (--except handles exceptions explicitly).
+    if (!isTTY && !opts.except && activeFindings.length > 0) {
+      const deferredByPrompt = new Set(
+        fixPassResult.results
+          .filter(r => !r.fixed && isInteractive(r.finding.ruleId))
+          .map(r => suppressedKey(r.finding.ruleId, r.finding.file)),
+      );
+
+      const autoDeferred: Exception[] = [];
+      const stillActive: DriftFinding[] = [];
+      for (const f of activeFindings) {
+        if (deferredByPrompt.has(suppressedKey(f.ruleId, f.file))) {
+          autoDeferred.push({ rule: f.ruleId, path: f.file, reason: "auto-deferred: no TTY" });
+        } else {
+          stillActive.push(f);
+        }
+      }
+
+      if (autoDeferred.length > 0) {
+        const merged = [...exceptions, ...autoDeferred];
+        await mkdir(dirname(exceptionsPath), { recursive: true });
+        await writeFile(exceptionsPath, serializeExceptions(merged), "utf8");
+        info(`${autoDeferred.length} finding(s) auto-deferred to exceptions.json (non-TTY mode)`);
+      }
+
+      activeFindings = stillActive;
+    }
   }
 
   // --except: write exception entries for remaining active findings.
