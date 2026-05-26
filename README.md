@@ -1,32 +1,52 @@
 # claude-ds
 
-Shared design-system governance + scaffold CLI.
+Shared design-system governance and scaffold CLI. Installs a consistent `design-system/` layout, Claude Code hooks, and contracts into any consumer project — then keeps them in sync across releases.
 
-Install (per-project, no global): `npx github:collod873/claude-ds#v1.0.0 init --pack next-react`
+## Install
 
-Pin to a specific release: `npx github:collod873/claude-ds#v1.0.0 <subcommand>`
+```sh
+# Greenfield — bootstrap a new project with the full scaffold
+npx github:collod873/claude-ds#v1.0.0 init --pack next-react
 
-Subcommands: `init`, `adopt`, `classify`, `audit`, `doctor`, `sync`, `upgrade`, `enforce`, `reconform`, `migrate`, `version`.
-
-See `.claude/spec.md` for the full surface.
-
-## Upgrade notes
-
-### v0.7.6 — `meta.examples: []` semantic flip
-
-In v0.7.6 the meaning of an empty `examples` array in showcase-companion source files changed:
-
-- **Before (≤ v0.7.5):** empty `examples[]` → generator auto-expanded the CVA variant matrix into a synthesized default entry.
-- **After (≥ v0.7.6):** empty `examples[]` → authoritative stub signal. Generator emits a placeholder card and skips CVA expansion entirely.
-
-If you were relying on the old auto-expand behavior, migrate to an explicit default entry:
-
-```ts
-// Before
-export const meta = { examples: [] };
-
-// After
-export const meta = { examples: [{ name: "default", props: {} }] };
+# Brownfield — adopt into an existing project
+npx github:collod873/claude-ds#v1.0.0 adopt --pack next-react
 ```
 
-See CHANGELOG `[0.7.6]` and issues #62, #64 for context.
+Pin every invocation to a release tag. The CLI never auto-updates.
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `init` | Greenfield bootstrap — full scaffold, hooks in BLOCK mode |
+| `adopt` | Brownfield install — scaffold + hooks in WARN mode |
+| `audit` | Read-only conformance report. `--fix` auto-remediates deterministic issues |
+| `classify` | Categorize existing files into DS tiers |
+| `migrate <path>` | Move one component into the scaffold and register exceptions |
+| `migrate-layout` | Rename lookalike files to canonical paths (`git mv`) |
+| `enforce` | Flip WARN → BLOCK (gated on exception count threshold) |
+| `sync` | Update managed files to the pinned release (diff + confirm) |
+| `upgrade` | Bump the pinned version in `.claude-ds.json` |
+| `reconform` | Fill missing companion files and run conformance checks |
+| `reconcile` | Prune orphaned/deprecated files |
+| `doctor` | Health check — lookalikes, drift, hook verification |
+| `version` | Print installed vs. latest version |
+
+## How it works
+
+Each consumer project gets a `.claude-ds.json` that pins a version and pack (currently `next-react`). Files are owned in four categories:
+
+- **Managed** — CLI owns entirely; rewritten on `sync`
+- **Hybrid** — CLI owns marker blocks; consumer owns the rest
+- **Seeded** — written once on `init`/`adopt`, never touched again
+- **Generated** — produced by hooks, never written by CLI
+
+The CLI never deletes user content or edits outside its declared ownership.
+
+## Adoption path
+
+```
+audit → adopt → classify → audit --fix
+```
+
+`audit` shows the gap. `adopt` installs the scaffold. `classify` sorts existing files into tiers. `audit --fix` auto-remediates what it can. See CHANGELOG.md for version-specific migration notes.
