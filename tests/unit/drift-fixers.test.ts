@@ -28,8 +28,8 @@ describe("drift-fixers", () => {
       expect(isFixable("DRIFT-DS-IMPORTS-FEATURE")).toBe(false);
     });
 
-    it("returns false for DRIFT-INLINE-STATIC-STYLE", () => {
-      expect(isFixable("DRIFT-INLINE-STATIC-STYLE")).toBe(false);
+    it("returns true for DRIFT-INLINE-STATIC-STYLE", () => {
+      expect(isFixable("DRIFT-INLINE-STATIC-STYLE")).toBe(true);
     });
   });
 
@@ -57,7 +57,6 @@ describe("drift-fixers", () => {
         "DRIFT-PATTERN-IMPORTS-PATTERN",
         "DRIFT-RAW-PRIMITIVE",
         "DRIFT-CVA-VARIANT-UNRENDERED",
-        "DRIFT-INLINE-STATIC-STYLE",
       ];
       for (const rule of unfixable) {
         expect(getFixer(rule)).toBeNull();
@@ -344,6 +343,213 @@ describe("drift-fixers", () => {
       await expect(stat(join(dir, "design-system/composites/chip.tsx"))).rejects.toThrow();
       const content = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
       expect(content).toContain('kind: "atom"');
+    });
+  });
+
+  describe("fixInlineStaticStyle", () => {
+    let dir: string;
+    beforeEach(async () => { dir = await freshTmpDir(); });
+    afterEach(async () => { await cleanup(dir); });
+
+    const TOKENS = {
+      color: { background: "#ffffff", foreground: "#111111", primary: "#0070f3" },
+      z: { base: 0, dropdown: 1000, modal: 1300 },
+      shadow: { sm: "0 1px 2px 0 rgb(0 0 0 / 0.05)" },
+    };
+
+    async function setupTokens(tokens = TOKENS) {
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify(tokens, null, 2));
+    }
+
+    function makeFinding(file = "design-system/atoms/card.tsx"): DriftFinding {
+      return {
+        ruleId: "DRIFT-INLINE-STATIC-STYLE",
+        file,
+        message: "inline style={} with literal values — use design tokens instead",
+      };
+    }
+
+    it("replaces a single-match literal value deterministically", async () => {
+      await setupTokens();
+      const source = `export function Card() {\n  return <div style={{ zIndex: 1000 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain('className="z-dropdown"');
+      expect(content).not.toContain("style=");
+    });
+
+    it("replaces string literal values (color)", async () => {
+      await setupTokens();
+      const source = `export function Card() {\n  return <div style={{ color: "#0070f3" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain('className="color-primary"');
+      expect(content).not.toContain("style=");
+    });
+
+    it("handles multiple style properties all fixable", async () => {
+      await setupTokens();
+      const source = `export function Card() {\n  return <div style={{ color: "#0070f3", zIndex: 1000 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain("color-primary");
+      expect(content).toContain("z-dropdown");
+      expect(content).not.toContain("style=");
+    });
+
+    it("does partial replacement — fixable properties removed, unfixable remain", async () => {
+      await setupTokens();
+      const source = `export function Card() {\n  return <div style={{ zIndex: 1000, width: "500px" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain('className="z-dropdown"');
+      expect(content).toContain('style={{ width: "500px" }}');
+    });
+
+    it("defers when no token matches exist", async () => {
+      await setupTokens();
+      const source = `export function Card() {\n  return <div style={{ width: "500px" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir);
+
+      expect(result.fixed).toBe(false);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toBe(source);
+    });
+
+    it("removes style={{}} entirely when all properties replaced", async () => {
+      await setupTokens();
+      const source = `export function Card() {\n  return <div style={{ zIndex: 1000 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      await fixer(makeFinding(), dir);
+
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).not.toContain("style=");
+      expect(content).not.toContain("{{}}");
+    });
+
+    it("preserves existing className when adding token classes", async () => {
+      await setupTokens();
+      const source = `export function Card() {\n  return <div className="existing" style={{ zIndex: 1000 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain('className="existing z-dropdown"');
+      expect(content).not.toContain("style=");
+    });
+
+    it("prompts on ambiguous matches (multiple token candidates)", async () => {
+      const ambiguousTokens = {
+        color: { background: "#ffffff", surface: "#ffffff" },
+      };
+      await setupTokens(ambiguousTokens);
+      const source = `export function Card() {\n  return <div style={{ color: "#ffffff" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const choices: string[][] = [];
+      const mockPrompt = async (_q: string, opts: string[]) => {
+        choices.push(opts);
+        return 0 as number | "defer";
+      };
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+      expect(result.fixed).toBe(true);
+      expect(choices.length).toBeGreaterThan(0);
+      expect(choices[0]).toContain("color-background");
+      expect(choices[0]).toContain("color-surface");
+    });
+
+    it("defers ambiguous match when prompt returns defer", async () => {
+      const ambiguousTokens = {
+        color: { background: "#ffffff", surface: "#ffffff" },
+      };
+      await setupTokens(ambiguousTokens);
+      const source = `export function Card() {\n  return <div style={{ color: "#ffffff" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const mockPrompt = async () => "defer" as number | "defer";
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+      expect(result.fixed).toBe(false);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toBe(source);
+    });
+
+    it("never touches dynamic expressions", async () => {
+      await setupTokens();
+      const source = `export function Card({ z }) {\n  return <div style={{ zIndex: z }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir);
+
+      expect(result.fixed).toBe(false);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toBe(source);
+    });
+
+    it("returns fixed:false when tokens.json is missing", async () => {
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      const source = `export function Card() {\n  return <div style={{ zIndex: 1000 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir);
+
+      expect(result.fixed).toBe(false);
+      expect(result.message).toMatch(/tokens/i);
+    });
+
+    it("returns fixed:false when the source file does not exist", async () => {
+      await setupTokens();
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir);
+      expect(result.fixed).toBe(false);
+    });
+
+    it("handles boxShadow → shadow token group", async () => {
+      await setupTokens();
+      const source = `export function Card() {\n  return <div style={{ boxShadow: "0 1px 2px 0 rgb(0 0 0 / 0.05)" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixer(makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain('className="shadow-sm"');
+      expect(content).not.toContain("style=");
     });
   });
 

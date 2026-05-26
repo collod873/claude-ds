@@ -34,6 +34,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-MISPLACED": { fixer: fixMisplaced, interactive: false },
   "DRIFT-MISCLASSIFIED-ATOM": { fixer: fixMisclassified, interactive: false },
   "DRIFT-MISCLASSIFIED-COMPOSITE": { fixer: fixMisclassified, interactive: false },
+  "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: true },
 };
 
 export function isFixable(ruleId: DriftRuleId): boolean {
@@ -225,6 +226,201 @@ async function fixMisplaced(finding: DriftFinding, cwd: string, opts?: FixerOpts
   }
 
   return relocateFile(finding, cwd, verdict.tier, opts);
+}
+
+// --- DRIFT-INLINE-STATIC-STYLE fixer ---
+
+interface TokenEntry {
+  className: string;
+  value: string;
+  group: string;
+}
+
+function flattenTokens(obj: unknown, prefix: string[] = []): TokenEntry[] {
+  const entries: TokenEntry[] = [];
+  if (obj === null || obj === undefined || typeof obj !== "object") return entries;
+  for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
+    const path = [...prefix, key];
+    if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+      entries.push(...flattenTokens(val, path));
+    } else {
+      entries.push({
+        className: path.join("-"),
+        value: String(val),
+        group: prefix[0] ?? key,
+      });
+    }
+  }
+  return entries;
+}
+
+const CSS_PROP_TOKEN_GROUP: Record<string, string> = {
+  color: "color",
+  backgroundColor: "color",
+  borderColor: "color",
+  outlineColor: "color",
+  fill: "color",
+  stroke: "color",
+  zIndex: "z",
+  boxShadow: "shadow",
+  transitionDuration: "motion",
+  animationDuration: "motion",
+  transitionTimingFunction: "motion",
+};
+
+function lookupToken(
+  entries: TokenEntry[],
+  cssProp: string,
+  rawValue: string,
+): TokenEntry[] {
+  const group = CSS_PROP_TOKEN_GROUP[cssProp];
+  return entries.filter(e => {
+    if (e.value !== rawValue) return false;
+    if (group && e.group !== group) return false;
+    return true;
+  });
+}
+
+const STYLE_PROP_RE = /([a-zA-Z_$][\w$]*)\s*:\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`[^`$]*`|-?\d+(?:\.\d+)?|true|false|null|undefined)/g;
+
+interface StyleProp {
+  name: string;
+  rawValue: string;
+  normalizedValue: string;
+}
+
+function parseStyleProps(innerBlock: string): StyleProp[] {
+  const props: StyleProp[] = [];
+  let m: RegExpExecArray | null;
+  STYLE_PROP_RE.lastIndex = 0;
+  while ((m = STYLE_PROP_RE.exec(innerBlock)) !== null) {
+    const rawValue = m[2];
+    let normalizedValue = rawValue;
+    if (
+      (rawValue.startsWith('"') && rawValue.endsWith('"')) ||
+      (rawValue.startsWith("'") && rawValue.endsWith("'")) ||
+      (rawValue.startsWith("`") && rawValue.endsWith("`"))
+    ) {
+      normalizedValue = rawValue.slice(1, -1);
+    }
+    props.push({ name: m[1], rawValue, normalizedValue });
+  }
+  return props;
+}
+
+const STATIC_STYLE_BLOCK_RE = new RegExp(
+  "(style\\s*=\\s*\\{\\{\\s*)" +
+  "(" +
+    "(?:" +
+      "[a-zA-Z_$][\\w$]*\\s*:\\s*" +
+      "(?:" +
+        "'(?:[^'\\\\]|\\\\.)*'" +
+        '|"(?:[^"\\\\]|\\\\.)*"' +
+        "|`[^`$]*`" +
+        "|-?\\d+(?:\\.\\d+)?" +
+        "|true|false|null|undefined" +
+      ")" +
+      "\\s*,?\\s*" +
+    ")+" +
+  ")" +
+  "(\\}\\})",
+  "g",
+);
+
+async function fixInlineStaticStyle(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(cwd, finding.file);
+  let source: string;
+  try {
+    source = await readFile(absPath, "utf8");
+  } catch {
+    return { finding, fixed: false, message: `could not read ${finding.file}` };
+  }
+
+  let tokensRaw: string;
+  try {
+    tokensRaw = await readFile(join(cwd, "design-system/tokens.json"), "utf8");
+  } catch {
+    return { finding, fixed: false, message: "could not read design-system/tokens.json" };
+  }
+
+  let tokens: unknown;
+  try {
+    tokens = JSON.parse(tokensRaw);
+  } catch {
+    return { finding, fixed: false, message: "could not parse design-system/tokens.json" };
+  }
+
+  const tokenEntries = flattenTokens(tokens);
+  let anyFixed = false;
+  let result = source;
+
+  STATIC_STYLE_BLOCK_RE.lastIndex = 0;
+  const replacements: Array<{ original: string; replacement: string }> = [];
+
+  let match: RegExpExecArray | null;
+  while ((match = STATIC_STYLE_BLOCK_RE.exec(source)) !== null) {
+    const fullMatch = match[0];
+    const innerBlock = match[2];
+    const props = parseStyleProps(innerBlock);
+
+    const resolved: Array<{ prop: StyleProp; className: string }> = [];
+    const unresolved: StyleProp[] = [];
+
+    for (const prop of props) {
+      const matches = lookupToken(tokenEntries, prop.name, prop.normalizedValue);
+      if (matches.length === 1) {
+        resolved.push({ prop, className: matches[0].className });
+      } else if (matches.length > 1 && opts?.prompt) {
+        const options = matches.map(m => m.className);
+        const choice = await opts.prompt(
+          `Ambiguous token match for ${prop.name}: ${prop.normalizedValue}`,
+          options,
+        );
+        if (choice === "defer") {
+          unresolved.push(prop);
+        } else {
+          resolved.push({ prop, className: matches[choice].className });
+        }
+      } else {
+        unresolved.push(prop);
+      }
+    }
+
+    if (resolved.length === 0) continue;
+
+    const classNames = resolved.map(r => r.className).join(" ");
+    let replacement: string;
+
+    if (unresolved.length === 0) {
+      replacement = `className="${classNames}"`;
+    } else {
+      const remaining = unresolved
+        .map(p => `${p.name}: ${p.rawValue}`)
+        .join(", ");
+      replacement = `className="${classNames}" style={{ ${remaining} }}`;
+    }
+
+    replacements.push({ original: fullMatch, replacement });
+  }
+
+  for (const { original, replacement } of replacements) {
+    const beforeReplace = result;
+    result = result.replace(original, replacement);
+    if (result !== beforeReplace) anyFixed = true;
+  }
+
+  if (!anyFixed) {
+    return { finding, fixed: false, message: `no token matches found for ${finding.file}` };
+  }
+
+  // Merge new className with any existing className on the same element
+  result = result.replace(
+    /className="([^"]*?)"\s+className="([^"]*?)"/g,
+    (_m, existing: string, added: string) => `className="${existing} ${added}"`,
+  );
+
+  await writeFile(absPath, result, "utf8");
+  return { finding, fixed: true, message: `replaced inline styles with token classes in ${finding.file}` };
 }
 
 async function fixMisclassified(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
