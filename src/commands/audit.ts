@@ -16,6 +16,16 @@ import { runFixPass } from "../lib/fix-pass.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
+const DS_KEYWORDS_RE = /\b(design[- _]?system|atoms?|composites?|tokens?|design[- _]?tokens|tailwind|css[- _]?variables)\b/i;
+
+async function isDsRelatedSkill(cwd: string, skillPath: string): Promise<boolean> {
+  if (DS_KEYWORDS_RE.test(skillPath)) return true;
+  try {
+    const content = await readFile(join(cwd, skillPath), "utf8");
+    return DS_KEYWORDS_RE.test(content);
+  } catch { return false; }
+}
+
 /**
  * Recursively collect all files (not dirs) under a root dir, returning paths
  * relative to `base`. Returns [] if the root doesn't exist.
@@ -164,14 +174,32 @@ export async function auditCmd(opts: AuditOpts) {
   const manifestFilePaths = new Set(manifest.files.map(f => f.path));
   const orphanPaths = new Set(manifest.deprecated_paths.map(d => d.path));
   const unexpectedFiles = await findUnexpectedFiles(cwd, manifestFilePaths, unexpectedIgnoreGlobs, manifest.managed_roots, manifest.generated_patterns);
-  let unexpectedCount = 0;
+  const dsRelatedUnexpected: string[] = [];
+  const nonDsUnexpected: string[] = [];
   for (const f of unexpectedFiles) {
     if (orphanPaths.has(f)) continue;
-    info(`unexpected: ${f} — not in manifest (may be user-authored extension, pre-adopt orphan, or drift)`);
-    unexpectedCount++;
+    const isSkill = f.startsWith(".claude/skills/");
+    if (isSkill && await isDsRelatedSkill(cwd, f)) {
+      dsRelatedUnexpected.push(f);
+    } else if (isSkill) {
+      nonDsUnexpected.push(f);
+    } else {
+      dsRelatedUnexpected.push(f);
+    }
   }
-  if (unexpectedCount > 0) {
-    info(`${unexpectedCount} unexpected file(s) under managed roots — add to \`.claude-ds.json\` lookalike_ignore to suppress`);
+  for (const f of dsRelatedUnexpected) {
+    const isSkill = f.startsWith(".claude/skills/");
+    if (isSkill) {
+      info(`unexpected (DS-related): ${f} — may conflict with pack skills, review for removal`);
+    } else {
+      info(`unexpected: ${f} — not in manifest (may be user-authored extension, pre-adopt orphan, or drift)`);
+    }
+  }
+  if (dsRelatedUnexpected.length > 0) {
+    info(`${dsRelatedUnexpected.length} unexpected file(s) under managed roots — add to \`.claude-ds.json\` lookalike_ignore to suppress`);
+  }
+  if (nonDsUnexpected.length > 0) {
+    info(`${nonDsUnexpected.length} non-DS skill(s) detected under .claude/skills/ (ignored: ${nonDsUnexpected.map(f => f.replace(".claude/skills/", "").replace(/\/.*/, "")).join(", ")})`);
   }
 
   if (opts.suggestRemovals) info("--suggest-removals: (heuristic) no ad-hoc removals detected at v1");
