@@ -468,3 +468,256 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
     expect(findings.filter(f => f.ruleId === "DRIFT-INLINE-STATIC-STYLE")).toHaveLength(0);
   });
 });
+
+describe("DRIFT-RAW-PRIMITIVE rule", () => {
+  it("registry exposes DRIFT-RAW-PRIMITIVE", () => {
+    expect(allRuleIds()).toContain("DRIFT-RAW-PRIMITIVE");
+  });
+
+  it("fires on composite file containing raw <button>", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/search-bar.tsx",
+      locationTier: "composite",
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+      source: `import { Input } from "../atoms/input";
+export function SearchBar() {
+  return <div><Input /><button type="submit">Go</button></div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-RAW-PRIMITIVE");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("button");
+  });
+
+  it("fires on composite file containing raw <input>", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/form-field.tsx",
+      locationTier: "composite",
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+      source: `export function FormField() {
+  return <div><label>Name</label><input type="text" /></div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-RAW-PRIMITIVE");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("input");
+  });
+
+  it("reports count when multiple raw elements are found", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/login-form.tsx",
+      locationTier: "composite",
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+      source: `export function LoginForm() {
+  return <form>
+    <input type="text" />
+    <input type="password" />
+    <button type="submit">Login</button>
+  </form>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-RAW-PRIMITIVE");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("2 <input>");
+    expect(hit!.message).toContain("1 <button>");
+  });
+
+  it("fires on pattern-tier files containing raw primitives", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/patterns/app-shell.tsx",
+      locationTier: "pattern",
+      classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
+      source: `export function AppShell({ children }: { children: React.ReactNode }) {
+  return <div><button>Menu</button>{children}</div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.find(f => f.ruleId === "DRIFT-RAW-PRIMITIVE")).toBeDefined();
+  });
+
+  it("does NOT fire on atom-tier files", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/button.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Button({ label }: { label: string }) {
+  return <button>{label}</button>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-RAW-PRIMITIVE")).toHaveLength(0);
+  });
+
+  it("does NOT fire on <Button> (PascalCase component, not raw HTML)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/toolbar.tsx",
+      locationTier: "composite",
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+      source: `import { Button } from "../atoms/button";
+export function Toolbar() {
+  return <div><Button>Save</Button></div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-RAW-PRIMITIVE")).toHaveLength(0);
+  });
+
+  it("does NOT fire when source is undefined", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/widget.tsx",
+      locationTier: "composite",
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-RAW-PRIMITIVE")).toHaveLength(0);
+  });
+
+  it("does NOT fire for files outside design-system (locationTier null)", () => {
+    const input: DriftRuleInput = {
+      file: "src/components/form.tsx",
+      locationTier: null,
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Form() { return <button>Submit</button>; }`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-RAW-PRIMITIVE")).toHaveLength(0);
+  });
+});
+
+describe("DRIFT-CVA-VARIANT-UNRENDERED rule", () => {
+  it("registry exposes DRIFT-CVA-VARIANT-UNRENDERED", () => {
+    expect(allRuleIds()).toContain("DRIFT-CVA-VARIANT-UNRENDERED");
+  });
+
+  it("fires when a CVA variant value has no matching meta.examples entry", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/button.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `import { cva } from "class-variance-authority";
+const buttonVariants = cva("base", {
+  variants: {
+    variant: { default: "def", ghost: "gho", outline: "out" },
+  },
+});
+export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "default", props: { variant: "default" } },
+  ],
+};`,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-CVA-VARIANT-UNRENDERED");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("ghost");
+    expect(hit!.message).toContain("outline");
+  });
+
+  it("does NOT fire when all variant values are exercised", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/badge.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `import { cva } from "class-variance-authority";
+const badgeVariants = cva("base", {
+  variants: {
+    tone: { info: "inf", warning: "wrn", error: "err" },
+  },
+});
+export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "info", props: { tone: "info" } },
+    { name: "warning", props: { tone: "warning" } },
+    { name: "error", props: { tone: "error" } },
+  ],
+};`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-CVA-VARIANT-UNRENDERED")).toHaveLength(0);
+  });
+
+  it("does NOT fire when source has no CVA variants", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/label.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `export function Label({ text }: { text: string }) {
+  return <span>{text}</span>;
+}
+export const meta = {
+  kind: "atom" as const,
+  examples: [{ name: "default", props: { text: "Hello" } }],
+};`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-CVA-VARIANT-UNRENDERED")).toHaveLength(0);
+  });
+
+  it("does NOT fire when source is undefined", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/button.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-CVA-VARIANT-UNRENDERED")).toHaveLength(0);
+  });
+
+  it("does NOT fire for files outside design-system (locationTier null)", () => {
+    const input: DriftRuleInput = {
+      file: "src/components/button.tsx",
+      locationTier: null,
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `import { cva } from "class-variance-authority";
+const v = cva("base", { variants: { size: { sm: "s", lg: "l" } } });
+export const meta = { kind: "atom" as const, examples: [] };`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-CVA-VARIANT-UNRENDERED")).toHaveLength(0);
+  });
+
+  it("reports multiple unexercised variant values across axes", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/chip.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `import { cva } from "class-variance-authority";
+const chipVariants = cva("base", {
+  variants: {
+    variant: { solid: "s", outline: "o" },
+    size: { sm: "s", md: "m", lg: "l" },
+  },
+});
+export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "solid-sm", props: { variant: "solid", size: "sm" } },
+  ],
+};`,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-CVA-VARIANT-UNRENDERED");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("outline");
+    expect(hit!.message).toContain("md");
+    expect(hit!.message).toContain("lg");
+  });
+
+  it("does NOT fire when examples is empty (authoritative stub signal)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/button.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      source: `import { cva } from "class-variance-authority";
+const v = cva("base", { variants: { size: { sm: "s", lg: "l" } } });
+export const meta = { kind: "atom" as const, examples: [] };`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-CVA-VARIANT-UNRENDERED")).toHaveLength(0);
+  });
+});

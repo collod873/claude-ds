@@ -21,8 +21,8 @@ export type DriftRuleId =
   | "DRIFT-PATTERN-NO-SLOTS"
   | "DRIFT-PATTERN-IMPORTS-PATTERN"
   // Code-quality drift rules (IDs stable)
-  | "DRIFT-RAW-PRIMITIVE"   // evaluator not yet wired
-  | "DRIFT-CVA-VARIANT-UNRENDERED"  // evaluator not yet wired
+  | "DRIFT-RAW-PRIMITIVE"
+  | "DRIFT-CVA-VARIANT-UNRENDERED"
   | "DRIFT-INLINE-STATIC-STYLE";
 
 export interface DriftFinding {
@@ -170,6 +170,125 @@ function evalInlineStaticStyle(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
+/**
+ * Match raw HTML primitives (<button, <input) in JSX.
+ * Case-sensitive — PascalCase variants (<Button, <Input) are component refs, not raw HTML.
+ * Captures the element name for counting.
+ */
+const RAW_PRIMITIVE_RE = /<(button|input)[\s>/]/g;
+
+/** DRIFT-RAW-PRIMITIVE: composite/pattern using raw HTML primitive instead of atom. */
+function evalRawPrimitive(input: DriftRuleInput): DriftFinding | null {
+  const { file, locationTier, source } = input;
+  if (locationTier === null) return null;
+  if (locationTier === "atom") return null;
+  if (source === undefined) return null;
+
+  const counts = new Map<string, number>();
+  let m: RegExpExecArray | null;
+  RAW_PRIMITIVE_RE.lastIndex = 0;
+  while ((m = RAW_PRIMITIVE_RE.exec(source)) !== null) {
+    const el = m[1];
+    counts.set(el, (counts.get(el) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+
+  const parts = [...counts.entries()].map(([el, n]) => `${n} <${el}>`);
+  return {
+    ruleId: "DRIFT-RAW-PRIMITIVE",
+    file,
+    message: `raw HTML primitive${counts.size > 1 || [...counts.values()][0] > 1 ? "s" : ""}: ${parts.join(", ")} — use design-system atoms instead`,
+  };
+}
+
+/**
+ * Extract CVA variant axis names and their values from source.
+ * Matches the variants object inside a cva() call.
+ */
+function parseCvaVariants(source: string): Record<string, string[]> | null {
+  if (!source.includes("cva(")) return null;
+
+  const broadMatch = source.match(/variants\s*:\s*\{([\s\S]*?)\}\s*(?:,\s*(?:defaultVariants|compoundVariants)|,?\s*\}\s*\))/);
+  if (!broadMatch) return null;
+
+  const varBlock = broadMatch[1];
+  const result: Record<string, string[]> = {};
+
+  const axisRe = /(\w+)\s*:\s*\{([^}]*)\}/g;
+  let am: RegExpExecArray | null;
+  while ((am = axisRe.exec(varBlock)) !== null) {
+    const axisName = am[1];
+    const valuesBlock = am[2];
+    const valueKeys: string[] = [];
+    const keyRe = /(\w+)\s*:/g;
+    let km: RegExpExecArray | null;
+    while ((km = keyRe.exec(valuesBlock)) !== null) {
+      valueKeys.push(km[1]);
+    }
+    if (valueKeys.length > 0) {
+      result[axisName] = valueKeys;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+/**
+ * Extract variant values exercised by meta.examples entries.
+ * Scans each example's props for keys matching CVA axis names.
+ */
+function parseExercisedVariants(source: string, axes: string[]): Map<string, Set<string>> {
+  const exercised = new Map<string, Set<string>>();
+  for (const axis of axes) exercised.set(axis, new Set());
+
+  const examplesMatch = source.match(/examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/);
+  if (!examplesMatch) return exercised;
+
+  for (const axis of axes) {
+    const re = new RegExp(`${axis}\\s*:\\s*["']([^"']+)["']`, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(examplesMatch[1])) !== null) {
+      exercised.get(axis)!.add(m[1]);
+    }
+  }
+
+  return exercised;
+}
+
+/** DRIFT-CVA-VARIANT-UNRENDERED: CVA variant value not exercised by any meta.examples entry. */
+function evalCvaVariantUnrendered(input: DriftRuleInput): DriftFinding | null {
+  const { file, locationTier, source } = input;
+  if (locationTier === null) return null;
+  if (source === undefined) return null;
+
+  const cvaVariants = parseCvaVariants(source);
+  if (!cvaVariants) return null;
+
+  // Empty examples is an authoritative stub signal — don't flag
+  const examplesMatch = source.match(/examples\s*:\s*\[\s*\]/);
+  if (examplesMatch) return null;
+
+  const axes = Object.keys(cvaVariants);
+  const exercised = parseExercisedVariants(source, axes);
+
+  const unexercised: string[] = [];
+  for (const axis of axes) {
+    const exercisedValues = exercised.get(axis)!;
+    for (const value of cvaVariants[axis]) {
+      if (!exercisedValues.has(value)) {
+        unexercised.push(`${axis}=${value}`);
+      }
+    }
+  }
+
+  if (unexercised.length === 0) return null;
+  return {
+    ruleId: "DRIFT-CVA-VARIANT-UNRENDERED",
+    file,
+    message: `${unexercised.length} unexercised CVA variant value${unexercised.length > 1 ? "s" : ""}: ${unexercised.join(", ")}`,
+  };
+}
+
 /** DRIFT-PATTERN-IMPORTS-PATTERN: pattern-tier file imports from another pattern. */
 function evalPatternImportsPattern(input: DriftRuleInput): DriftFinding | null {
   const { file, locationTier, classifierVerdict } = input;
@@ -197,5 +316,9 @@ export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   if (patternImportsPattern) findings.push(patternImportsPattern);
   const inlineStaticStyle = evalInlineStaticStyle(input);
   if (inlineStaticStyle) findings.push(inlineStaticStyle);
+  const rawPrimitive = evalRawPrimitive(input);
+  if (rawPrimitive) findings.push(rawPrimitive);
+  const cvaVariantUnrendered = evalCvaVariantUnrendered(input);
+  if (cvaVariantUnrendered) findings.push(cvaVariantUnrendered);
   return findings;
 }
