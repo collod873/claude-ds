@@ -368,3 +368,65 @@ describe("audit --fix abort handling", () => {
     expect(content).toBe(original);
   });
 });
+
+describe("audit --fix post-fix re-validation", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("catches fixer-introduced drift in the same run", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    // This component imports another DS atom → classifier says "composite".
+    // DRIFT-MISPLACED fires (atom folder, composite classifier) → fixer relocates to composites/.
+    // DRIFT-META-KIND-MISSING fixer can't read (file moved).
+    // Re-validation of composites/card.tsx finds META-KIND-MISSING at the new path.
+    await writeFile(
+      join(dir, "design-system/atoms/card.tsx"),
+      `import { Icon } from "design-system/atoms/icon";\nexport function Card() { return <div><Icon /></div>; }\n`,
+    );
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    // Re-validation should catch new findings at the relocated path
+    expect(r.stdout).toMatch(/re-validation/);
+    expect(r.code).toBe(1);
+  });
+
+  it("skips re-validation when fix pass aborts", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <button />; }\n`,
+    );
+    await chmod(join(dir, "design-system/atoms"), 0o555);
+
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).not.toBe(0);
+    expect(r.stdout + r.stderr).toMatch(/rolled back/i);
+    // Should NOT contain re-validation output
+    expect(r.stdout).not.toMatch(/re-validation/i);
+
+    await chmod(join(dir, "design-system/atoms"), 0o755);
+  });
+
+  it("includes re-validation findings in the scorecard", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/card.tsx"),
+      `import { Icon } from "design-system/atoms/icon";\nexport function Card() { return <div><Icon /></div>; }\n`,
+    );
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    // Scorecard should show errors from re-validation
+    expect(r.stdout).toMatch(/Errors:\s*\d+/);
+  });
+});

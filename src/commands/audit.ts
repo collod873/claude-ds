@@ -340,6 +340,39 @@ export async function auditCmd(opts: AuditOpts) {
       f => !fixedKeys.has(suppressedKey(f.ruleId, f.file))
     );
 
+    // Post-fix re-validation: re-check files modified by fixers to catch fixer-introduced drift.
+    if (fixPassResult.applied.length > 0) {
+      const modifiedPaths = new Set<string>();
+      for (const c of fixPassResult.applied) {
+        if (c.kind === "rename") {
+          modifiedPaths.add(c.after);
+        } else if (c.kind === "write") {
+          modifiedPaths.add(c.path);
+        }
+      }
+      const activeFindingKeys = new Set(activeFindings.map(f => suppressedKey(f.ruleId, f.file)));
+      let revalidationCount = 0;
+      for (const filePath of modifiedPaths) {
+        if (!filePath.endsWith(".tsx")) continue;
+        const inTierDir = driftTierDirs.some(d => filePath.startsWith(d + "/"));
+        if (!inTierDir) continue;
+        let source: string;
+        try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+        const { findings: reFindings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
+        for (const f of reFindings) {
+          const key = suppressedKey(f.ruleId, f.file);
+          if (!activeFindingKeys.has(key) && !suppressedSet.has(key)) {
+            activeFindings.push(f);
+            activeFindingKeys.add(key);
+            revalidationCount++;
+          }
+        }
+      }
+      if (revalidationCount > 0) {
+        info(`re-validation: ${revalidationCount} new finding(s) after fix pass`);
+      }
+    }
+
     // Non-TTY CI mode: auto-defer interactive findings to exceptions.json.
     // Only when --except is not also passed (--except handles exceptions explicitly).
     if (!isTTY && !opts.except && activeFindings.length > 0) {
