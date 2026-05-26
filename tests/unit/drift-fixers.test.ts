@@ -24,8 +24,8 @@ describe("drift-fixers", () => {
       expect(isFixable("DRIFT-MISCLASSIFIED-COMPOSITE")).toBe(true);
     });
 
-    it("returns false for DRIFT-DS-IMPORTS-FEATURE", () => {
-      expect(isFixable("DRIFT-DS-IMPORTS-FEATURE")).toBe(false);
+    it("returns true for DRIFT-DS-IMPORTS-FEATURE", () => {
+      expect(isFixable("DRIFT-DS-IMPORTS-FEATURE")).toBe(true);
     });
 
     it("returns true for DRIFT-INLINE-STATIC-STYLE", () => {
@@ -50,9 +50,12 @@ describe("drift-fixers", () => {
       expect(getFixer("DRIFT-MISCLASSIFIED-COMPOSITE")).toBeTypeOf("function");
     });
 
+    it("returns a function for DRIFT-DS-IMPORTS-FEATURE", () => {
+      expect(getFixer("DRIFT-DS-IMPORTS-FEATURE")).toBeTypeOf("function");
+    });
+
     it("returns null for unfixable rules", () => {
       const unfixable: DriftRuleId[] = [
-        "DRIFT-DS-IMPORTS-FEATURE",
         "DRIFT-PATTERN-NO-SLOTS",
         "DRIFT-PATTERN-IMPORTS-PATTERN",
         "DRIFT-RAW-PRIMITIVE",
@@ -550,6 +553,264 @@ describe("drift-fixers", () => {
       const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
       expect(content).toContain('className="shadow-sm"');
       expect(content).not.toContain("style=");
+    });
+  });
+
+  describe("fixDsImportsFeature", () => {
+    let dir: string;
+    beforeEach(async () => { dir = await freshTmpDir(); });
+    afterEach(async () => { await cleanup(dir); });
+
+    function makeFinding(file = "design-system/composites/event-card.tsx"): DriftFinding {
+      return {
+        ruleId: "DRIFT-DS-IMPORTS-FEATURE",
+        file,
+        message: "design-system file imports from domain root (imports from lib/)",
+      };
+    }
+
+    it("extracts a pure utility from lib/ to design-system/utils/", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/utils"), { recursive: true });
+
+      await writeFile(join(dir, "lib/utils/format.ts"),
+        `export function formatDate(d: Date): string {\n  return d.toISOString();\n}\n`);
+
+      const dsSource = [
+        `import { formatDate } from "../../lib/utils/format";`,
+        `export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
+
+      const mockPrompt = async () => 0 as number | "defer";
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      const result = await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+      expect(result.fixed).toBe(true);
+
+      const utilsContent = await readFile(join(dir, "design-system/utils/format.ts"), "utf8");
+      expect(utilsContent).toContain("export function formatDate");
+
+      const dsContent = await readFile(join(dir, "design-system/composites/event-card.tsx"), "utf8");
+      expect(dsContent).toContain("@/design-system/utils/format");
+      expect(dsContent).not.toContain("lib/utils/format");
+    });
+
+    it("rewrites imports project-wide when extracting to utils", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/utils"), { recursive: true });
+      await mkdir(join(dir, "src"), { recursive: true });
+
+      await writeFile(join(dir, "lib/utils/format.ts"),
+        `export function formatDate(d: Date): string {\n  return d.toISOString();\n}\n`);
+
+      const dsSource = [
+        `import { formatDate } from "../../lib/utils/format";`,
+        `export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
+
+      await writeFile(join(dir, "src/page.tsx"),
+        `import { formatDate } from "@/lib/utils/format";\nexport default function Page() { return <div>{formatDate(new Date())}</div>; }\n`);
+
+      const mockPrompt = async () => 0 as number | "defer";
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+      const pageContent = await readFile(join(dir, "src/page.tsx"), "utf8");
+      expect(pageContent).toContain("@/design-system/utils/format");
+      expect(pageContent).not.toContain("@/lib/utils/format");
+    });
+
+    it("does not offer extract-to-utils when symbol has transitive domain deps", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/api"), { recursive: true });
+      await mkdir(join(dir, "features/auth"), { recursive: true });
+
+      await writeFile(join(dir, "features/auth/session.ts"),
+        `export function getSession() { return { user: "test" }; }\n`);
+
+      await writeFile(join(dir, "lib/api/client.ts"),
+        `import { getSession } from "../../features/auth/session";\nexport function apiClient() { return getSession(); }\n`);
+
+      const dsSource = [
+        `import { apiClient } from "../../lib/api/client";`,
+        `export function UserBadge() { return <div>{apiClient()}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/user-badge.tsx"), dsSource);
+
+      const promptOptions: string[][] = [];
+      const mockPrompt = async (_q: string, opts: string[]) => {
+        promptOptions.push(opts);
+        return 0 as number | "defer";
+      };
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      await fixer(makeFinding("design-system/composites/user-badge.tsx"), dir, { prompt: mockPrompt });
+
+      expect(promptOptions.length).toBeGreaterThan(0);
+      const options = promptOptions[0];
+      expect(options.some(o => o.toLowerCase().includes("extract"))).toBe(false);
+      expect(options.some(o => o.toLowerCase().includes("prop"))).toBe(true);
+    });
+
+    it("offers convert-to-prop only for pure functions with ≤2 params", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/utils"), { recursive: true });
+
+      await writeFile(join(dir, "lib/utils/complex.ts"),
+        `export function complexFn(a: string, b: number, c: boolean): string { return a + b + c; }\n`);
+
+      const dsSource = [
+        `import { complexFn } from "../../lib/utils/complex";`,
+        `export function Widget() { return <div>{complexFn("a", 1, true)}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
+
+      const promptOptions: string[][] = [];
+      const mockPrompt = async (_q: string, opts: string[]) => {
+        promptOptions.push(opts);
+        return 0 as number | "defer";
+      };
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      await fixer(makeFinding("design-system/composites/widget.tsx"), dir, { prompt: mockPrompt });
+
+      expect(promptOptions.length).toBeGreaterThan(0);
+      const options = promptOptions[0];
+      expect(options.some(o => o.toLowerCase().includes("extract"))).toBe(true);
+      expect(options.some(o => o.toLowerCase().includes("prop"))).toBe(false);
+    });
+
+    it("offers convert-to-prop for simple constants", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/config"), { recursive: true });
+
+      await writeFile(join(dir, "lib/config/theme.ts"),
+        `export const PRIMARY_COLOR = "#0070f3";\n`);
+
+      const dsSource = [
+        `import { PRIMARY_COLOR } from "../../lib/config/theme";`,
+        `export function Badge() { return <span style={{ color: PRIMARY_COLOR }}>badge</span>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
+
+      const promptOptions: string[][] = [];
+      const mockPrompt = async (_q: string, opts: string[]) => {
+        promptOptions.push(opts);
+        return 0 as number | "defer";
+      };
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      await fixer(makeFinding("design-system/composites/badge.tsx"), dir, { prompt: mockPrompt });
+
+      expect(promptOptions.length).toBeGreaterThan(0);
+      const options = promptOptions[0];
+      expect(options.some(o => o.toLowerCase().includes("extract"))).toBe(true);
+      expect(options.some(o => o.toLowerCase().includes("prop"))).toBe(true);
+    });
+
+    it("converts to prop injection — removes import and adds prop", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/utils"), { recursive: true });
+
+      await writeFile(join(dir, "lib/utils/format.ts"),
+        `export function formatDate(d: Date): string { return d.toISOString(); }\n`);
+
+      const dsSource = [
+        `import { formatDate } from "../../lib/utils/format";`,
+        `export function EventCard({ title }: { title: string }) {`,
+        `  return <div>{title}: {formatDate(new Date())}</div>;`,
+        `}`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
+
+      const mockPrompt = async (_q: string, opts: string[]) => {
+        return opts.findIndex(o => o.toLowerCase().includes("prop")) as number | "defer";
+      };
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      const result = await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/composites/event-card.tsx"), "utf8");
+      expect(content).not.toContain("lib/utils/format");
+      expect(content).toContain("formatDate");
+      expect(content).toMatch(/\bformatDate\b.*\}/); // prop in destructuring
+    });
+
+    it("defers and writes exception entry", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "design-system"), { recursive: true });
+      await mkdir(join(dir, "lib/utils"), { recursive: true });
+
+      await writeFile(join(dir, "lib/utils/format.ts"),
+        `export function formatDate(d: Date): string { return d.toISOString(); }\n`);
+
+      const dsSource = [
+        `import { formatDate } from "../../lib/utils/format";`,
+        `export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
+
+      const mockPrompt = async () => "defer" as number | "defer";
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      const result = await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+      expect(result.fixed).toBe(false);
+      expect(result.message).toMatch(/defer/i);
+    });
+
+    it("returns fixed:false when the file does not exist", async () => {
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      const result = await fixer(makeFinding(), dir);
+      expect(result.fixed).toBe(false);
+    });
+
+    it("returns fixed:false when no prompt callback is provided", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/utils"), { recursive: true });
+
+      await writeFile(join(dir, "lib/utils/format.ts"),
+        `export function formatDate(d: Date): string { return d.toISOString(); }\n`);
+
+      const dsSource = [
+        `import { formatDate } from "../../lib/utils/format";`,
+        `export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
+
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      const result = await fixer(makeFinding(), dir);
+      expect(result.fixed).toBe(false);
+    });
+
+    it("handles @/ alias imports", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/utils"), { recursive: true });
+
+      await writeFile(join(dir, "lib/utils/format.ts"),
+        `export function formatDate(d: Date): string { return d.toISOString(); }\n`);
+
+      const dsSource = [
+        `import { formatDate } from "@/lib/utils/format";`,
+        `export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
+
+      const mockPrompt = async () => 0 as number | "defer";
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      const result = await fixer(makeFinding(), dir, { prompt: mockPrompt });
+
+      expect(result.fixed).toBe(true);
+      const dsContent = await readFile(join(dir, "design-system/composites/event-card.tsx"), "utf8");
+      expect(dsContent).toContain("@/design-system/utils/format");
+      expect(dsContent).not.toContain("@/lib/utils/format");
     });
   });
 
