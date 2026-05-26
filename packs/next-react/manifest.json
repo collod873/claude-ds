@@ -1,6 +1,7 @@
 {
   "generated_patterns": [
-    "design-system/references/*.showcase.tsx"
+    "design-system/references/*.showcase.tsx",
+    "design-system/manifest.generated.ts"
   ],
   "managed_roots": [
     {
