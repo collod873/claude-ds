@@ -7,7 +7,7 @@ on:
 jobs:
   implement:
     if: github.event.label.name == 'agent:implement'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 60
     concurrency:
       group: agent-implement-issue-${{ github.event.issue.number }}

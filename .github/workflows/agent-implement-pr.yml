@@ -7,7 +7,7 @@ on:
 jobs:
   implement-pr:
     if: github.event.label.name == 'agent:implement'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 60
     concurrency:
       group: agent-mutate-pr-${{ github.event.pull_request.number }}
@@ -138,7 +138,7 @@ jobs:
           REPLIES: ${{ runner.temp }}/implement_thread_replies.json
         run: |
           count=$(jq 'length' "$REPLIES")
-          for i in $(seq 0 $((count - 1))); do
+          for ((i=0; i<count; i++)); do
             commentId=$(jq -r ".[$i].commentId" "$REPLIES")
             body=$(jq -r ".[$i].body" "$REPLIES")
             rest_id=$(gh api graphql -f query="query(\$id:ID!){ node(id:\$id){ ... on PullRequestReviewComment { databaseId } } }" -F id="$commentId" --jq '.data.node.databaseId')
@@ -159,7 +159,7 @@ jobs:
         run: |
           commit_id=$(jq -r '.commit_id' "$INLINE")
           count=$(jq '.comments | length' "$INLINE")
-          for i in $(seq 0 $((count - 1))); do
+          for ((i=0; i<count; i++)); do
             path=$(jq -r ".comments[$i].path" "$INLINE")
             line=$(jq -r ".comments[$i].line" "$INLINE")
             side=$(jq -r ".comments[$i].side" "$INLINE")
@@ -180,7 +180,7 @@ jobs:
           TOP: ${{ runner.temp }}/implement_top_level_comments.json
         run: |
           count=$(jq 'length' "$TOP")
-          for i in $(seq 0 $((count - 1))); do
+          for ((i=0; i<count; i++)); do
             body=$(jq -r ".[$i].body" "$TOP")
             gh pr comment "$PR_NUMBER" --body "$body"
           done
