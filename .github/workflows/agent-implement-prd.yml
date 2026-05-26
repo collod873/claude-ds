@@ -125,6 +125,21 @@ jobs:
           gh issue edit "$PRD_NUMBER" --remove-label "ready-for-agent" || true
           gh issue edit "$PRD_NUMBER" --add-label "agent:in-progress" || true
 
+      - name: Transition labels — label all open sub-issues as queued, current as in-progress
+        if: steps.shape.outputs.mode == 'run'
+        env:
+          SUB_ISSUE_NUMBER: ${{ steps.shape.outputs.next_open_number }}
+        run: |
+          set -euo pipefail
+          sub_issues_json=$(gh api "repos/${GH_REPO}/issues/${PRD_NUMBER}/sub_issues" 2>/dev/null || echo "[]")
+          for num in $(echo "$sub_issues_json" | jq -r '.[] | select(.state == "open") | .number'); do
+            if [ "$num" = "$SUB_ISSUE_NUMBER" ]; then
+              gh issue edit "$num" --remove-label "agent:queued" --add-label "agent:in-progress" || true
+            else
+              gh issue edit "$num" --remove-label "agent:in-progress" --add-label "agent:queued" || true
+            fi
+          done
+
       - name: Compute branch name
         if: steps.shape.outputs.mode == 'run'
         id: branch
@@ -306,6 +321,7 @@ jobs:
             reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
           fi
           gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
+          gh issue edit "$SUB_ISSUE_NUMBER" --remove-label "agent:in-progress" --add-label "agent:blocked" || true
           gh issue comment "$PRD_NUMBER" --body "$(cat <<EOF
           \`agent:implement\` (PRD mode) run failed while implementing sub-issue #${SUB_ISSUE_NUMBER}.
 
@@ -319,6 +335,19 @@ jobs:
           if [ -n "${SUB_ISSUE_NUMBER:-}" ]; then
             gh issue comment "$SUB_ISSUE_NUMBER" --body "Implementation attempt failed. See PRD #${PRD_NUMBER} for status. Workflow run: $RUN_URL" || true
           fi
+          # Clear agent:queued from remaining sub-issues since the chain has stopped
+          sub_issues_json=$(gh api "repos/${GH_REPO}/issues/${PRD_NUMBER}/sub_issues" 2>/dev/null || echo "[]")
+          for num in $(echo "$sub_issues_json" | jq -r '.[] | select(.state == "open") | .number'); do
+            if [ "$num" != "$SUB_ISSUE_NUMBER" ]; then
+              gh issue edit "$num" --remove-label "agent:queued" || true
+            fi
+          done
+
+      - name: Always remove in-progress from sub-issue
+        if: always() && steps.shape.outputs.mode == 'run'
+        env:
+          SUB_ISSUE_NUMBER: ${{ steps.shape.outputs.next_open_number }}
+        run: gh issue edit "$SUB_ISSUE_NUMBER" --remove-label "agent:in-progress" || true
 
       - name: Always remove in-progress from PRD
         if: always() && steps.shape.outputs.mode == 'run'
