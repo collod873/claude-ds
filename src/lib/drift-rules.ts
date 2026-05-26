@@ -252,17 +252,39 @@ export function parseCvaVariants(source: string): Record<string, string[]> | nul
   const varBlock = broadMatch[1];
   const result: Record<string, string[]> = {};
 
-  const axisRe = /(\w+)\s*:\s*\{([^}]*)\}/g;
+  // Brace-balanced extraction of top-level axis blocks
+  const axisStartRe = /(\w+)\s*:\s*\{/g;
   let am: RegExpExecArray | null;
-  while ((am = axisRe.exec(varBlock)) !== null) {
+  while ((am = axisStartRe.exec(varBlock)) !== null) {
     const axisName = am[1];
     if (PSEUDO_STATE_AXES.has(axisName)) continue;
-    const valuesBlock = am[2];
+
+    // Walk forward from the opening { to find the balanced closing }
+    let depth = 1;
+    let i = am.index + am[0].length;
+    while (i < varBlock.length && depth > 0) {
+      if (varBlock[i] === "{") depth++;
+      else if (varBlock[i] === "}") depth--;
+      i++;
+    }
+    if (depth !== 0) continue;
+
+    const axisBody = varBlock.slice(am.index + am[0].length, i - 1);
+
+    // Extract only top-level keys (depth-0 `word:` patterns)
     const valueKeys: string[] = [];
+    let d = 0;
     const keyRe = /(\w+)\s*:/g;
     let km: RegExpExecArray | null;
-    while ((km = keyRe.exec(valuesBlock)) !== null) {
-      valueKeys.push(km[1]);
+    while ((km = keyRe.exec(axisBody)) !== null) {
+      // Compute brace depth at this position
+      const prefix = axisBody.slice(0, km.index);
+      d = 0;
+      for (const ch of prefix) {
+        if (ch === "{" || ch === "[" || ch === "(") d++;
+        else if (ch === "}" || ch === "]" || ch === ")") d--;
+      }
+      if (d === 0) valueKeys.push(km[1]);
     }
     if (valueKeys.length > 0) {
       result[axisName] = valueKeys;

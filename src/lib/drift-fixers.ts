@@ -992,6 +992,13 @@ export function buildVariantOptions(cvaVariants: Record<string, string[]>): stri
   return options;
 }
 
+interface InstanceRewrite {
+  element: string;
+  atomComponent: string;
+  variantProp: string | null;
+  index: number;
+}
+
 function rewriteRawElement(
   source: string,
   element: string,
@@ -1028,6 +1035,49 @@ function rewriteRawElement(
     if (cleanAttrs) parts.push(` ${cleanAttrs}`);
     return parts.join("") + " />";
   });
+
+  return result;
+}
+
+function rewriteInstances(source: string, rewrites: InstanceRewrite[]): string {
+  const sorted = [...rewrites].sort((a, b) => b.index - a.index);
+  let result = source;
+
+  for (const { element, atomComponent, variantProp, index } of sorted) {
+    const selfCloseRe = new RegExp(`<${element}(\\s[^>]*)\\s*/>`);
+    const openTagRe = new RegExp(`<${element}(\\s[^>]*)?>`);
+
+    const after = result.slice(index);
+
+    const selfMatch = after.match(selfCloseRe);
+    if (selfMatch && selfMatch.index === 0) {
+      let cleanAttrs = (selfMatch[1] ?? "").trim();
+      cleanAttrs = cleanAttrs.replace(/\bclassName\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\})\s*/g, "").trim();
+      const parts = [`<${atomComponent}`];
+      if (variantProp) parts.push(` ${variantProp}`);
+      if (cleanAttrs) parts.push(` ${cleanAttrs}`);
+      result = result.slice(0, index) + parts.join("") + " />" + result.slice(index + selfMatch[0].length);
+      continue;
+    }
+
+    const openMatch = after.match(openTagRe);
+    if (openMatch && openMatch.index === 0) {
+      let cleanAttrs = (openMatch[1] ?? "").trim();
+      cleanAttrs = cleanAttrs.replace(/\bclassName\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\})\s*/g, "").trim();
+      const parts = [`<${atomComponent}`];
+      if (variantProp) parts.push(` ${variantProp}`);
+      if (cleanAttrs) parts.push(` ${cleanAttrs}`);
+      let replaced = result.slice(0, index) + parts.join("") + ">" + result.slice(index + openMatch[0].length);
+
+      const closeRe = new RegExp(`</${element}>`);
+      const closeMatch = replaced.slice(index).match(closeRe);
+      if (closeMatch && closeMatch.index != null) {
+        const closeStart = index + closeMatch.index;
+        replaced = replaced.slice(0, closeStart) + `</${atomComponent}>` + replaced.slice(closeStart + closeMatch[0].length);
+      }
+      result = replaced;
+    }
+  }
 
   return result;
 }
@@ -1159,28 +1209,25 @@ function extractCodeContext(source: string, element: string, file: string): stri
   return file;
 }
 
-function inferVariantFromContext(
-  source: string,
-  element: string,
+function inferVariantForInstance(
+  openTag: string,
   cvaVariants: Record<string, string[]>,
 ): string | null {
   const allValues = Object.entries(cvaVariants).flatMap(([axis, values]) =>
     values.map(v => ({ axis, value: v }))
   );
 
-  const elementRe = new RegExp(`<${element}[^>]*className\\s*=\\s*"([^"]*)"`, "g");
-  const classNames: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = elementRe.exec(source)) !== null) {
-    classNames.push(m[1]);
-  }
+  const classMatch = openTag.match(/className\s*=\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/);
+  const classText = (classMatch?.[1] ?? classMatch?.[2] ?? classMatch?.[3] ?? "").toLowerCase();
+  if (!classText) return "default";
 
-  const allClassText = classNames.join(" ").toLowerCase();
-  if (!allClassText) return "default";
-
-  const matchedVariants = allValues.filter(({ value }) =>
-    allClassText.includes(value.toLowerCase())
-  );
+  // Match variant values only as standalone classes (word-bounded by whitespace),
+  // not as suffixes of Tailwind utilities like "text-sm" or "bg-secondary"
+  const classes = classText.split(/\s+/);
+  const matchedVariants = allValues.filter(({ value }) => {
+    const v = value.toLowerCase();
+    return classes.some(cls => cls === v);
+  });
 
   if (matchedVariants.length === 0) return "default";
   if (matchedVariants.length === 1) {
@@ -1203,7 +1250,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
   let anyFixed = false;
   const changes: Change[] = [];
 
-  // Path A: replace raw primitives with existing atoms
+  // Path A: replace raw primitives with existing atoms (per-instance inference)
   const rawElements = findRawElements(currentSource);
   const uniqueElements = [...new Set(rawElements.map(m => m.element))];
 
@@ -1223,17 +1270,61 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     }
 
     const cvaVariants = parseCvaVariants(atomSource);
-    let variantProp: string | null = null;
 
-    if (cvaVariants) {
-      const inferredVariant = inferVariantFromContext(currentSource, element, cvaVariants);
-      if (inferredVariant === "default") {
-        // Auto-apply with no variant prop (use default)
-      } else if (inferredVariant) {
-        variantProp = inferredVariant;
-      } else if (opts?.prompt) {
-        // Ambiguous — prompt with code context
-        const context = extractCodeContext(currentSource, element, finding.file);
+    if (!cvaVariants) {
+      // No variants — auto-replace all instances
+      currentSource = rewriteRawElement(currentSource, element, atomComponent, null);
+      currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
+      anyFixed = true;
+      continue;
+    }
+
+    // Per-instance: infer variant from each element's own className
+    const instances = findRawElements(currentSource);
+    const elementInstances = instances.filter(m => m.element === element);
+
+    const autoRewrites: InstanceRewrite[] = [];
+    const ambiguousInstances: RawElementMatch[] = [];
+
+    for (const inst of elementInstances) {
+      const openTagMatch = currentSource.slice(inst.index).match(
+        new RegExp(`<${element}(\\s[^>]*)?\\/?>`)
+      );
+      const openTag = openTagMatch ? openTagMatch[0] : "";
+      const inferred = inferVariantForInstance(openTag, cvaVariants);
+
+      if (inferred === "default") {
+        autoRewrites.push({ element, atomComponent, variantProp: null, index: inst.index });
+      } else if (inferred) {
+        autoRewrites.push({ element, atomComponent, variantProp: inferred, index: inst.index });
+      } else {
+        ambiguousInstances.push(inst);
+      }
+    }
+
+    // Auto-apply unambiguous instances
+    if (autoRewrites.length > 0) {
+      currentSource = rewriteInstances(currentSource, autoRewrites);
+      currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
+      anyFixed = true;
+    }
+
+    // Prompt only for genuinely ambiguous instances
+    if (ambiguousInstances.length > 0 && opts?.prompt) {
+      // Re-find after auto-rewrites shifted indices
+      const remaining = findRawElements(currentSource).filter(m => m.element === element);
+      const remainingRewrites: InstanceRewrite[] = [];
+
+      for (const inst of remaining) {
+        const lineNum = currentSource.slice(0, inst.index).split("\n").length;
+        const lines = currentSource.split("\n");
+        const start = Math.max(0, lineNum - 2);
+        const end = Math.min(lines.length, lineNum + 1);
+        const snippet = lines.slice(start, end)
+          .map((l, idx) => `  ${start + idx + 1}| ${l}`)
+          .join("\n");
+        const context = `${finding.file}:${lineNum}\n${snippet}`;
+
         const options = [...buildVariantOptions(cvaVariants), "Use default (no variant prop)", "Skip"];
         const choice = await opts.prompt(
           `${context}\nraw <${element}> — replace with <${atomComponent}>?`,
@@ -1242,28 +1333,17 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
         if (choice === "defer") continue;
         const selected = options[choice];
         if (selected === "Skip") continue;
-        if (selected !== "Use default (no variant prop)") {
-          variantProp = selected;
-        }
-      } else {
-        continue;
-      }
-    } else if (!opts?.prompt) {
-      // No variants, no prompt — auto-replace
-    } else {
-      const context = extractCodeContext(currentSource, element, finding.file);
-      const options = ["Replace with " + atomComponent, "Skip"];
-      const choice = await opts.prompt(
-        `${context}\nraw <${element}> — replace with <${atomComponent}>?`,
-        options,
-      );
-      if (choice === "defer") continue;
-      if (options[choice] === "Skip") continue;
-    }
 
-    currentSource = rewriteRawElement(currentSource, element, atomComponent, variantProp);
-    currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
-    anyFixed = true;
+        const variantProp = selected === "Use default (no variant prop)" ? null : selected;
+        remainingRewrites.push({ element, atomComponent, variantProp, index: inst.index });
+      }
+
+      if (remainingRewrites.length > 0) {
+        currentSource = rewriteInstances(currentSource, remainingRewrites);
+        currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
+        anyFixed = true;
+      }
+    }
   }
 
   // Path B: extract internal components to new atoms

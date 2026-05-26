@@ -374,7 +374,7 @@ describe("integration: full --fix pass on fixture project", () => {
       "export function Toolbar() {",
       "  return (",
       "    <div>",
-      '      <button className="ghost-action" onClick={() => {}}>Action</button>',
+      '      <button className="ghost" onClick={() => {}}>Action</button>',
       "    </div>",
       "  );",
       "}",
@@ -410,18 +410,24 @@ describe("integration: full --fix pass on fixture project", () => {
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
     await writeFile(join(dir, "design-system/atoms/button.tsx"), [
+      'import { cva } from "class-variance-authority";',
+      'const buttonVariants = cva("btn", {',
+      "  variants: {",
+      '    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline" },',
+      "  },",
+      '  defaultVariants: { variant: "default" },',
+      "});",
       "export function Button(props: any) { return <button {...props} />; }",
       'export const meta = { kind: "atom" as const, examples: [] };',
       "",
     ].join("\n"));
 
-    // Composite with raw <button> — interactive fixer
-    // Must import DS atom so classifier sees composite, not atom
+    // Composite with raw <button> with ambiguous className (2 standalone variant matches)
     await writeFile(join(dir, "design-system/composites/form.tsx"), [
       'import { Input } from "@/design-system/atoms/button";',
       "",
       "export function Form() {",
-      '  return <div><Input /><button type="submit">Go</button></div>;',
+      '  return <div><Input /><button className="ghost outline" type="submit">Go</button></div>;',
       "}",
       'export const meta = { kind: "composite" as const, examples: [] };',
       "",

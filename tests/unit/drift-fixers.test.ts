@@ -953,7 +953,7 @@ describe("drift-fixers", () => {
     }
 
     describe("Path A — atom already exists", () => {
-      it("rewrites raw <button> to <Button> with variant from prompt", async () => {
+      it("rewrites raw <button> to <Button> with auto-inferred variant", async () => {
         await mkdir(join(dir, "design-system/atoms"), { recursive: true });
         await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -977,7 +977,7 @@ describe("drift-fixers", () => {
           `export function Toolbar() {`,
           `  return (`,
           `    <div>`,
-          `      <button className="ghost-btn" onClick={handleClick}>Click</button>`,
+          `      <button className="ghost" onClick={handleClick}>Click</button>`,
           `    </div>`,
           `  );`,
           `}`,
@@ -985,9 +985,8 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
-        const mockPrompt = async () => 1 as number | "defer"; // select "ghost"
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+        const result = await fixAndApply(fixer,makeFinding(), dir, {});
 
         expect(result.fixed).toBe(true);
         const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
@@ -1068,16 +1067,23 @@ describe("drift-fixers", () => {
         expect(content).toContain("@/design-system/atoms/input");
       });
 
-      it("defers when prompt returns defer", async () => {
+      it("defers when prompt returns defer for ambiguous variant", async () => {
         await mkdir(join(dir, "design-system/atoms"), { recursive: true });
         await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
         await writeFile(join(dir, "design-system/atoms/button.tsx"), [
+          `import { cva } from "class-variance-authority";`,
+          `const buttonVariants = cva("btn", {`,
+          `  variants: {`,
+          `    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline" },`,
+          `  },`,
+          `  defaultVariants: { variant: "default" },`,
+          `});`,
           `export function Button(props) { return <button {...props} />; }`,
           `export const meta = { kind: "atom" as const, examples: [] };`,
         ].join("\n") + "\n");
         await writeFile(join(dir, "design-system/composites/toolbar.tsx"), [
-          `export function Toolbar() { return <div><button>X</button></div>; }`,
+          `export function Toolbar() { return <div><button className="ghost outline">X</button></div>; }`,
           `export const meta = { kind: "composite" as const, examples: [] };`,
         ].join("\n") + "\n");
 
@@ -1381,7 +1387,7 @@ describe("drift-fixers", () => {
           "export function Toolbar() {",
           "  return (",
           "    <div>",
-          '      <button className="ghost-btn action" onClick={handleClick}>Click</button>',
+          '      <button className="ghost action" onClick={handleClick}>Click</button>',
           "    </div>",
           "  );",
           "}",
@@ -1484,7 +1490,7 @@ describe("drift-fixers", () => {
           'import { Input } from "@/design-system/atoms/input";',
           "",
           "export function Actions() {",
-          '  return <div><button className="ghost outline-style">Go</button></div>;',
+          '  return <div><button className="ghost outline">Go</button></div>;',
           "}",
           'export const meta = { kind: "composite" as const, examples: [] };',
         ].join("\n") + "\n";

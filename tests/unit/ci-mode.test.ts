@@ -60,13 +60,15 @@ describe("non-TTY CI mode", () => {
     await writeFile(
       join(dir, "design-system/composites/toolbar.tsx"),
       [
-        `export function Toolbar() { return <div><button>Click</button></div>; }`,
+        `export function Toolbar() { return <div><button className="ghost outline">Click</button></div>; }`,
         `export const meta = { kind: "composite" as const, examples: [] };`,
       ].join("\n") + "\n",
     );
     await writeFile(
       join(dir, "design-system/atoms/button.tsx"),
       [
+        `import { cva } from "class-variance-authority";`,
+        `const bv = cva("btn", { variants: { variant: { default: "d", ghost: "g", outline: "o" } }, defaultVariants: { variant: "default" } });`,
         `export function Button(props: any) { return <button {...props} />; }`,
         `export const meta = { kind: "atom" as const, examples: [] };`,
       ].join("\n") + "\n",
@@ -95,13 +97,15 @@ describe("non-TTY CI mode", () => {
     await writeFile(
       join(dir, "design-system/composites/form.tsx"),
       [
-        `export function Form() { return <form><button type="submit">Go</button></form>; }`,
+        `export function Form() { return <form><button className="ghost outline" type="submit">Go</button></form>; }`,
         `export const meta = { kind: "composite" as const, examples: [] };`,
       ].join("\n") + "\n",
     );
     await writeFile(
       join(dir, "design-system/atoms/button.tsx"),
       [
+        `import { cva } from "class-variance-authority";`,
+        `const bv = cva("btn", { variants: { variant: { default: "d", ghost: "g", outline: "o" } }, defaultVariants: { variant: "default" } });`,
         `export function Button(props: any) { return <button {...props} />; }`,
         `export const meta = { kind: "atom" as const, examples: [] };`,
       ].join("\n") + "\n",
