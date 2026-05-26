@@ -31,4 +31,6 @@ Merge all `ready-to-merge` PRs in smart order, then pull main locally.
 
 6. After all merges: `git pull origin main` to sync local.
 
-7. Report: what merged, what's still open, local status.
+7. If any merged PR changed files under `src/`, `tsconfig.json`, or `package.json`, run `npm run build` to rebuild the linked CLI.
+
+8. Report: what merged, what's still open, whether a rebuild ran, local status.
