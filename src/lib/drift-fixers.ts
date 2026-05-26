@@ -67,8 +67,12 @@ export function makeTtyPrompt(): FixerPrompt {
   return async (question: string, options: string[]): Promise<number | "defer"> => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     try {
-      const lines = options.map((opt, i) => `  [${i + 1}] ${opt}`).join("\n");
-      const display = `${question}\n${lines}\n  [s] Skip/defer\n> `;
+      const maxOptions = 5;
+      const displayOptions = options.length > maxOptions
+        ? [...options.slice(0, maxOptions - 1), `... and ${options.length - maxOptions + 1} more (defer to review)`]
+        : options;
+      const lines = displayOptions.map((opt, i) => `  \x1b[36m[${i + 1}]\x1b[0m ${opt}`).join("\n");
+      const display = `\n\x1b[1m${question}\x1b[0m\n${lines}\n  \x1b[90m[s] Skip/defer\x1b[0m\n\x1b[36m>\x1b[0m `;
       const answer = await new Promise<string>(resolve => {
         rl.question(display, resolve);
       });
@@ -381,7 +385,38 @@ const CSS_PROP_TOKEN_GROUP: Record<string, string> = {
   transitionDuration: "motion",
   animationDuration: "motion",
   transitionTimingFunction: "motion",
+  padding: "spacing",
+  paddingTop: "spacing",
+  paddingBottom: "spacing",
+  paddingLeft: "spacing",
+  paddingRight: "spacing",
+  margin: "spacing",
+  marginTop: "spacing",
+  marginBottom: "spacing",
+  marginLeft: "spacing",
+  marginRight: "spacing",
+  gap: "spacing",
+  rowGap: "spacing",
+  columnGap: "spacing",
 };
+
+function normalizeTokenValue(value: string): string {
+  return value.toLowerCase().trim();
+}
+
+function valuesMatch(tokenValue: string, sourceValue: string): boolean {
+  if (tokenValue === sourceValue) return true;
+  const normToken = normalizeTokenValue(tokenValue);
+  const normSource = normalizeTokenValue(sourceValue);
+  if (normToken === normSource) return true;
+  // Strip units from source (e.g., "16px" → "16") and compare to token
+  const strippedSource = normSource.replace(/^(-?\d+(?:\.\d+)?)\s*(px|rem|em|%)$/, "$1");
+  if (normToken === strippedSource) return true;
+  // Token might have units, source might not
+  const strippedToken = normToken.replace(/^(-?\d+(?:\.\d+)?)\s*(px|rem|em|%)$/, "$1");
+  if (strippedToken === normSource) return true;
+  return false;
+}
 
 function lookupToken(
   entries: TokenEntry[],
@@ -390,7 +425,7 @@ function lookupToken(
 ): TokenEntry[] {
   const group = CSS_PROP_TOKEN_GROUP[cssProp];
   return entries.filter(e => {
-    if (e.value !== rawValue) return false;
+    if (!valuesMatch(e.value, rawValue)) return false;
     if (group && e.group !== group) return false;
     return true;
   });
@@ -488,7 +523,7 @@ async function fixInlineStaticStyle(finding: DriftFinding, cwd: string, opts?: F
       } else if (matches.length > 1 && opts?.prompt) {
         const options = matches.map(m => m.className);
         const choice = await opts.prompt(
-          `Ambiguous token match for ${prop.name}: ${prop.normalizedValue}`,
+          `${finding.file}: ambiguous token for ${prop.name}: ${prop.normalizedValue}`,
           options,
         );
         if (choice === "defer") {
@@ -748,11 +783,7 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
     return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
-  if (!opts?.prompt) {
-    return { finding, fixed: false, message: `DRIFT-DS-IMPORTS-FEATURE requires interactive prompt`, changes: [] };
-  }
-
-  const domainRoots = opts.domainRoots ?? DEFAULT_DOMAIN_ROOTS;
+  const domainRoots = opts?.domainRoots ?? DEFAULT_DOMAIN_ROOTS;
   const domainImports = parseDomainImports(source, domainRoots);
   if (domainImports.length === 0) {
     return { finding, fixed: false, message: `no domain imports found in ${finding.file}`, changes: [] };
@@ -793,14 +824,21 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
         continue;
       }
 
-      const choice = await opts.prompt(
-        `${finding.file}: "${symbolName}" imported from domain root`,
-        options,
-      );
-
-      if (choice === "defer") continue;
-
-      const selectedOption = options[choice];
+      // Auto-extract: pure function ≤2 params with no domain deps → deterministic
+      const autoExtract = canExtract && symbolInfo && symbolInfo.isFunction && symbolInfo.paramCount <= 2 && !hasDomainDeps;
+      let selectedOption: string;
+      if (autoExtract) {
+        selectedOption = options[0];
+      } else if (opts?.prompt) {
+        const choice = await opts.prompt(
+          `${finding.file}: "${symbolName}" imported from domain root`,
+          options,
+        );
+        if (choice === "defer") continue;
+        selectedOption = options[choice];
+      } else {
+        continue;
+      }
 
       if (selectedOption.startsWith("Extract")) {
         const canonical = resolveToCanonical(imp.importPath, finding.file);
@@ -941,17 +979,17 @@ async function atomFileExists(cwd: string, atomName: string): Promise<string | n
   return null;
 }
 
-function buildVariantOptions(cvaVariants: Record<string, string[]>): string[] {
+export function buildVariantOptions(cvaVariants: Record<string, string[]>): string[] {
   const axes = Object.entries(cvaVariants);
   if (axes.length === 0) return ["Use default"];
 
-  if (axes.length === 1) {
-    const [axis, values] = axes[0];
-    return values.map(v => `${axis}="${v}"`);
+  const options: string[] = [];
+  for (const [axis, values] of axes) {
+    for (const v of values) {
+      options.push(`${axis}="${v}"`);
+    }
   }
-
-  const firstAxis = axes[0];
-  return firstAxis[1].map(v => `${firstAxis[0]}="${v}"`);
+  return options;
 }
 
 function rewriteRawElement(
@@ -1104,6 +1142,54 @@ function findLocalDeps(componentBody: string, source: string): { name: string; d
   return deps;
 }
 
+function extractCodeContext(source: string, element: string, file: string): string {
+  const lines = source.split("\n");
+  const elementRe = new RegExp(`<${element}[\\s>]`);
+  for (let i = 0; i < lines.length; i++) {
+    if (elementRe.test(lines[i])) {
+      const lineNum = i + 1;
+      const start = Math.max(0, i - 1);
+      const end = Math.min(lines.length, i + 2);
+      const snippet = lines.slice(start, end)
+        .map((l, idx) => `  ${start + idx + 1}| ${l}`)
+        .join("\n");
+      return `${file}:${lineNum}\n${snippet}`;
+    }
+  }
+  return file;
+}
+
+function inferVariantFromContext(
+  source: string,
+  element: string,
+  cvaVariants: Record<string, string[]>,
+): string | null {
+  const allValues = Object.entries(cvaVariants).flatMap(([axis, values]) =>
+    values.map(v => ({ axis, value: v }))
+  );
+
+  const elementRe = new RegExp(`<${element}[^>]*className\\s*=\\s*"([^"]*)"`, "g");
+  const classNames: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = elementRe.exec(source)) !== null) {
+    classNames.push(m[1]);
+  }
+
+  const allClassText = classNames.join(" ").toLowerCase();
+  if (!allClassText) return "default";
+
+  const matchedVariants = allValues.filter(({ value }) =>
+    allClassText.includes(value.toLowerCase())
+  );
+
+  if (matchedVariants.length === 0) return "default";
+  if (matchedVariants.length === 1) {
+    const { axis, value } = matchedVariants[0];
+    return `${axis}="${value}"`;
+  }
+  return null;
+}
+
 async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
   const absPath = join(cwd, finding.file);
   let source: string;
@@ -1111,10 +1197,6 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     source = await readFile(absPath, "utf8");
   } catch {
     return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
-  }
-
-  if (!opts?.prompt) {
-    return { finding, fixed: false, message: `DRIFT-RAW-PRIMITIVE requires interactive prompt`, changes: [] };
   }
 
   let currentSource = source;
@@ -1141,22 +1223,42 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     }
 
     const cvaVariants = parseCvaVariants(atomSource);
-    const options = cvaVariants
-      ? [...buildVariantOptions(cvaVariants), "Use default (no variant prop)", "Skip"]
-      : ["Replace with " + atomComponent, "Skip"];
-
-    const choice = await opts.prompt(
-      `${finding.file}: raw <${element}> — replace with <${atomComponent}>?`,
-      options,
-    );
-
-    if (choice === "defer") continue;
-    const selected = options[choice];
-    if (selected === "Skip") continue;
-
     let variantProp: string | null = null;
-    if (cvaVariants && selected !== "Use default (no variant prop)") {
-      variantProp = selected;
+
+    if (cvaVariants) {
+      const inferredVariant = inferVariantFromContext(currentSource, element, cvaVariants);
+      if (inferredVariant === "default") {
+        // Auto-apply with no variant prop (use default)
+      } else if (inferredVariant) {
+        variantProp = inferredVariant;
+      } else if (opts?.prompt) {
+        // Ambiguous — prompt with code context
+        const context = extractCodeContext(currentSource, element, finding.file);
+        const options = [...buildVariantOptions(cvaVariants), "Use default (no variant prop)", "Skip"];
+        const choice = await opts.prompt(
+          `${context}\nraw <${element}> — replace with <${atomComponent}>?`,
+          options,
+        );
+        if (choice === "defer") continue;
+        const selected = options[choice];
+        if (selected === "Skip") continue;
+        if (selected !== "Use default (no variant prop)") {
+          variantProp = selected;
+        }
+      } else {
+        continue;
+      }
+    } else if (!opts?.prompt) {
+      // No variants, no prompt — auto-replace
+    } else {
+      const context = extractCodeContext(currentSource, element, finding.file);
+      const options = ["Replace with " + atomComponent, "Skip"];
+      const choice = await opts.prompt(
+        `${context}\nraw <${element}> — replace with <${atomComponent}>?`,
+        options,
+      );
+      if (choice === "defer") continue;
+      if (options[choice] === "Skip") continue;
     }
 
     currentSource = rewriteRawElement(currentSource, element, atomComponent, variantProp);
@@ -1172,27 +1274,21 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     const atomName = deriveAtomName(comp.name, parentFileName);
     const atomFileKebab = toKebab(atomName);
     const existingAtom = await atomFileExists(cwd, atomFileKebab);
-    if (existingAtom) continue;
 
-    const extractOptions = [
-      `Accept as "${atomName}"`,
-      "Rename",
-      "Skip",
-    ];
-
-    const choice = await opts.prompt(
-      `${finding.file}: extract internal component "${comp.name}" as atom "${atomName}"?`,
-      extractOptions,
-    );
-
-    if (choice === "defer") continue;
-    const selected = extractOptions[choice];
-    if (selected === "Skip") continue;
-
-    let finalAtomName = atomName;
-    if (selected === "Rename") {
+    if (existingAtom) {
+      // Collision — prompt only if available
+      if (!opts?.prompt) continue;
+      const collisionOptions = ["Skip"];
+      const choice = await opts.prompt(
+        `${finding.file}: derived atom name "${atomName}" collides with existing atom — skip extraction?`,
+        collisionOptions,
+      );
+      if (choice === "defer" || choice === 0) continue;
       continue;
     }
+
+    // Auto-accept derived name (no prompt needed)
+    let finalAtomName = atomName;
 
     const finalFileName = toKebab(finalAtomName);
     const localDeps = findLocalDeps(comp.body, currentSource);

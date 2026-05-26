@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { isFixable, getFixer, isInteractive, makeNoTtyPrompt, getFixerPriority } from "../../src/lib/drift-fixers";
+import { isFixable, getFixer, isInteractive, makeNoTtyPrompt, getFixerPriority, buildVariantOptions } from "../../src/lib/drift-fixers";
 import type { DriftFixer, FixResult, FixerOpts } from "../../src/lib/drift-fixers";
 import type { DriftRuleId } from "../../src/lib/drift-rules";
 import type { DriftFinding } from "../../src/lib/drift-rules";
@@ -608,6 +608,41 @@ describe("drift-fixers", () => {
       expect(content).toContain('className="shadow-sm"');
       expect(content).not.toContain("style=");
     });
+
+    it("matches token via normalized value (strip units, normalize case)", async () => {
+      const tokensWithSpacing = {
+        spacing: { 1: "4px", 2: "8px", 4: "16px", 6: "24px" },
+        color: { primary: "#007BFF" },
+      };
+      await setupTokens(tokensWithSpacing);
+      const source = `export function Card() {\n  return <div style={{ padding: "16px", color: "#007bff" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer,makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain("spacing-4");
+      expect(content).toContain("color-primary");
+      expect(content).not.toContain("style=");
+    });
+
+    it("matches numeric token value against string with same numeric value", async () => {
+      const tokensWithZ = {
+        z: { base: 0, dropdown: 1000, modal: 1300 },
+      };
+      await setupTokens(tokensWithZ);
+      const source = `export function Card() {\n  return <div style={{ zIndex: "1000" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer,makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain("z-dropdown");
+    });
   });
 
   describe("fixDsImportsFeature", () => {
@@ -795,17 +830,21 @@ describe("drift-fixers", () => {
       expect(content).toMatch(/\bformatDate\b.*\}/); // prop in destructuring
     });
 
-    it("defers and writes exception entry", async () => {
+    it("defers when prompt returns defer for non-auto-extractable symbol", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await mkdir(join(dir, "design-system"), { recursive: true });
-      await mkdir(join(dir, "lib/utils"), { recursive: true });
+      await mkdir(join(dir, "lib/api"), { recursive: true });
+      await mkdir(join(dir, "features/auth"), { recursive: true });
 
-      await writeFile(join(dir, "lib/utils/format.ts"),
-        `export function formatDate(d: Date): string { return d.toISOString(); }\n`);
+      await writeFile(join(dir, "features/auth/session.ts"),
+        `export function getSession() { return { user: "test" }; }\n`);
+
+      await writeFile(join(dir, "lib/api/client.ts"),
+        `import { getSession } from "../../features/auth/session";\nexport function apiClient() { return getSession(); }\n`);
 
       const dsSource = [
-        `import { formatDate } from "../../lib/utils/format";`,
-        `export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+        `import { apiClient } from "../../lib/api/client";`,
+        `export function UserBadge() { return <div>{apiClient()}</div>; }`,
         `export const meta = { kind: "composite" as const, examples: [] };`,
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
@@ -824,7 +863,7 @@ describe("drift-fixers", () => {
       expect(result.fixed).toBe(false);
     });
 
-    it("returns fixed:false when no prompt callback is provided", async () => {
+    it("auto-extracts pure functions even without prompt callback", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await mkdir(join(dir, "lib/utils"), { recursive: true });
 
@@ -839,8 +878,11 @@ describe("drift-fixers", () => {
       await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      const result = await fixAndApply(fixer,makeFinding(), dir);
-      expect(result.fixed).toBe(false);
+      const result = await fixAndApply(fixer, makeFinding(), dir);
+      // Auto-extracts pure function ≤2 params without needing a prompt
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/composites/event-card.tsx"), "utf8");
+      expect(content).toContain("@/design-system/utils/format");
     });
 
     it("handles @/ alias imports", async () => {
@@ -1146,21 +1188,16 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/search-bar.tsx"), compositeSource);
 
-        const promptQuestions: string[] = [];
-        const mockPrompt = async (q: string) => {
-          promptQuestions.push(q);
-          return 0 as number | "defer";
-        };
+        const mockPrompt = async () => 0 as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        await fixAndApply(fixer,
+        const result = await fixAndApply(fixer,
           makeFinding("design-system/composites/search-bar.tsx"),
           dir,
           { prompt: mockPrompt },
         );
 
-        // The prompt should mention "Input" (stripped from SearchBarInput)
-        expect(promptQuestions.some(q => q.includes("Input"))).toBe(true);
-        // Atom file should be named input.tsx
+        expect(result.fixed).toBe(true);
+        // Atom file should be named input.tsx (prefix "SearchBar" stripped)
         const atomContent = await readFile(join(dir, "design-system/atoms/input.tsx"), "utf8");
         expect(atomContent).toContain("export function Input");
       });
@@ -1286,6 +1323,272 @@ describe("drift-fixers", () => {
       const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
       const result = await fixAndApply(fixer,makeFinding(), dir);
       expect(result.fixed).toBe(false);
+    });
+  });
+
+  describe("Gap 4: multi-axis buildVariantOptions", () => {
+    it("returns options for all axes, not just the first", () => {
+      const result = buildVariantOptions({
+        variant: ["default", "ghost", "outline"],
+        size: ["default", "sm", "lg"],
+      });
+      expect(result).toContain('variant="default"');
+      expect(result).toContain('variant="ghost"');
+      expect(result).toContain('variant="outline"');
+      expect(result).toContain('size="default"');
+      expect(result).toContain('size="sm"');
+      expect(result).toContain('size="lg"');
+    });
+
+    it("returns 'Use default' for empty variants", () => {
+      expect(buildVariantOptions({})).toEqual(["Use default"]);
+    });
+
+    it("handles single axis", () => {
+      const result = buildVariantOptions({ variant: ["default", "ghost"] });
+      expect(result).toEqual(['variant="default"', 'variant="ghost"']);
+    });
+  });
+
+  describe("Gap 1: auto-fix deterministic cases", () => {
+    let dir: string;
+    beforeEach(async () => { dir = await freshTmpDir(); });
+    afterEach(async () => { await cleanup(dir); });
+
+    describe("DRIFT-RAW-PRIMITIVE auto-infer variant from className", () => {
+      it("auto-infers variant when className contains exactly one variant keyword", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const atomSource = [
+          'import { cva } from "class-variance-authority";',
+          'const buttonVariants = cva("btn", {',
+          "  variants: {",
+          '    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline", destructive: "btn-destructive" },',
+          "  },",
+          "  defaultVariants: { variant: \"default\" },",
+          "});",
+          "export function Button({ variant, ...props }: any) {",
+          "  return <button className={buttonVariants({ variant })} {...props} />;",
+          "}",
+          'export const meta = { kind: "atom" as const, examples: [] };',
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/atoms/button.tsx"), atomSource);
+
+        const compositeSource = [
+          'import { Input } from "@/design-system/atoms/input";',
+          "",
+          "export function Toolbar() {",
+          "  return (",
+          "    <div>",
+          '      <button className="ghost-btn action" onClick={handleClick}>Click</button>',
+          "    </div>",
+          "  );",
+          "}",
+          'export const meta = { kind: "composite" as const, examples: [] };',
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
+
+        const promptCalls: string[] = [];
+        const mockPrompt = async (q: string) => {
+          promptCalls.push(q);
+          return 0 as number | "defer";
+        };
+
+        const finding: DriftFinding = {
+          ruleId: "DRIFT-RAW-PRIMITIVE",
+          file: "design-system/composites/toolbar.tsx",
+          message: "raw <button>",
+        };
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        const result = await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+
+        expect(result.fixed).toBe(true);
+        const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
+        expect(content).toContain('variant="ghost"');
+        expect(content).toContain("<Button");
+        // Should NOT have prompted — variant was auto-inferred
+        expect(promptCalls).toHaveLength(0);
+      });
+
+      it("auto-applies default variant when className has no variant keywords", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const atomSource = [
+          'import { cva } from "class-variance-authority";',
+          'const buttonVariants = cva("btn", {',
+          "  variants: {",
+          '    variant: { default: "btn-default", ghost: "btn-ghost" },',
+          "  },",
+          "  defaultVariants: { variant: \"default\" },",
+          "});",
+          "export function Button({ variant, ...props }: any) {",
+          "  return <button className={buttonVariants({ variant })} {...props} />;",
+          "}",
+          'export const meta = { kind: "atom" as const, examples: [] };',
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/atoms/button.tsx"), atomSource);
+
+        const compositeSource = [
+          'import { Input } from "@/design-system/atoms/input";',
+          "",
+          "export function Form() {",
+          '  return <div><button type="submit">Go</button></div>;',
+          "}",
+          'export const meta = { kind: "composite" as const, examples: [] };',
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/form.tsx"), compositeSource);
+
+        const promptCalls: string[] = [];
+        const mockPrompt = async (q: string) => {
+          promptCalls.push(q);
+          return 0 as number | "defer";
+        };
+
+        const finding: DriftFinding = {
+          ruleId: "DRIFT-RAW-PRIMITIVE",
+          file: "design-system/composites/form.tsx",
+          message: "raw <button>",
+        };
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        const result = await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+
+        expect(result.fixed).toBe(true);
+        const content = await readFile(join(dir, "design-system/composites/form.tsx"), "utf8");
+        expect(content).toContain("<Button");
+        // No prompt needed — auto-applied default
+        expect(promptCalls).toHaveLength(0);
+      });
+
+      it("prompts when className matches 2+ variant keywords", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const atomSource = [
+          'import { cva } from "class-variance-authority";',
+          'const buttonVariants = cva("btn", {',
+          "  variants: {",
+          '    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline" },',
+          "  },",
+          "  defaultVariants: { variant: \"default\" },",
+          "});",
+          "export function Button({ variant, ...props }: any) {",
+          "  return <button className={buttonVariants({ variant })} {...props} />;",
+          "}",
+          'export const meta = { kind: "atom" as const, examples: [] };',
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/atoms/button.tsx"), atomSource);
+
+        const compositeSource = [
+          'import { Input } from "@/design-system/atoms/input";',
+          "",
+          "export function Actions() {",
+          '  return <div><button className="ghost outline-style">Go</button></div>;',
+          "}",
+          'export const meta = { kind: "composite" as const, examples: [] };',
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/actions.tsx"), compositeSource);
+
+        const promptCalls: string[] = [];
+        const mockPrompt = async (q: string) => {
+          promptCalls.push(q);
+          return 0 as number | "defer";
+        };
+
+        const finding: DriftFinding = {
+          ruleId: "DRIFT-RAW-PRIMITIVE",
+          file: "design-system/composites/actions.tsx",
+          message: "raw <button>",
+        };
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+
+        // Should have prompted due to ambiguity
+        expect(promptCalls.length).toBeGreaterThan(0);
+        // Gap 3: prompt includes code context (file reference and surrounding code)
+        expect(promptCalls[0]).toContain("actions.tsx");
+        expect(promptCalls[0]).toContain("className");
+      });
+    });
+
+    describe("DRIFT-RAW-PRIMITIVE Path B: auto-accept derived name", () => {
+      it("auto-accepts derived atom name without prompting (no collision)", async () => {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const internalLines = Array.from({ length: 20 }, (_, i) =>
+          `  const x${i} = ${i};`
+        ).join("\n");
+        const compositeSource = [
+          `function FilterBarChip({ label }: { label: string }) {`,
+          internalLines,
+          `  return <span className="chip">{label}</span>;`,
+          `}`,
+          ``,
+          `export function FilterBar() {`,
+          `  return <div><FilterBarChip label="hi" /></div>;`,
+          `}`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
+
+        const promptCalls: string[] = [];
+        const mockPrompt = async (q: string) => {
+          promptCalls.push(q);
+          return 0 as number | "defer";
+        };
+
+        const finding: DriftFinding = {
+          ruleId: "DRIFT-RAW-PRIMITIVE",
+          file: "design-system/composites/filter-bar.tsx",
+          message: "raw primitive",
+        };
+        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+        const result = await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+
+        expect(result.fixed).toBe(true);
+        await expect(stat(join(dir, "design-system/atoms/chip.tsx"))).resolves.toBeTruthy();
+        // Should NOT have prompted — auto-accepted name
+        expect(promptCalls).toHaveLength(0);
+      });
+    });
+
+    describe("DRIFT-DS-IMPORTS-FEATURE auto-extract", () => {
+      it("auto-extracts pure function with ≤2 params without prompting", async () => {
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+        await mkdir(join(dir, "lib/utils"), { recursive: true });
+
+        await writeFile(join(dir, "lib/utils/format.ts"),
+          `export function formatDate(d: Date): string {\n  return d.toISOString();\n}\n`);
+
+        const dsSource = [
+          `import { formatDate } from "../../lib/utils/format";`,
+          `export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+          `export const meta = { kind: "composite" as const, examples: [] };`,
+        ].join("\n") + "\n";
+        await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
+
+        const promptCalls: string[] = [];
+        const mockPrompt = async (q: string) => {
+          promptCalls.push(q);
+          return 0 as number | "defer";
+        };
+
+        const finding: DriftFinding = {
+          ruleId: "DRIFT-DS-IMPORTS-FEATURE",
+          file: "design-system/composites/event-card.tsx",
+          message: "domain import",
+        };
+        const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+        const result = await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+
+        expect(result.fixed).toBe(true);
+        const content = await readFile(join(dir, "design-system/composites/event-card.tsx"), "utf8");
+        expect(content).toContain("@/design-system/utils/format");
+        // Should NOT have prompted — auto-extracted pure function
+        expect(promptCalls).toHaveLength(0);
+      });
     });
   });
 });
