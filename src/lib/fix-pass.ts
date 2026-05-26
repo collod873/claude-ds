@@ -1,0 +1,185 @@
+import { readFile, mkdir, writeFile, rename, unlink, stat } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import type { DriftFinding } from "./drift-rules.js";
+import type { Change } from "./operation.js";
+import type { FixResult, FixerOpts, FixerPrompt } from "./drift-fixers.js";
+import { getFixer, getFixerPriority } from "./drift-fixers.js";
+import { info } from "./log.js";
+
+export interface FixPassResult {
+  results: FixResult[];
+  applied: Change[];
+  aborted: boolean;
+}
+
+type ConfirmPrompt = (diffText: string) => Promise<boolean>;
+
+export interface FixPassOpts extends FixerOpts {
+  confirm?: ConfirmPrompt;
+}
+
+function isBinary(buf: Buffer): boolean {
+  const len = Math.min(buf.length, 8192);
+  for (let i = 0; i < len; i++) if (buf[i] === 0) return true;
+  return false;
+}
+
+function renderDiff(changes: Change[]): string {
+  const lines: string[] = [];
+  for (const c of changes) {
+    if (c.kind === "write") {
+      if (c.before === null) {
+        lines.push(`+++ ${c.path} (create)`);
+        if (!isBinary(c.after)) {
+          for (const l of c.after.toString("utf8").split("\n")) lines.push(`+${l}`);
+        } else {
+          lines.push(`[binary ${c.after.length} bytes]`);
+        }
+      } else {
+        lines.push(`--- ${c.path} (modify)`);
+        if (!isBinary(c.before) && !isBinary(c.after)) {
+          for (const l of c.before.toString("utf8").split("\n")) lines.push(`-${l}`);
+          for (const l of c.after.toString("utf8").split("\n")) lines.push(`+${l}`);
+        } else {
+          lines.push(`[binary ${c.before.length} -> ${c.after.length} bytes]`);
+        }
+      }
+    } else if (c.kind === "rename") {
+      lines.push(`rename: ${c.path} -> ${c.after}`);
+    } else if (c.kind === "delete") {
+      lines.push(`--- ${c.path} (delete)`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+async function applyChange(cwd: string, c: Change): Promise<void> {
+  if (c.kind === "abort") return;
+  if (c.kind === "write") {
+    const abs = join(cwd, c.path);
+    await mkdir(dirname(abs), { recursive: true });
+    const tmp = `${abs}.tmp`;
+    await writeFile(tmp, c.after);
+    await rename(tmp, abs);
+  } else if (c.kind === "delete") {
+    const abs = join(cwd, c.path);
+    try { await unlink(abs); } catch (e: any) {
+      if (e.code !== "ENOENT") throw e;
+    }
+  } else {
+    const absFrom = join(cwd, c.path);
+    const absTo = join(cwd, c.after);
+    await mkdir(dirname(absTo), { recursive: true });
+    await rename(absFrom, absTo);
+  }
+}
+
+async function rollbackChange(cwd: string, c: Change): Promise<void> {
+  if (c.kind === "abort") return;
+  if (c.kind === "write") {
+    if (c.before === null) {
+      try { await unlink(join(cwd, c.path)); } catch { /* */ }
+    } else {
+      await writeFile(join(cwd, c.path), c.before);
+    }
+  } else if (c.kind === "delete") {
+    await mkdir(dirname(join(cwd, c.path)), { recursive: true });
+    await writeFile(join(cwd, c.path), c.before);
+  } else {
+    const absFrom = join(cwd, c.after);
+    const absTo = join(cwd, c.path);
+    await mkdir(dirname(absTo), { recursive: true });
+    await rename(absFrom, absTo);
+  }
+}
+
+function deduplicateChanges(changes: Change[]): Change[] {
+  const seen = new Map<string, number>();
+  const result: Change[] = [];
+  for (let i = 0; i < changes.length; i++) {
+    const c = changes[i];
+    const key = c.kind === "rename" ? `rename:${c.path}` : c.path;
+    const prev = seen.get(key);
+    if (prev !== undefined) {
+      result[prev] = c;
+    } else {
+      seen.set(key, result.length);
+      result.push(c);
+    }
+  }
+  return result.filter(Boolean);
+}
+
+export function sortFindingsByPriority(findings: DriftFinding[]): DriftFinding[] {
+  return [...findings].sort((a, b) => {
+    const pa = getFixerPriority(a.ruleId);
+    const pb = getFixerPriority(b.ruleId);
+    if (pa !== pb) return pa - pb;
+    return a.file.localeCompare(b.file);
+  });
+}
+
+export async function runFixPass(
+  cwd: string,
+  findings: DriftFinding[],
+  opts: FixPassOpts,
+): Promise<FixPassResult> {
+  const sorted = sortFindingsByPriority(findings);
+  const results: FixResult[] = [];
+  const allChanges: Change[] = [];
+  const appliedChanges: Change[] = [];
+
+  let currentPriority = -1;
+
+  for (const finding of sorted) {
+    const fixer = getFixer(finding.ruleId);
+    if (!fixer) continue;
+
+    const priority = getFixerPriority(finding.ruleId);
+
+    if (priority !== currentPriority && appliedChanges.length > 0) {
+      // Priority boundary: earlier group's changes are already applied to disk
+    }
+    currentPriority = priority;
+
+    const result = await fixer(finding, cwd, opts);
+    results.push(result);
+
+    if (result.fixed && result.changes.length > 0) {
+      for (const change of result.changes) {
+        try {
+          await applyChange(cwd, change);
+          appliedChanges.push(change);
+          allChanges.push(change);
+        } catch (err) {
+          info(`error applying change for ${finding.ruleId}: ${(err as Error).message}`);
+          // Rollback everything applied so far
+          for (let i = appliedChanges.length - 1; i >= 0; i--) {
+            try { await rollbackChange(cwd, appliedChanges[i]); } catch { /* best effort */ }
+          }
+          return { results, applied: [], aborted: true };
+        }
+      }
+    }
+  }
+
+  if (allChanges.length === 0) {
+    return { results, applied: [], aborted: false };
+  }
+
+  const deduped = deduplicateChanges(allChanges);
+
+  if (opts.confirm) {
+    const diffText = renderDiff(deduped);
+    const confirmed = await opts.confirm(diffText);
+    if (!confirmed) {
+      for (let i = appliedChanges.length - 1; i >= 0; i--) {
+        try { await rollbackChange(cwd, appliedChanges[i]); } catch { /* best effort */ }
+      }
+      return { results, applied: [], aborted: true };
+    }
+  }
+
+  return { results, applied: deduped, aborted: false };
+}

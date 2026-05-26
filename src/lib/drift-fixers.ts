@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir, rename, mkdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join, basename, dirname, extname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { DriftFinding, DriftRuleId } from "./drift-rules.js";
@@ -6,12 +6,14 @@ import { parseCvaVariants } from "./drift-rules.js";
 import type { Tier } from "./classifier.js";
 import { classifySource, DEFAULT_DOMAIN_ROOTS } from "./classifier.js";
 import { locationTierFromPath, metaKindFromSource } from "./three-signal.js";
-import { rewriteImportPaths } from "./ops/rewrite-imports.js";
+
+import type { Change } from "./operation.js";
 
 export interface FixResult {
   finding: DriftFinding;
   fixed: boolean;
   message: string;
+  changes: Change[];
 }
 
 export type FixerPrompt = (question: string, options: string[]) => Promise<number | "defer">;
@@ -28,16 +30,17 @@ export interface FixerOpts {
 interface FixerEntry {
   fixer: DriftFixer;
   interactive: boolean;
+  priority: number;
 }
 
 const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
-  "DRIFT-META-KIND-MISSING": { fixer: fixMetaKindMissing, interactive: false },
-  "DRIFT-MISPLACED": { fixer: fixMisplaced, interactive: false },
-  "DRIFT-MISCLASSIFIED-ATOM": { fixer: fixMisclassified, interactive: false },
-  "DRIFT-MISCLASSIFIED-COMPOSITE": { fixer: fixMisclassified, interactive: false },
-  "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: true },
-  "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: true },
-  "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: true },
+  "DRIFT-META-KIND-MISSING": { fixer: fixMetaKindMissing, interactive: false, priority: 3 },
+  "DRIFT-MISPLACED": { fixer: fixMisplaced, interactive: false, priority: 1 },
+  "DRIFT-MISCLASSIFIED-ATOM": { fixer: fixMisclassified, interactive: false, priority: 3 },
+  "DRIFT-MISCLASSIFIED-COMPOSITE": { fixer: fixMisclassified, interactive: false, priority: 3 },
+  "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: true, priority: 2 },
+  "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: true, priority: 2 },
+  "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: true, priority: 0 },
 };
 
 export function isFixable(ruleId: DriftRuleId): boolean {
@@ -50,6 +53,10 @@ export function getFixer(ruleId: DriftRuleId): DriftFixer | null {
 
 export function isInteractive(ruleId: DriftRuleId): boolean {
   return FIXABLE_RULES[ruleId]?.interactive ?? false;
+}
+
+export function getFixerPriority(ruleId: DriftRuleId): number {
+  return FIXABLE_RULES[ruleId]?.priority ?? Infinity;
 }
 
 export function makeNoTtyPrompt(): FixerPrompt {
@@ -82,7 +89,7 @@ async function fixMetaKindMissing(finding: DriftFinding, cwd: string, opts?: Fix
   try {
     source = await readFile(absPath, "utf8");
   } catch {
-    return { finding, fixed: false, message: `could not read ${finding.file}` };
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
   const locationTier = locationTierFromPath(finding.file);
@@ -90,13 +97,93 @@ async function fixMetaKindMissing(finding: DriftFinding, cwd: string, opts?: Fix
   const tier = locationTier ?? verdict.tier;
 
   if (tier === "feature" || tier === "unknown") {
-    return { finding, fixed: false, message: `cannot determine tier for ${finding.file}` };
+    return { finding, fixed: false, message: `cannot determine tier for ${finding.file}`, changes: [] };
   }
 
   const metaExport = `\nexport const meta = { kind: "${tier}" as const, examples: [] };\n`;
-  await writeFile(absPath, source.trimEnd() + "\n" + metaExport, "utf8");
+  const newContent = source.trimEnd() + "\n" + metaExport;
+  const changes: Change[] = [{
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(newContent),
+  }];
 
-  return { finding, fixed: true, message: `added meta.kind = "${tier}" to ${finding.file}` };
+  return { finding, fixed: true, message: `added meta.kind = "${tier}" to ${finding.file}`, changes };
+}
+
+async function collectTierImportRewriteChanges(
+  cwd: string,
+  fromSegment: string,
+  toSegment: string,
+): Promise<Change[]> {
+  const fromPath = `@/design-system/${fromSegment}`;
+  const toPath = `@/design-system/${toSegment}`;
+  const changes: Change[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    let entries: string[];
+    try { entries = await readdir(dir); } catch { return; }
+    for (const entry of entries) {
+      if (entry === "node_modules" || entry === ".git") continue;
+      const full = join(dir, entry);
+      let s;
+      try { s = await stat(full); } catch { continue; }
+      if (s.isDirectory()) { await walk(full); continue; }
+      if (!s.isFile()) continue;
+      if (!(entry.endsWith(".ts") || entry.endsWith(".tsx") || entry.endsWith(".js") || entry.endsWith(".jsx"))) continue;
+      let content: string;
+      try { content = await readFile(full, "utf8"); } catch { continue; }
+      if (content.includes(fromPath)) {
+        const updated = content.split(fromPath).join(toPath);
+        const relPath = full.slice(cwd.length + 1);
+        changes.push({
+          kind: "write",
+          path: relPath,
+          before: Buffer.from(content),
+          after: Buffer.from(updated),
+        });
+      }
+    }
+  }
+  await walk(cwd);
+  return changes;
+}
+
+async function collectProjectImportRewriteChanges(
+  cwd: string,
+  oldImportPath: string,
+  newImportPath: string,
+): Promise<Change[]> {
+  const changes: Change[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    let entries: string[];
+    try { entries = await readdir(dir); } catch { return; }
+    for (const entry of entries) {
+      if (entry === "node_modules" || entry === ".git") continue;
+      const full = join(dir, entry);
+      let s;
+      try { s = await stat(full); } catch { continue; }
+      if (s.isDirectory()) { await walk(full); continue; }
+      if (!s.isFile()) continue;
+      if (!(entry.endsWith(".ts") || entry.endsWith(".tsx") || entry.endsWith(".js") || entry.endsWith(".jsx"))) continue;
+      let content: string;
+      try { content = await readFile(full, "utf8"); } catch { continue; }
+      if (content.includes(oldImportPath)) {
+        const updated = content.split(oldImportPath).join(newImportPath);
+        const relPath = full.slice(cwd.length + 1);
+        changes.push({
+          kind: "write",
+          path: relPath,
+          before: Buffer.from(content),
+          after: Buffer.from(updated),
+        });
+      }
+    }
+  }
+  await walk(cwd);
+  return changes;
 }
 
 const TIER_FOLDERS: Record<string, string> = {
@@ -127,8 +214,10 @@ async function updateBarrelExports(
   sourceDir: string,
   destDir: string,
   baseName: string,
+  changes: Change[],
 ): Promise<void> {
-  const srcBarrelPath = join(cwd, sourceDir, "index.ts");
+  const srcBarrelRel = join(sourceDir, "index.ts");
+  const srcBarrelPath = join(cwd, srcBarrelRel);
   try {
     const content = await readFile(srcBarrelPath, "utf8");
     const lines = content.split("\n");
@@ -141,16 +230,30 @@ async function updateBarrelExports(
       return true;
     });
     if (movedLines.length > 0) {
-      await writeFile(srcBarrelPath, kept.join("\n"), "utf8");
+      changes.push({
+        kind: "write",
+        path: srcBarrelRel,
+        before: Buffer.from(content),
+        after: Buffer.from(kept.join("\n")),
+      });
     }
 
-    const dstBarrelPath = join(cwd, destDir, "index.ts");
+    const dstBarrelRel = join(destDir, "index.ts");
+    const dstBarrelPath = join(cwd, dstBarrelRel);
     try {
       let dstContent = await readFile(dstBarrelPath, "utf8");
+      const originalDst = dstContent;
       for (const line of movedLines) {
         if (line.trim()) dstContent = dstContent.trimEnd() + "\n" + line + "\n";
       }
-      await writeFile(dstBarrelPath, dstContent, "utf8");
+      if (dstContent !== originalDst) {
+        changes.push({
+          kind: "write",
+          path: dstBarrelRel,
+          before: Buffer.from(originalDst),
+          after: Buffer.from(dstContent),
+        });
+      }
     } catch {
       // destination barrel doesn't exist — skip
     }
@@ -162,18 +265,18 @@ async function updateBarrelExports(
 async function relocateFile(
   finding: DriftFinding,
   cwd: string,
+  source: string,
   targetTier: Tier,
   opts?: FixerOpts,
 ): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
   const locationTier = locationTierFromPath(finding.file);
   const targetFolder = TIER_FOLDERS[targetTier];
   if (!targetFolder || !locationTier) {
-    return { finding, fixed: false, message: `cannot determine target for ${finding.file}` };
+    return { finding, fixed: false, message: `cannot determine target for ${finding.file}`, changes: [] };
   }
   const sourceFolder = TIER_FOLDERS[locationTier];
   if (!sourceFolder) {
-    return { finding, fixed: false, message: `cannot determine source tier for ${finding.file}` };
+    return { finding, fixed: false, message: `cannot determine source tier for ${finding.file}`, changes: [] };
   }
 
   const fileName = basename(finding.file);
@@ -184,26 +287,34 @@ async function relocateFile(
   const dsRoot = segments.slice(0, dsIdx + 1).join("/");
   const targetDir = `${dsRoot}/${targetFolder}`;
 
-  await mkdir(join(cwd, targetDir), { recursive: true });
+  const changes: Change[] = [];
 
   const companions = await findCompanionFiles(join(cwd, sourceDir), baseName);
 
-  await rename(absPath, join(cwd, targetDir, fileName));
+  changes.push({ kind: "rename", path: finding.file, after: `${targetDir}/${fileName}` });
 
   for (const comp of companions) {
-    await rename(join(cwd, sourceDir, comp), join(cwd, targetDir, comp));
+    changes.push({ kind: "rename", path: `${sourceDir}/${comp}`, after: `${targetDir}/${comp}` });
   }
 
-  await rewriteImportPaths(cwd, `${sourceFolder}/${baseName}`, `${targetFolder}/${baseName}`);
+  const importChanges = await collectTierImportRewriteChanges(
+    cwd, `${sourceFolder}/${baseName}`, `${targetFolder}/${baseName}`,
+  );
+  changes.push(...importChanges);
 
-  await updateBarrelExports(cwd, sourceDir, targetDir, baseName);
+  await updateBarrelExports(cwd, sourceDir, targetDir, baseName, changes);
 
-  const newAbsPath = join(cwd, targetDir, fileName);
-  const newSource = await readFile(newAbsPath, "utf8");
-  const currentMetaKind = metaKindFromSource(newSource);
+  const currentMetaKind = metaKindFromSource(source);
   if (currentMetaKind && currentMetaKind !== targetTier) {
-    const updated = newSource.replace(META_KIND_REPLACE_RE, `$1${targetTier}$2`);
-    if (updated !== newSource) await writeFile(newAbsPath, updated, "utf8");
+    const updated = source.replace(META_KIND_REPLACE_RE, `$1${targetTier}$2`);
+    if (updated !== source) {
+      changes.push({
+        kind: "write",
+        path: `${targetDir}/${fileName}`,
+        before: Buffer.from(source),
+        after: Buffer.from(updated),
+      });
+    }
   }
 
   const movedCount = 1 + companions.length;
@@ -211,6 +322,7 @@ async function relocateFile(
     finding,
     fixed: true,
     message: `relocated ${movedCount} file${movedCount > 1 ? "s" : ""} from ${sourceDir} to ${targetDir}`,
+    changes,
   };
 }
 
@@ -220,15 +332,15 @@ async function fixMisplaced(finding: DriftFinding, cwd: string, opts?: FixerOpts
   try {
     source = await readFile(absPath, "utf8");
   } catch {
-    return { finding, fixed: false, message: `could not read ${finding.file}` };
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
   const verdict = classifySource(source, opts?.domainRoots, opts?.allowedImports, opts?.dsAliases);
   if (verdict.tier === "feature" || verdict.tier === "unknown" || verdict.tier === "pattern") {
-    return { finding, fixed: false, message: `cannot relocate ${finding.file} — classifier says ${verdict.tier}` };
+    return { finding, fixed: false, message: `cannot relocate ${finding.file} — classifier says ${verdict.tier}`, changes: [] };
   }
 
-  return relocateFile(finding, cwd, verdict.tier, opts);
+  return relocateFile(finding, cwd, source, verdict.tier, opts);
 }
 
 // --- DRIFT-INLINE-STATIC-STYLE fixer ---
@@ -336,21 +448,21 @@ async function fixInlineStaticStyle(finding: DriftFinding, cwd: string, opts?: F
   try {
     source = await readFile(absPath, "utf8");
   } catch {
-    return { finding, fixed: false, message: `could not read ${finding.file}` };
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
   let tokensRaw: string;
   try {
     tokensRaw = await readFile(join(cwd, "design-system/tokens.json"), "utf8");
   } catch {
-    return { finding, fixed: false, message: "could not read design-system/tokens.json" };
+    return { finding, fixed: false, message: "could not read design-system/tokens.json", changes: [] };
   }
 
   let tokens: unknown;
   try {
     tokens = JSON.parse(tokensRaw);
   } catch {
-    return { finding, fixed: false, message: "could not parse design-system/tokens.json" };
+    return { finding, fixed: false, message: "could not parse design-system/tokens.json", changes: [] };
   }
 
   const tokenEntries = flattenTokens(tokens);
@@ -413,17 +525,21 @@ async function fixInlineStaticStyle(finding: DriftFinding, cwd: string, opts?: F
   }
 
   if (!anyFixed) {
-    return { finding, fixed: false, message: `no token matches found for ${finding.file}` };
+    return { finding, fixed: false, message: `no token matches found for ${finding.file}`, changes: [] };
   }
 
-  // Merge new className with any existing className on the same element
   result = result.replace(
     /className="([^"]*?)"\s+className="([^"]*?)"/g,
     (_m, existing: string, added: string) => `className="${existing} ${added}"`,
   );
 
-  await writeFile(absPath, result, "utf8");
-  return { finding, fixed: true, message: `replaced inline styles with token classes in ${finding.file}` };
+  const changes: Change[] = [{
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(result),
+  }];
+  return { finding, fixed: true, message: `replaced inline styles with token classes in ${finding.file}`, changes };
 }
 
 async function fixMisclassified(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
@@ -432,26 +548,31 @@ async function fixMisclassified(finding: DriftFinding, cwd: string, opts?: Fixer
   try {
     source = await readFile(absPath, "utf8");
   } catch {
-    return { finding, fixed: false, message: `could not read ${finding.file}` };
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
   const locationTier = locationTierFromPath(finding.file);
   const verdict = classifySource(source, opts?.domainRoots, opts?.allowedImports, opts?.dsAliases);
 
   if (verdict.tier === "feature" || verdict.tier === "unknown" || verdict.tier === "pattern") {
-    return { finding, fixed: false, message: `cannot fix ${finding.file} — classifier says ${verdict.tier}` };
+    return { finding, fixed: false, message: `cannot fix ${finding.file} — classifier says ${verdict.tier}`, changes: [] };
   }
 
   if (locationTier === verdict.tier) {
     const updated = source.replace(META_KIND_REPLACE_RE, `$1${verdict.tier}$2`);
     if (updated === source) {
-      return { finding, fixed: false, message: `could not rewrite meta.kind in ${finding.file}` };
+      return { finding, fixed: false, message: `could not rewrite meta.kind in ${finding.file}`, changes: [] };
     }
-    await writeFile(absPath, updated, "utf8");
-    return { finding, fixed: true, message: `flipped meta.kind to "${verdict.tier}" in ${finding.file}` };
+    const changes: Change[] = [{
+      kind: "write",
+      path: finding.file,
+      before: Buffer.from(source),
+      after: Buffer.from(updated),
+    }];
+    return { finding, fixed: true, message: `flipped meta.kind to "${verdict.tier}" in ${finding.file}`, changes };
   }
 
-  return relocateFile(finding, cwd, verdict.tier, opts);
+  return relocateFile(finding, cwd, source, verdict.tier, opts);
 }
 
 // --- DRIFT-DS-IMPORTS-FEATURE fixer ---
@@ -608,32 +729,6 @@ function extractUntilStatement(source: string, start: number): string {
   return source.slice(start);
 }
 
-async function rewriteProjectImports(
-  cwd: string,
-  oldImportPath: string,
-  newImportPath: string,
-): Promise<void> {
-  async function walk(dir: string): Promise<void> {
-    let entries: string[];
-    try { entries = await readdir(dir); } catch { return; }
-    for (const entry of entries) {
-      if (entry === "node_modules" || entry === ".git") continue;
-      const full = join(dir, entry);
-      let s;
-      try { s = await stat(full); } catch { continue; }
-      if (s.isDirectory()) { await walk(full); continue; }
-      if (!s.isFile()) continue;
-      if (!(entry.endsWith(".ts") || entry.endsWith(".tsx") || entry.endsWith(".js") || entry.endsWith(".jsx"))) continue;
-      let content: string;
-      try { content = await readFile(full, "utf8"); } catch { continue; }
-      if (content.includes(oldImportPath)) {
-        await writeFile(full, content.split(oldImportPath).join(newImportPath), "utf8");
-      }
-    }
-  }
-  await walk(cwd);
-}
-
 function resolveToCanonical(importPath: string, fromFileRel: string): string {
   if (importPath.startsWith("@/")) return importPath.slice(2);
   const parts = dirname(fromFileRel).replace(/\\/g, "/").split("/");
@@ -650,21 +745,22 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
   try {
     source = await readFile(absPath, "utf8");
   } catch {
-    return { finding, fixed: false, message: `could not read ${finding.file}` };
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
   if (!opts?.prompt) {
-    return { finding, fixed: false, message: `DRIFT-DS-IMPORTS-FEATURE requires interactive prompt` };
+    return { finding, fixed: false, message: `DRIFT-DS-IMPORTS-FEATURE requires interactive prompt`, changes: [] };
   }
 
   const domainRoots = opts.domainRoots ?? DEFAULT_DOMAIN_ROOTS;
   const domainImports = parseDomainImports(source, domainRoots);
   if (domainImports.length === 0) {
-    return { finding, fixed: false, message: `no domain imports found in ${finding.file}` };
+    return { finding, fixed: false, message: `no domain imports found in ${finding.file}`, changes: [] };
   }
 
   let anyFixed = false;
   let currentSource = source;
+  const changes: Change[] = [];
 
   for (const imp of domainImports) {
     const resolvedFile = await resolveImportFile(imp.importPath, finding.file, cwd);
@@ -709,11 +805,15 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
       if (selectedOption.startsWith("Extract")) {
         const canonical = resolveToCanonical(imp.importPath, finding.file);
         const utilsFileName = basename(canonical);
-        const utilsDir = join(cwd, "design-system/utils");
-        await mkdir(utilsDir, { recursive: true });
+        const utilsRelPath = `design-system/utils/${utilsFileName}.ts`;
 
         const definition = symbolInfo?.definition ?? `export { ${symbolName} } from "${imp.importPath}";\n`;
-        await writeFile(join(utilsDir, `${utilsFileName}.ts`), definition.trimEnd() + "\n", "utf8");
+        changes.push({
+          kind: "write",
+          path: utilsRelPath,
+          before: null,
+          after: Buffer.from(definition.trimEnd() + "\n"),
+        });
 
         const newPath = `@/design-system/utils/${utilsFileName}`;
 
@@ -727,14 +827,13 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
           `import { ${symbolName} } from "${newPath}";`,
         );
 
-        await writeFile(absPath, currentSource, "utf8");
-        // Rewrite both the relative form and the @/ alias form project-wide
         const aliasOldPath = `@/${canonical}`;
-        await rewriteProjectImports(cwd, imp.importPath, newPath);
+        const importChanges = await collectProjectImportRewriteChanges(cwd, imp.importPath, newPath);
+        changes.push(...importChanges);
         if (aliasOldPath !== imp.importPath) {
-          await rewriteProjectImports(cwd, aliasOldPath, newPath);
+          const aliasChanges = await collectProjectImportRewriteChanges(cwd, aliasOldPath, newPath);
+          changes.push(...aliasChanges);
         }
-        currentSource = await readFile(absPath, "utf8");
         anyFixed = true;
 
       } else if (selectedOption.startsWith("Convert")) {
@@ -779,17 +878,23 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
           }
         }
 
-        await writeFile(absPath, currentSource, "utf8");
         anyFixed = true;
       }
     }
   }
 
   if (!anyFixed) {
-    return { finding, fixed: false, message: `deferred domain import fixes for ${finding.file}` };
+    return { finding, fixed: false, message: `deferred domain import fixes for ${finding.file}`, changes: [] };
   }
 
-  return { finding, fixed: true, message: `resolved domain imports in ${finding.file}` };
+  changes.push({
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(currentSource),
+  });
+
+  return { finding, fixed: true, message: `resolved domain imports in ${finding.file}`, changes };
 }
 
 // --- DRIFT-RAW-PRIMITIVE fixer ---
@@ -1006,15 +1111,16 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
   try {
     source = await readFile(absPath, "utf8");
   } catch {
-    return { finding, fixed: false, message: `could not read ${finding.file}` };
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
   if (!opts?.prompt) {
-    return { finding, fixed: false, message: `DRIFT-RAW-PRIMITIVE requires interactive prompt` };
+    return { finding, fixed: false, message: `DRIFT-RAW-PRIMITIVE requires interactive prompt`, changes: [] };
   }
 
   let currentSource = source;
   let anyFixed = false;
+  const changes: Change[] = [];
 
   // Path A: replace raw primitives with existing atoms
   const rawElements = findRawElements(currentSource);
@@ -1110,11 +1216,13 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     atomFileContent += `export ${renamedBody.trimEnd()}\n`;
     atomFileContent += `\nexport const meta = { kind: "atom" as const, examples: [{ name: "default", props: {} }] };\n`;
 
-    const atomDir = join(cwd, "design-system/atoms");
-    await mkdir(atomDir, { recursive: true });
-    await writeFile(join(atomDir, `${finalFileName}.tsx`), atomFileContent, "utf8");
+    changes.push({
+      kind: "write",
+      path: `design-system/atoms/${finalFileName}.tsx`,
+      before: null,
+      after: Buffer.from(atomFileContent),
+    });
 
-    // Remove the component and its exclusive deps from the composite
     let updatedSource = currentSource;
     for (const dep of depsToMove) {
       updatedSource = updatedSource.replace(dep.declaration, "");
@@ -1122,7 +1230,6 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     updatedSource = updatedSource.replace(comp.body, "");
     updatedSource = updatedSource.replace(/\n{3,}/g, "\n\n");
 
-    // Rename JSX references from old component name to new atom name
     if (comp.name !== finalAtomName) {
       updatedSource = updatedSource.replace(
         new RegExp(`<${comp.name}(\\s|>|\\/)`, "g"),
@@ -1140,9 +1247,14 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
   }
 
   if (!anyFixed) {
-    return { finding, fixed: false, message: `deferred raw primitive fixes for ${finding.file}` };
+    return { finding, fixed: false, message: `deferred raw primitive fixes for ${finding.file}`, changes: [] };
   }
 
-  await writeFile(absPath, currentSource, "utf8");
-  return { finding, fixed: true, message: `replaced raw primitives in ${finding.file}` };
+  changes.push({
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(currentSource),
+  });
+  return { finding, fixed: true, message: `replaced raw primitives in ${finding.file}`, changes };
 }

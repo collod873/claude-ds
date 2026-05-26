@@ -11,7 +11,8 @@ import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import type { DriftFinding } from "../lib/drift-rules.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
-import { getFixer, makeNoTtyPrompt, makeTtyPrompt, type FixResult, type FixerPrompt } from "../lib/drift-fixers.js";
+import { makeNoTtyPrompt, makeTtyPrompt, type FixerPrompt } from "../lib/drift-fixers.js";
+import { runFixPass } from "../lib/fix-pass.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -218,26 +219,52 @@ export async function auditCmd(opts: AuditOpts) {
 
   // --fix: attempt auto-fix for fixable rules.
   if (opts.fix && activeFindings.length > 0) {
-    const fixResults: FixResult[] = [];
     const isTTY = process.stdin.isTTY === true;
     const prompt: FixerPrompt = isTTY ? makeTtyPrompt() : makeNoTtyPrompt();
-    const fixerOpts = { domainRoots: domainRoots, allowedImports, dsAliases, prompt };
-    for (const f of activeFindings) {
-      const fixer = getFixer(f.ruleId);
-      if (fixer) {
-        const result = await fixer(f, cwd, fixerOpts);
-        fixResults.push(result);
-      }
-    }
-    for (const r of fixResults) {
+    const fixPassResult = await runFixPass(cwd, activeFindings, {
+      domainRoots, allowedImports, dsAliases, prompt,
+    });
+    for (const r of fixPassResult.results) {
       if (r.fixed) {
         info(`fixed [${r.finding.ruleId}]: ${r.message}`);
       } else {
         info(`skipped [${r.finding.ruleId}]: ${r.message}`);
       }
     }
+
+    // Clean stale exceptions after successful fixes
+    if (fixPassResult.applied.length > 0 && exceptions.length > 0) {
+      const remainingExceptions: Exception[] = [];
+      for (const ex of exceptions) {
+        const absFile = join(cwd, ex.path);
+        let source: string | null = null;
+        try { source = await readFile(absFile, "utf8"); } catch { /* file may have moved */ }
+        if (source === null) {
+          // File no longer exists at this path — exception is stale
+          continue;
+        }
+        const { findings: reFindings } = checkThreeSignals(
+          ex.path, source, domainRoots, metaKindStrict, allowedImports, dsAliases,
+        );
+        const stillFires = reFindings.some(f => f.ruleId === ex.rule);
+        if (stillFires) {
+          remainingExceptions.push(ex);
+        }
+      }
+      if (remainingExceptions.length < exceptions.length) {
+        const removed = exceptions.length - remainingExceptions.length;
+        await mkdir(dirname(exceptionsPath), { recursive: true });
+        await writeFile(exceptionsPath, serializeExceptions(remainingExceptions), "utf8");
+        info(`${removed} stale exception(s) removed from exceptions.json`);
+        exceptions = remainingExceptions;
+        // Rebuild suppression set
+        suppressedSet.clear();
+        for (const e of exceptions) suppressedSet.add(suppressedKey(e.rule, e.path));
+      }
+    }
+
     const fixedKeys = new Set(
-      fixResults.filter(r => r.fixed).map(r => suppressedKey(r.finding.ruleId, r.finding.file))
+      fixPassResult.results.filter(r => r.fixed).map(r => suppressedKey(r.finding.ruleId, r.finding.file))
     );
     activeFindings = activeFindings.filter(
       f => !fixedKeys.has(suppressedKey(f.ruleId, f.file))
