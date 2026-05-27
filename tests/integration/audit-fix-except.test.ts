@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 
 describe("audit --fix", () => {
@@ -37,7 +37,7 @@ describe("audit --fix", () => {
     );
     const r = await runCli(["audit", "--pack", "next-react", "--fix"], { cwd: dir });
     expect(r.code).toBe(1);
-    expect(r.stdout).toMatch(/manual/i);
+    expect(r.stdout).toMatch(/error.*require/i);
     expect(r.stdout).toMatch(/DRIFT-MISPLACED/);
   });
 
@@ -299,5 +299,134 @@ describe("audit --fix stale exception cleanup", () => {
     const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
     const parsed = JSON.parse(raw);
     expect(parsed.exceptions.some((e: { rule: string }) => e.rule === "DRIFT-MISPLACED")).toBe(true);
+  });
+});
+
+describe("audit --fix abort handling", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => {
+    try { await chmod(join(dir, "design-system/atoms"), 0o755); } catch {}
+    try { await chmod(join(dir, "design-system"), 0o755); } catch {}
+    await cleanup(dir);
+  });
+
+  it("exits non-zero with rollback message when fixer fails to apply", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <button />; }\n`,
+    );
+    await chmod(join(dir, "design-system/atoms"), 0o555);
+
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).not.toBe(0);
+    expect(r.stdout + r.stderr).toMatch(/rolled back/i);
+  });
+
+  it("does not modify exceptions.json when fix pass aborts", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <button />; }\n`,
+    );
+    const existingExceptions = JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-META-KIND-MISSING", path: "design-system/atoms/other.tsx", issue: "#1", reason: "test" },
+      ],
+    }, null, 2) + "\n";
+    await writeFile(join(dir, "design-system/exceptions.json"), existingExceptions);
+    await chmod(join(dir, "design-system/atoms"), 0o555);
+
+    await runCli(["audit", "--fix"], { cwd: dir });
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    expect(raw).toBe(existingExceptions);
+  });
+
+  it("exits non-zero and rolls back when finalizer fails", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    const original = `export function Button() { return <button />; }\n`;
+    await writeFile(join(dir, "design-system/atoms/button.tsx"), original);
+    await chmod(join(dir, "design-system"), 0o555);
+
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).not.toBe(0);
+    expect(r.stdout + r.stderr).toMatch(/rolled back/i);
+    const content = await readFile(join(dir, "design-system/atoms/button.tsx"), "utf8");
+    expect(content).toBe(original);
+  });
+});
+
+describe("audit --fix post-fix re-validation", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("catches fixer-introduced drift in the same run", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    // This component imports another DS atom → classifier says "composite".
+    // DRIFT-MISPLACED fires (atom folder, composite classifier) → fixer relocates to composites/.
+    // DRIFT-META-KIND-MISSING fixer can't read (file moved).
+    // Re-validation of composites/card.tsx finds META-KIND-MISSING at the new path.
+    await writeFile(
+      join(dir, "design-system/atoms/card.tsx"),
+      `import { Icon } from "design-system/atoms/icon";\nexport function Card() { return <div><Icon /></div>; }\n`,
+    );
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    // Re-validation should catch new findings at the relocated path
+    expect(r.stdout).toMatch(/re-validation/);
+    expect(r.code).toBe(1);
+  });
+
+  it("skips re-validation when fix pass aborts", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <button />; }\n`,
+    );
+    await chmod(join(dir, "design-system/atoms"), 0o555);
+
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    expect(r.code).not.toBe(0);
+    expect(r.stdout + r.stderr).toMatch(/rolled back/i);
+    // Should NOT contain re-validation output
+    expect(r.stdout).not.toMatch(/re-validation/i);
+
+    await chmod(join(dir, "design-system/atoms"), 0o755);
+  });
+
+  it("includes re-validation findings in the scorecard", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/card.tsx"),
+      `import { Icon } from "design-system/atoms/icon";\nexport function Card() { return <div><Icon /></div>; }\n`,
+    );
+    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    // Scorecard should show errors from re-validation
+    expect(r.stdout).toMatch(/Errors:\s*\d+/);
   });
 });

@@ -41,6 +41,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: true, priority: 2 },
   "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: true, priority: 2 },
   "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: true, priority: 0 },
+  "DRIFT-CVA-VARIANT-UNRENDERED": { fixer: fixCvaVariantUnrendered, interactive: false, priority: 3 },
 };
 
 export function isFixable(ruleId: DriftRuleId): boolean {
@@ -933,6 +934,101 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
   });
 
   return { finding, fixed: true, message: `resolved domain imports in ${finding.file}`, changes };
+}
+
+// --- DRIFT-CVA-VARIANT-UNRENDERED fixer ---
+
+function parseExercisedVariantsFromSource(source: string, axes: string[]): Map<string, Set<string>> {
+  const exercised = new Map<string, Set<string>>();
+  for (const axis of axes) exercised.set(axis, new Set());
+
+  const examplesMatch = source.match(/examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/);
+  if (!examplesMatch) return exercised;
+
+  for (const axis of axes) {
+    const re = new RegExp(`${axis}\\s*:\\s*["']([^"']+)["']`, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(examplesMatch[1])) !== null) {
+      exercised.get(axis)!.add(m[1]);
+    }
+  }
+  return exercised;
+}
+
+function buildExampleStub(axis: string, value: string): string {
+  return `{ name: "${value}", props: { ${axis}: "${value}" } }`;
+}
+
+async function fixCvaVariantUnrendered(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(cwd, finding.file);
+  let source: string;
+  try {
+    source = await readFile(absPath, "utf8");
+  } catch {
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
+  }
+
+  const cvaVariants = parseCvaVariants(source);
+  if (!cvaVariants) {
+    return { finding, fixed: false, message: `no CVA variants found in ${finding.file}`, changes: [] };
+  }
+
+  const axes = Object.keys(cvaVariants);
+  const exercised = parseExercisedVariantsFromSource(source, axes);
+
+  const stubs: string[] = [];
+  for (const axis of axes) {
+    const exercisedValues = exercised.get(axis)!;
+    for (const value of cvaVariants[axis]) {
+      if (!exercisedValues.has(value)) {
+        stubs.push(buildExampleStub(axis, value));
+      }
+    }
+  }
+
+  if (stubs.length === 0) {
+    return { finding, fixed: false, message: `no unexercised variants found in ${finding.file}`, changes: [] };
+  }
+
+  let result = source;
+
+  const emptyExamplesRe = /examples\s*:\s*\[\s*\]/;
+  const existingExamplesRe = /examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/;
+
+  if (emptyExamplesRe.test(result)) {
+    const stubList = stubs.join(",\n    ");
+    result = result.replace(emptyExamplesRe, `examples: [\n    ${stubList},\n  ]`);
+  } else {
+    const match = existingExamplesRe.exec(result);
+    if (match) {
+      const existingContent = match[1].trimEnd();
+      const trailingComma = existingContent.endsWith(",") ? "" : ",";
+      const stubList = stubs.join(",\n    ");
+      const newExamples = `examples: [${existingContent}${trailingComma}\n    ${stubList},\n  ]`;
+      result = result.replace(existingExamplesRe, (full) => {
+        const suffix = full.endsWith(",") ? "," : full.endsWith("}") ? "}" : "";
+        return newExamples + suffix;
+      });
+    }
+  }
+
+  if (result === source) {
+    return { finding, fixed: false, message: `could not modify examples in ${finding.file}`, changes: [] };
+  }
+
+  const changes: Change[] = [{
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(result),
+  }];
+
+  return {
+    finding,
+    fixed: true,
+    message: `added ${stubs.length} meta.examples stub${stubs.length > 1 ? "s" : ""} to ${finding.file}`,
+    changes,
+  };
 }
 
 // --- DRIFT-RAW-PRIMITIVE fixer ---

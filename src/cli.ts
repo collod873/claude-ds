@@ -50,8 +50,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--reason <text>", "reason for exception (used with --except)")
     .option("--issue <ref>", "tracking issue link (used with --except)")
     .option("--permanent", "mark exceptions as permanent (used with --except)")
-    .action(async (opts: { pack?: string; suggestRemovals?: boolean; fix?: boolean; except?: boolean; reason?: string; issue?: string; permanent?: boolean }) => {
-      await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals, fix: opts.fix, except: opts.except, reason: opts.reason, issue: opts.issue, permanent: opts.permanent, cwd: defaults.cwd });
+    .option("--verbose", "show full scaffold inventory (present + missing)")
+    .action(async (opts: { pack?: string; suggestRemovals?: boolean; fix?: boolean; except?: boolean; reason?: string; issue?: string; permanent?: boolean; verbose?: boolean }) => {
+      await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals, fix: opts.fix, except: opts.except, reason: opts.reason, issue: opts.issue, permanent: opts.permanent, verbose: opts.verbose, cwd: defaults.cwd });
     });
 
   program

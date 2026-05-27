@@ -119,16 +119,157 @@ export async function scanDanglingHooks(
   });
 }
 
+export interface ReconcileResult {
+  deleted: number;
+  pruned: number;
+  skipped: number;
+  collisionWarnings: string[];
+}
+
+/**
+ * Core reconcile logic: scan and apply reconcile actions.
+ * Used by both `reconcile` command and `audit --fix`.
+ *
+ * `force`: auto-delete without prompting (equivalent to --force).
+ * When not force and not TTY, non-interactive actions (orphan deletion, hook pruning)
+ * still auto-apply, but interactive decisions (collisions, content-differs dupes)
+ * skip with warnings.
+ */
+export async function runReconcileActions(
+  ctx: import("../lib/project.js").ProjectContext,
+  opts: { force?: boolean; dryRun?: boolean },
+): Promise<ReconcileResult> {
+  const cwd = ctx.cwd;
+  const cfg = ctx.cfg;
+  const manifest = ctx.manifest;
+  const force = opts.force ?? false;
+  const dryRun = opts.dryRun ?? false;
+
+  const result: ReconcileResult = { deleted: 0, pruned: 0, skipped: 0, collisionWarnings: [] };
+
+  // ── Scan ───────────────────────────────────────────────────────────────────
+  const deprecatedFindings = await scanDeprecated(cwd, manifest.deprecated_paths);
+  const collisionFindings = cfg.claude_md_target === "CLAUDE.md"
+    ? await scanClaudeMdCollision(cwd)
+    : [];
+  const rootDupeFindings = await scanRootDupes(cwd, manifest.deprecated_paths);
+  const danglingHookFindings = await scanDanglingHooks(cwd, manifest.deprecated_paths);
+  const allFindings = [...deprecatedFindings, ...collisionFindings, ...danglingHookFindings];
+
+  if (allFindings.length === 0 && rootDupeFindings.length === 0) {
+    return result;
+  }
+
+  if (dryRun) {
+    return result;
+  }
+
+  const isTTY = Boolean(process.stdin.isTTY);
+  const rootDupeMap = new Map(rootDupeFindings.map(f => [f.rootPath, f]));
+
+  // ── Gather decisions (no I/O yet) ─────────────────────────────────────────
+  const pathsToDelete: string[] = [];
+  const mergeRequests: Array<{ root: string; canonical: string }> = [];
+
+  // ── Remediate root dupes (content-differs path) ───────────────────────────
+  for (const f of rootDupeFindings) {
+    if (!f.contentDiffers) continue;
+    if (!isTTY && !force) {
+      info(`warning: ${f.rootPath} content differs from ${f.canonicalPath} — run \`reconcile\` interactively to merge, or pass --force to delete root`);
+      result.skipped++;
+      continue;
+    }
+    if (force) {
+      pathsToDelete.push(f.rootPath);
+      continue;
+    }
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    process.stdout.write(`\nRoot dupe with different content: ${f.rootPath}\n`);
+    process.stdout.write(`  Canonical: ${f.canonicalPath}\n`);
+    process.stdout.write(`  (a) merge root → canonical (overwrites canonical with root content), then delete root\n`);
+    process.stdout.write(`  (b) keep canonical as-is, delete root\n`);
+    process.stdout.write(`  (c) skip — resolve manually\n`);
+    const ans = (await rl.question(`Choose [a/b/c]: `)).trim().toLowerCase();
+    rl.close();
+    if (ans === "a") {
+      mergeRequests.push({ root: f.rootPath, canonical: f.canonicalPath });
+    } else if (ans === "b") {
+      pathsToDelete.push(f.rootPath);
+    } else {
+      info(`skipped: ${f.rootPath} — resolve manually`);
+      result.skipped++;
+    }
+  }
+
+  // ── Remediate deprecated orphans ──────────────────────────────────────────
+  const collisionList = allFindings.filter(f => f.kind === "collision");
+  const deprecatedList = allFindings.filter(f => f.kind === "deprecated");
+
+  const toDelete = deprecatedList;
+  for (const f of toDelete) {
+    if (rootDupeMap.get(f.path)?.contentDiffers) continue;
+    pathsToDelete.push(f.path);
+  }
+
+  // ── Handle CLAUDE.md collisions ───────────────────────────────────────────
+  for (const f of collisionList) {
+    if (force || !isTTY) {
+      const msg = "CLAUDE.md collision needs manual resolution — run `reconcile` interactively";
+      info(`warning: ${msg}`);
+      result.collisionWarnings.push(msg);
+      result.skipped++;
+      continue;
+    }
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    process.stdout.write(`\nCLAUDE.md collision: both CLAUDE.md (pack-written) and .claude/CLAUDE.md (pre-existing) exist.\n`);
+    process.stdout.write(`  (a) delete root CLAUDE.md   — keeps .claude/CLAUDE.md\n`);
+    process.stdout.write(`  (b) delete .claude/CLAUDE.md — keeps root CLAUDE.md\n`);
+    process.stdout.write(`  (c) skip — resolve manually\n`);
+    const ans = (await rl.question(`Choose [a/b/c]: `)).trim().toLowerCase();
+    rl.close();
+    if (ans === "a") {
+      pathsToDelete.push("CLAUDE.md");
+    } else if (ans === "b") {
+      pathsToDelete.push(".claude/CLAUDE.md");
+    } else {
+      info(`skipped: CLAUDE.md collision — resolve manually`);
+      result.skipped++;
+    }
+  }
+
+  // ── Apply via Runner ──────────────────────────────────────────────────────
+  const ops: Operation[] = mergeRequests.map(({ root, canonical }) => makeMergeRootToCanonical(root, canonical));
+  if (pathsToDelete.length > 0) {
+    ops.push(makeDeleteFiles(pathsToDelete));
+  }
+
+  if (ops.length > 0) {
+    const report = await run(ctx, ops, "apply");
+    result.deleted = report.applied.filter(c => c.kind === "delete").length;
+    if (report.failed) {
+      info(`warning: could not apply change to ${report.failed.change.path}: ${report.failed.error}`);
+      result.skipped++;
+    }
+  }
+
+  // ── Prune dangling hook references (#136) ────────────────────────────────
+  if (danglingHookFindings.length > 0) {
+    const pruneReport = await run(ctx, [makePruneDanglingHooks()], "apply");
+    result.pruned = pruneReport.applied.filter(c => c.kind === "write").length;
+    if (pruneReport.failed) {
+      info(`warning: could not prune hooks from settings.json: ${pruneReport.failed.error}`);
+    }
+  }
+
+  return result;
+}
+
 export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cwd?: string }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const dryRun = opts.dryRun ?? false;
   const force = opts.force ?? false;
 
   // ── Boot via loadProject ──────────────────────────────────────────────────
-  // #84: loadProject is now a pure read — no longer rewrites pre-v0.6 configs as a
-  // side effect — so it's safe here. cfg.claude_md_target === "CLAUDE.md" (the
-  // parseConfig default) still drives the collision branch correctly because the
-  // raw file is untouched until a command opts into the migrateConfig Op.
   const cfgPath = join(cwd, ".claude-ds.json");
   if (!(await exists(cfgPath))) {
     err(".claude-ds.json absent — run `adopt` first");
@@ -144,17 +285,12 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   const cfg = ctx.cfg;
   const manifest = ctx.manifest;
 
-  // ── Scan ───────────────────────────────────────────────────────────────────
+  // ── Scan for reporting ────────────────────────────────────────────────────
   const deprecatedFindings = await scanDeprecated(cwd, manifest.deprecated_paths);
-  // #34: collision check only applies when the configured target IS root. When the
-  // target is non-root (.claude/CLAUDE.md or docs/CLAUDE.md), the root file is handled
-  // by `reconform`'s migration path — not a "collision".
   const collisionFindings = cfg.claude_md_target === "CLAUDE.md"
     ? await scanClaudeMdCollision(cwd)
     : [];
-  // #23: root-dupe scan — deprecated root files where canonical design-system/ copy also exists
   const rootDupeFindings = await scanRootDupes(cwd, manifest.deprecated_paths);
-  // #136: dangling hook references in settings.json
   const danglingHookFindings = await scanDanglingHooks(cwd, manifest.deprecated_paths);
   const allFindings = [...deprecatedFindings, ...collisionFindings, ...danglingHookFindings];
 
@@ -164,7 +300,6 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   }
 
   // ── Report ─────────────────────────────────────────────────────────────────
-  // Build a lookup map for root-dupe findings to annotate deprecated orphan lines
   const rootDupeMap = new Map(rootDupeFindings.map(f => [f.rootPath, f]));
   const lines: string[] = ["", "reconcile: found the following issues:", ""];
   for (const f of allFindings) {
@@ -174,7 +309,6 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
                                    "[orphan]       ";
     lines.push(`  ${tag}  ${f.path}`);
     lines.push(`                  ${f.detail}`);
-    // Annotate deprecated orphans that are also root-dupes (#23)
     const dupe = rootDupeMap.get(f.path);
     if (dupe) {
       const note = dupe.contentDiffers
@@ -183,7 +317,6 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
       lines.push(`                  [root-dupe] ${note}`);
     }
   }
-  // Report root-dupes that aren't already in deprecated findings (edge case)
   for (const f of rootDupeFindings) {
     if (!deprecatedFindings.some(d => d.path === f.rootPath)) {
       const differs = f.contentDiffers ? " [content differs — merge required]" : " [identical to canonical]";
@@ -199,139 +332,35 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     process.exit(0);
   }
 
-  // ── Prompt or auto-accept (--force / non-TTY) ─────────────────────────────
-  // Separate collision findings (CLAUDE.md) from regular deprecated-path orphans.
-  // CLAUDE.md collisions get a 3-way prompt because both files may have user content.
-  // In --force/non-TTY mode we skip collisions with a warning rather than auto-deleting.
-  const collisionList = allFindings.filter(f => f.kind === "collision");
-  const deprecatedList = allFindings.filter(f => f.kind === "deprecated");
-
+  // ── Non-TTY, non-force: can't prompt ──────────────────────────────────────
   const isTTY = Boolean(process.stdin.isTTY);
+  if (!force && !isTTY) {
+    const collisionList = allFindings.filter(f => f.kind === "collision");
+    const deprecatedList = allFindings.filter(f => f.kind === "deprecated");
+    if (deprecatedList.length > 0 || collisionList.length > 0) {
+      info("reconcile: non-interactive mode — pass --force to delete deprecated orphans");
+      process.exit(0);
+    }
+    return;
+  }
 
+  // ── Interactive confirmation for standalone reconcile ─────────────────────
   if (!force && isTTY) {
-    // Interactive mode: confirm all deprecated orphans in bulk, then handle each collision
+    const deprecatedList = allFindings.filter(f => f.kind === "deprecated");
     if (deprecatedList.length > 0) {
       if (!(await confirm(`Delete the ${deprecatedList.length} deprecated orphan(s)?`))) {
         info("aborted — no files modified");
         return;
       }
     }
-  } else if (!force && !isTTY) {
-    // Non-TTY, non-force: can't prompt, bail out
-    if (deprecatedList.length === 0 && collisionList.length === 0) return;
-    if (!(force)) {
-      info("reconcile: non-interactive mode — pass --force to delete deprecated orphans");
-      process.exit(0);
-    }
   }
 
-  // ── Gather decisions (no I/O yet) ─────────────────────────────────────────
-  const pathsToDelete: string[] = [];
-  const mergeRequests: Array<{ root: string; canonical: string }> = [];
-  let skipped = 0;
-
-  // ── Remediate root dupes (content-differs path) ───────────────────────────
-  // Root dupes that are content-identical are handled by the normal deprecated-path
-  // deletion below. Dupes where content differs need merge-or-skip handling first.
-  for (const f of rootDupeFindings) {
-    if (!f.contentDiffers) continue; // identical — handled by deprecated delete below
-    if (!isTTY && !force) {
-      info(`warning: ${f.rootPath} content differs from ${f.canonicalPath} — run \`reconcile\` interactively to merge, or pass --force to delete root`);
-      skipped++;
-      continue;
-    }
-    if (force) {
-      // --force: delete root copy unconditionally (canonical wins); user content in root is stale
-      pathsToDelete.push(f.rootPath);
-      continue;
-    }
-    // Interactive: offer merge root→canonical then delete root
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    process.stdout.write(`\nRoot dupe with different content: ${f.rootPath}\n`);
-    process.stdout.write(`  Canonical: ${f.canonicalPath}\n`);
-    process.stdout.write(`  (a) merge root → canonical (overwrites canonical with root content), then delete root\n`);
-    process.stdout.write(`  (b) keep canonical as-is, delete root\n`);
-    process.stdout.write(`  (c) skip — resolve manually\n`);
-    const ans = (await rl.question(`Choose [a/b/c]: `)).trim().toLowerCase();
-    rl.close();
-    if (ans === "a") {
-      mergeRequests.push({ root: f.rootPath, canonical: f.canonicalPath });
-    } else if (ans === "b") {
-      pathsToDelete.push(f.rootPath);
-    } else {
-      info(`skipped: ${f.rootPath} — resolve manually`);
-      skipped++;
-    }
-  }
-
-  // ── Remediate deprecated orphans ──────────────────────────────────────────
-  // Skip any root-dupe paths that were already handled (merged or skipped) above.
-  const toDelete = (force || isTTY) ? deprecatedList : [];
-  for (const f of toDelete) {
-    // Skip root-dupes that differ in content — handled above (merged, deleted, or skipped)
-    if (rootDupeMap.get(f.path)?.contentDiffers) continue;
-    pathsToDelete.push(f.path);
-  }
-
-  // ── Handle CLAUDE.md collisions ───────────────────────────────────────────
-  for (const f of collisionList) {
-    if (force || !isTTY) {
-      // Safe default: skip — auto-deleting either file could destroy user content
-      info(`warning: CLAUDE.md collision needs manual resolution — run \`reconcile\` interactively`);
-      skipped++;
-      continue;
-    }
-
-    // Interactive 3-way prompt
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    process.stdout.write(`\nCLAUDE.md collision: both CLAUDE.md (pack-written) and .claude/CLAUDE.md (pre-existing) exist.\n`);
-    process.stdout.write(`  (a) delete root CLAUDE.md   — keeps .claude/CLAUDE.md\n`);
-    process.stdout.write(`  (b) delete .claude/CLAUDE.md — keeps root CLAUDE.md\n`);
-    process.stdout.write(`  (c) skip — resolve manually\n`);
-    const ans = (await rl.question(`Choose [a/b/c]: `)).trim().toLowerCase();
-    rl.close();
-
-    if (ans === "a") {
-      pathsToDelete.push("CLAUDE.md");
-    } else if (ans === "b") {
-      pathsToDelete.push(".claude/CLAUDE.md");
-    } else {
-      info(`skipped: CLAUDE.md collision — resolve manually`);
-      skipped++;
-    }
-  }
-
-  // ── Apply via Runner ──────────────────────────────────────────────────────
-  const ops: Operation[] = mergeRequests.map(({ root, canonical }) => makeMergeRootToCanonical(root, canonical));
-  if (pathsToDelete.length > 0) {
-    ops.push(makeDeleteFiles(pathsToDelete));
-  }
-
-  let deleted = 0;
-  if (ops.length > 0) {
-    const report = await run(ctx, ops, "apply");
-    deleted = report.applied.filter(c => c.kind === "delete").length;
-    if (report.failed) {
-      info(`warning: could not apply change to ${report.failed.change.path}: ${report.failed.error}`);
-      skipped++;
-    }
-  }
-
-  // ── Prune dangling hook references (#136) ────────────────────────────────
-  // Runs after file deletions so that just-deleted scripts are caught alongside
-  // hooks that referenced never-shipped scripts.
-  let pruned = 0;
-  if (danglingHookFindings.length > 0) {
-    const pruneReport = await run(ctx, [makePruneDanglingHooks()], "apply");
-    pruned = pruneReport.applied.filter(c => c.kind === "write").length;
-    if (pruneReport.failed) {
-      info(`warning: could not prune hooks from settings.json: ${pruneReport.failed.error}`);
-    }
-  }
+  // ── Delegate to shared logic ──────────────────────────────────────────────
+  const result = await runReconcileActions(ctx, { force });
 
   const parts: string[] = [];
-  if (deleted > 0) parts.push(`${deleted} deleted`);
-  if (pruned > 0) parts.push(`settings.json pruned`);
-  if (skipped > 0) parts.push(`${skipped} skipped`);
+  if (result.deleted > 0) parts.push(`${result.deleted} deleted`);
+  if (result.pruned > 0) parts.push(`settings.json pruned`);
+  if (result.skipped > 0) parts.push(`${result.skipped} skipped`);
   info(`reconcile complete — ${parts.length > 0 ? parts.join(", ") : "nothing to do"}`);
 }

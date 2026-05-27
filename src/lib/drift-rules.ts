@@ -76,6 +76,25 @@ export function allRuleIds(): DriftRuleId[] {
   return Object.keys(RULE_REGISTRY) as DriftRuleId[];
 }
 
+export type Severity = "error" | "warning" | "info";
+
+const SEVERITY_MAP: Record<DriftRuleId, Severity> = {
+  "DRIFT-MISPLACED": "error",
+  "DRIFT-MISCLASSIFIED-ATOM": "error",
+  "DRIFT-MISCLASSIFIED-COMPOSITE": "error",
+  "DRIFT-META-KIND-MISSING": "error",
+  "DRIFT-DS-IMPORTS-FEATURE": "error",
+  "DRIFT-PATTERN-NO-SLOTS": "error",
+  "DRIFT-PATTERN-IMPORTS-PATTERN": "error",
+  "DRIFT-RAW-PRIMITIVE": "error",
+  "DRIFT-CVA-VARIANT-UNRENDERED": "error",
+  "DRIFT-INLINE-STATIC-STYLE": "error",
+};
+
+export function ruleSeverity(id: DriftRuleId): Severity {
+  return SEVERITY_MAP[id];
+}
+
 /** DRIFT-MISPLACED: file's folder tier ≠ classifier verdict.
  *  Pattern verdict is suppressed — pattern classification requires explicit
  *  declaration (meta.kind or directory placement). Use `classify` for discovery. */

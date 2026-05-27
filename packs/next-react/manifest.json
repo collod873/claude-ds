@@ -31,6 +31,10 @@
     {
       "root": "design-system/patterns/",
       "strict": false
+    },
+    {
+      "root": "design-system/utils/",
+      "strict": false
     }
   ],
   "lookalike_ignore": [

@@ -1,7 +1,7 @@
-import { readFile, writeFile, stat, readdir, mkdir } from "node:fs/promises";
+import { readFile, writeFile, stat, readdir, mkdir, unlink } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseManifest, isManifestOrKeepfile } from "../lib/manifest.js";
+import { parseManifest, isManifestOrKeepfile, type DeprecatedPath, type ManagedRoot } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
 import { info, err } from "../lib/log.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
@@ -9,10 +9,11 @@ import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
-import type { DriftFinding } from "../lib/drift-rules.js";
+import { ruleSeverity, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
 import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
 import { runFixPass } from "../lib/fix-pass.js";
+import { runReconcileActions } from "./reconcile.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -56,50 +57,91 @@ const FALLBACK_MANAGED_ROOTS = [
   { root: "design-system/", strict: true },
 ];
 
+interface UnexpectedFileFinding {
+  path: string;
+  root: string;
+  strict: boolean;
+  deprecatedMatch: DeprecatedPath | null;
+}
+
+function findDeprecatedMatch(
+  filePath: string,
+  deprecatedPaths: DeprecatedPath[],
+  managedRootSet: Set<string>,
+): DeprecatedPath | null {
+  const fileDir = filePath.substring(0, filePath.lastIndexOf("/") + 1);
+  for (const dp of deprecatedPaths) {
+    if (filePath === dp.path) return dp;
+    const dpAsDir = dp.path.endsWith("/") ? dp.path : dp.path + "/";
+    if (filePath.startsWith(dpAsDir)) return dp;
+    const dpDir = dp.path.substring(0, dp.path.lastIndexOf("/") + 1);
+    if (dpDir && fileDir === dpDir && !managedRootSet.has(dpDir)) return dp;
+  }
+  return null;
+}
+
 /**
- * Scan managed roots and return file paths (relative to cwd) that are not in the
- * manifest file list and not suppressed by an ignore glob.
- *
- * Per-root strictness (#57): roots marked strict:false are open for user growth —
- * files under those roots are never flagged as unexpected.
+ * Scan managed roots and return enriched findings for files not in the manifest.
+ * Scans both strict and open roots — callers decide how to handle each type.
  */
 async function findUnexpectedFiles(
   cwd: string,
   manifestPaths: Set<string>,
   ignoreGlobs: string[],
-  managedRoots: { root: string; strict: boolean }[],
+  managedRoots: ManagedRoot[],
   generatedPatterns: string[],
-): Promise<string[]> {
+  deprecatedPaths: DeprecatedPath[],
+): Promise<UnexpectedFileFinding[]> {
   const roots = managedRoots.length > 0 ? managedRoots : FALLBACK_MANAGED_ROOTS;
 
-  // Build a set of open root prefixes so strict roots can skip files that fall under them.
   const openPrefixes = roots
     .filter(r => !r.strict)
     .map(r => r.root.endsWith("/") ? r.root : `${r.root}/`);
+
+  const managedRootSet = new Set(roots.map(r => r.root));
 
   const isGenerated = generatedPatterns.length > 0
     ? picomatch(generatedPatterns, { dot: true })
     : null;
 
-  const unexpected: string[] = [];
-  for (const { root, strict } of roots) {
-    // Open roots allow user growth — never flag unexpected files here.
-    if (!strict) continue;
+  const isIgnored = ignoreGlobs.length > 0
+    ? picomatch(ignoreGlobs, { dot: true })
+    : null;
 
-    // root has trailing slash; strip it for walkDir
+  const unexpected: UnexpectedFileFinding[] = [];
+  for (const { root, strict } of roots) {
     const rootDir = root.endsWith("/") ? root.slice(0, -1) : root;
     const files = await walkDir(cwd, rootDir);
     for (const f of files) {
-      // Skip files that fall under a non-strict (open) sub-root.
-      if (openPrefixes.some(prefix => f.startsWith(prefix))) continue;
+      if (strict && openPrefixes.some(prefix => f.startsWith(prefix))) continue;
       if (isManifestOrKeepfile(f, manifestPaths)) continue;
       if (isGenerated && isGenerated(f)) continue;
-      // Check against ignore globs (same engine as lookalike.ts)
-      const suppressed = ignoreGlobs.length > 0 && picomatch(ignoreGlobs, { dot: true })(f);
-      if (!suppressed) unexpected.push(f);
+      if (isIgnored && isIgnored(f)) continue;
+      const deprecatedMatch = findDeprecatedMatch(f, deprecatedPaths, managedRootSet);
+      unexpected.push({ path: f, root, strict, deprecatedMatch });
     }
   }
   return unexpected;
+}
+
+async function addToConsumerManifest(cwd: string, packDir: string, paths: string[]): Promise<void> {
+  const consumerPath = join(cwd, "design-system/manifest.json");
+  let manifestJson: Record<string, unknown>;
+  try {
+    manifestJson = JSON.parse(await readFile(consumerPath, "utf8"));
+  } catch {
+    manifestJson = JSON.parse(await readFile(join(packDir, "manifest.json"), "utf8"));
+  }
+  const files = (manifestJson.files ?? []) as Array<{ path: string; category: string }>;
+  const existingPaths = new Set(files.map(f => f.path));
+  for (const p of paths) {
+    if (!existingPaths.has(p)) {
+      files.push({ path: p, category: "seeded" });
+    }
+  }
+  manifestJson.files = files;
+  await mkdir(dirname(consumerPath), { recursive: true });
+  await writeFile(consumerPath, JSON.stringify(manifestJson, null, 2) + "\n", "utf8");
 }
 
 export interface AuditOpts {
@@ -110,6 +152,7 @@ export interface AuditOpts {
   reason?: string;
   issue?: string;
   permanent?: boolean;
+  verbose?: boolean;
   cwd?: string;
 }
 
@@ -119,14 +162,15 @@ export async function auditCmd(opts: AuditOpts) {
   let cfg: Config | null = null;
   let packDir: string;
   let manifest;
+  let projectCtx: import("../lib/project.js").ProjectContext | null = null;
   const cfgPath = join(cwd, ".claude-ds.json");
   if (!pack) {
     if (!(await exists(cfgPath))) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
-    const ctx = await loadProject(cwd);
-    cfg = ctx.cfg;
+    projectCtx = await loadProject(cwd);
+    cfg = projectCtx.cfg;
     pack = cfg.pack;
-    packDir = ctx.packDir;
-    manifest = ctx.manifest;
+    packDir = projectCtx.packDir;
+    manifest = projectCtx.manifest;
   } else {
     // --pack override: parse config if present (best-effort), resolve packDir from --pack.
     if (await exists(cfgPath)) {
@@ -139,67 +183,130 @@ export async function auditCmd(opts: AuditOpts) {
   const appDir = cfg?.app_dir ?? await detectAppDir(cwd);
   const claudeMdTarget = cfg?.claude_md_target ?? "CLAUDE.md";
 
+  const verbose = opts.verbose ?? false;
+  let scaffoldTotal = 0;
+  let scaffoldPresent = 0;
+  let warningCount = 0;
+
   // Build the set of suppression globs: manifest-level + project config lookalike_ignore
   const configIgnore: string[] = cfg?.lookalike_ignore ?? [];
   const unexpectedIgnoreGlobs = [...manifest.lookalike_ignore, ...configIgnore];
   for (const f of manifest.files) {
     if (f.category === "generated") continue;
+    scaffoldTotal++;
     const checkPath = f.path === "CLAUDE.md"
       ? claudeMdTarget
       : resolveManifestPath(f.path, appDir);
     const here = await exists(join(cwd, checkPath));
+    if (here) scaffoldPresent++;
     const display = (checkPath === f.path) ? f.path : `${f.path} (at ${checkPath})`;
-    info(`${here ? "present" : "missing"}: ${display} (${f.category})`);
-  }
-
-  // Deprecated-path scan: report any files on disk that should no longer exist.
-  // This catches orphans left by prior pack versions — the "lookalike at deprecated path" check
-  // from #26. We skip the lookalike.ts short-circuit here by checking deprecated paths directly
-  // rather than going through detectLookalikes (which returns present:true, lookalike:null for
-  // canonical paths that exist, never inspecting deprecated-path neighbours).
-  let orphanCount = 0;
-  for (const d of manifest.deprecated_paths) {
-    if (await exists(join(cwd, d.path))) {
-      info(`orphan (deprecated since ${d.since_version}): ${d.path} — ${d.reason}`);
-      orphanCount++;
+    if (here && verbose) {
+      info(`present: ${display} (${f.category})`);
+    } else if (!here) {
+      info(`missing: ${display} (${f.category})`);
     }
   }
-  if (orphanCount > 0) {
-    info(`${orphanCount} deprecated-path orphan(s) found — run \`claude-ds reconcile\` to remove`);
+
+  // #171: when --fix is active and we have a project context, run reconcile as a pre-step.
+  // This auto-deletes deprecated orphans, prunes dangling hooks, and handles collisions.
+  let reconciledCount = 0;
+  if (opts.fix && projectCtx) {
+    const reconcileResult = await runReconcileActions(projectCtx, { force: true });
+    reconciledCount = reconcileResult.deleted + reconcileResult.pruned;
+    if (reconciledCount > 0) {
+      const parts: string[] = [];
+      if (reconcileResult.deleted > 0) parts.push(`${reconcileResult.deleted} orphan(s) deleted`);
+      if (reconcileResult.pruned > 0) parts.push(`dangling hooks pruned`);
+      info(`reconcile: ${parts.join(", ")}`);
+    }
+    warningCount += reconcileResult.skipped;
+  } else {
+    // Read-only mode: report deprecated orphans and suggest reconcile
+    let orphanCount = 0;
+    for (const d of manifest.deprecated_paths) {
+      if (await exists(join(cwd, d.path))) {
+        info(`WARNING  orphan (deprecated since ${d.since_version}): ${d.path} — ${d.reason}`);
+        orphanCount++;
+      }
+    }
+    warningCount += orphanCount;
+    if (orphanCount > 0) {
+      info(`${orphanCount} deprecated-path orphan(s) found — run \`claude-ds reconcile\` to remove`);
+    }
   }
 
-  // #29/#57: unexpected-file scan — enumerate files under managed roots and flag anything
-  // not in the manifest. Per-root strictness: strict roots flag extras; open roots allow
-  // user growth (e.g. design-system/atoms/, design-system/composites/).
+  // #29/#57/#174: unexpected-file scan — enumerate files under managed roots.
+  // Returns enriched findings with root context, strictness, and deprecated-path matches.
   const manifestFilePaths = new Set(manifest.files.map(f => f.path));
+  // Also read consumer manifest for user-tracked extensions
+  const consumerManifestPath = join(cwd, "design-system/manifest.json");
+  try {
+    const consumerManifest = parseManifest(await readFile(consumerManifestPath, "utf8"));
+    for (const f of consumerManifest.files) manifestFilePaths.add(f.path);
+  } catch { /* no consumer manifest or parse error — use pack manifest only */ }
   const orphanPaths = new Set(manifest.deprecated_paths.map(d => d.path));
-  const unexpectedFiles = await findUnexpectedFiles(cwd, manifestFilePaths, unexpectedIgnoreGlobs, manifest.managed_roots, manifest.generated_patterns);
-  const dsRelatedUnexpected: string[] = [];
+  const unexpectedFindings = await findUnexpectedFiles(
+    cwd, manifestFilePaths, unexpectedIgnoreGlobs,
+    manifest.managed_roots, manifest.generated_patterns, manifest.deprecated_paths,
+  );
+
+  const strictFindings: UnexpectedFileFinding[] = [];
+  const openFindings: UnexpectedFileFinding[] = [];
+  const deprecatedMatches: UnexpectedFileFinding[] = [];
   const nonDsUnexpected: string[] = [];
-  for (const f of unexpectedFiles) {
-    if (orphanPaths.has(f)) continue;
-    const isSkill = f.startsWith(".claude/skills/");
-    if (isSkill && await isDsRelatedSkill(cwd, f)) {
-      dsRelatedUnexpected.push(f);
-    } else if (isSkill) {
-      nonDsUnexpected.push(f);
+
+  for (const f of unexpectedFindings) {
+    if (orphanPaths.has(f.path)) continue;
+    if (f.deprecatedMatch) {
+      deprecatedMatches.push(f);
+    } else if (f.strict) {
+      const isSkill = f.path.startsWith(".claude/skills/");
+      if (isSkill && !(await isDsRelatedSkill(cwd, f.path))) {
+        nonDsUnexpected.push(f.path);
+      } else {
+        strictFindings.push(f);
+      }
     } else {
-      dsRelatedUnexpected.push(f);
+      openFindings.push(f);
     }
   }
-  for (const f of dsRelatedUnexpected) {
-    const isSkill = f.startsWith(".claude/skills/");
+
+  // Strict root: warn with specific remediation
+  for (const f of strictFindings) {
+    const isSkill = f.path.startsWith(".claude/skills/");
     if (isSkill) {
-      info(`unexpected (DS-related): ${f} — may conflict with pack skills, review for removal`);
+      info(`WARNING  unexpected (DS-related): ${f.path} (in ${f.root}) — add to lookalike_ignore in .claude-ds.json, or delete if unintended`);
     } else {
-      info(`unexpected: ${f} — not in manifest (may be user-authored extension, pre-adopt orphan, or drift)`);
+      info(`WARNING  unexpected: ${f.path} (in ${f.root}) — add to lookalike_ignore in .claude-ds.json, or delete if unintended`);
     }
   }
-  if (dsRelatedUnexpected.length > 0) {
-    info(`${dsRelatedUnexpected.length} unexpected file(s) under managed roots — add to \`.claude-ds.json\` lookalike_ignore to suppress`);
+  warningCount += strictFindings.length;
+  if (strictFindings.length > 0) {
+    info(`${strictFindings.length} unexpected file(s) under strict managed roots — add to lookalike_ignore in .claude-ds.json to suppress`);
   }
   if (nonDsUnexpected.length > 0) {
     info(`${nonDsUnexpected.length} non-DS skill(s) detected under .claude/skills/ (ignored: ${nonDsUnexpected.map(f => f.replace(".claude/skills/", "").replace(/\/.*/, "")).join(", ")})`);
+  }
+
+  // --fix: handle open roots and deprecated matches
+  if (opts.fix) {
+    if (openFindings.length > 0) {
+      try {
+        await addToConsumerManifest(cwd, packDir, openFindings.map(f => f.path));
+        info(`tracked ${openFindings.length} user extension(s) in consumer manifest`);
+      } catch { /* best-effort — consumer manifest may not be writable */ }
+    }
+    for (const f of deprecatedMatches) {
+      try {
+        await unlink(join(cwd, f.path));
+        info(`deleted (deprecated-related): ${f.path}`);
+      } catch { /* already gone */ }
+    }
+  } else {
+    for (const f of deprecatedMatches) {
+      info(`WARNING  unexpected (deprecated-related): ${f.path} — related to deprecated ${f.deprecatedMatch!.path}; run --fix to delete`);
+      warningCount++;
+    }
   }
 
   if (opts.suggestRemovals) info("--suggest-removals: (heuristic) no ad-hoc removals detected at v1");
@@ -247,6 +354,8 @@ export async function auditCmd(opts: AuditOpts) {
     f => !suppressedSet.has(suppressedKey(f.ruleId, f.file))
   );
 
+  let fixedCount = 0;
+
   // --fix: attempt auto-fix for fixable rules.
   if (opts.fix && activeFindings.length > 0) {
     const isTTY = process.stdout.isTTY === true;
@@ -255,7 +364,12 @@ export async function auditCmd(opts: AuditOpts) {
       domainRoots, allowedImports, dsAliases, prompt,
     });
 
-    const fixedCount = fixPassResult.results.filter(r => r.fixed).length;
+    if (fixPassResult.aborted) {
+      err("Fix pass failed — all changes rolled back. Re-run to retry.");
+      process.exit(1);
+    }
+
+    fixedCount = fixPassResult.results.filter(r => r.fixed).length;
     const deferredCount = fixPassResult.results.filter(r => !r.fixed).length;
 
     for (const r of fixPassResult.results) {
@@ -306,6 +420,39 @@ export async function auditCmd(opts: AuditOpts) {
       f => !fixedKeys.has(suppressedKey(f.ruleId, f.file))
     );
 
+    // Post-fix re-validation: re-check files modified by fixers to catch fixer-introduced drift.
+    if (fixPassResult.applied.length > 0) {
+      const modifiedPaths = new Set<string>();
+      for (const c of fixPassResult.applied) {
+        if (c.kind === "rename") {
+          modifiedPaths.add(c.after);
+        } else if (c.kind === "write") {
+          modifiedPaths.add(c.path);
+        }
+      }
+      const activeFindingKeys = new Set(activeFindings.map(f => suppressedKey(f.ruleId, f.file)));
+      let revalidationCount = 0;
+      for (const filePath of modifiedPaths) {
+        if (!filePath.endsWith(".tsx")) continue;
+        const inTierDir = driftTierDirs.some(d => filePath.startsWith(d + "/"));
+        if (!inTierDir) continue;
+        let source: string;
+        try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+        const { findings: reFindings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
+        for (const f of reFindings) {
+          const key = suppressedKey(f.ruleId, f.file);
+          if (!activeFindingKeys.has(key) && !suppressedSet.has(key)) {
+            activeFindings.push(f);
+            activeFindingKeys.add(key);
+            revalidationCount++;
+          }
+        }
+      }
+      if (revalidationCount > 0) {
+        info(`re-validation: ${revalidationCount} new finding(s) after fix pass`);
+      }
+    }
+
     // Non-TTY CI mode: auto-defer interactive findings to exceptions.json.
     // Only when --except is not also passed (--except handles exceptions explicitly).
     if (!isTTY && !opts.except && activeFindings.length > 0) {
@@ -355,7 +502,7 @@ export async function auditCmd(opts: AuditOpts) {
     activeFindings = [];
   }
 
-  // Group remaining findings by rule ID and output.
+  // Group remaining findings by rule ID and output with severity prefix.
   const byRule = new Map<string, DriftFinding[]>();
   for (const f of activeFindings) {
     const group = byRule.get(f.ruleId);
@@ -363,21 +510,29 @@ export async function auditCmd(opts: AuditOpts) {
     else byRule.set(f.ruleId, [f]);
   }
   for (const [ruleId, ruleFindings] of byRule) {
+    const severity = ruleSeverity(ruleId as DriftRuleId);
+    const prefix = severity === "error" ? "ERROR" : severity === "warning" ? "WARNING" : "INFO";
     const noun = ruleFindings.length === 1 ? "finding" : "findings";
-    info(`[${ruleId}] (${ruleFindings.length} ${noun})`);
+    info(`${prefix}  [${ruleId}] (${ruleFindings.length} ${noun})`);
     for (const f of ruleFindings) {
       info(`  ${f.file}: ${f.message}`);
     }
   }
 
+  // Scorecard
+  const parts: string[] = [];
+  parts.push(`Scaffold: ${scaffoldPresent}/${scaffoldTotal}`);
+  if (scaffoldPresent === scaffoldTotal) parts[0] += " ✓";
+  if (reconciledCount > 0) parts.push(`Reconciled: ${reconciledCount}`);
+  if (fixedCount > 0) parts.push(`Fixed: ${fixedCount}`);
+  if (warningCount > 0) parts.push(`Warnings: ${warningCount}`);
+  if (activeFindings.length > 0) parts.push(`Errors: ${activeFindings.length}`);
+  info(parts.join(" | "));
+
   if (activeFindings.length > 0) {
-    if (opts.fix) {
-      info(`${activeFindings.length} unfixable drift finding(s) require manual intervention`);
-    } else {
-      info(`${activeFindings.length} drift finding(s) — add to design-system/exceptions.json to suppress`);
-    }
+    info(`${activeFindings.length} error(s) require attention`);
     process.exit(1);
   } else {
-    info("drift check: no drift findings");
+    info("No action required.");
   }
 }
