@@ -1,0 +1,280 @@
+name: Agent Fix Loop
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  fix-loop:
+    if: github.event.label.name == 'agent:fix-loop'
+    runs-on: self-hosted
+    timeout-minutes: 120
+    concurrency:
+      group: agent-fix-loop-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      CREWOPS_BASELINE: e816cf4
+      MAX_ITERATIONS: "10"
+
+    steps:
+      - name: Transition labels
+        run: |
+          gh issue edit "$ISSUE_NUMBER" --remove-label "agent:fix-loop" || true
+          gh issue edit "$ISSUE_NUMBER" --remove-label "agent:blocked" || true
+          gh issue edit "$ISSUE_NUMBER" --add-label "agent:in-progress"
+
+      - name: Compute branch name
+        id: branch
+        run: |
+          branch="agent/fix-loop-${ISSUE_NUMBER}"
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout claude-ds
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Resume or create branch
+        id: branchstate
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          git config user.name "claude-code[bot]"
+          git config user.email "claude-code[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+          else
+            git checkout -b "$BRANCH"
+          fi
+
+      - name: Count iteration
+        id: iteration
+        run: |
+          count=$(git rev-list --count main..HEAD)
+          iteration=$((count + 1))
+          echo "number=$iteration" >> "$GITHUB_OUTPUT"
+          echo "Iteration $iteration"
+
+      - name: Check iteration limit
+        id: limit
+        env:
+          ITERATION: ${{ steps.iteration.outputs.number }}
+        run: |
+          if [ "$ITERATION" -gt "$MAX_ITERATIONS" ]; then
+            echo "exceeded=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exceeded=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refuse — iteration limit exceeded
+        if: steps.limit.outputs.exceeded == 'true'
+        env:
+          ITERATION: ${{ steps.iteration.outputs.number }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" --add-label "agent:blocked" || true
+          gh issue comment "$ISSUE_NUMBER" --body "Fix loop stopped at iteration ${ITERATION} — exceeded the ${MAX_ITERATIONS}-iteration limit. Not converging; needs human assessment."
+          exit 1
+
+      - name: Setup Node.js 22
+        if: steps.limit.outputs.exceeded != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install deps, build, and link claude-ds
+        if: steps.limit.outputs.exceeded != 'true'
+        run: |
+          npm install
+          npm run build
+          npm link
+
+      - name: Install Claude Code
+        if: steps.limit.outputs.exceeded != 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Clone and reset crewops
+        if: steps.limit.outputs.exceeded != 'true'
+        env:
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+        run: |
+          set -euo pipefail
+          crewops_dir="${RUNNER_TEMP}/crewops"
+          if [ -d "$crewops_dir" ]; then
+            rm -rf "$crewops_dir"
+          fi
+          git clone "https://x-access-token:${AGENT_PAT}@github.com/collod873/crewops.git" "$crewops_dir"
+          cd "$crewops_dir"
+          git reset --hard "$CREWOPS_BASELINE"
+          git clean -fdx
+          npm install
+
+      - name: Run mechanical checks
+        if: steps.limit.outputs.exceeded != 'true'
+        env:
+          CREWOPS_DIR: ${{ runner.temp }}/crewops
+        run: |
+          set -x
+          cd "$CREWOPS_DIR"
+
+          # Primary audit --fix
+          claude-ds audit --fix > "${RUNNER_TEMP}/audit.log" 2>&1 || true
+
+          # Type check
+          npx tsc --noEmit > "${RUNNER_TEMP}/tsc.log" 2>&1 || true
+
+          # Next.js build
+          npx next build > "${RUNNER_TEMP}/build.log" 2>&1 || true
+
+          # Idempotency: second audit --fix (should be no-op)
+          claude-ds audit --fix > "${RUNNER_TEMP}/audit-idempotency.log" 2>&1 || true
+
+          # Readonly audit (should report zero findings)
+          claude-ds audit > "${RUNNER_TEMP}/audit-readonly.log" 2>&1 || true
+
+      - name: Run grader agent
+        if: steps.limit.outputs.exceeded != 'true'
+        id: grader
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OUTPUT_DIR: ${{ runner.temp }}
+          AUDIT_LOG: ${{ runner.temp }}/audit.log
+          TSC_LOG: ${{ runner.temp }}/tsc.log
+          BUILD_LOG: ${{ runner.temp }}/build.log
+          AUDIT_IDEMPOTENCY_LOG: ${{ runner.temp }}/audit-idempotency.log
+          AUDIT_READONLY_LOG: ${{ runner.temp }}/audit-readonly.log
+          CREWOPS_DIR: ${{ runner.temp }}/crewops
+        run: npx tsx .sandcastle/fix-loop/grade.ts
+
+      - name: Read grader result
+        if: steps.limit.outputs.exceeded != 'true'
+        id: result
+        run: |
+          all_pass=$(cat "${RUNNER_TEMP}/all_pass.txt")
+          echo "all_pass=$all_pass" >> "$GITHUB_OUTPUT"
+          score=$(jq '.score' "${RUNNER_TEMP}/scorecard.json")
+          echo "score=$score" >> "$GITHUB_OUTPUT"
+
+      - name: Post or update rolling scorecard comment
+        if: steps.limit.outputs.exceeded != 'true'
+        env:
+          ITERATION: ${{ steps.iteration.outputs.number }}
+        run: |
+          set -euo pipefail
+          marker="<!-- fix-loop-scorecard -->"
+          scorecard=$(cat "${RUNNER_TEMP}/scorecard.md")
+          body=$(printf '%s\n\n**Iteration %s** | [Workflow run](%s/%s/actions/runs/%s)\n\n%s' \
+            "$marker" "$ITERATION" "$GITHUB_SERVER_URL" "$GH_REPO" "$GITHUB_RUN_ID" "$scorecard")
+
+          existing_id=$(gh api "repos/${GH_REPO}/issues/${ISSUE_NUMBER}/comments" \
+            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | .[0] // empty" 2>/dev/null || echo "")
+
+          if [ -n "$existing_id" ]; then
+            gh api --method PATCH "repos/${GH_REPO}/issues/comments/${existing_id}" \
+              -f body="$body" > /dev/null
+          else
+            gh issue comment "$ISSUE_NUMBER" --body "$body"
+          fi
+
+      - name: Run fixer agent
+        if: steps.limit.outputs.exceeded != 'true' && steps.result.outputs.all_pass != 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          ITERATION: ${{ steps.iteration.outputs.number }}
+          OUTPUT_DIR: ${{ runner.temp }}
+          AUDIT_LOG: ${{ runner.temp }}/audit.log
+          TSC_LOG: ${{ runner.temp }}/tsc.log
+          BUILD_LOG: ${{ runner.temp }}/build.log
+          AUDIT_IDEMPOTENCY_LOG: ${{ runner.temp }}/audit-idempotency.log
+          AUDIT_READONLY_LOG: ${{ runner.temp }}/audit-readonly.log
+        run: npx tsx .sandcastle/fix-loop/fix.ts
+
+      - name: Push branch
+        if: steps.limit.outputs.exceeded != 'true' && success()
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: git push origin "$BRANCH"
+
+      - name: All pass — open PR and request review
+        if: steps.limit.outputs.exceeded != 'true' && steps.result.outputs.all_pass == 'true'
+        id: open_pr
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          SCORE: ${{ steps.result.outputs.score }}
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+          GITHUB_TOKEN_FALLBACK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          existing_pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing_pr" ]; then
+            echo "PR #$existing_pr already exists."
+          else
+            pr_url=$(gh pr create \
+              --draft \
+              --base main \
+              --head "$BRANCH" \
+              --title "fix: audit --fix clean pass on crewops (closes #${ISSUE_NUMBER})" \
+              --body "$(printf '## Fix Loop Result\n\nScored %s/23 on crewops baseline \`%s\`.\n\nCloses #%s.' "$SCORE" "$CREWOPS_BASELINE" "$ISSUE_NUMBER")" \
+              | tail -n1)
+            existing_pr=$(basename "$pr_url")
+          fi
+          set +e
+          if [ -n "$AGENT_PAT" ]; then
+            GH_TOKEN="$AGENT_PAT" gh pr edit "$existing_pr" --add-label "agent:review"
+            status=$?
+            if [ "$status" -eq 0 ]; then exit 0; fi
+          fi
+          GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh pr edit "$existing_pr" --add-label "agent:review"
+
+      - name: Chain next iteration
+        if: steps.limit.outputs.exceeded != 'true' && steps.result.outputs.all_pass != 'true' && success()
+        env:
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+          GITHUB_TOKEN_FALLBACK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          if [ -n "$AGENT_PAT" ]; then
+            GH_TOKEN="$AGENT_PAT" gh issue edit "$ISSUE_NUMBER" --add-label "agent:fix-loop"
+            status=$?
+            if [ "$status" -eq 0 ]; then exit 0; fi
+          fi
+          GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh issue edit "$ISSUE_NUMBER" --add-label "agent:fix-loop"
+
+      - name: Mark blocked on failure
+        if: steps.limit.outputs.exceeded != 'true' && failure()
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          reason="(no reason file written — check workflow logs)"
+          if [ -f "${RUNNER_TEMP}/failure_reason.txt" ]; then
+            reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
+          fi
+          gh issue edit "$ISSUE_NUMBER" --add-label "agent:blocked" || true
+          gh issue comment "$ISSUE_NUMBER" --body "$(cat <<EOF
+          \`agent:fix-loop\` iteration failed.
+
+          **Reason:** $reason
+
+          **Workflow run:** $RUN_URL
+
+          Re-add \`agent:fix-loop\` to retry.
+          EOF
+          )"
+
+      - name: Always remove in-progress
+        if: always()
+        run: gh issue edit "$ISSUE_NUMBER" --remove-label "agent:in-progress" || true
