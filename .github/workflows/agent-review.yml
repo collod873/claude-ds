@@ -122,9 +122,22 @@ jobs:
               -f body="$body"
           done
 
-      - name: Add ready-to-merge label
+      - name: Add ready-to-merge label (via AGENT_PAT to trigger auto-merge workflow)
         if: success()
-        run: gh pr edit "$PR_NUMBER" --add-label "ready-to-merge" || true
+        env:
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+          GITHUB_TOKEN_FALLBACK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          if [ -n "$AGENT_PAT" ]; then
+            GH_TOKEN="$AGENT_PAT" gh pr edit "$PR_NUMBER" --add-label "ready-to-merge"
+            status=$?
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            echo "AGENT_PAT label add failed (status $status); falling back to GITHUB_TOKEN."
+          fi
+          GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh pr edit "$PR_NUMBER" --add-label "ready-to-merge"
 
       - name: Mark blocked on failure
         if: failure()
