@@ -1049,7 +1049,7 @@ async function fixMetaExamplesDuplicate(finding: DriftFinding, cwd: string, _opt
     return { finding, fixed: false, message: `no examples array found in ${finding.file}`, changes: [] };
   }
 
-  const entryRe = /\{[^}]+\}/g;
+  const entryRe = /\{(?:[^{}]|\{[^}]*\})*\}/g;
   let m: RegExpExecArray | null;
   const entries: string[] = [];
   while ((m = entryRe.exec(examplesMatch[1])) !== null) {

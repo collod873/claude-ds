@@ -395,7 +395,7 @@ function evalMetaExamplesDuplicate(input: DriftRuleInput): DriftFinding | null {
   const examplesMatch = source.match(/examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/);
   if (!examplesMatch) return null;
 
-  const entryRe = /\{[^}]+\}/g;
+  const entryRe = /\{(?:[^{}]|\{[^}]*\})*\}/g;
   let m: RegExpExecArray | null;
   const entries: string[] = [];
   while ((m = entryRe.exec(examplesMatch[1])) !== null) {

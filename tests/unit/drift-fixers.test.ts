@@ -1845,6 +1845,9 @@ export const meta = {
       expect(visibleMatches).toHaveLength(1);
       const hiddenMatches = content.match(/name: "hidden"/g);
       expect(hiddenMatches).toHaveLength(1);
+      const openBraces = (content.match(/\{/g) || []).length;
+      const closeBraces = (content.match(/\}/g) || []).length;
+      expect(openBraces).toBe(closeBraces);
     });
 
     it("returns fixed=false when there are no duplicates", async () => {
