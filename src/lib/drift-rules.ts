@@ -290,23 +290,24 @@ export function parseCvaVariants(source: string): Record<string, string[]> | nul
 
     const axisBody = varBlock.slice(am.index + am[0].length, i - 1);
 
-    // Extract only top-level keys (depth-0 `word:` patterns)
-    const valueKeys: string[] = [];
-    let d = 0;
+    // Extract only top-level keys (depth-0 `word:` patterns, outside strings)
+    const valueKeySet = new Set<string>();
     const keyRe = /(\w+)\s*:/g;
     let km: RegExpExecArray | null;
     while ((km = keyRe.exec(axisBody)) !== null) {
-      // Compute brace depth at this position
       const prefix = axisBody.slice(0, km.index);
-      d = 0;
+      let d = 0;
+      let inStr: string | null = null;
       for (const ch of prefix) {
+        if (inStr) { if (ch === inStr) inStr = null; continue; }
+        if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; continue; }
         if (ch === "{" || ch === "[" || ch === "(") d++;
         else if (ch === "}" || ch === "]" || ch === ")") d--;
       }
-      if (d === 0) valueKeys.push(km[1]);
+      if (d === 0 && !inStr) valueKeySet.add(km[1]);
     }
-    if (valueKeys.length > 0) {
-      result[axisName] = valueKeys;
+    if (valueKeySet.size > 0) {
+      result[axisName] = [...valueKeySet];
     }
   }
 
