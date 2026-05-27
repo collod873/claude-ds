@@ -43,7 +43,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-MISPLACED": { fixer: fixMisplaced, interactive: false, priority: 1 },
   "DRIFT-MISCLASSIFIED-ATOM": { fixer: fixMisclassified, interactive: false, priority: 3 },
   "DRIFT-MISCLASSIFIED-COMPOSITE": { fixer: fixMisclassified, interactive: false, priority: 3 },
-  "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: true, priority: 2 },
+  "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: false, priority: 2 },
   "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: true, priority: 2 },
   "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: true, priority: 0 },
   "DRIFT-CVA-VARIANT-UNRENDERED": { fixer: fixCvaVariantUnrendered, interactive: false, priority: 3 },
@@ -440,6 +440,56 @@ function lookupToken(
   });
 }
 
+function extractNumeric(value: string): number | null {
+  const m = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*(?:px|rem|em|%)?$/);
+  return m ? parseFloat(m[1]) : null;
+}
+
+interface NearestTokenResult {
+  token: TokenEntry;
+  distance: number;
+  equidistantPeer: TokenEntry | null;
+}
+
+function findNearestNumericToken(
+  entries: TokenEntry[],
+  cssProp: string,
+  rawValue: string,
+): NearestTokenResult | null {
+  const sourceNum = extractNumeric(rawValue);
+  if (sourceNum === null) return null;
+
+  const group = CSS_PROP_TOKEN_GROUP[cssProp];
+  const candidates = entries.filter(e => {
+    if (group && e.group !== group) return false;
+    return extractNumeric(e.value) !== null;
+  });
+
+  if (candidates.length === 0) return null;
+
+  let best: TokenEntry | null = null;
+  let bestDist = Infinity;
+  let equidistant: TokenEntry | null = null;
+
+  for (const c of candidates) {
+    const d = Math.abs(extractNumeric(c.value)! - sourceNum);
+    if (d < bestDist) {
+      best = c;
+      bestDist = d;
+      equidistant = null;
+    } else if (d === bestDist && best !== null) {
+      equidistant = c;
+    }
+  }
+
+  if (!best) return null;
+
+  const threshold = Math.abs(sourceNum) * 2;
+  if (bestDist > threshold) return null;
+
+  return { token: best, distance: bestDist, equidistantPeer: equidistant };
+}
+
 const STYLE_PROP_RE = /([a-zA-Z_$][\w$]*)\s*:\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`[^`$]*`|-?\d+(?:\.\d+)?|true|false|null|undefined)/g;
 
 interface StyleProp {
@@ -529,19 +579,31 @@ async function fixInlineStaticStyle(finding: DriftFinding, cwd: string, opts?: F
       const matches = lookupToken(tokenEntries, prop.name, prop.normalizedValue);
       if (matches.length === 1) {
         resolved.push({ prop, className: matches[0].className });
-      } else if (matches.length > 1 && opts?.prompt) {
-        const options = matches.map(m => ({ label: m.className, description: `Use token class "${m.className}"` }));
-        const choice = await opts.prompt(
-          `${finding.file}: ambiguous token for ${prop.name}: ${prop.normalizedValue}`,
-          options,
-        );
-        if (choice === "defer") {
+      } else if (matches.length > 1) {
+        resolved.push({ prop, className: matches[0].className });
+      } else {
+        const nearest = findNearestNumericToken(tokenEntries, prop.name, prop.normalizedValue);
+        if (!nearest) {
+          unresolved.push(prop);
+        } else if (nearest.equidistantPeer && opts?.prompt) {
+          const options = [
+            { label: nearest.token.className, description: `Use token class "${nearest.token.className}" (value: ${nearest.token.value})` },
+            { label: nearest.equidistantPeer.className, description: `Use token class "${nearest.equidistantPeer.className}" (value: ${nearest.equidistantPeer.value})` },
+          ];
+          const choice = await opts.prompt(
+            `${finding.file}: "${prop.name}: ${prop.normalizedValue}" is equidistant from two tokens`,
+            options,
+          );
+          if (choice === "defer") {
+            unresolved.push(prop);
+          } else {
+            resolved.push({ prop, className: options[choice].label });
+          }
+        } else if (nearest.equidistantPeer) {
           unresolved.push(prop);
         } else {
-          resolved.push({ prop, className: matches[choice].className });
+          resolved.push({ prop, className: nearest.token.className });
         }
-      } else {
-        unresolved.push(prop);
       }
     }
 

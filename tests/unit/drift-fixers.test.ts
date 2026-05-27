@@ -169,16 +169,15 @@ describe("drift-fixers", () => {
   });
 
   describe("structured prompt options", () => {
-    it("prompt receives options with label and description fields", async () => {
+    it("prompt receives options with label and description fields (equidistant tokens)", async () => {
       const dir = await freshTmpDir();
       try {
         await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-        await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-        const tokensJson = { spacing: { "p-4": "1rem", "p-5": "1rem" } };
+        const tokensJson = { spacing: { 2: "8", 4: "16" } };
         await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify(tokensJson));
 
-        const source = `export function Card() {\n  return <div style={{ padding: "1rem" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+        const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
         await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
         const received: Array<Array<{ label: string; description: string }>> = [];
@@ -606,7 +605,7 @@ describe("drift-fixers", () => {
       expect(content).not.toContain("style=");
     });
 
-    it("prompts on ambiguous matches (multiple token candidates)", async () => {
+    it("auto-selects first token when multiple exact matches (no prompt)", async () => {
       const ambiguousTokens = {
         color: { background: "#ffffff", surface: "#ffffff" },
       };
@@ -614,35 +613,95 @@ describe("drift-fixers", () => {
       const source = `export function Card() {\n  return <div style={{ color: "#ffffff" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
       await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-      const choices: Array<Array<{ label: string; description: string }>> = [];
-      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
-        choices.push(opts);
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer, makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain("color-background");
+      expect(content).not.toContain("style=");
+    });
+
+    it("picks nearest token by numeric distance when no exact match", async () => {
+      const spacingTokens = {
+        spacing: { 1: "4", 2: "8", 4: "16", 8: "32" },
+      };
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 15 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer, makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain("spacing-4");
+      expect(content).not.toContain("style=");
+    });
+
+    it("skips value when no token within 2x threshold", async () => {
+      const spacingTokens = {
+        spacing: { 10: "100", 20: "200" },
+      };
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 2 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer, makeFinding(), dir);
+
+      expect(result.fixed).toBe(false);
+    });
+
+    it("prompts only when two tokens are equidistant from the value", async () => {
+      const spacingTokens = {
+        spacing: { 2: "8", 4: "16" },
+      };
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      let prompted = false;
+      const mockPrompt = async (_q: string, _opts: Array<{ label: string; description: string }>) => {
+        prompted = true;
         return 0 as number | "defer";
       };
       const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
-      const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding(), dir, { prompt: mockPrompt });
 
+      expect(prompted).toBe(true);
       expect(result.fixed).toBe(true);
-      expect(choices.length).toBeGreaterThan(0);
-      expect(choices[0].map(o => o.label)).toContain("color-background");
-      expect(choices[0].map(o => o.label)).toContain("color-surface");
     });
 
-    it("defers ambiguous match when prompt returns defer", async () => {
-      const ambiguousTokens = {
-        color: { background: "#ffffff", surface: "#ffffff" },
+    it("defers equidistant match when prompt returns defer", async () => {
+      const spacingTokens = {
+        spacing: { 2: "8", 4: "16" },
       };
-      await setupTokens(ambiguousTokens);
-      const source = `export function Card() {\n  return <div style={{ color: "#ffffff" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
       await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
       const mockPrompt = async () => "defer" as number | "defer";
       const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
-      const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding(), dir, { prompt: mockPrompt });
 
       expect(result.fixed).toBe(false);
+    });
+
+    it("nearest-token picks lower token when value is closer to it", async () => {
+      const spacingTokens = {
+        spacing: { 2: "8", 4: "16" },
+      };
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 10 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer, makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
       const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
-      expect(content).toBe(source);
+      expect(content).toContain("spacing-2");
     });
 
     it("never touches dynamic expressions", async () => {
