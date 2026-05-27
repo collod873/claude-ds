@@ -263,18 +263,18 @@ describe("reconform", () => {
     expect(r.code).toBe(0);
   });
 
-  it("meta check: references dir scanned — reference file missing meta → reported", async () => {
+  it("meta check: patterns dir scanned — pattern file missing meta → reported", async () => {
     await scaffoldProject(dir);
-    await mkdir(join(dir, "design-system", "references"), { recursive: true });
+    await mkdir(join(dir, "design-system", "patterns"), { recursive: true });
     await writeFile(
-      join(dir, "design-system", "references", "tokens.tsx"),
-      `export default function TokensPage() { return null; }\n`
+      join(dir, "design-system", "patterns", "app-shell.tsx"),
+      `export function AppShell({ children }: { children: React.ReactNode }) { return <div>{children}</div>; }\n`
     );
 
     const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/META-001/);
-    expect(r.stdout).toMatch(/tokens\.tsx/);
+    expect(r.stdout).toMatch(/app-shell\.tsx/);
   });
 
   it("meta check: reference file with kind=reference meta → not reported", async () => {
@@ -335,23 +335,21 @@ describe("reconform", () => {
     expect(content).toMatch(/skip/);
   });
 
-  it("--backfill-meta --fix: reference file gets title + render:null stub", async () => {
+  it("--backfill-meta --fix: pattern file gets kind=pattern stub", async () => {
     await scaffoldProject(dir);
-    await mkdir(join(dir, "design-system", "references"), { recursive: true });
+    await mkdir(join(dir, "design-system", "patterns"), { recursive: true });
     await writeFile(
-      join(dir, "design-system", "references", "design-tokens.tsx"),
-      `export default function DesignTokensPage() { return null; }\n`
+      join(dir, "design-system", "patterns", "app-shell.tsx"),
+      `export function AppShell({ children }: { children: React.ReactNode }) { return <div>{children}</div>; }\n`
     );
 
     const r = await runCli(["reconform", "--backfill-meta", "--fix"], { cwd: dir });
     expect(r.code).toBe(0);
 
-    const content = await readFile(join(dir, "design-system", "references", "design-tokens.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "patterns", "app-shell.tsx"), "utf8");
     expect(content).toMatch(/export const meta/);
-    expect(content).toMatch(/kind:\s*"reference"/);
-    expect(content).toMatch(/title:\s*"Design Tokens"/);
-    expect(content).toMatch(/render:\s*\(\)\s*=>/);
-    expect(content).toMatch(/TODO\(claude-ds\)/);
+    expect(content).toMatch(/kind:\s*"pattern"/);
+    expect(content).toMatch(/examples:\s*\[\]/);
   });
 
   it("--backfill-meta --fix: file already with meta is not touched", async () => {

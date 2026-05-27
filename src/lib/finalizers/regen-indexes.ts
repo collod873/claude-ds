@@ -15,6 +15,18 @@ function isCompanion(fileName: string): boolean {
   return COMPANION_SUFFIXES.some(suffix => fileName.endsWith(suffix));
 }
 
+const EXPORT_DECL_RE = /\bexport\s+(?:(?:default|async)\s+)*(?:function\*?|const|let|var|class|enum)\s+(\w+)/g;
+
+function extractExportedNames(source: string): string[] {
+  const names: string[] = [];
+  let m;
+  const re = new RegExp(EXPORT_DECL_RE.source, "g");
+  while ((m = re.exec(source))) {
+    if (m[1] !== "meta") names.push(m[1]);
+  }
+  return [...new Set(names)];
+}
+
 interface ComponentEntry {
   name: string;
   tier: string;
@@ -43,10 +55,21 @@ export async function regenIndexes(cwd: string): Promise<Change[]> {
       .filter(f => f.endsWith(".tsx") && !isCompanion(f))
       .sort();
 
-    const barrelLines = componentFiles.map(f => {
+    const barrelLines: string[] = [];
+    for (const f of componentFiles) {
       const name = f.slice(0, -extname(f).length);
-      return `export * from "./${name}";`;
-    });
+      const filePath = join(dsRoot, tierDir, f);
+      let source: string;
+      try {
+        source = await readFile(filePath, "utf8");
+      } catch {
+        continue;
+      }
+      const exportedNames = extractExportedNames(source);
+      if (exportedNames.length > 0) {
+        barrelLines.push(`export { ${exportedNames.join(", ")} } from "./${name}";`);
+      }
+    }
     const barrelContent = barrelLines.length > 0
       ? barrelLines.join("\n") + "\n"
       : "";

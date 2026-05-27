@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Change, Operation } from "../../../operation.js";
 import type { ProjectContext } from "../../../project.js";
 
-const DS_TIERS = ["atoms", "composites", "references"] as const;
+const DS_TIERS = ["atoms", "composites", "patterns"] as const;
 const EXCEPTIONS_PATH = "design-system/exceptions.json";
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 
