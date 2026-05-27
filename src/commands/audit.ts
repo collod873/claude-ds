@@ -10,6 +10,7 @@ import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import { ruleSeverity, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
+import { evaluateIntegrity, integrityRuleSeverity, type IntegrityRuleId, type IntegrityFinding } from "../lib/integrity-rules.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
 import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
 import { runFixPass } from "../lib/fix-pass.js";
@@ -333,7 +334,9 @@ export async function auditCmd(opts: AuditOpts) {
     dsAliases = await detectDsAliases(cwd, cfg?.srcRoot ?? "src");
   }
   const driftTierDirs = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
-  const allFindings: DriftFinding[] = [];
+  type AuditFinding = DriftFinding | IntegrityFinding;
+  const allFindings: AuditFinding[] = [];
+  const integrityFailedFiles = new Set<string>();
   for (const tierDir of driftTierDirs) {
     const abs = join(cwd, tierDir);
     let entries: string[];
@@ -344,6 +347,14 @@ export async function auditCmd(opts: AuditOpts) {
       const filePath = `${tierDir}/${entry}`;
       let source: string;
       try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+
+      const integrityFindings = evaluateIntegrity(filePath, source);
+      if (integrityFindings.length > 0) {
+        allFindings.push(...integrityFindings);
+        integrityFailedFiles.add(filePath);
+        continue;
+      }
+
       const { findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
       allFindings.push(...findings);
     }
@@ -360,7 +371,10 @@ export async function auditCmd(opts: AuditOpts) {
   if (opts.fix && activeFindings.length > 0) {
     const isTTY = process.stdout.isTTY === true;
     const prompt: FixerPrompt = isTTY ? makeTtyPrompt() : makeNoTtyPrompt();
-    const fixPassResult = await runFixPass(cwd, activeFindings, {
+    const driftFindings = activeFindings.filter(
+      (f): f is DriftFinding => !f.ruleId.startsWith("INTEGRITY-"),
+    );
+    const fixPassResult = await runFixPass(cwd, driftFindings, {
       domainRoots, allowedImports, dsAliases, prompt,
     });
 
@@ -463,7 +477,7 @@ export async function auditCmd(opts: AuditOpts) {
       );
 
       const autoDeferred: Exception[] = [];
-      const stillActive: DriftFinding[] = [];
+      const stillActive: AuditFinding[] = [];
       for (const f of activeFindings) {
         if (deferredByPrompt.has(suppressedKey(f.ruleId, f.file))) {
           autoDeferred.push({ rule: f.ruleId, path: f.file, reason: "auto-deferred: no TTY" });
@@ -503,14 +517,16 @@ export async function auditCmd(opts: AuditOpts) {
   }
 
   // Group remaining findings by rule ID and output with severity prefix.
-  const byRule = new Map<string, DriftFinding[]>();
+  const byRule = new Map<string, AuditFinding[]>();
   for (const f of activeFindings) {
     const group = byRule.get(f.ruleId);
     if (group) group.push(f);
     else byRule.set(f.ruleId, [f]);
   }
   for (const [ruleId, ruleFindings] of byRule) {
-    const severity = ruleSeverity(ruleId as DriftRuleId);
+    const severity = ruleId.startsWith("INTEGRITY-")
+      ? integrityRuleSeverity(ruleId as IntegrityRuleId)
+      : ruleSeverity(ruleId as DriftRuleId);
     const prefix = severity === "error" ? "ERROR" : severity === "warning" ? "WARNING" : "INFO";
     const noun = ruleFindings.length === 1 ? "finding" : "findings";
     info(`${prefix}  [${ruleId}] (${ruleFindings.length} ${noun})`);

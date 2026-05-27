@@ -520,6 +520,40 @@ describe("audit — unexpected-file enrichment (#174)", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).not.toMatch(/unexpected.*switch\.tsx/i);
   });
+
+  it("fires INTEGRITY-UNPARSEABLE for a DS file with broken syntax", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/broken.tsx"),
+      `import { Button } from "@ds/atoms/button";\nexport function Broken( {\n  // missing closing brace`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/INTEGRITY-UNPARSEABLE/);
+    expect(r.stdout).toMatch(/broken\.tsx/);
+  });
+
+  it("skips drift rules for files that fail integrity checks", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/broken.tsx"),
+      `import { fmt } from "../../features/billing/format";\nexport function Broken( {\n`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/INTEGRITY-UNPARSEABLE/);
+    expect(r.stdout).not.toMatch(/DRIFT-DS-IMPORTS-FEATURE/);
+  });
+
+  it("does not fire INTEGRITY-UNPARSEABLE for a valid DS file", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <button />; }`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.stdout).not.toMatch(/INTEGRITY-UNPARSEABLE/);
+  });
 });
 
 function extractAllHookCommands(hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>): string[] {
