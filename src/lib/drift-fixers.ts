@@ -44,7 +44,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-MISCLASSIFIED-ATOM": { fixer: fixMisclassified, interactive: false, priority: 3 },
   "DRIFT-MISCLASSIFIED-COMPOSITE": { fixer: fixMisclassified, interactive: false, priority: 3 },
   "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: false, priority: 2 },
-  "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: true, priority: 2 },
+  "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: false, priority: 2 },
   "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: true, priority: 0 },
   "DRIFT-CVA-VARIANT-UNRENDERED": { fixer: fixCvaVariantUnrendered, interactive: false, priority: 3 },
   "DRIFT-META-EXAMPLES-DUPLICATE": { fixer: fixMetaExamplesDuplicate, interactive: false, priority: 4 },
@@ -886,23 +886,20 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
         (symbolInfo.isFunction && symbolInfo.paramCount <= 2)
       );
 
-      const options: PromptOption[] = [];
-      if (canExtract) options.push({ label: `Extract "${symbolName}" to design-system/utils/`, description: "Move this import to the design system utilities folder" });
-      if (canConvertToProp) options.push({ label: `Convert "${symbolName}" to prop injection`, description: "Pass this value as a prop instead of importing it" });
-      options.push({ label: "Defer (add exception)", description: "Skip for now and add an exception entry" });
-
-      if (options.length === 1) {
-        continue;
-      }
-
-      // Auto-extract: pure function ≤2 params with no domain deps → deterministic
-      const autoExtract = canExtract && symbolInfo && symbolInfo.isFunction && symbolInfo.paramCount <= 2 && !hasDomainDeps;
       let selectedOption: string;
-      if (autoExtract) {
-        selectedOption = options[0].label;
-      } else if (opts?.prompt) {
+      if (canExtract) {
+        selectedOption = `Extract "${symbolName}" to design-system/utils/`;
+      } else if (canConvertToProp || opts?.prompt) {
+        const options: PromptOption[] = [];
+        if (canConvertToProp) options.push({ label: `Convert "${symbolName}" to prop injection`, description: "Pass this value as a prop instead of importing it" });
+        options.push({ label: "Defer (add exception)", description: "Skip for now and add an exception entry" });
+
+        if (options.length === 1 || !opts?.prompt) {
+          continue;
+        }
+
         const choice = await opts.prompt(
-          `${finding.file}: "${symbolName}" imported from domain root`,
+          `"${symbolName}" comes from a domain module that can't be moved to design-system (it has its own domain dependencies). What should we do?`,
           options,
         );
         if (choice === "defer") continue;

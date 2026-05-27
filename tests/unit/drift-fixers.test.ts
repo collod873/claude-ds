@@ -886,7 +886,7 @@ describe("drift-fixers", () => {
       expect(labels.some(l => l.includes("prop"))).toBe(true);
     });
 
-    it("offers convert-to-prop only for pure functions with ≤2 params", async () => {
+    it("auto-extracts 3+ param functions without offering prop injection", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await mkdir(join(dir, "lib/utils"), { recursive: true });
 
@@ -900,21 +900,18 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
 
-      const promptOptions: Array<Array<{ label: string; description: string }>> = [];
-      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
-        promptOptions.push(opts);
-        return 0 as number | "defer";
-      };
+      let prompted = false;
+      const mockPrompt = async () => { prompted = true; return 0 as number | "defer"; };
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      await fixAndApply(fixer,makeFinding("design-system/composites/widget.tsx"), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding("design-system/composites/widget.tsx"), dir, { prompt: mockPrompt });
 
-      expect(promptOptions.length).toBeGreaterThan(0);
-      const labels = promptOptions[0].map(o => o.label.toLowerCase());
-      expect(labels.some(l => l.includes("extract"))).toBe(true);
-      expect(labels.some(l => l.includes("prop"))).toBe(false);
+      expect(prompted).toBe(false);
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/composites/widget.tsx"), "utf8");
+      expect(content).toContain("@/design-system/utils/complex");
     });
 
-    it("offers convert-to-prop for simple constants", async () => {
+    it("auto-extracts constants without offering prop injection", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await mkdir(join(dir, "lib/config"), { recursive: true });
 
@@ -928,18 +925,15 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
 
-      const promptOptions: Array<Array<{ label: string; description: string }>> = [];
-      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
-        promptOptions.push(opts);
-        return 0 as number | "defer";
-      };
+      let prompted = false;
+      const mockPrompt = async () => { prompted = true; return 0 as number | "defer"; };
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      await fixAndApply(fixer,makeFinding("design-system/composites/badge.tsx"), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding("design-system/composites/badge.tsx"), dir, { prompt: mockPrompt });
 
-      expect(promptOptions.length).toBeGreaterThan(0);
-      const labels = promptOptions[0].map(o => o.label.toLowerCase());
-      expect(labels.some(l => l.includes("extract"))).toBe(true);
-      expect(labels.some(l => l.includes("prop"))).toBe(true);
+      expect(prompted).toBe(false);
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/composites/badge.tsx"), "utf8");
+      expect(content).toContain("@/design-system/utils/theme");
     });
 
     it("converts to prop injection — removes import and adds prop", async () => {
@@ -1048,6 +1042,88 @@ describe("drift-fixers", () => {
       const dsContent = await readFile(join(dir, "design-system/composites/event-card.tsx"), "utf8");
       expect(dsContent).toContain("@/design-system/utils/format");
       expect(dsContent).not.toContain("@/lib/utils/format");
+    });
+
+    it("auto-extracts constants without prompting", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/config"), { recursive: true });
+
+      await writeFile(join(dir, "lib/config/theme.ts"),
+        `export const PRIMARY_COLOR = "#0070f3";\n`);
+
+      const dsSource = [
+        `import { PRIMARY_COLOR } from "../../lib/config/theme";`,
+        `export function Badge() { return <span style={{ color: PRIMARY_COLOR }}>badge</span>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
+
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      // No prompt callback — should auto-extract without one
+      const result = await fixAndApply(fixer, makeFinding("design-system/composites/badge.tsx"), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/composites/badge.tsx"), "utf8");
+      expect(content).toContain("@/design-system/utils/theme");
+      expect(content).not.toContain("lib/config/theme");
+    });
+
+    it("auto-extracts 3+ param functions without prompting", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/utils"), { recursive: true });
+
+      await writeFile(join(dir, "lib/utils/complex.ts"),
+        `export function complexFn(a: string, b: number, c: boolean): string { return a + b + c; }\n`);
+
+      const dsSource = [
+        `import { complexFn } from "../../lib/utils/complex";`,
+        `export function Widget() { return <div>{complexFn("a", 1, true)}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
+
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      const result = await fixAndApply(fixer, makeFinding("design-system/composites/widget.tsx"), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/composites/widget.tsx"), "utf8");
+      expect(content).toContain("@/design-system/utils/complex");
+    });
+
+    it("prompts with simple-question when circular dependency prevents extraction", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/api"), { recursive: true });
+      await mkdir(join(dir, "features/auth"), { recursive: true });
+
+      await writeFile(join(dir, "features/auth/session.ts"),
+        `export function getSession() { return { user: "test" }; }\n`);
+
+      await writeFile(join(dir, "lib/api/client.ts"),
+        `import { getSession } from "../../features/auth/session";\nexport function apiClient() { return getSession(); }\n`);
+
+      const dsSource = [
+        `import { apiClient } from "../../lib/api/client";`,
+        `export function UserBadge() { return <div>{apiClient()}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/user-badge.tsx"), dsSource);
+
+      let prompted = false;
+      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
+        prompted = true;
+        const labels = opts.map(o => o.label.toLowerCase());
+        expect(labels.some(l => l.includes("extract"))).toBe(false);
+        expect(labels.some(l => l.includes("prop"))).toBe(true);
+        return opts.findIndex(o => o.label.toLowerCase().includes("prop")) as number | "defer";
+      };
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      await fixAndApply(fixer, makeFinding("design-system/composites/user-badge.tsx"), dir, { prompt: mockPrompt });
+
+      expect(prompted).toBe(true);
+    });
+
+    it("registry marks DRIFT-DS-IMPORTS-FEATURE as non-interactive", () => {
+      expect(isInteractive("DRIFT-DS-IMPORTS-FEATURE" as DriftRuleId)).toBe(false);
     });
   });
 
