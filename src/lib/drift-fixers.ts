@@ -50,6 +50,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-META-EXAMPLES-DUPLICATE": { fixer: fixMetaExamplesDuplicate, interactive: false, priority: 4 },
   "DRIFT-META-EXAMPLES-CORRUPT": { fixer: fixMetaExamplesCorrupt, interactive: false, priority: 5 },
   "DRIFT-STALE-DS-IMPORT": { fixer: fixStaleDsImport, interactive: false, priority: 0 },
+  "DRIFT-STALE-META-STATES": { fixer: fixStaleMetaStates, interactive: false, priority: 0 },
 };
 
 export function isFixable(ruleId: DriftRuleId): boolean {
@@ -1312,6 +1313,74 @@ async function fixStaleDsImport(finding: DriftFinding, cwd: string, opts?: Fixer
     finding,
     fixed: true,
     message: `rewrote stale @/design-system/ imports to ${canonicalAlias}/ in ${finding.file}`,
+    changes,
+  };
+}
+
+// --- DRIFT-STALE-META-STATES fixer ---
+
+function stripMetaStates(source: string): string {
+  const re = /\bstates\s*:\s*\{/;
+  const match = re.exec(source);
+  if (!match) return source;
+
+  const openBraceIdx = match.index + match[0].lastIndexOf("{");
+  let depth = 0;
+  let closeBraceIdx = -1;
+  let i = openBraceIdx;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === "{") { depth++; }
+    else if (ch === "}") { depth--; if (depth === 0) { closeBraceIdx = i; break; } }
+    else if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      i++;
+      while (i < source.length) {
+        if (source[i] === "\\") { i += 2; continue; }
+        if (source[i] === quote) break;
+        i++;
+      }
+    }
+    i++;
+  }
+  if (closeBraceIdx === -1) return source;
+
+  let start = match.index;
+  while (start > 0 && (source[start - 1] === " " || source[start - 1] === "\t")) start--;
+  if (start > 0 && source[start - 1] === "\n") start--;
+
+  let end = closeBraceIdx + 1;
+  while (end < source.length && (source[end] === "," || source[end] === " " || source[end] === "\t")) end++;
+  if (end < source.length && source[end] === "\n") end++;
+
+  return source.slice(0, start) + source.slice(end);
+}
+
+async function fixStaleMetaStates(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(cwd, finding.file);
+  let source: string;
+  try {
+    source = await readFile(absPath, "utf8");
+  } catch {
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
+  }
+
+  const result = stripMetaStates(source);
+  if (result === source) {
+    return { finding, fixed: false, message: `no states field found in ${finding.file}`, changes: [] };
+  }
+
+  const changes: Change[] = [{
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(result),
+  }];
+
+  return {
+    finding,
+    fixed: true,
+    message: `stripped retired meta.states from ${finding.file}`,
     changes,
   };
 }
