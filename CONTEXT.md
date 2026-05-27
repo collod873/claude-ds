@@ -77,12 +77,38 @@ location (ADR-0005). The drift rule `DRIFT-DS-IMPORTS-FEATURE` flags
 violations.
 
 ### Drift rule
-A named, stable identifier for an audit check. Examples: `DRIFT-MISPLACED`,
-`DRIFT-MISCLASSIFIED-ATOM`, `DRIFT-RAW-PRIMITIVE`, `DRIFT-PATTERN-NO-SLOTS`,
-`DRIFT-DS-IMPORTS-FEATURE`, `DRIFT-CVA-VARIANT-UNRENDERED`,
-`DRIFT-INLINE-STATIC-STYLE`. IDs are part of the pack's public surface
-(referenced by `exceptions.json` forever); rule retirement requires a
-migration Op.
+A named, stable identifier for an audit convention check. Prefix: `DRIFT-`.
+Examples: `DRIFT-MISPLACED`, `DRIFT-MISCLASSIFIED-ATOM`, `DRIFT-RAW-PRIMITIVE`,
+`DRIFT-PATTERN-NO-SLOTS`, `DRIFT-DS-IMPORTS-FEATURE`,
+`DRIFT-CVA-VARIANT-UNRENDERED`, `DRIFT-INLINE-STATIC-STYLE`. IDs are part of
+the pack's public surface (referenced by `exceptions.json` forever); rule
+retirement requires a migration Op.
+_Contrast_: integrity rule.
+
+### Integrity rule
+A named audit check for structural file health. Prefix: `INTEGRITY-`. Fires
+**before** drift rules — if a file fails integrity, convention fixers skip it.
+Examples: `INTEGRITY-UNPARSEABLE`, `INTEGRITY-ORPHANED-FROM`,
+`INTEGRITY-UNRESOLVABLE-IMPORT`. Subject to the same ADR-0013 actionability
+contract as drift rules. See ADR-0014.
+_Contrast_: drift rule.
+
+### Fixer output validation
+Gate inside every audit fixer: parse the rewritten file before writing to
+disk. If the output doesn't parse but the input did, the fixer preserves the
+original and reports failure. Breakage never reaches the consumer's files.
+See ADR-0014.
+
+### Next-step breadcrumb
+A `→ Next:` line printed by every CLI command on completion, telling the
+consumer what to run next. Replaces the expectation that the consumer
+consults the README between commands. See ADR-0014.
+
+### Simple question test
+Three-part gate for when the CLI may prompt the consumer (ADR-0014):
+(1) a non-coder can understand it without context, (2) options are concrete
+and distinguishable, (3) the system's best guess would be wrong often enough
+to matter. If any test fails, automate instead of asking.
 
 ### Exception
 An entry in `design-system/exceptions.json` sanctioning a specific drift
