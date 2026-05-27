@@ -213,21 +213,29 @@ describe("audit --fix --except", () => {
       join(dir, ".claude-ds.json"),
       JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
     );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
-    // Feature import → DRIFT-META-KIND-MISSING (fixable) + DRIFT-MISPLACED (fixer declines for feature tier)
+    // Feature import → DRIFT-DS-IMPORTS-FEATURE (fixable) + DRIFT-META-KIND-MISSING (fixable)
+    // After feature import extraction, file reclassifies as atom → re-fix moves to atoms/
     await writeFile(
       join(dir, "design-system/composites/orphan.tsx"),
       'import { api } from "@/features/billing/api";\nexport function Orphan() { return <span>{api()}</span>; }',
     );
+    // Pattern file with no slots → DRIFT-PATTERN-NO-SLOTS (unfixable)
+    await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/patterns/page-layout.tsx"),
+      'export function PageLayout() { return <div />; }\nexport const meta = { kind: "pattern" as const, examples: [] };\n',
+    );
     const r = await runCli(["audit", "--fix", "--except", "--reason", "pending move", "--issue", "#55"], { cwd: dir });
     expect(r.code).toBe(0);
-    // Verify the file got the meta.kind fix
-    const content = await readFile(join(dir, "design-system/composites/orphan.tsx"), "utf8");
+    // Verify orphan.tsx was fully fixed — relocated to atoms/ with meta.kind
+    const content = await readFile(join(dir, "design-system/atoms/orphan.tsx"), "utf8");
     expect(content).toMatch(/export const meta.*kind/);
-    // Verify DRIFT-MISPLACED was excepted
+    // Verify the unfixable DRIFT-PATTERN-NO-SLOTS was excepted
     const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
     const parsed = JSON.parse(raw);
-    expect(parsed.exceptions.some((e: { rule: string }) => e.rule === "DRIFT-MISPLACED")).toBe(true);
+    expect(parsed.exceptions.some((e: { rule: string }) => e.rule === "DRIFT-PATTERN-NO-SLOTS")).toBe(true);
   });
 });
 
