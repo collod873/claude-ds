@@ -23,7 +23,8 @@ export type DriftRuleId =
   // Code-quality drift rules (IDs stable)
   | "DRIFT-RAW-PRIMITIVE"
   | "DRIFT-CVA-VARIANT-UNRENDERED"
-  | "DRIFT-INLINE-STATIC-STYLE";
+  | "DRIFT-INLINE-STATIC-STYLE"
+  | "DRIFT-META-EXAMPLES-DUPLICATE";
 
 export interface DriftFinding {
   ruleId: DriftRuleId;
@@ -66,6 +67,8 @@ const RULE_REGISTRY: Record<DriftRuleId, string> = {
     "CVA variant defined in meta.variants is not exercised by any meta.examples entry",
   "DRIFT-INLINE-STATIC-STYLE":
     "File uses inline style={} with a literal value that should be a design token",
+  "DRIFT-META-EXAMPLES-DUPLICATE":
+    "meta.examples contains duplicate entries (identical name + props)",
 };
 
 export function ruleDescription(id: DriftRuleId): string {
@@ -89,6 +92,7 @@ const SEVERITY_MAP: Record<DriftRuleId, Severity> = {
   "DRIFT-RAW-PRIMITIVE": "error",
   "DRIFT-CVA-VARIANT-UNRENDERED": "error",
   "DRIFT-INLINE-STATIC-STYLE": "error",
+  "DRIFT-META-EXAMPLES-DUPLICATE": "error",
 };
 
 export function ruleSeverity(id: DriftRuleId): Severity {
@@ -382,6 +386,40 @@ function evalPatternImportsPattern(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
+/** DRIFT-META-EXAMPLES-DUPLICATE: meta.examples contains duplicate entries. */
+function evalMetaExamplesDuplicate(input: DriftRuleInput): DriftFinding | null {
+  const { file, locationTier, source } = input;
+  if (locationTier === null) return null;
+  if (source === undefined) return null;
+
+  const examplesMatch = source.match(/examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/);
+  if (!examplesMatch) return null;
+
+  const entryRe = /\{(?:[^{}]|\{[^}]*\})*\}/g;
+  let m: RegExpExecArray | null;
+  const entries: string[] = [];
+  while ((m = entryRe.exec(examplesMatch[1])) !== null) {
+    entries.push(m[0].replace(/\s+/g, " "));
+  }
+
+  const seen = new Set<string>();
+  let duplicateCount = 0;
+  for (const entry of entries) {
+    if (seen.has(entry)) {
+      duplicateCount++;
+    } else {
+      seen.add(entry);
+    }
+  }
+
+  if (duplicateCount === 0) return null;
+  return {
+    ruleId: "DRIFT-META-EXAMPLES-DUPLICATE",
+    file,
+    message: `${duplicateCount} duplicate meta.examples entr${duplicateCount === 1 ? "y" : "ies"}`,
+  };
+}
+
 /** Evaluate all registered drift rules against a single file's signals. */
 export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   const findings: DriftFinding[] = [];
@@ -405,5 +443,7 @@ export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   if (rawPrimitive) findings.push(rawPrimitive);
   const cvaVariantUnrendered = evalCvaVariantUnrendered(input);
   if (cvaVariantUnrendered) findings.push(cvaVariantUnrendered);
+  const metaExamplesDuplicate = evalMetaExamplesDuplicate(input);
+  if (metaExamplesDuplicate) findings.push(metaExamplesDuplicate);
   return findings;
 }

@@ -1766,5 +1766,111 @@ export const meta = { kind: "atom" as const, examples: [] };
       const result = await fixer(finding, dir);
       expect(result.fixed).toBe(false);
     });
+
+    it("does not append stubs for variant values already exercised by existing examples", async () => {
+      const source = `import { cva } from "class-variance-authority";
+const buttonVariants = cva("base", {
+  variants: {
+    variant: { default: "def", ghost: "gho", destructive: "des" },
+  },
+});
+export function Button() { return <button />; }
+export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "default", props: { variant: "default" } },
+    { name: "ghost", props: { variant: "ghost" } },
+    { name: "ghost", props: { variant: "ghost" } },
+  ],
+};
+`;
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(join(dir, "design-system/atoms/button.tsx"), source);
+
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-CVA-VARIANT-UNRENDERED",
+        file: "design-system/atoms/button.tsx",
+        message: "1 unexercised CVA variant value: variant=destructive",
+      };
+      const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+      const result = await fixAndApply(fixer, finding, dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/button.tsx"), "utf8");
+      expect(content).toContain('variant: "destructive"');
+      // Should NOT have added another ghost stub
+      const ghostMatches = content.match(/variant: "ghost"/g);
+      expect(ghostMatches).toHaveLength(2); // only the original 2, no new one
+    });
+  });
+
+  describe("fixMetaExamplesDuplicate", () => {
+    let dir: string;
+    beforeEach(async () => { dir = await freshTmpDir(); });
+    afterEach(async () => { await cleanup(dir); });
+
+    it("deduplicates repeated meta.examples entries", async () => {
+      const source = `import { cva } from "class-variance-authority";
+const v = cva("base", {
+  variants: {
+    invalid: { visible: "v", hidden: "h" },
+  },
+});
+export function Combobox() { return <div />; }
+export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "visible", props: { invalid: "visible" } },
+    { name: "visible", props: { invalid: "visible" } },
+    { name: "visible", props: { invalid: "visible" } },
+    { name: "hidden", props: { invalid: "hidden" } },
+  ],
+};
+`;
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(join(dir, "design-system/atoms/combobox.tsx"), source);
+
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-META-EXAMPLES-DUPLICATE",
+        file: "design-system/atoms/combobox.tsx",
+        message: "2 duplicate meta.examples entries",
+      };
+      const fixer = getFixer("DRIFT-META-EXAMPLES-DUPLICATE")!;
+      expect(fixer).toBeDefined();
+      const result = await fixAndApply(fixer, finding, dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/combobox.tsx"), "utf8");
+      const visibleMatches = content.match(/name: "visible"/g);
+      expect(visibleMatches).toHaveLength(1);
+      const hiddenMatches = content.match(/name: "hidden"/g);
+      expect(hiddenMatches).toHaveLength(1);
+      const openBraces = (content.match(/\{/g) || []).length;
+      const closeBraces = (content.match(/\}/g) || []).length;
+      expect(openBraces).toBe(closeBraces);
+    });
+
+    it("returns fixed=false when there are no duplicates", async () => {
+      const source = `export function Button() { return <button />; }
+export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "default", props: { variant: "default" } },
+    { name: "ghost", props: { variant: "ghost" } },
+  ],
+};
+`;
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(join(dir, "design-system/atoms/button.tsx"), source);
+
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-META-EXAMPLES-DUPLICATE",
+        file: "design-system/atoms/button.tsx",
+        message: "0 duplicate meta.examples entries",
+      };
+      const fixer = getFixer("DRIFT-META-EXAMPLES-DUPLICATE")!;
+      const result = await fixer(finding, dir);
+      expect(result.fixed).toBe(false);
+    });
   });
 });
