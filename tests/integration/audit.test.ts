@@ -90,7 +90,9 @@ describe("audit", () => {
   });
 
   it("does NOT flag user-authored composites as unexpected (open root)", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(join(dir, "design-system/atoms/button.tsx"), "export function Button() { return <button />; }");
     // Import from atoms/ so the classifier agrees with composites/ location (no drift).
     await writeFile(
       join(dir, "design-system/composites/data-table.tsx"),

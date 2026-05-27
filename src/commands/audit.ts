@@ -348,9 +348,12 @@ export async function auditCmd(opts: AuditOpts) {
       let source: string;
       try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
 
-      const integrityFindings = evaluateIntegrity(filePath, source);
-      if (integrityFindings.length > 0) {
-        allFindings.push(...integrityFindings);
+      const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases });
+      const blockingIntegrity = integrityFindings.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
+      const nonBlockingIntegrity = integrityFindings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
+      allFindings.push(...nonBlockingIntegrity);
+      if (blockingIntegrity.length > 0) {
+        allFindings.push(...blockingIntegrity);
         integrityFailedFiles.add(filePath);
         continue;
       }
