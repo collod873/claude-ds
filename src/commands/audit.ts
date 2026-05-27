@@ -11,7 +11,7 @@ import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import { ruleSeverity, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
 import { evaluateIntegrity, integrityRuleSeverity, type IntegrityRuleId, type IntegrityFinding } from "../lib/integrity-rules.js";
-import { detectDsAliases } from "../lib/ds-aliases.js";
+import { detectDsAliases, detectTsconfigPaths } from "../lib/ds-aliases.js";
 import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
 import { runFixPass } from "../lib/fix-pass.js";
 import { fixIntegrity, isIntegrityFixable } from "../lib/integrity-fixers.js";
@@ -334,6 +334,7 @@ export async function auditCmd(opts: AuditOpts) {
   if (dsAliases.length === 0) {
     dsAliases = await detectDsAliases(cwd, cfg?.srcRoot ?? "src");
   }
+  const tsconfigPaths = await detectTsconfigPaths(cwd, cfg?.srcRoot ?? "src");
   const driftTierDirs = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
   type AuditFinding = DriftFinding | IntegrityFinding;
   const allFindings: AuditFinding[] = [];
@@ -349,7 +350,7 @@ export async function auditCmd(opts: AuditOpts) {
       let source: string;
       try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
 
-      const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases });
+      const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases, tsconfigPaths });
       const blockingIntegrity = integrityFindings.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
       const nonBlockingIntegrity = integrityFindings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
       allFindings.push(...nonBlockingIntegrity);

@@ -17,6 +17,7 @@ export interface IntegrityFinding {
 export interface IntegrityContext {
   cwd: string;
   dsAliases: string[];
+  tsconfigPaths?: Record<string, string[]>;
 }
 
 const RULE_REGISTRY: Record<IntegrityRuleId, string> = {
@@ -119,20 +120,41 @@ async function resolveImportPath(
   if (importPath.startsWith("./") || importPath.startsWith("../")) {
     const fromDir = dirname(join(ctx.cwd, fromFileRel));
     candidate = join(fromDir, importPath);
-  } else if (importPath.startsWith("@/")) {
-    candidate = join(ctx.cwd, importPath.slice(2));
-  } else {
-    for (const alias of ctx.dsAliases) {
-      const prefix = alias + "/";
-      if (importPath.startsWith(prefix)) {
-        candidate = join(ctx.cwd, "design-system", importPath.slice(prefix.length));
-        return tryResolve(candidate);
-      }
-    }
-    return true; // bare module specifier — not our concern
+    return tryResolve(candidate);
   }
 
-  return tryResolve(candidate);
+  // Try tsconfig paths first (covers @/, @ds/, and any custom aliases)
+  if (ctx.tsconfigPaths) {
+    for (const [pattern, targets] of Object.entries(ctx.tsconfigPaths)) {
+      if (!pattern.endsWith("/*")) continue;
+      const prefix = pattern.slice(0, -1); // "@/*" → "@/"
+      if (!importPath.startsWith(prefix)) continue;
+      const rest = importPath.slice(prefix.length);
+      for (const target of targets) {
+        if (!target.endsWith("/*")) continue;
+        const dir = target.slice(0, -1); // "./src/*" → "./src/"
+        const resolved = join(ctx.cwd, dir, rest);
+        if (await tryResolve(resolved)) return true;
+      }
+    }
+  }
+
+  // DS alias fallback (when tsconfig paths not provided)
+  for (const alias of ctx.dsAliases) {
+    const prefix = alias + "/";
+    if (importPath.startsWith(prefix)) {
+      candidate = join(ctx.cwd, "design-system", importPath.slice(prefix.length));
+      return tryResolve(candidate);
+    }
+  }
+
+  // Hardcoded @/ fallback for projects without tsconfig paths
+  if (importPath.startsWith("@/")) {
+    candidate = join(ctx.cwd, importPath.slice(2));
+    return tryResolve(candidate);
+  }
+
+  return true; // bare module specifier — not our concern
 }
 
 async function tryResolve(candidate: string): Promise<boolean> {
