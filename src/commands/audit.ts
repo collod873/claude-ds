@@ -400,6 +400,7 @@ export async function auditCmd(opts: AuditOpts) {
 
     // Re-evaluate integrity on fixed files; exclude still-broken files from drift
     const stillBrokenFiles = new Set<string>();
+    const integrityFixedFiles = new Set<string>();
     if (integrityFixedCount > 0) {
       for (const r of integrityResults.filter(r => r.fixed)) {
         const filePath = r.finding.file;
@@ -407,13 +408,35 @@ export async function auditCmd(opts: AuditOpts) {
         try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
         const recheck = evaluateIntegrity(filePath, source);
         const blocking = recheck.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
-        if (blocking.length > 0) stillBrokenFiles.add(filePath);
+        if (blocking.length > 0) {
+          stillBrokenFiles.add(filePath);
+        } else {
+          integrityFixedFiles.add(filePath);
+        }
       }
     }
 
     for (const f of integrityToFix) {
       const wasFixed = integrityResults.find(r => r.finding === f)?.fixed;
       if (!wasFixed) stillBrokenFiles.add(f.file);
+    }
+
+    // Remove successfully-fixed integrity findings from activeFindings
+    const fixedIntegrityKeys = new Set(
+      integrityResults.filter(r => r.fixed).map(r => suppressedKey(r.finding.ruleId, r.finding.file)),
+    );
+    activeFindings = activeFindings.filter(f => !fixedIntegrityKeys.has(suppressedKey(f.ruleId, f.file)));
+
+    // Re-scan integrity-fixed files for drift — initial scan skipped them
+    for (const filePath of integrityFixedFiles) {
+      let source: string;
+      try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+      const { findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
+      for (const f of findings) {
+        if (!suppressedSet.has(suppressedKey(f.ruleId, f.file))) {
+          activeFindings.push(f);
+        }
+      }
     }
 
     // Phase 2: drift fixers — skip files that still fail integrity
