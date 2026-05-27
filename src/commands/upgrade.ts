@@ -106,7 +106,7 @@ export async function upgradeCmd(opts: {
   }
 }
 
-const DS_TIERS = ["atoms", "composites", "references"] as const;
+const DS_TIERS = ["atoms", "composites", "patterns"] as const;
 const IMPORT_SPECIFIER_RE = /from\s+["']([^"']+)["']/g;
 
 /**
