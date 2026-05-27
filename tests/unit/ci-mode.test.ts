@@ -6,6 +6,8 @@ import { join } from "node:path";
 vi.mock("../../src/lib/log.js", () => ({
   info: vi.fn(),
   err: vi.fn(),
+  printNextStep: vi.fn(),
+  detectBuildCommand: vi.fn().mockResolvedValue("npm run build"),
 }));
 
 import { auditCmd } from "../../src/commands/audit";
@@ -53,7 +55,7 @@ describe("non-TTY CI mode", () => {
     });
   }
 
-  it("auto-defers interactive findings to exceptions.json in non-TTY mode", async () => {
+  it("non-TTY mode picks safe default instead of deferring interactive findings", async () => {
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -78,19 +80,13 @@ describe("non-TTY CI mode", () => {
 
     await auditCmd({ fix: true, pack: "next-react", cwd: dir });
 
-    expect(exitSpy).toHaveBeenCalledWith(1);
-
-    const exceptionsRaw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
-    const exceptions = JSON.parse(exceptionsRaw);
-    expect(exceptions.exceptions.length).toBeGreaterThan(0);
-    const deferred = exceptions.exceptions.find(
-      (e: any) => e.rule === "DRIFT-RAW-PRIMITIVE",
-    );
-    expect(deferred).toBeDefined();
-    expect(deferred.reason).toBe("auto-deferred: no TTY");
+    // Raw primitive should be fixed (first option picked), not deferred
+    const toolbar = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
+    expect(toolbar).toContain("<Button");
+    expect(toolbar).not.toContain("<button");
   });
 
-  it("deferred exceptions have no issue link", async () => {
+  it("no auto-deferred exceptions when non-TTY prompt picks safe defaults", async () => {
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -115,13 +111,10 @@ describe("non-TTY CI mode", () => {
 
     await auditCmd({ fix: true, pack: "next-react", cwd: dir });
 
-    const exceptionsRaw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
-    const exceptions = JSON.parse(exceptionsRaw);
-    for (const ex of exceptions.exceptions) {
-      if (ex.reason === "auto-deferred: no TTY") {
-        expect(ex).not.toHaveProperty("issue");
-      }
-    }
+    // The raw primitive should be fixed, not deferred — no exceptions.json needed
+    const form = await readFile(join(dir, "design-system/composites/form.tsx"), "utf8");
+    expect(form).toContain("<Button");
+    expect(form).not.toContain("<button");
   });
 
   it("exits 0 when all findings are deterministic and fixed in non-TTY", async () => {
@@ -148,7 +141,7 @@ describe("non-TTY CI mode", () => {
     expect(exitSpy).not.toHaveBeenCalledWith(1);
   });
 
-  it("outputs summary distinguishing fixed vs deferred counts", async () => {
+  it("outputs fix summary with all-fixed counts when non-TTY picks defaults", async () => {
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -159,7 +152,6 @@ describe("non-TTY CI mode", () => {
         `export const meta = { kind: "atom" as const, examples: [] };`,
       ].join("\n") + "\n",
     );
-    // A composite with raw <button> triggers DRIFT-RAW-PRIMITIVE (interactive, will defer)
     await writeFile(
       join(dir, "design-system/composites/toolbar.tsx"),
       [
@@ -176,10 +168,9 @@ describe("non-TTY CI mode", () => {
     const summaryLine = calls.find(c => c.includes("fix summary:"));
     expect(summaryLine).toBeDefined();
     expect(summaryLine).toMatch(/\d+ fixed/);
-    expect(summaryLine).toMatch(/\d+ deferred/);
   });
 
-  it("exit code is 1 when deferred findings exist even if some were fixed", async () => {
+  it("fixes interactive findings in non-TTY mode instead of deferring them", async () => {
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -190,7 +181,6 @@ describe("non-TTY CI mode", () => {
         `export const meta = { kind: "atom" as const, examples: [] };`,
       ].join("\n") + "\n",
     );
-    // Composite: raw primitive will defer (interactive), meta fix is deterministic
     await writeFile(
       join(dir, "design-system/composites/toolbar.tsx"),
       [
@@ -203,6 +193,13 @@ describe("non-TTY CI mode", () => {
 
     await auditCmd({ fix: true, pack: "next-react", cwd: dir });
 
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    // Raw primitive should be fixed (not deferred)
+    const toolbar = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
+    expect(toolbar).toContain("<Button");
+    expect(toolbar).not.toContain("<button>");
+
+    // No auto-deferred exceptions for DRIFT-RAW-PRIMITIVE
+    const calls = vi.mocked(info).mock.calls.map(c => String(c[0]));
+    expect(calls.some(c => c.includes("auto-deferred"))).toBe(false);
   });
 });

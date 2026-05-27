@@ -18,7 +18,7 @@ export function diffFile(info: EntryInfo, d: DiffInput): FileVerdict {
 
   if (info.category === "managed") {
     if (d.upstream === d.current) return { action: "skip", reason: "in sync" };
-    if (d.prev !== null && d.prev !== d.current) return { action: "abort", reason: "managed file hand-edited; aborting this file" };
+    if (d.prev !== null && d.prev !== d.current) return { action: "rewrite", reason: "overwritten (had local edits — original in git history)" };
     return { action: "rewrite", reason: "upstream changed" };
   }
 

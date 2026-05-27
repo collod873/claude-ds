@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { info, err, confirm } from "../lib/log.js";
+import { info, err, printNextStep } from "../lib/log.js";
 import { detectLookalikes } from "../lib/lookalike.js";
 import { detectPackageManager, runCmd } from "../lib/package-manager.js";
 import { detectAppDir, detectClaudeMdCandidates, DEFAULT_CLAUDE_MD_TARGET } from "../lib/paths.js";
@@ -75,7 +75,7 @@ async function patchTsconfigForSrcApp(cwd: string): Promise<void> {
   info("patched tsconfig.json: added @/design-system/* path alias for src/app layout (#52)");
 }
 
-export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: string; cwd?: string }) {
+export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: string; dryRun?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
   if (await exists(join(cwd, ".claude-ds.json"))) { err(".claude-ds.json already exists — did you mean `claude-ds sync`?"); process.exit(2); }
 
@@ -152,23 +152,18 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     claudeMdTarget = DEFAULT_CLAUDE_MD_TARGET;
   } else if (candidates.length === 1) {
     claudeMdTarget = candidates[0];
-  } else if (opts.yes) {
+  } else {
     // Prefer .claude/ over root over docs (matches the "least intrusive" policy in #34).
     claudeMdTarget = candidates.find(c => c === ".claude/CLAUDE.md")
       ?? candidates.find(c => c === "CLAUDE.md")
       ?? candidates[0];
-  } else {
-    process.stdout.write(`\nMultiple CLAUDE.md files found — choose where the managed pointer block lives:\n`);
-    candidates.forEach((c, i) => process.stdout.write(`  ${i + 1}. ${c}\n`));
-    const { createInterface } = await import("node:readline/promises");
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const ans = (await rl.question(`Pick [1-${candidates.length}]: `)).trim();
-    rl.close();
-    const idx = Number.parseInt(ans, 10) - 1;
-    claudeMdTarget = (idx >= 0 && idx < candidates.length) ? candidates[idx] : candidates[0];
   }
 
-  if (!opts.yes && !(await confirm(`Adopt claude-ds (pack=${pack}, WARN mode) here?`))) { info("aborted"); return; }
+  if (opts.dryRun) {
+    info(`[dry-run] would adopt pack=${pack}, mode=warn, app_dir=${appDir}, claude_md_target=${claudeMdTarget}`);
+    info("[dry-run] no files modified");
+    return;
+  }
 
   // Run user's pre-existing build-manifest.ts (if any) BEFORE pack files overwrite it.
   // This allows a failing script to be detected as non-fatal before the pack's version lands.
@@ -337,4 +332,5 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   info(`adopted claude-ds (${pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);
   info(`CI scripts installed. Run: ${runCmd(pm, "ci:hook-contract")} and ${runCmd(pm, "ci:consistency")}`);
   info(`A starter GitHub Actions workflow was seeded at .github/workflows/claude-ds-governance.yml (delete if not on GH Actions). See docs/ci-wiring.md for details.`);
+  printNextStep("adopt", {});
 }

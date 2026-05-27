@@ -164,6 +164,44 @@ describe("Issue #15 — sync chmod +x on hooks and scripts", () => {
   });
 });
 
+describe("#192 — sync runs without confirmation prompt", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("sync completes without stdin input (no confirmation gate)", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }));
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("sync complete");
+    expect(r.stdout).not.toContain("aborted");
+  });
+
+  it("sync --dry-run renders preview without applying changes", async () => {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }));
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("create:");
+    expect(r.stdout).not.toContain("sync complete");
+    // Files should NOT exist on disk
+    await expect(stat(join(dir, ".claude/hooks/atom-imports.sh"))).rejects.toThrow();
+  });
+
+  it("sync overwrites hand-edited managed files instead of aborting", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+    await writeFile(join(dir, ".claude/hooks/atom-imports.sh"), "# hand-edited\n", "utf8");
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Must NOT abort on the hand-edited file
+    expect(r.stdout).not.toMatch(/abort.*atom-imports/);
+    // File should be rewritten with pack content
+    expect(r.stdout).toMatch(/rewrite:.*atom-imports\.sh/);
+    const content = await readFile(join(dir, ".claude/hooks/atom-imports.sh"), "utf8");
+    expect(content).not.toBe("# hand-edited\n");
+  }, 30_000);
+});
+
 describe("Issue #18c — sync preview create: vs rewrite: labels", () => {
   let dir: string;
   beforeEach(async () => { dir = await freshTmpDir(); });

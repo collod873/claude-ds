@@ -119,6 +119,10 @@ describe("drift-fixers", () => {
     it("returns false for DRIFT-MISCLASSIFIED-COMPOSITE (deterministic fixer)", () => {
       expect(isInteractive("DRIFT-MISCLASSIFIED-COMPOSITE")).toBe(false);
     });
+
+    it("returns false for DRIFT-RAW-PRIMITIVE (automated safe default)", () => {
+      expect(isInteractive("DRIFT-RAW-PRIMITIVE" as DriftRuleId)).toBe(false);
+    });
   });
 
   describe("getFixerPriority", () => {
@@ -147,16 +151,90 @@ describe("drift-fixers", () => {
   });
 
   describe("makeNoTtyPrompt", () => {
-    it("always returns 'defer'", async () => {
+    it("always picks the first option (safe default)", async () => {
       const prompt = makeNoTtyPrompt();
-      const result = await prompt("Which variant?", ["default", "ghost", "outline"]);
-      expect(result).toBe("defer");
+      const result = await prompt("Which variant?", [
+        { label: "default", description: "Default variant" },
+        { label: "ghost", description: "Ghost variant" },
+        { label: "outline", description: "Outline variant" },
+      ]);
+      expect(result).toBe(0);
     });
 
-    it("returns 'defer' regardless of question or options", async () => {
+    it("returns 0 regardless of question or options", async () => {
       const prompt = makeNoTtyPrompt();
-      expect(await prompt("Pick one", ["a"])).toBe("defer");
-      expect(await prompt("Another?", ["x", "y", "z"])).toBe("defer");
+      expect(await prompt("Pick one", [{ label: "a", description: "Option A" }])).toBe(0);
+      expect(await prompt("Another?", [
+        { label: "x", description: "Option X" },
+        { label: "y", description: "Option Y" },
+        { label: "z", description: "Option Z" },
+      ])).toBe(0);
+    });
+  });
+
+  describe("structured prompt options", () => {
+    it("prompt receives options with label and description fields (equidistant tokens)", async () => {
+      const dir = await freshTmpDir();
+      try {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+
+        const tokensJson = { spacing: { 2: "8", 4: "16" } };
+        await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify(tokensJson));
+
+        const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+        await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+        const received: Array<Array<{ label: string; description: string }>> = [];
+        const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
+          received.push(opts);
+          for (const opt of opts) {
+            expect(opt).toHaveProperty("label");
+            expect(opt).toHaveProperty("description");
+            expect(typeof opt.label).toBe("string");
+            expect(typeof opt.description).toBe("string");
+          }
+          return 0 as number | "defer";
+        };
+
+        const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+        const finding: DriftFinding = {
+          ruleId: "DRIFT-INLINE-STATIC-STYLE",
+          file: "design-system/atoms/card.tsx",
+          message: "inline static style",
+        };
+        await fixer(finding, dir, { prompt: mockPrompt });
+
+        expect(received.length).toBeGreaterThan(0);
+      } finally {
+        await cleanup(dir);
+      }
+    });
+
+    it("non-TTY prompt picks safe default (first option) for ambiguous token match", async () => {
+      const dir = await freshTmpDir();
+      try {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+
+        const tokensJson = { color: { primary: "#ff0000", danger: "#ff0000" } };
+        await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify(tokensJson));
+
+        const source = `export function Alert() {\n  return <div style={{ color: "#ff0000" }}>warn</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+        await writeFile(join(dir, "design-system/atoms/alert.tsx"), source);
+
+        const prompt = makeNoTtyPrompt();
+        const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+        const finding: DriftFinding = {
+          ruleId: "DRIFT-INLINE-STATIC-STYLE",
+          file: "design-system/atoms/alert.tsx",
+          message: "inline static style",
+        };
+        const result = await fixer(finding, dir, { prompt });
+
+        expect(result.fixed).toBe(true);
+        expect(result.changes.length).toBeGreaterThan(0);
+      } finally {
+        await cleanup(dir);
+      }
     });
   });
 
@@ -531,7 +609,7 @@ describe("drift-fixers", () => {
       expect(content).not.toContain("style=");
     });
 
-    it("prompts on ambiguous matches (multiple token candidates)", async () => {
+    it("auto-selects first token when multiple exact matches (no prompt)", async () => {
       const ambiguousTokens = {
         color: { background: "#ffffff", surface: "#ffffff" },
       };
@@ -539,35 +617,95 @@ describe("drift-fixers", () => {
       const source = `export function Card() {\n  return <div style={{ color: "#ffffff" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
       await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-      const choices: string[][] = [];
-      const mockPrompt = async (_q: string, opts: string[]) => {
-        choices.push(opts);
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer, makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain("color-background");
+      expect(content).not.toContain("style=");
+    });
+
+    it("picks nearest token by numeric distance when no exact match", async () => {
+      const spacingTokens = {
+        spacing: { 1: "4", 2: "8", 4: "16", 8: "32" },
+      };
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 15 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer, makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
+      expect(content).toContain("spacing-4");
+      expect(content).not.toContain("style=");
+    });
+
+    it("skips value when no token within 2x threshold", async () => {
+      const spacingTokens = {
+        spacing: { 10: "100", 20: "200" },
+      };
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 2 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer, makeFinding(), dir);
+
+      expect(result.fixed).toBe(false);
+    });
+
+    it("prompts only when two tokens are equidistant from the value", async () => {
+      const spacingTokens = {
+        spacing: { 2: "8", 4: "16" },
+      };
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      let prompted = false;
+      const mockPrompt = async (_q: string, _opts: Array<{ label: string; description: string }>) => {
+        prompted = true;
         return 0 as number | "defer";
       };
       const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
-      const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding(), dir, { prompt: mockPrompt });
 
+      expect(prompted).toBe(true);
       expect(result.fixed).toBe(true);
-      expect(choices.length).toBeGreaterThan(0);
-      expect(choices[0]).toContain("color-background");
-      expect(choices[0]).toContain("color-surface");
     });
 
-    it("defers ambiguous match when prompt returns defer", async () => {
-      const ambiguousTokens = {
-        color: { background: "#ffffff", surface: "#ffffff" },
+    it("defers equidistant match when prompt returns defer", async () => {
+      const spacingTokens = {
+        spacing: { 2: "8", 4: "16" },
       };
-      await setupTokens(ambiguousTokens);
-      const source = `export function Card() {\n  return <div style={{ color: "#ffffff" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
       await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
       const mockPrompt = async () => "defer" as number | "defer";
       const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
-      const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding(), dir, { prompt: mockPrompt });
 
       expect(result.fixed).toBe(false);
+    });
+
+    it("nearest-token picks lower token when value is closer to it", async () => {
+      const spacingTokens = {
+        spacing: { 2: "8", 4: "16" },
+      };
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 10 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer, makeFinding(), dir);
+
+      expect(result.fixed).toBe(true);
       const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
-      expect(content).toBe(source);
+      expect(content).toContain("spacing-2");
     });
 
     it("never touches dynamic expressions", async () => {
@@ -738,8 +876,8 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/user-badge.tsx"), dsSource);
 
-      const promptOptions: string[][] = [];
-      const mockPrompt = async (_q: string, opts: string[]) => {
+      const promptOptions: Array<Array<{ label: string; description: string }>> = [];
+      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
         promptOptions.push(opts);
         return 0 as number | "defer";
       };
@@ -747,12 +885,12 @@ describe("drift-fixers", () => {
       await fixAndApply(fixer,makeFinding("design-system/composites/user-badge.tsx"), dir, { prompt: mockPrompt });
 
       expect(promptOptions.length).toBeGreaterThan(0);
-      const options = promptOptions[0];
-      expect(options.some(o => o.toLowerCase().includes("extract"))).toBe(false);
-      expect(options.some(o => o.toLowerCase().includes("prop"))).toBe(true);
+      const labels = promptOptions[0].map(o => o.label.toLowerCase());
+      expect(labels.some(l => l.includes("extract"))).toBe(false);
+      expect(labels.some(l => l.includes("prop"))).toBe(true);
     });
 
-    it("offers convert-to-prop only for pure functions with ≤2 params", async () => {
+    it("auto-extracts 3+ param functions without offering prop injection", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await mkdir(join(dir, "lib/utils"), { recursive: true });
 
@@ -766,21 +904,18 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
 
-      const promptOptions: string[][] = [];
-      const mockPrompt = async (_q: string, opts: string[]) => {
-        promptOptions.push(opts);
-        return 0 as number | "defer";
-      };
+      let prompted = false;
+      const mockPrompt = async () => { prompted = true; return 0 as number | "defer"; };
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      await fixAndApply(fixer,makeFinding("design-system/composites/widget.tsx"), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding("design-system/composites/widget.tsx"), dir, { prompt: mockPrompt });
 
-      expect(promptOptions.length).toBeGreaterThan(0);
-      const options = promptOptions[0];
-      expect(options.some(o => o.toLowerCase().includes("extract"))).toBe(true);
-      expect(options.some(o => o.toLowerCase().includes("prop"))).toBe(false);
+      expect(prompted).toBe(false);
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/composites/widget.tsx"), "utf8");
+      expect(content).toContain("@/design-system/utils/complex");
     });
 
-    it("offers convert-to-prop for simple constants", async () => {
+    it("auto-extracts constants without offering prop injection", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await mkdir(join(dir, "lib/config"), { recursive: true });
 
@@ -794,18 +929,15 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
 
-      const promptOptions: string[][] = [];
-      const mockPrompt = async (_q: string, opts: string[]) => {
-        promptOptions.push(opts);
-        return 0 as number | "defer";
-      };
+      let prompted = false;
+      const mockPrompt = async () => { prompted = true; return 0 as number | "defer"; };
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      await fixAndApply(fixer,makeFinding("design-system/composites/badge.tsx"), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding("design-system/composites/badge.tsx"), dir, { prompt: mockPrompt });
 
-      expect(promptOptions.length).toBeGreaterThan(0);
-      const options = promptOptions[0];
-      expect(options.some(o => o.toLowerCase().includes("extract"))).toBe(true);
-      expect(options.some(o => o.toLowerCase().includes("prop"))).toBe(true);
+      expect(prompted).toBe(false);
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/composites/badge.tsx"), "utf8");
+      expect(content).toContain("@/design-system/utils/theme");
     });
 
     it("converts to prop injection — removes import and adds prop", async () => {
@@ -824,8 +956,8 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
-      const mockPrompt = async (_q: string, opts: string[]) => {
-        return opts.findIndex(o => o.toLowerCase().includes("prop")) as number | "defer";
+      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
+        return opts.findIndex(o => o.label.toLowerCase().includes("prop")) as number | "defer";
       };
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
       const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
@@ -914,6 +1046,88 @@ describe("drift-fixers", () => {
       const dsContent = await readFile(join(dir, "design-system/composites/event-card.tsx"), "utf8");
       expect(dsContent).toContain("@/design-system/utils/format");
       expect(dsContent).not.toContain("@/lib/utils/format");
+    });
+
+    it("auto-extracts constants without prompting", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/config"), { recursive: true });
+
+      await writeFile(join(dir, "lib/config/theme.ts"),
+        `export const PRIMARY_COLOR = "#0070f3";\n`);
+
+      const dsSource = [
+        `import { PRIMARY_COLOR } from "../../lib/config/theme";`,
+        `export function Badge() { return <span style={{ color: PRIMARY_COLOR }}>badge</span>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
+
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      // No prompt callback — should auto-extract without one
+      const result = await fixAndApply(fixer, makeFinding("design-system/composites/badge.tsx"), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/composites/badge.tsx"), "utf8");
+      expect(content).toContain("@/design-system/utils/theme");
+      expect(content).not.toContain("lib/config/theme");
+    });
+
+    it("auto-extracts 3+ param functions without prompting", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/utils"), { recursive: true });
+
+      await writeFile(join(dir, "lib/utils/complex.ts"),
+        `export function complexFn(a: string, b: number, c: boolean): string { return a + b + c; }\n`);
+
+      const dsSource = [
+        `import { complexFn } from "../../lib/utils/complex";`,
+        `export function Widget() { return <div>{complexFn("a", 1, true)}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
+
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      const result = await fixAndApply(fixer, makeFinding("design-system/composites/widget.tsx"), dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/composites/widget.tsx"), "utf8");
+      expect(content).toContain("@/design-system/utils/complex");
+    });
+
+    it("prompts with simple-question when circular dependency prevents extraction", async () => {
+      await mkdir(join(dir, "design-system/composites"), { recursive: true });
+      await mkdir(join(dir, "lib/api"), { recursive: true });
+      await mkdir(join(dir, "features/auth"), { recursive: true });
+
+      await writeFile(join(dir, "features/auth/session.ts"),
+        `export function getSession() { return { user: "test" }; }\n`);
+
+      await writeFile(join(dir, "lib/api/client.ts"),
+        `import { getSession } from "../../features/auth/session";\nexport function apiClient() { return getSession(); }\n`);
+
+      const dsSource = [
+        `import { apiClient } from "../../lib/api/client";`,
+        `export function UserBadge() { return <div>{apiClient()}</div>; }`,
+        `export const meta = { kind: "composite" as const, examples: [] };`,
+      ].join("\n") + "\n";
+      await writeFile(join(dir, "design-system/composites/user-badge.tsx"), dsSource);
+
+      let prompted = false;
+      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
+        prompted = true;
+        const labels = opts.map(o => o.label.toLowerCase());
+        expect(labels.some(l => l.includes("extract"))).toBe(false);
+        expect(labels.some(l => l.includes("prop"))).toBe(true);
+        return opts.findIndex(o => o.label.toLowerCase().includes("prop")) as number | "defer";
+      };
+      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+      await fixAndApply(fixer, makeFinding("design-system/composites/user-badge.tsx"), dir, { prompt: mockPrompt });
+
+      expect(prompted).toBe(true);
+    });
+
+    it("registry marks DRIFT-DS-IMPORTS-FEATURE as non-interactive", () => {
+      expect(isInteractive("DRIFT-DS-IMPORTS-FEATURE" as DriftRuleId)).toBe(false);
     });
   });
 
@@ -1021,9 +1235,8 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
-        const mockPrompt = async () => 0 as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+        await fixAndApply(fixer,makeFinding(), dir);
 
         const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
         expect(content).toMatch(/import\s+\{\s*Button\s*\}\s+from\s+/);
@@ -1056,12 +1269,10 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/search-form.tsx"), compositeSource);
 
-        const mockPrompt = async () => 0 as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
         const result = await fixAndApply(fixer,
           makeFinding("design-system/composites/search-form.tsx"),
           dir,
-          { prompt: mockPrompt },
         );
 
         expect(result.fixed).toBe(true);
@@ -1074,7 +1285,7 @@ describe("drift-fixers", () => {
         expect(content).toContain("@/design-system/atoms/input");
       });
 
-      it("defers when prompt returns defer for ambiguous variant", async () => {
+      it("auto-replaces ambiguous variants with base atom (no variant prop)", async () => {
         await mkdir(join(dir, "design-system/atoms"), { recursive: true });
         await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -1094,11 +1305,13 @@ describe("drift-fixers", () => {
           `export const meta = { kind: "composite" as const, examples: [] };`,
         ].join("\n") + "\n");
 
-        const mockPrompt = async () => "defer" as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+        const result = await fixAndApply(fixer,makeFinding(), dir);
 
-        expect(result.fixed).toBe(false);
+        expect(result.fixed).toBe(true);
+        const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
+        expect(content).toContain("<Button");
+        expect(content).not.toContain("<button");
       });
 
       it("preserves non-className attributes on raw elements", async () => {
@@ -1117,9 +1330,8 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
-        const mockPrompt = async () => 0 as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+        await fixAndApply(fixer,makeFinding(), dir);
 
         const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
         expect(content).toContain("onClick={handleClick}");
@@ -1326,7 +1538,7 @@ describe("drift-fixers", () => {
       expect(result.fixed).toBe(false);
     });
 
-    it("requires interactive prompt", async () => {
+    it("skips with remediation message when no atom file exists", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await writeFile(join(dir, "design-system/composites/toolbar.tsx"), [
         `export function Toolbar() { return <div><button>X</button></div>; }`,
@@ -1336,6 +1548,8 @@ describe("drift-fixers", () => {
       const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
       const result = await fixAndApply(fixer,makeFinding(), dir);
       expect(result.fixed).toBe(false);
+      expect(result.message).toContain("no base atom mapping");
+      expect(result.message).toContain("design-system/atoms/");
     });
   });
 
@@ -1474,7 +1688,7 @@ describe("drift-fixers", () => {
         expect(promptCalls).toHaveLength(0);
       });
 
-      it("prompts when className matches 2+ variant keywords", async () => {
+      it("auto-applies default (no variant) when className matches 2+ variant keywords", async () => {
         await mkdir(join(dir, "design-system/atoms"), { recursive: true });
         await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -1503,25 +1717,19 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/actions.tsx"), compositeSource);
 
-        const promptCalls: string[] = [];
-        const mockPrompt = async (q: string) => {
-          promptCalls.push(q);
-          return 0 as number | "defer";
-        };
-
         const finding: DriftFinding = {
           ruleId: "DRIFT-RAW-PRIMITIVE",
           file: "design-system/composites/actions.tsx",
           message: "raw <button>",
         };
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+        const result = await fixAndApply(fixer, finding, dir, {});
 
-        // Should have prompted due to ambiguity
-        expect(promptCalls.length).toBeGreaterThan(0);
-        // Gap 3: prompt includes code context (file reference and surrounding code)
-        expect(promptCalls[0]).toContain("actions.tsx");
-        expect(promptCalls[0]).toContain("className");
+        expect(result.fixed).toBe(true);
+        const content = await readFile(join(dir, "design-system/composites/actions.tsx"), "utf8");
+        expect(content).toContain("<Button");
+        expect(content).not.toContain("<button");
+        expect(content).toContain("@/design-system/atoms/button");
       });
     });
 

@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { info, err, confirm } from "../lib/log.js";
+import { info, err, printNextStep } from "../lib/log.js";
 
 const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
@@ -14,7 +14,7 @@ import { detectFormatter, runFormatter } from "../lib/formatter.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 
-export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean }) {
+export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean }) {
   const cwd = opts.cwd ?? process.cwd();
   try { await stat(join(cwd, ".claude-ds.json")); } catch { err(".claude-ds.json absent"); process.exit(2); }
 
@@ -71,7 +71,10 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
     }
   }
 
-  if (!opts.yes && !(await confirm("Apply the above?"))) { info("aborted"); return; }
+  if (opts.dryRun) {
+    info("[dry-run] planned changes shown above — no files modified");
+    return;
+  }
 
   // Apply via the Runner. Plan is cached so this does not re-run diffFile.
   const report = await run(ctx, [op], "apply");
@@ -120,4 +123,5 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
   }
 
   info(`sync complete → ${target}`);
+  printNextStep("sync", {});
 }

@@ -1,9 +1,12 @@
 import { allRuleIds, type DriftRuleId } from "./drift-rules.js";
+import { allIntegrityRuleIds, type IntegrityRuleId } from "./integrity-rules.js";
+
+export type AuditRuleId = DriftRuleId | IntegrityRuleId;
 
 export class ExceptionError extends Error {}
 
 export interface Exception {
-  rule: DriftRuleId;
+  rule: AuditRuleId;
   path: string;
   issue?: string;      // URL or "#N" — required by lint, optional at parse time
   reason?: string;     // human-readable note
@@ -11,7 +14,7 @@ export interface Exception {
 }
 
 export interface ExceptionLint {
-  rule: DriftRuleId;
+  rule: AuditRuleId;
   path: string;
   issue: string | undefined;
   warning: string;
@@ -27,7 +30,7 @@ export function parseExceptions(raw: string): Exception[] {
   if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.exceptions))
     throw new ExceptionError('exceptions.json must have an "exceptions" array');
 
-  const validIds = new Set<string>(allRuleIds());
+  const validIds = new Set<string>([...allRuleIds(), ...allIntegrityRuleIds()]);
   const arr: unknown[] = parsed.exceptions;
   const result: Exception[] = [];
 
@@ -39,13 +42,13 @@ export function parseExceptions(raw: string): Exception[] {
 
     if (!validIds.has(entry.rule))
       throw new ExceptionError(
-        `unknown rule ID "${entry.rule}" in exceptions.json — registered IDs: ${allRuleIds().join(", ")}`
+        `unknown rule ID "${entry.rule}" in exceptions.json — registered IDs: ${[...allRuleIds(), ...allIntegrityRuleIds()].join(", ")}`
       );
 
     if (typeof entry.path !== "string")
       throw new ExceptionError(`malformed exception entry (missing path): ${JSON.stringify(e)}`);
 
-    const exception: Exception = { rule: entry.rule as DriftRuleId, path: entry.path };
+    const exception: Exception = { rule: entry.rule as AuditRuleId, path: entry.path };
     if (typeof entry.issue === "string") exception.issue = entry.issue;
     if (typeof entry.reason === "string") exception.reason = entry.reason;
     if (entry.permanent === true) exception.permanent = true;

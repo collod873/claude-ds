@@ -16,7 +16,12 @@ export interface FixResult {
   changes: Change[];
 }
 
-export type FixerPrompt = (question: string, options: string[]) => Promise<number | "defer">;
+export interface PromptOption {
+  label: string;
+  description: string;
+}
+
+export type FixerPrompt = (question: string, options: PromptOption[]) => Promise<number | "defer">;
 
 export type DriftFixer = (finding: DriftFinding, cwd: string, opts?: FixerOpts) => Promise<FixResult>;
 
@@ -38,9 +43,9 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-MISPLACED": { fixer: fixMisplaced, interactive: false, priority: 1 },
   "DRIFT-MISCLASSIFIED-ATOM": { fixer: fixMisclassified, interactive: false, priority: 3 },
   "DRIFT-MISCLASSIFIED-COMPOSITE": { fixer: fixMisclassified, interactive: false, priority: 3 },
-  "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: true, priority: 2 },
-  "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: true, priority: 2 },
-  "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: true, priority: 0 },
+  "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: false, priority: 2 },
+  "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: false, priority: 2 },
+  "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: false, priority: 0 },
   "DRIFT-CVA-VARIANT-UNRENDERED": { fixer: fixCvaVariantUnrendered, interactive: false, priority: 3 },
   "DRIFT-META-EXAMPLES-DUPLICATE": { fixer: fixMetaExamplesDuplicate, interactive: false, priority: 4 },
   "DRIFT-META-EXAMPLES-CORRUPT": { fixer: fixMetaExamplesCorrupt, interactive: false, priority: 5 },
@@ -64,18 +69,18 @@ export function getFixerPriority(ruleId: DriftRuleId): number {
 }
 
 export function makeNoTtyPrompt(): FixerPrompt {
-  return async () => "defer";
+  return async () => 0;
 }
 
 export function makeTtyPrompt(): FixerPrompt {
-  return async (question: string, options: string[]): Promise<number | "defer"> => {
+  return async (question: string, options: PromptOption[]): Promise<number | "defer"> => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     try {
       const maxOptions = 5;
       const displayOptions = options.length > maxOptions
-        ? [...options.slice(0, maxOptions - 1), `... and ${options.length - maxOptions + 1} more (defer to review)`]
+        ? [...options.slice(0, maxOptions - 1), { label: `... and ${options.length - maxOptions + 1} more`, description: "defer to review" }]
         : options;
-      const lines = displayOptions.map((opt, i) => `  \x1b[36m[${i + 1}]\x1b[0m ${opt}`).join("\n");
+      const lines = displayOptions.map((opt, i) => `  \x1b[36m[${i + 1}]\x1b[0m ${opt.label} — ${opt.description}`).join("\n");
       const display = `\n\x1b[1m${question}\x1b[0m\n${lines}\n  \x1b[90m[s] Skip/defer\x1b[0m\n\x1b[36m>\x1b[0m `;
       const answer = await new Promise<string>(resolve => {
         rl.question(display, resolve);
@@ -435,6 +440,56 @@ function lookupToken(
   });
 }
 
+function extractNumeric(value: string): number | null {
+  const m = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*(?:px|rem|em|%)?$/);
+  return m ? parseFloat(m[1]) : null;
+}
+
+interface NearestTokenResult {
+  token: TokenEntry;
+  distance: number;
+  equidistantPeer: TokenEntry | null;
+}
+
+function findNearestNumericToken(
+  entries: TokenEntry[],
+  cssProp: string,
+  rawValue: string,
+): NearestTokenResult | null {
+  const sourceNum = extractNumeric(rawValue);
+  if (sourceNum === null) return null;
+
+  const group = CSS_PROP_TOKEN_GROUP[cssProp];
+  const candidates = entries.filter(e => {
+    if (group && e.group !== group) return false;
+    return extractNumeric(e.value) !== null;
+  });
+
+  if (candidates.length === 0) return null;
+
+  let best: TokenEntry | null = null;
+  let bestDist = Infinity;
+  let equidistant: TokenEntry | null = null;
+
+  for (const c of candidates) {
+    const d = Math.abs(extractNumeric(c.value)! - sourceNum);
+    if (d < bestDist) {
+      best = c;
+      bestDist = d;
+      equidistant = null;
+    } else if (d === bestDist && best !== null) {
+      equidistant = c;
+    }
+  }
+
+  if (!best) return null;
+
+  const threshold = Math.abs(sourceNum) * 2;
+  if (bestDist > threshold) return null;
+
+  return { token: best, distance: bestDist, equidistantPeer: equidistant };
+}
+
 const STYLE_PROP_RE = /([a-zA-Z_$][\w$]*)\s*:\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`[^`$]*`|-?\d+(?:\.\d+)?|true|false|null|undefined)/g;
 
 interface StyleProp {
@@ -524,19 +579,31 @@ async function fixInlineStaticStyle(finding: DriftFinding, cwd: string, opts?: F
       const matches = lookupToken(tokenEntries, prop.name, prop.normalizedValue);
       if (matches.length === 1) {
         resolved.push({ prop, className: matches[0].className });
-      } else if (matches.length > 1 && opts?.prompt) {
-        const options = matches.map(m => m.className);
-        const choice = await opts.prompt(
-          `${finding.file}: ambiguous token for ${prop.name}: ${prop.normalizedValue}`,
-          options,
-        );
-        if (choice === "defer") {
+      } else if (matches.length > 1) {
+        resolved.push({ prop, className: matches[0].className });
+      } else {
+        const nearest = findNearestNumericToken(tokenEntries, prop.name, prop.normalizedValue);
+        if (!nearest) {
+          unresolved.push(prop);
+        } else if (nearest.equidistantPeer && opts?.prompt) {
+          const options = [
+            { label: nearest.token.className, description: `Use token class "${nearest.token.className}" (value: ${nearest.token.value})` },
+            { label: nearest.equidistantPeer.className, description: `Use token class "${nearest.equidistantPeer.className}" (value: ${nearest.equidistantPeer.value})` },
+          ];
+          const choice = await opts.prompt(
+            `${finding.file}: "${prop.name}: ${prop.normalizedValue}" is equidistant from two tokens`,
+            options,
+          );
+          if (choice === "defer") {
+            unresolved.push(prop);
+          } else {
+            resolved.push({ prop, className: options[choice].label });
+          }
+        } else if (nearest.equidistantPeer) {
           unresolved.push(prop);
         } else {
-          resolved.push({ prop, className: matches[choice].className });
+          resolved.push({ prop, className: nearest.token.className });
         }
-      } else {
-        unresolved.push(prop);
       }
     }
 
@@ -819,27 +886,24 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
         (symbolInfo.isFunction && symbolInfo.paramCount <= 2)
       );
 
-      const options: string[] = [];
-      if (canExtract) options.push(`Extract "${symbolName}" to design-system/utils/`);
-      if (canConvertToProp) options.push(`Convert "${symbolName}" to prop injection`);
-      options.push("Defer (add exception)");
-
-      if (options.length === 1) {
-        continue;
-      }
-
-      // Auto-extract: pure function ≤2 params with no domain deps → deterministic
-      const autoExtract = canExtract && symbolInfo && symbolInfo.isFunction && symbolInfo.paramCount <= 2 && !hasDomainDeps;
       let selectedOption: string;
-      if (autoExtract) {
-        selectedOption = options[0];
-      } else if (opts?.prompt) {
+      if (canExtract) {
+        selectedOption = `Extract "${symbolName}" to design-system/utils/`;
+      } else if (canConvertToProp || opts?.prompt) {
+        const options: PromptOption[] = [];
+        if (canConvertToProp) options.push({ label: `Convert "${symbolName}" to prop injection`, description: "Pass this value as a prop instead of importing it" });
+        options.push({ label: "Defer (add exception)", description: "Skip for now and add an exception entry" });
+
+        if (options.length === 1 || !opts?.prompt) {
+          continue;
+        }
+
         const choice = await opts.prompt(
-          `${finding.file}: "${symbolName}" imported from domain root`,
+          `"${symbolName}" comes from a domain module that can't be moved to design-system (it has its own domain dependencies). What should we do?`,
           options,
         );
         if (choice === "defer") continue;
-        selectedOption = options[choice];
+        selectedOption = options[choice].label;
       } else {
         continue;
       }
@@ -1571,12 +1635,20 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
   const rawElements = findRawElements(currentSource);
   const uniqueElements = [...new Set(rawElements.map(m => m.element))];
 
+  const skippedElements: string[] = [];
+
   for (const element of uniqueElements) {
     const atomFileName = ELEMENT_TO_ATOM[element];
-    if (!atomFileName) continue;
+    if (!atomFileName) {
+      skippedElements.push(element);
+      continue;
+    }
 
     const atomPath = await atomFileExists(cwd, atomFileName);
-    if (!atomPath) continue;
+    if (!atomPath) {
+      skippedElements.push(element);
+      continue;
+    }
 
     const atomComponent = capitalize(element);
     let atomSource: string;
@@ -1626,34 +1698,15 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
       anyFixed = true;
     }
 
-    // Prompt only for genuinely ambiguous instances
-    if (ambiguousInstances.length > 0 && opts?.prompt) {
-      // Re-find after auto-rewrites shifted indices
+    // Ambiguous instances: safe default is base atom with no variant prop
+    if (ambiguousInstances.length > 0) {
       const remaining = findRawElements(currentSource).filter(m => m.element === element);
-      const remainingRewrites: InstanceRewrite[] = [];
-
-      for (const inst of remaining) {
-        const lineNum = currentSource.slice(0, inst.index).split("\n").length;
-        const lines = currentSource.split("\n");
-        const start = Math.max(0, lineNum - 2);
-        const end = Math.min(lines.length, lineNum + 1);
-        const snippet = lines.slice(start, end)
-          .map((l, idx) => `  ${start + idx + 1}| ${l}`)
-          .join("\n");
-        const context = `${finding.file}:${lineNum}\n${snippet}`;
-
-        const options = [...buildVariantOptions(cvaVariants), "Use default (no variant prop)", "Skip"];
-        const choice = await opts.prompt(
-          `${context}\nraw <${element}> — replace with <${atomComponent}>?`,
-          options,
-        );
-        if (choice === "defer") continue;
-        const selected = options[choice];
-        if (selected === "Skip") continue;
-
-        const variantProp = selected === "Use default (no variant prop)" ? null : selected;
-        remainingRewrites.push({ element, atomComponent, variantProp, index: inst.index });
-      }
+      const remainingRewrites: InstanceRewrite[] = remaining.map(inst => ({
+        element,
+        atomComponent,
+        variantProp: null,
+        index: inst.index,
+      }));
 
       if (remainingRewrites.length > 0) {
         currentSource = rewriteInstances(currentSource, remainingRewrites);
@@ -1672,17 +1725,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     const atomFileKebab = toKebab(atomName);
     const existingAtom = await atomFileExists(cwd, atomFileKebab);
 
-    if (existingAtom) {
-      // Collision — prompt only if available
-      if (!opts?.prompt) continue;
-      const collisionOptions = ["Skip"];
-      const choice = await opts.prompt(
-        `${finding.file}: derived atom name "${atomName}" collides with existing atom — skip extraction?`,
-        collisionOptions,
-      );
-      if (choice === "defer" || choice === 0) continue;
-      continue;
-    }
+    if (existingAtom) continue;
 
     // Auto-accept derived name (no prompt needed)
     let finalAtomName = atomName;
@@ -1739,7 +1782,11 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
   }
 
   if (!anyFixed) {
-    return { finding, fixed: false, message: `deferred raw primitive fixes for ${finding.file}`, changes: [] };
+    if (skippedElements.length > 0) {
+      const tags = skippedElements.map(e => `<${e}>`).join(", ");
+      return { finding, fixed: false, message: `no base atom mapping for ${tags} — create the atom in design-system/atoms/ first`, changes: [] };
+    }
+    return { finding, fixed: false, message: `no fixable raw primitives in ${finding.file}`, changes: [] };
   }
 
   changes.push({

@@ -90,7 +90,9 @@ describe("audit", () => {
   });
 
   it("does NOT flag user-authored composites as unexpected (open root)", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(join(dir, "design-system/atoms/button.tsx"), "export function Button() { return <button />; }");
     // Import from atoms/ so the classifier agrees with composites/ location (no drift).
     await writeFile(
       join(dir, "design-system/composites/data-table.tsx"),
@@ -412,7 +414,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
     expect(allCmds).not.toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
   });
 
-  it("warns about CLAUDE.md collision in non-TTY mode without auto-deleting", async () => {
+  it("auto-resolves CLAUDE.md collision by deleting root CLAUDE.md", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
       version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
       claude_md_target: "CLAUDE.md",
@@ -422,11 +424,9 @@ describe("audit --fix — reconcile integration (#171)", () => {
     await writeFile(join(dir, ".claude/CLAUDE.md"), "# Pre-existing project context\n");
 
     const r = await runCli(["audit", "--fix"], { cwd: dir });
-    // Both files preserved — non-TTY can't prompt
-    expect(await exists(join(dir, "CLAUDE.md"))).toBe(true);
+    // Root CLAUDE.md auto-deleted; .claude/CLAUDE.md kept
+    expect(await exists(join(dir, "CLAUDE.md"))).toBe(false);
     expect(await exists(join(dir, ".claude/CLAUDE.md"))).toBe(true);
-    // Warning printed
-    expect(r.stdout).toMatch(/CLAUDE\.md collision/i);
   });
 
   it("standalone reconcile command still works independently", async () => {
@@ -519,6 +519,40 @@ describe("audit — unexpected-file enrichment (#174)", () => {
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).not.toMatch(/unexpected.*switch\.tsx/i);
+  });
+
+  it("fires INTEGRITY-UNPARSEABLE for a DS file with broken syntax", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/broken.tsx"),
+      `import { Button } from "@ds/atoms/button";\nexport function Broken( {\n  // missing closing brace`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/INTEGRITY-UNPARSEABLE/);
+    expect(r.stdout).toMatch(/broken\.tsx/);
+  });
+
+  it("skips drift rules for files that fail integrity checks", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/broken.tsx"),
+      `import { fmt } from "../../features/billing/format";\nexport function Broken( {\n`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/INTEGRITY-UNPARSEABLE/);
+    expect(r.stdout).not.toMatch(/DRIFT-DS-IMPORTS-FEATURE/);
+  });
+
+  it("does not fire INTEGRITY-UNPARSEABLE for a valid DS file", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <button />; }`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.stdout).not.toMatch(/INTEGRITY-UNPARSEABLE/);
   });
 });
 

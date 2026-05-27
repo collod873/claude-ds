@@ -2,8 +2,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DeprecatedPath } from "../lib/manifest.js";
 import { loadProject } from "../lib/project.js";
-import { info, err, confirm } from "../lib/log.js";
-import { createInterface } from "node:readline/promises";
+import { info, err, printNextStep } from "../lib/log.js";
 import { scanRootDupes, RootDupeFinding } from "../lib/root-dupes.js";
 import { run, type Operation } from "../lib/runner.js";
 import { makeDeleteFiles, makeMergeRootToCanonical, makePruneDanglingHooks } from "../lib/ops/reconcile-mutations.js";
@@ -123,17 +122,12 @@ export interface ReconcileResult {
   deleted: number;
   pruned: number;
   skipped: number;
-  collisionWarnings: string[];
 }
 
 /**
  * Core reconcile logic: scan and apply reconcile actions.
  * Used by both `reconcile` command and `audit --fix`.
- *
- * `force`: auto-delete without prompting (equivalent to --force).
- * When not force and not TTY, non-interactive actions (orphan deletion, hook pruning)
- * still auto-apply, but interactive decisions (collisions, content-differs dupes)
- * skip with warnings.
+ * All decisions are deterministic — no interactive prompts.
  */
 export async function runReconcileActions(
   ctx: import("../lib/project.js").ProjectContext,
@@ -142,10 +136,9 @@ export async function runReconcileActions(
   const cwd = ctx.cwd;
   const cfg = ctx.cfg;
   const manifest = ctx.manifest;
-  const force = opts.force ?? false;
   const dryRun = opts.dryRun ?? false;
 
-  const result: ReconcileResult = { deleted: 0, pruned: 0, skipped: 0, collisionWarnings: [] };
+  const result: ReconcileResult = { deleted: 0, pruned: 0, skipped: 0 };
 
   // ── Scan ───────────────────────────────────────────────────────────────────
   const deprecatedFindings = await scanDeprecated(cwd, manifest.deprecated_paths);
@@ -164,41 +157,17 @@ export async function runReconcileActions(
     return result;
   }
 
-  const isTTY = Boolean(process.stdin.isTTY);
   const rootDupeMap = new Map(rootDupeFindings.map(f => [f.rootPath, f]));
 
-  // ── Gather decisions (no I/O yet) ─────────────────────────────────────────
+  // ── Gather decisions (no I/O) ─────────────────────────────────────────────
   const pathsToDelete: string[] = [];
   const mergeRequests: Array<{ root: string; canonical: string }> = [];
 
-  // ── Remediate root dupes (content-differs path) ───────────────────────────
+  // Root dupes with different content: keep canonical, delete root.
   for (const f of rootDupeFindings) {
     if (!f.contentDiffers) continue;
-    if (!isTTY && !force) {
-      info(`warning: ${f.rootPath} content differs from ${f.canonicalPath} — run \`reconcile\` interactively to merge, or pass --force to delete root`);
-      result.skipped++;
-      continue;
-    }
-    if (force) {
-      pathsToDelete.push(f.rootPath);
-      continue;
-    }
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    process.stdout.write(`\nRoot dupe with different content: ${f.rootPath}\n`);
-    process.stdout.write(`  Canonical: ${f.canonicalPath}\n`);
-    process.stdout.write(`  (a) merge root → canonical (overwrites canonical with root content), then delete root\n`);
-    process.stdout.write(`  (b) keep canonical as-is, delete root\n`);
-    process.stdout.write(`  (c) skip — resolve manually\n`);
-    const ans = (await rl.question(`Choose [a/b/c]: `)).trim().toLowerCase();
-    rl.close();
-    if (ans === "a") {
-      mergeRequests.push({ root: f.rootPath, canonical: f.canonicalPath });
-    } else if (ans === "b") {
-      pathsToDelete.push(f.rootPath);
-    } else {
-      info(`skipped: ${f.rootPath} — resolve manually`);
-      result.skipped++;
-    }
+    pathsToDelete.push(f.rootPath);
+    info(`deleting root dupe: ${f.rootPath} (canonical at ${f.canonicalPath} kept — original in git history)`);
   }
 
   // ── Remediate deprecated orphans ──────────────────────────────────────────
@@ -211,30 +180,10 @@ export async function runReconcileActions(
     pathsToDelete.push(f.path);
   }
 
-  // ── Handle CLAUDE.md collisions ───────────────────────────────────────────
+  // CLAUDE.md collisions: delete root CLAUDE.md (prefer .claude/CLAUDE.md per #34).
   for (const f of collisionList) {
-    if (force || !isTTY) {
-      const msg = "CLAUDE.md collision needs manual resolution — run `reconcile` interactively";
-      info(`warning: ${msg}`);
-      result.collisionWarnings.push(msg);
-      result.skipped++;
-      continue;
-    }
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    process.stdout.write(`\nCLAUDE.md collision: both CLAUDE.md (pack-written) and .claude/CLAUDE.md (pre-existing) exist.\n`);
-    process.stdout.write(`  (a) delete root CLAUDE.md   — keeps .claude/CLAUDE.md\n`);
-    process.stdout.write(`  (b) delete .claude/CLAUDE.md — keeps root CLAUDE.md\n`);
-    process.stdout.write(`  (c) skip — resolve manually\n`);
-    const ans = (await rl.question(`Choose [a/b/c]: `)).trim().toLowerCase();
-    rl.close();
-    if (ans === "a") {
-      pathsToDelete.push("CLAUDE.md");
-    } else if (ans === "b") {
-      pathsToDelete.push(".claude/CLAUDE.md");
-    } else {
-      info(`skipped: CLAUDE.md collision — resolve manually`);
-      result.skipped++;
-    }
+    pathsToDelete.push("CLAUDE.md");
+    info("deleting root CLAUDE.md (keeping .claude/CLAUDE.md — original in git history)");
   }
 
   // ── Apply via Runner ──────────────────────────────────────────────────────
@@ -296,6 +245,7 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
 
   if (allFindings.length === 0 && rootDupeFindings.length === 0) {
     info("reconcile: no orphans or collisions found — tree is clean");
+    printNextStep("reconcile", {});
     return;
   }
 
@@ -332,29 +282,6 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
     process.exit(0);
   }
 
-  // ── Non-TTY, non-force: can't prompt ──────────────────────────────────────
-  const isTTY = Boolean(process.stdin.isTTY);
-  if (!force && !isTTY) {
-    const collisionList = allFindings.filter(f => f.kind === "collision");
-    const deprecatedList = allFindings.filter(f => f.kind === "deprecated");
-    if (deprecatedList.length > 0 || collisionList.length > 0) {
-      info("reconcile: non-interactive mode — pass --force to delete deprecated orphans");
-      process.exit(0);
-    }
-    return;
-  }
-
-  // ── Interactive confirmation for standalone reconcile ─────────────────────
-  if (!force && isTTY) {
-    const deprecatedList = allFindings.filter(f => f.kind === "deprecated");
-    if (deprecatedList.length > 0) {
-      if (!(await confirm(`Delete the ${deprecatedList.length} deprecated orphan(s)?`))) {
-        info("aborted — no files modified");
-        return;
-      }
-    }
-  }
-
   // ── Delegate to shared logic ──────────────────────────────────────────────
   const result = await runReconcileActions(ctx, { force });
 
@@ -363,4 +290,5 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   if (result.pruned > 0) parts.push(`settings.json pruned`);
   if (result.skipped > 0) parts.push(`${result.skipped} skipped`);
   info(`reconcile complete — ${parts.length > 0 ? parts.join(", ") : "nothing to do"}`);
+  printNextStep("reconcile", {});
 }

@@ -3,16 +3,18 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest, isManifestOrKeepfile, type DeprecatedPath, type ManagedRoot } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
-import { info, err } from "../lib/log.js";
+import { info, err, printNextStep, detectBuildCommand } from "../lib/log.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import { ruleSeverity, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
+import { evaluateIntegrity, integrityRuleSeverity, type IntegrityRuleId, type IntegrityFinding } from "../lib/integrity-rules.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
 import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
 import { runFixPass } from "../lib/fix-pass.js";
+import { fixIntegrity, isIntegrityFixable } from "../lib/integrity-fixers.js";
 import { runReconcileActions } from "./reconcile.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
@@ -333,7 +335,9 @@ export async function auditCmd(opts: AuditOpts) {
     dsAliases = await detectDsAliases(cwd, cfg?.srcRoot ?? "src");
   }
   const driftTierDirs = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
-  const allFindings: DriftFinding[] = [];
+  type AuditFinding = DriftFinding | IntegrityFinding;
+  const allFindings: AuditFinding[] = [];
+  const integrityFailedFiles = new Set<string>();
   for (const tierDir of driftTierDirs) {
     const abs = join(cwd, tierDir);
     let entries: string[];
@@ -344,6 +348,17 @@ export async function auditCmd(opts: AuditOpts) {
       const filePath = `${tierDir}/${entry}`;
       let source: string;
       try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+
+      const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases });
+      const blockingIntegrity = integrityFindings.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
+      const nonBlockingIntegrity = integrityFindings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
+      allFindings.push(...nonBlockingIntegrity);
+      if (blockingIntegrity.length > 0) {
+        allFindings.push(...blockingIntegrity);
+        integrityFailedFiles.add(filePath);
+        continue;
+      }
+
       const { findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
       allFindings.push(...findings);
     }
@@ -358,9 +373,57 @@ export async function auditCmd(opts: AuditOpts) {
 
   // --fix: attempt auto-fix for fixable rules.
   if (opts.fix && activeFindings.length > 0) {
+    // Phase 1: integrity fixers (priority 0) — restore structurally broken files
+    const integrityToFix = activeFindings.filter(
+      (f): f is IntegrityFinding =>
+        f.ruleId.startsWith("INTEGRITY-") && isIntegrityFixable(f.ruleId as IntegrityRuleId),
+    );
+
+    const integrityResults: Array<{ finding: IntegrityFinding; fixed: boolean; message: string }> = [];
+    for (const finding of integrityToFix) {
+      const result = await fixIntegrity(finding, cwd);
+      integrityResults.push(result);
+      if (result.fixed) {
+        for (const change of result.changes) {
+          if (change.kind === "write") {
+            const abs = join(cwd, change.path);
+            await writeFile(abs, change.after);
+          }
+        }
+        info(`fixed [${finding.ruleId}]: ${result.message}`);
+      } else {
+        info(`deferred [${finding.ruleId}]: ${result.message}`);
+      }
+    }
+
+    const integrityFixedCount = integrityResults.filter(r => r.fixed).length;
+
+    // Re-evaluate integrity on fixed files; exclude still-broken files from drift
+    const stillBrokenFiles = new Set<string>();
+    if (integrityFixedCount > 0) {
+      for (const r of integrityResults.filter(r => r.fixed)) {
+        const filePath = r.finding.file;
+        let source: string;
+        try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+        const recheck = evaluateIntegrity(filePath, source);
+        const blocking = recheck.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
+        if (blocking.length > 0) stillBrokenFiles.add(filePath);
+      }
+    }
+
+    for (const f of integrityToFix) {
+      const wasFixed = integrityResults.find(r => r.finding === f)?.fixed;
+      if (!wasFixed) stillBrokenFiles.add(f.file);
+    }
+
+    // Phase 2: drift fixers — skip files that still fail integrity
     const isTTY = process.stdout.isTTY === true;
     const prompt: FixerPrompt = isTTY ? makeTtyPrompt() : makeNoTtyPrompt();
-    const fixPassResult = await runFixPass(cwd, activeFindings, {
+    const driftFindings = activeFindings.filter(
+      (f): f is DriftFinding =>
+        !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
+    );
+    const fixPassResult = await runFixPass(cwd, driftFindings, {
       domainRoots, allowedImports, dsAliases, prompt,
     });
 
@@ -369,8 +432,10 @@ export async function auditCmd(opts: AuditOpts) {
       process.exit(1);
     }
 
-    fixedCount = fixPassResult.results.filter(r => r.fixed).length;
-    const deferredCount = fixPassResult.results.filter(r => !r.fixed).length;
+    const driftFixedCount = fixPassResult.results.filter(r => r.fixed).length;
+    const driftDeferredCount = fixPassResult.results.filter(r => !r.fixed).length;
+    fixedCount = integrityFixedCount + driftFixedCount;
+    const deferredCount = integrityResults.filter(r => !r.fixed).length + driftDeferredCount;
 
     for (const r of fixPassResult.results) {
       if (r.fixed) {
@@ -463,7 +528,7 @@ export async function auditCmd(opts: AuditOpts) {
       );
 
       const autoDeferred: Exception[] = [];
-      const stillActive: DriftFinding[] = [];
+      const stillActive: AuditFinding[] = [];
       for (const f of activeFindings) {
         if (deferredByPrompt.has(suppressedKey(f.ruleId, f.file))) {
           autoDeferred.push({ rule: f.ruleId, path: f.file, reason: "auto-deferred: no TTY" });
@@ -503,14 +568,16 @@ export async function auditCmd(opts: AuditOpts) {
   }
 
   // Group remaining findings by rule ID and output with severity prefix.
-  const byRule = new Map<string, DriftFinding[]>();
+  const byRule = new Map<string, AuditFinding[]>();
   for (const f of activeFindings) {
     const group = byRule.get(f.ruleId);
     if (group) group.push(f);
     else byRule.set(f.ruleId, [f]);
   }
   for (const [ruleId, ruleFindings] of byRule) {
-    const severity = ruleSeverity(ruleId as DriftRuleId);
+    const severity = ruleId.startsWith("INTEGRITY-")
+      ? integrityRuleSeverity(ruleId as IntegrityRuleId)
+      : ruleSeverity(ruleId as DriftRuleId);
     const prefix = severity === "error" ? "ERROR" : severity === "warning" ? "WARNING" : "INFO";
     const noun = ruleFindings.length === 1 ? "finding" : "findings";
     info(`${prefix}  [${ruleId}] (${ruleFindings.length} ${noun})`);
@@ -529,10 +596,16 @@ export async function auditCmd(opts: AuditOpts) {
   if (activeFindings.length > 0) parts.push(`Errors: ${activeFindings.length}`);
   info(parts.join(" | "));
 
+  const buildCmd = await detectBuildCommand(cwd);
   if (activeFindings.length > 0) {
     info(`${activeFindings.length} error(s) require attention`);
+    printNextStep("audit", { hasFindings: true });
     process.exit(1);
+  } else if (fixedCount > 0) {
+    info("No action required.");
+    printNextStep("audit-fix", { buildCmd });
   } else {
     info("No action required.");
+    printNextStep("audit", { hasFindings: false, buildCmd });
   }
 }
