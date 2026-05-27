@@ -24,7 +24,8 @@ export type DriftRuleId =
   | "DRIFT-RAW-PRIMITIVE"
   | "DRIFT-CVA-VARIANT-UNRENDERED"
   | "DRIFT-INLINE-STATIC-STYLE"
-  | "DRIFT-META-EXAMPLES-DUPLICATE";
+  | "DRIFT-META-EXAMPLES-DUPLICATE"
+  | "DRIFT-META-EXAMPLES-CORRUPT";
 
 export interface DriftFinding {
   ruleId: DriftRuleId;
@@ -69,6 +70,8 @@ const RULE_REGISTRY: Record<DriftRuleId, string> = {
     "File uses inline style={} with a literal value that should be a design token",
   "DRIFT-META-EXAMPLES-DUPLICATE":
     "meta.examples contains duplicate entries (identical name + props)",
+  "DRIFT-META-EXAMPLES-CORRUPT":
+    "meta.examples has unbalanced braces — entries truncated by a prior dedup fix",
 };
 
 export function ruleDescription(id: DriftRuleId): string {
@@ -93,6 +96,7 @@ const SEVERITY_MAP: Record<DriftRuleId, Severity> = {
   "DRIFT-CVA-VARIANT-UNRENDERED": "error",
   "DRIFT-INLINE-STATIC-STYLE": "error",
   "DRIFT-META-EXAMPLES-DUPLICATE": "error",
+  "DRIFT-META-EXAMPLES-CORRUPT": "error",
 };
 
 export function ruleSeverity(id: DriftRuleId): Severity {
@@ -326,13 +330,13 @@ function parseExercisedVariants(source: string, axes: string[]): Map<string, Set
   const exercised = new Map<string, Set<string>>();
   for (const axis of axes) exercised.set(axis, new Set());
 
-  const examplesMatch = source.match(/examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/);
-  if (!examplesMatch) return exercised;
+  const examplesContent = extractExamplesContent(source);
+  if (!examplesContent) return exercised;
 
   for (const axis of axes) {
     const re = new RegExp(`${axis}\\s*:\\s*["']([^"']+)["']`, "g");
     let m: RegExpExecArray | null;
-    while ((m = re.exec(examplesMatch[1])) !== null) {
+    while ((m = re.exec(examplesContent)) !== null) {
       exercised.get(axis)!.add(m[1]);
     }
   }
@@ -386,6 +390,22 @@ function evalPatternImportsPattern(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
+// Find the content between `examples: [` and its matching `]`, handling nested brackets.
+function extractExamplesContent(source: string): string | null {
+  const opener = /examples\s*:\s*\[/.exec(source);
+  if (!opener) return null;
+  let depth = 1;
+  const start = opener.index + opener[0].length;
+  for (let i = start; i < source.length; i++) {
+    if (source[i] === "[") depth++;
+    else if (source[i] === "]") {
+      depth--;
+      if (depth === 0) return source.slice(start, i);
+    }
+  }
+  return null;
+}
+
 function extractBraceEntries(text: string): string[] {
   const entries: string[] = [];
   let depth = 0;
@@ -411,10 +431,10 @@ function evalMetaExamplesDuplicate(input: DriftRuleInput): DriftFinding | null {
   if (locationTier === null) return null;
   if (source === undefined) return null;
 
-  const examplesMatch = source.match(/examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/);
-  if (!examplesMatch) return null;
+  const examplesContent = extractExamplesContent(source);
+  if (!examplesContent) return null;
 
-  const entries = extractBraceEntries(examplesMatch[1]).map(e => e.replace(/\s+/g, " "));
+  const entries = extractBraceEntries(examplesContent).map(e => e.replace(/\s+/g, " "));
 
   const seen = new Set<string>();
   let duplicateCount = 0;
@@ -431,6 +451,29 @@ function evalMetaExamplesDuplicate(input: DriftRuleInput): DriftFinding | null {
     ruleId: "DRIFT-META-EXAMPLES-DUPLICATE",
     file,
     message: `${duplicateCount} duplicate meta.examples entr${duplicateCount === 1 ? "y" : "ies"}`,
+  };
+}
+
+/** DRIFT-META-EXAMPLES-CORRUPT: examples array has unbalanced braces (truncated entries). */
+function evalMetaExamplesCorrupt(input: DriftRuleInput): DriftFinding | null {
+  const { file, locationTier, source } = input;
+  if (locationTier === null) return null;
+  if (source === undefined) return null;
+
+  const content = extractExamplesContent(source);
+  if (!content) return null;
+
+  let depth = 0;
+  for (const ch of content) {
+    if (ch === "{") depth++;
+    else if (ch === "}") depth--;
+  }
+  if (depth === 0) return null;
+
+  return {
+    ruleId: "DRIFT-META-EXAMPLES-CORRUPT",
+    file,
+    message: `meta.examples has ${depth} unclosed brace${depth === 1 ? "" : "s"} — likely truncated entries from a prior dedup fix`,
   };
 }
 
@@ -459,5 +502,7 @@ export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   if (cvaVariantUnrendered) findings.push(cvaVariantUnrendered);
   const metaExamplesDuplicate = evalMetaExamplesDuplicate(input);
   if (metaExamplesDuplicate) findings.push(metaExamplesDuplicate);
+  const metaExamplesCorrupt = evalMetaExamplesCorrupt(input);
+  if (metaExamplesCorrupt) findings.push(metaExamplesCorrupt);
   return findings;
 }

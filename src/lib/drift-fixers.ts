@@ -43,6 +43,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: true, priority: 0 },
   "DRIFT-CVA-VARIANT-UNRENDERED": { fixer: fixCvaVariantUnrendered, interactive: false, priority: 3 },
   "DRIFT-META-EXAMPLES-DUPLICATE": { fixer: fixMetaExamplesDuplicate, interactive: false, priority: 4 },
+  "DRIFT-META-EXAMPLES-CORRUPT": { fixer: fixMetaExamplesCorrupt, interactive: false, priority: 5 },
 };
 
 export function isFixable(ruleId: DriftRuleId): boolean {
@@ -1052,6 +1053,21 @@ function extractBraceEntries(text: string): string[] {
   return entries;
 }
 
+function extractExamplesContent(source: string): string | null {
+  const opener = /examples\s*:\s*\[/.exec(source);
+  if (!opener) return null;
+  let depth = 1;
+  const start = opener.index + opener[0].length;
+  for (let i = start; i < source.length; i++) {
+    if (source[i] === "[") depth++;
+    else if (source[i] === "]") {
+      depth--;
+      if (depth === 0) return source.slice(start, i);
+    }
+  }
+  return null;
+}
+
 // --- DRIFT-META-EXAMPLES-DUPLICATE fixer ---
 
 async function fixMetaExamplesDuplicate(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promise<FixResult> {
@@ -1063,13 +1079,12 @@ async function fixMetaExamplesDuplicate(finding: DriftFinding, cwd: string, _opt
     return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
-  const examplesRe = /examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/;
-  const examplesMatch = examplesRe.exec(source);
-  if (!examplesMatch) {
+  const examplesContent = extractExamplesContent(source);
+  if (examplesContent === null) {
     return { finding, fixed: false, message: `no examples array found in ${finding.file}`, changes: [] };
   }
 
-  const entries = extractBraceEntries(examplesMatch[1]);
+  const entries = extractBraceEntries(examplesContent);
 
   const seen = new Set<string>();
   const unique: string[] = [];
@@ -1085,12 +1100,21 @@ async function fixMetaExamplesDuplicate(finding: DriftFinding, cwd: string, _opt
     return { finding, fixed: false, message: `no duplicates found in ${finding.file}`, changes: [] };
   }
 
+  const opener = /examples\s*:\s*\[/.exec(source)!;
+  const arrayStart = opener.index;
+  let depth = 1;
+  let arrayEnd = arrayStart + opener[0].length;
+  for (let i = arrayEnd; i < source.length; i++) {
+    if (source[i] === "[") depth++;
+    else if (source[i] === "]") { depth--; if (depth === 0) { arrayEnd = i + 1; break; } }
+  }
+  const afterBracket = source.slice(arrayEnd).match(/^\s*(?:,|\})/);
+  const suffix = afterBracket ? afterBracket[0].trimStart() : "";
+
   const indent = "    ";
   const stubList = unique.map(e => e.trim()).join(`,\n${indent}`);
-  const result = source.replace(examplesRe, (full) => {
-    const suffix = full.endsWith(",") ? "," : full.endsWith("}") ? "}" : "";
-    return `examples: [\n${indent}${stubList},\n  ]${suffix}`;
-  });
+  const replacement = `examples: [\n${indent}${stubList},\n  ]${suffix}`;
+  const result = source.slice(0, arrayStart) + replacement + source.slice(arrayEnd + (afterBracket?.[0].length ?? 0));
 
   const changes: Change[] = [{
     kind: "write",
@@ -1104,6 +1128,77 @@ async function fixMetaExamplesDuplicate(finding: DriftFinding, cwd: string, _opt
     finding,
     fixed: true,
     message: `removed ${removed} duplicate meta.examples entr${removed === 1 ? "y" : "ies"} from ${finding.file}`,
+    changes,
+  };
+}
+
+// --- DRIFT-META-EXAMPLES-CORRUPT fixer ---
+
+async function fixMetaExamplesCorrupt(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(cwd, finding.file);
+  let source: string;
+  try {
+    source = await readFile(absPath, "utf8");
+  } catch {
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
+  }
+
+  const content = extractExamplesContent(source);
+  if (content === null) {
+    return { finding, fixed: false, message: `no examples array found in ${finding.file}`, changes: [] };
+  }
+
+  const lines = content.split("\n");
+  const repaired: string[] = [];
+  let depth = 0;
+
+  for (const line of lines) {
+    const stripped = line.trimStart();
+    if (stripped.startsWith("{") && depth > 0) {
+      const indent = line.slice(0, line.length - stripped.length);
+      while (depth > 0) {
+        repaired.push(`${indent}},`);
+        depth--;
+      }
+    }
+    for (const ch of line) {
+      if (ch === "{") depth++;
+      else if (ch === "}") depth--;
+    }
+    repaired.push(line);
+  }
+
+  const fixed = repaired.join("\n");
+  if (fixed === content) {
+    return { finding, fixed: false, message: `could not auto-repair ${finding.file}`, changes: [] };
+  }
+
+  const opener = /examples\s*:\s*\[/.exec(source)!;
+  const arrayStart = opener.index;
+  let bracketDepth = 1;
+  let arrayEnd = arrayStart + opener[0].length;
+  for (let i = arrayEnd; i < source.length; i++) {
+    if (source[i] === "[") bracketDepth++;
+    else if (source[i] === "]") { bracketDepth--; if (bracketDepth === 0) { arrayEnd = i + 1; break; } }
+  }
+  const afterBracket = source.slice(arrayEnd).match(/^\s*(?:,|\})/);
+  const suffix = afterBracket ? afterBracket[0].trimStart() : "";
+
+  const result = source.slice(0, arrayStart)
+    + `examples: [\n${fixed.trimStart()}\n  ]${suffix}`
+    + source.slice(arrayEnd + (afterBracket?.[0].length ?? 0));
+
+  const changes: Change[] = [{
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(result),
+  }];
+
+  return {
+    finding,
+    fixed: true,
+    message: `repaired truncated meta.examples entries in ${finding.file}`,
     changes,
   };
 }
