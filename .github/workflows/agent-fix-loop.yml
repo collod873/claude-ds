@@ -119,7 +119,7 @@ jobs:
           cd "$crewops_dir"
           git reset --hard "$CREWOPS_BASELINE"
           git clean -fdx
-          npm install
+          npm install --legacy-peer-deps
 
       - name: Run mechanical checks
         if: steps.limit.outputs.exceeded != 'true'
