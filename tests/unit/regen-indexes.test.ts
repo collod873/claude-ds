@@ -99,6 +99,17 @@ describe("regenIndexes", () => {
       expect(content).not.toContain("meta");
     });
 
+    it("excludes export-default names from barrel (default is not a named export)", async () => {
+      await setupTierDir("atoms", {
+        "button.tsx": `export default function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+      });
+
+      const changes = await regenIndexes(dir);
+      const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
+      // File has no named exports (only default + meta), so no barrel entry
+      expect(barrelChange).toBeUndefined();
+    });
+
     it("sorts exports alphabetically", async () => {
       await setupTierDir("atoms", {
         "chip.tsx": `export function Chip() { return <span />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,

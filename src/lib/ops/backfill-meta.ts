@@ -64,11 +64,6 @@ function ensureMetaImport(source: string): { source: string; injected: boolean }
   return { source: headPart + importLine + tailPart, injected: true };
 }
 
-/**
- * Build the bytes a meta-backfill would write for a single file. Returns null
- * when the file path falls outside the atom/composite/reference tiers (the Op
- * skips it).
- */
 function metaStubPattern(): string {
   return `export const meta: Meta = { kind: "pattern", examples: [] };\n`;
 }
@@ -95,13 +90,13 @@ function buildBackfilledSource(relPath: string, source: string): { after: string
 }
 
 /**
- * Plan meta-export backfill for atoms/composites/references missing
+ * Plan meta-export backfill for atoms/composites/patterns missing
  * `export const meta`. Companion files (`.showcase.tsx`, `.test.tsx`,
  * `.stories.tsx`) and skip patterns (`index.ts`, `.logic.ts`, `.d.ts`) are
  * exempt — they never need a meta export.
  *
  * For each missing-meta file: append the appropriate stub (`atom` /
- * `composite` / `reference`) and, when not already present, inject
+ * `composite` / `pattern`) and, when not already present, inject
  * `import type { Meta } from "@/design-system/types/meta"`.
  *
  * Idempotent: after apply, every file matches META_RE → re-plan returns `[]`.

@@ -15,7 +15,7 @@ function isCompanion(fileName: string): boolean {
   return COMPANION_SUFFIXES.some(suffix => fileName.endsWith(suffix));
 }
 
-const EXPORT_DECL_RE = /\bexport\s+(?:(?:default|async)\s+)*(?:function\*?|const|let|var|class|enum)\s+(\w+)/g;
+const EXPORT_DECL_RE = /\bexport\s+(?:async\s+)?(?:function\*?|const|let|var|class|enum)\s+(\w+)/g;
 
 function extractExportedNames(source: string): string[] {
   const names: string[] = [];
