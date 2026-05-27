@@ -92,7 +92,7 @@ for (let i = 0; i < slices.length; i++) {
       "-X",
       "POST",
       `repos/${GH_REPO}/issues/${PRD_NUMBER}/sub_issues`,
-      "-f",
+      "-F",
       `sub_issue_id=${subIssueId}`,
     ],
     { encoding: "utf8" }
