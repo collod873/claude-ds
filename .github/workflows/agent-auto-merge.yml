@@ -1,0 +1,26 @@
+name: Agent Auto-Merge
+
+# When agent review passes and adds `ready-to-merge`, merge the PR
+# automatically so the linked issue closes and the promote-queued
+# workflow can fire for any dependent issues.
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+jobs:
+  merge:
+    if: github.event.label.name == 'ready-to-merge'
+    runs-on: self-hosted
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Merge PR
+        run: |
+          gh pr merge "$PR_NUMBER" --squash --delete-branch
