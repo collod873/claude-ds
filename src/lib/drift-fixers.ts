@@ -42,6 +42,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: true, priority: 2 },
   "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: true, priority: 0 },
   "DRIFT-CVA-VARIANT-UNRENDERED": { fixer: fixCvaVariantUnrendered, interactive: false, priority: 3 },
+  "DRIFT-META-EXAMPLES-DUPLICATE": { fixer: fixMetaExamplesDuplicate, interactive: false, priority: 4 },
 };
 
 export function isFixable(ruleId: DriftRuleId): boolean {
@@ -1027,6 +1028,67 @@ async function fixCvaVariantUnrendered(finding: DriftFinding, cwd: string, _opts
     finding,
     fixed: true,
     message: `added ${stubs.length} meta.examples stub${stubs.length > 1 ? "s" : ""} to ${finding.file}`,
+    changes,
+  };
+}
+
+// --- DRIFT-META-EXAMPLES-DUPLICATE fixer ---
+
+async function fixMetaExamplesDuplicate(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(cwd, finding.file);
+  let source: string;
+  try {
+    source = await readFile(absPath, "utf8");
+  } catch {
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
+  }
+
+  const examplesRe = /examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/;
+  const examplesMatch = examplesRe.exec(source);
+  if (!examplesMatch) {
+    return { finding, fixed: false, message: `no examples array found in ${finding.file}`, changes: [] };
+  }
+
+  const entryRe = /\{[^}]+\}/g;
+  let m: RegExpExecArray | null;
+  const entries: string[] = [];
+  while ((m = entryRe.exec(examplesMatch[1])) !== null) {
+    entries.push(m[0]);
+  }
+
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const entry of entries) {
+    const normalized = entry.replace(/\s+/g, " ");
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      unique.push(entry);
+    }
+  }
+
+  if (unique.length === entries.length) {
+    return { finding, fixed: false, message: `no duplicates found in ${finding.file}`, changes: [] };
+  }
+
+  const indent = "    ";
+  const stubList = unique.map(e => e.trim()).join(`,\n${indent}`);
+  const result = source.replace(examplesRe, (full) => {
+    const suffix = full.endsWith(",") ? "," : full.endsWith("}") ? "}" : "";
+    return `examples: [\n${indent}${stubList},\n  ]${suffix}`;
+  });
+
+  const changes: Change[] = [{
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(result),
+  }];
+
+  const removed = entries.length - unique.length;
+  return {
+    finding,
+    fixed: true,
+    message: `removed ${removed} duplicate meta.examples entr${removed === 1 ? "y" : "ies"} from ${finding.file}`,
     changes,
   };
 }

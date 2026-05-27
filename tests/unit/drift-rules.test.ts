@@ -844,6 +844,87 @@ export const meta = { kind: "atom" as const, examples: [] };`,
   });
 });
 
+describe("DRIFT-META-EXAMPLES-DUPLICATE rule", () => {
+  it("registry exposes DRIFT-META-EXAMPLES-DUPLICATE", () => {
+    expect(allRuleIds()).toContain("DRIFT-META-EXAMPLES-DUPLICATE");
+  });
+
+  it("fires when meta.examples has duplicate entries", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/combobox.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: "atom",
+      source: `import { cva } from "class-variance-authority";
+const v = cva("base", {
+  variants: {
+    invalid: { visible: "v", hidden: "h" },
+  },
+});
+export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "visible", props: { invalid: "visible" } },
+    { name: "visible", props: { invalid: "visible" } },
+    { name: "visible", props: { invalid: "visible" } },
+    { name: "hidden", props: { invalid: "hidden" } },
+  ],
+};`,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-META-EXAMPLES-DUPLICATE");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("2 duplicate");
+  });
+
+  it("does NOT fire when all examples are unique", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/badge.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: "atom",
+      source: `export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "info", props: { tone: "info" } },
+    { name: "warning", props: { tone: "warning" } },
+  ],
+};`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-META-EXAMPLES-DUPLICATE")).toHaveLength(0);
+  });
+
+  it("does NOT fire when source is undefined", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/button.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: "atom",
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-META-EXAMPLES-DUPLICATE")).toHaveLength(0);
+  });
+
+  it("does NOT fire for files outside design-system", () => {
+    const input: DriftRuleInput = {
+      file: "src/components/button.tsx",
+      locationTier: null,
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: null,
+      source: `export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "a", props: {} },
+    { name: "a", props: {} },
+  ],
+};`,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-META-EXAMPLES-DUPLICATE")).toHaveLength(0);
+  });
+});
+
 describe("parseCvaVariants", () => {
   it("returns base variant axes and values", () => {
     const source = `import { cva } from "class-variance-authority";
