@@ -1,5 +1,6 @@
 import { mkdir, writeFile, rename, unlink } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { join, dirname, extname } from "node:path";
+import ts from "typescript";
 import type { DriftFinding } from "./drift-rules.js";
 import type { Change } from "./operation.js";
 import type { FixResult, FixerOpts } from "./drift-fixers.js";
@@ -23,6 +24,51 @@ function isBinary(buf: Buffer): boolean {
   const len = Math.min(buf.length, 8192);
   for (let i = 0; i < len; i++) if (buf[i] === 0) return true;
   return false;
+}
+
+const PARSEABLE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx"]);
+
+function getScriptKind(ext: string): ts.ScriptKind {
+  switch (ext) {
+    case ".tsx": return ts.ScriptKind.TSX;
+    case ".jsx": return ts.ScriptKind.JSX;
+    case ".js": return ts.ScriptKind.JS;
+    default: return ts.ScriptKind.TS;
+  }
+}
+
+function hasSyntaxErrors(source: string, fileName: string): string | null {
+  const ext = extname(fileName).toLowerCase();
+  const kind = getScriptKind(ext);
+  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
+  const diags = (sf as any).parseDiagnostics as ts.DiagnosticWithLocation[] | undefined;
+  if (diags && diags.length > 0) {
+    return diags[0].messageText as string;
+  }
+  return null;
+}
+
+export function validateFixerOutput(
+  change: Change,
+  ruleId: string,
+): { message: string } | null {
+  if (change.kind !== "write") return null;
+  if (change.before === null) return null;
+
+  const ext = extname(change.path).toLowerCase();
+  if (!PARSEABLE_EXTS.has(ext)) return null;
+
+  const afterSource = change.after.toString("utf8");
+  const afterError = hasSyntaxErrors(afterSource, change.path);
+  if (!afterError) return null;
+
+  const beforeSource = change.before.toString("utf8");
+  const beforeError = hasSyntaxErrors(beforeSource, change.path);
+  if (beforeError) return null;
+
+  return {
+    message: `Fixer ${ruleId} produced unparseable output for ${change.path}: ${afterError}`,
+  };
 }
 
 function renderDiff(changes: Change[]): string {
@@ -139,6 +185,23 @@ export async function runFixPass(
     results.push(result);
 
     if (result.fixed && result.changes.length > 0) {
+      let gated = false;
+      for (const change of result.changes) {
+        const gateResult = validateFixerOutput(change, finding.ruleId);
+        if (gateResult) {
+          info(gateResult.message);
+          results[results.length - 1] = {
+            finding,
+            fixed: false,
+            message: gateResult.message,
+            changes: [],
+          };
+          gated = true;
+          break;
+        }
+      }
+      if (gated) continue;
+
       for (const change of result.changes) {
         try {
           await applyChange(cwd, change);
@@ -146,7 +209,6 @@ export async function runFixPass(
           allChanges.push(change);
         } catch (err) {
           info(`error applying change for ${finding.ruleId}: ${(err as Error).message}`);
-          // Rollback everything applied so far
           for (let i = appliedChanges.length - 1; i >= 0; i--) {
             try { await rollbackChange(cwd, appliedChanges[i]); } catch { /* best effort */ }
           }
