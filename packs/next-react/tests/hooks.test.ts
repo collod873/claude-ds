@@ -105,6 +105,32 @@ describe("next-react hooks (fixture)", () => {
     expect(r.code).toBe(1);
     expect(r.stderr).toMatch(/SIM-000/);
   });
+  it("pre-write-ds-similarity: exits 0 for files outside design-system/ even when near-duplicates exist", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sim-hook-outside-"));
+    try {
+      mkdirSync(join(tmp, "scripts"), { recursive: true });
+      mkdirSync(join(tmp, "design-system", "atoms"), { recursive: true });
+      copyFileSync(
+        resolve("packs/next-react/files/scripts/similarity-check.ts"),
+        join(tmp, "scripts", "similarity-check.ts")
+      );
+      // Near-duplicate atoms that would trigger SIM-001 if the scan runs
+      writeFileSync(join(tmp, "design-system", "atoms", "Button.tsx"), "");
+      writeFileSync(join(tmp, "design-system", "atoms", "Buton.tsx"), "");
+      // Target is outside design-system/ — hook should early-exit without scanning
+      const targetFile = join(tmp, "src", "components", "Foo.tsx");
+      const input = JSON.stringify({ tool_name: "Write", tool_input: { file_path: targetFile } });
+      const r = spawnSync(
+        "bash",
+        [resolve("packs/next-react/files/.claude/hooks/pre-write-ds-similarity.sh")],
+        { encoding: "utf8", cwd: tmp, input }
+      );
+      expect(r.status).toBe(0);
+      expect(r.stderr).toBe("");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
   it("pre-write-ds-similarity: exits 0 when similarity-check.ts present and no near-duplicates found", () => {
     const tmp = mkdtempSync(join(tmpdir(), "sim-hook-"));
     try {

@@ -45,6 +45,38 @@ describe("similarity-check.ts [integration]", () => {
     expect(r.stderr).toMatch(/^[^:]+:\d+: SIM-001: /m);
   });
 
+  it("exit 0 when short names have small absolute distance but low ratio (no false positive)", async () => {
+    const atomsDir = join(dir, "design-system", "atoms");
+    await mkdir(atomsDir, { recursive: true });
+    // "Badge" vs "Table" — distance 3 but ratio 3/5 = 0.6, should NOT flag
+    await writeFile(join(atomsDir, "Badge.tsx"), "");
+    await writeFile(join(atomsDir, "Table.tsx"), "");
+    // "Card" vs "Kbd" — distance 3 but ratio 3/4 = 0.75, should NOT flag
+    await writeFile(join(atomsDir, "Card.tsx"), "");
+    await writeFile(join(atomsDir, "Kbd.tsx"), "");
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+  });
+
+  it("exit 2 when names are long and similar (high ratio match)", async () => {
+    const atomsDir = join(dir, "design-system", "atoms");
+    await mkdir(atomsDir, { recursive: true });
+    // "Button" vs "Buton" — distance 1, ratio 1/6 = 0.17, should flag
+    await writeFile(join(atomsDir, "Button.tsx"), "");
+    await writeFile(join(atomsDir, "Buton.tsx"), "");
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/SIM-001/);
+  });
+
   it("exit 1 with SIM-000 when design-system/ is missing", () => {
     const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
       cwd: dir,
