@@ -1032,6 +1032,26 @@ async function fixCvaVariantUnrendered(finding: DriftFinding, cwd: string, _opts
   };
 }
 
+// Extract top-level `{...}` entries from a string by counting brace depth.
+function extractBraceEntries(text: string): string[] {
+  const entries: string[] = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (text[i] === "}") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        entries.push(text.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return entries;
+}
+
 // --- DRIFT-META-EXAMPLES-DUPLICATE fixer ---
 
 async function fixMetaExamplesDuplicate(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promise<FixResult> {
@@ -1049,12 +1069,7 @@ async function fixMetaExamplesDuplicate(finding: DriftFinding, cwd: string, _opt
     return { finding, fixed: false, message: `no examples array found in ${finding.file}`, changes: [] };
   }
 
-  const entryRe = /\{(?:[^{}]|\{[^}]*\})*\}/g;
-  let m: RegExpExecArray | null;
-  const entries: string[] = [];
-  while ((m = entryRe.exec(examplesMatch[1])) !== null) {
-    entries.push(m[0]);
-  }
+  const entries = extractBraceEntries(examplesMatch[1]);
 
   const seen = new Set<string>();
   const unique: string[] = [];

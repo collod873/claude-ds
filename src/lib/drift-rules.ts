@@ -386,6 +386,25 @@ function evalPatternImportsPattern(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
+function extractBraceEntries(text: string): string[] {
+  const entries: string[] = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (text[i] === "}") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        entries.push(text.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return entries;
+}
+
 /** DRIFT-META-EXAMPLES-DUPLICATE: meta.examples contains duplicate entries. */
 function evalMetaExamplesDuplicate(input: DriftRuleInput): DriftFinding | null {
   const { file, locationTier, source } = input;
@@ -395,12 +414,7 @@ function evalMetaExamplesDuplicate(input: DriftRuleInput): DriftFinding | null {
   const examplesMatch = source.match(/examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/);
   if (!examplesMatch) return null;
 
-  const entryRe = /\{(?:[^{}]|\{[^}]*\})*\}/g;
-  let m: RegExpExecArray | null;
-  const entries: string[] = [];
-  while ((m = entryRe.exec(examplesMatch[1])) !== null) {
-    entries.push(m[0].replace(/\s+/g, " "));
-  }
+  const entries = extractBraceEntries(examplesMatch[1]).map(e => e.replace(/\s+/g, " "));
 
   const seen = new Set<string>();
   let duplicateCount = 0;
