@@ -14,6 +14,7 @@ import { evaluateIntegrity, integrityRuleSeverity, type IntegrityRuleId, type In
 import { detectDsAliases } from "../lib/ds-aliases.js";
 import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
 import { runFixPass } from "../lib/fix-pass.js";
+import { fixIntegrity, isIntegrityFixable } from "../lib/integrity-fixers.js";
 import { runReconcileActions } from "./reconcile.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
@@ -372,10 +373,55 @@ export async function auditCmd(opts: AuditOpts) {
 
   // --fix: attempt auto-fix for fixable rules.
   if (opts.fix && activeFindings.length > 0) {
+    // Phase 1: integrity fixers (priority 0) — restore structurally broken files
+    const integrityToFix = activeFindings.filter(
+      (f): f is IntegrityFinding =>
+        f.ruleId.startsWith("INTEGRITY-") && isIntegrityFixable(f.ruleId as IntegrityRuleId),
+    );
+
+    const integrityResults: Array<{ finding: IntegrityFinding; fixed: boolean; message: string }> = [];
+    for (const finding of integrityToFix) {
+      const result = await fixIntegrity(finding, cwd);
+      integrityResults.push(result);
+      if (result.fixed) {
+        for (const change of result.changes) {
+          if (change.kind === "write") {
+            const abs = join(cwd, change.path);
+            await writeFile(abs, change.after);
+          }
+        }
+        info(`fixed [${finding.ruleId}]: ${result.message}`);
+      } else {
+        info(`deferred [${finding.ruleId}]: ${result.message}`);
+      }
+    }
+
+    const integrityFixedCount = integrityResults.filter(r => r.fixed).length;
+
+    // Re-evaluate integrity on fixed files; exclude still-broken files from drift
+    const stillBrokenFiles = new Set<string>();
+    if (integrityFixedCount > 0) {
+      for (const r of integrityResults.filter(r => r.fixed)) {
+        const filePath = r.finding.file;
+        let source: string;
+        try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+        const recheck = evaluateIntegrity(filePath, source);
+        const blocking = recheck.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
+        if (blocking.length > 0) stillBrokenFiles.add(filePath);
+      }
+    }
+
+    for (const f of integrityToFix) {
+      const wasFixed = integrityResults.find(r => r.finding === f)?.fixed;
+      if (!wasFixed) stillBrokenFiles.add(f.file);
+    }
+
+    // Phase 2: drift fixers — skip files that still fail integrity
     const isTTY = process.stdout.isTTY === true;
     const prompt: FixerPrompt = isTTY ? makeTtyPrompt() : makeNoTtyPrompt();
     const driftFindings = activeFindings.filter(
-      (f): f is DriftFinding => !f.ruleId.startsWith("INTEGRITY-"),
+      (f): f is DriftFinding =>
+        !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
     );
     const fixPassResult = await runFixPass(cwd, driftFindings, {
       domainRoots, allowedImports, dsAliases, prompt,
@@ -386,8 +432,10 @@ export async function auditCmd(opts: AuditOpts) {
       process.exit(1);
     }
 
-    fixedCount = fixPassResult.results.filter(r => r.fixed).length;
-    const deferredCount = fixPassResult.results.filter(r => !r.fixed).length;
+    const driftFixedCount = fixPassResult.results.filter(r => r.fixed).length;
+    const driftDeferredCount = fixPassResult.results.filter(r => !r.fixed).length;
+    fixedCount = integrityFixedCount + driftFixedCount;
+    const deferredCount = integrityResults.filter(r => !r.fixed).length + driftDeferredCount;
 
     for (const r of fixPassResult.results) {
       if (r.fixed) {
