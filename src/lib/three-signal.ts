@@ -62,7 +62,7 @@ export function checkThreeSignals(
 
   const signals: ThreeSignals = { locationTier, metaKind, classifierVerdict };
 
-  const findings = evaluateDrift({ file: filePath, classifierVerdict, locationTier, source, metaKind, metaKindStrict });
+  const findings = evaluateDrift({ file: filePath, classifierVerdict, locationTier, source, metaKind, metaKindStrict, dsAliases });
 
   return { signals, findings };
 }

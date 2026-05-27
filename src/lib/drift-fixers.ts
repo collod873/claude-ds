@@ -44,6 +44,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-CVA-VARIANT-UNRENDERED": { fixer: fixCvaVariantUnrendered, interactive: false, priority: 3 },
   "DRIFT-META-EXAMPLES-DUPLICATE": { fixer: fixMetaExamplesDuplicate, interactive: false, priority: 4 },
   "DRIFT-META-EXAMPLES-CORRUPT": { fixer: fixMetaExamplesCorrupt, interactive: false, priority: 5 },
+  "DRIFT-STALE-DS-IMPORT": { fixer: fixStaleDsImport, interactive: false, priority: 0 },
 };
 
 export function isFixable(ruleId: DriftRuleId): boolean {
@@ -1199,6 +1200,53 @@ async function fixMetaExamplesCorrupt(finding: DriftFinding, cwd: string, _opts?
     finding,
     fixed: true,
     message: `repaired truncated meta.examples entries in ${finding.file}`,
+    changes,
+  };
+}
+
+// --- DRIFT-STALE-DS-IMPORT fixer ---
+
+const STALE_ALIAS_RE = /(from\s+["'])@\/design-system\/(.*?)(["'])/g;
+
+async function fixStaleDsImport(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(cwd, finding.file);
+  let source: string;
+  try {
+    source = await readFile(absPath, "utf8");
+  } catch {
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
+  }
+
+  const canonicalAlias = (opts?.dsAliases ?? []).find(a => a !== "@/design-system") ?? "@ds";
+  let result = source.replace(STALE_ALIAS_RE, `$1${canonicalAlias}/$2$3`);
+
+  // Deduplicate identical import lines created by the rewrite
+  const lines = result.split("\n");
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("import ") && seen.has(trimmed)) continue;
+    if (trimmed.startsWith("import ")) seen.add(trimmed);
+    deduped.push(line);
+  }
+  result = deduped.join("\n");
+
+  if (result === source) {
+    return { finding, fixed: false, message: `no stale imports found in ${finding.file}`, changes: [] };
+  }
+
+  const changes: Change[] = [{
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(result),
+  }];
+
+  return {
+    finding,
+    fixed: true,
+    message: `rewrote stale @/design-system/ imports to ${canonicalAlias}/ in ${finding.file}`,
     changes,
   };
 }

@@ -25,7 +25,8 @@ export type DriftRuleId =
   | "DRIFT-CVA-VARIANT-UNRENDERED"
   | "DRIFT-INLINE-STATIC-STYLE"
   | "DRIFT-META-EXAMPLES-DUPLICATE"
-  | "DRIFT-META-EXAMPLES-CORRUPT";
+  | "DRIFT-META-EXAMPLES-CORRUPT"
+  | "DRIFT-STALE-DS-IMPORT";
 
 export interface DriftFinding {
   ruleId: DriftRuleId;
@@ -45,6 +46,8 @@ export interface DriftRuleInput {
   metaKind: Tier | null;
   /** When true, DRIFT-META-KIND-MISSING fires on DS files that lack meta.kind. */
   metaKindStrict?: boolean;
+  /** Detected DS path aliases (e.g. ["@ds"]). */
+  dsAliases?: string[];
 }
 
 const RULE_REGISTRY: Record<DriftRuleId, string> = {
@@ -72,6 +75,8 @@ const RULE_REGISTRY: Record<DriftRuleId, string> = {
     "meta.examples contains duplicate entries (identical name + props)",
   "DRIFT-META-EXAMPLES-CORRUPT":
     "meta.examples has unbalanced braces — entries truncated by a prior dedup fix",
+  "DRIFT-STALE-DS-IMPORT":
+    "File imports via @/design-system/ instead of the canonical @ds/ alias",
 };
 
 export function ruleDescription(id: DriftRuleId): string {
@@ -97,6 +102,7 @@ const SEVERITY_MAP: Record<DriftRuleId, Severity> = {
   "DRIFT-INLINE-STATIC-STYLE": "error",
   "DRIFT-META-EXAMPLES-DUPLICATE": "error",
   "DRIFT-META-EXAMPLES-CORRUPT": "error",
+  "DRIFT-STALE-DS-IMPORT": "error",
 };
 
 export function ruleSeverity(id: DriftRuleId): Severity {
@@ -477,6 +483,25 @@ function evalMetaExamplesCorrupt(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
+const STALE_DS_IMPORT_RE = /from\s+["']@\/design-system\//;
+
+/** DRIFT-STALE-DS-IMPORT: file uses @/design-system/ when @ds/ alias is available. */
+function evalStaleDsImport(input: DriftRuleInput): DriftFinding | null {
+  const { file, locationTier, source, dsAliases } = input;
+  if (locationTier === null) return null;
+  if (source === undefined) return null;
+  const canonicalAliases = (dsAliases ?? []).filter(a => a !== "@/design-system");
+  if (canonicalAliases.length === 0) return null;
+  if (!STALE_DS_IMPORT_RE.test(source)) return null;
+
+  const staleCount = (source.match(/from\s+["']@\/design-system\//g) ?? []).length;
+  return {
+    ruleId: "DRIFT-STALE-DS-IMPORT",
+    file,
+    message: `${staleCount} import${staleCount === 1 ? "" : "s"} use @/design-system/ instead of @ds/`,
+  };
+}
+
 /** Evaluate all registered drift rules against a single file's signals. */
 export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   const findings: DriftFinding[] = [];
@@ -504,5 +529,7 @@ export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   if (metaExamplesDuplicate) findings.push(metaExamplesDuplicate);
   const metaExamplesCorrupt = evalMetaExamplesCorrupt(input);
   if (metaExamplesCorrupt) findings.push(metaExamplesCorrupt);
+  const staleDsImport = evalStaleDsImport(input);
+  if (staleDsImport) findings.push(staleDsImport);
   return findings;
 }
