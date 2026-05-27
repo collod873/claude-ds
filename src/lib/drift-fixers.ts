@@ -1226,8 +1226,9 @@ async function fixStaleDsImport(finding: DriftFinding, cwd: string, opts?: Fixer
   const deduped: string[] = [];
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed.startsWith("import ") && seen.has(trimmed)) continue;
-    if (trimmed.startsWith("import ")) seen.add(trimmed);
+    const isCompleteImport = trimmed.startsWith("import ") && trimmed.includes(" from ");
+    if (isCompleteImport && seen.has(trimmed)) continue;
+    if (isCompleteImport) seen.add(trimmed);
     deduped.push(line);
   }
   result = deduped.join("\n");
