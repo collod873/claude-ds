@@ -122,17 +122,12 @@ export interface ReconcileResult {
   deleted: number;
   pruned: number;
   skipped: number;
-  collisionWarnings: string[];
 }
 
 /**
  * Core reconcile logic: scan and apply reconcile actions.
  * Used by both `reconcile` command and `audit --fix`.
- *
- * `force`: auto-delete without prompting (equivalent to --force).
- * When not force and not TTY, non-interactive actions (orphan deletion, hook pruning)
- * still auto-apply, but interactive decisions (collisions, content-differs dupes)
- * skip with warnings.
+ * All decisions are deterministic — no interactive prompts.
  */
 export async function runReconcileActions(
   ctx: import("../lib/project.js").ProjectContext,
@@ -141,10 +136,9 @@ export async function runReconcileActions(
   const cwd = ctx.cwd;
   const cfg = ctx.cfg;
   const manifest = ctx.manifest;
-  const force = opts.force ?? false;
   const dryRun = opts.dryRun ?? false;
 
-  const result: ReconcileResult = { deleted: 0, pruned: 0, skipped: 0, collisionWarnings: [] };
+  const result: ReconcileResult = { deleted: 0, pruned: 0, skipped: 0 };
 
   // ── Scan ───────────────────────────────────────────────────────────────────
   const deprecatedFindings = await scanDeprecated(cwd, manifest.deprecated_paths);

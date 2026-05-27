@@ -41,9 +41,10 @@ function hasSyntaxErrors(source: string, fileName: string): string | null {
   const ext = extname(fileName).toLowerCase();
   const kind = getScriptKind(ext);
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
-  const diags = (sf as any).parseDiagnostics as ts.DiagnosticWithLocation[] | undefined;
+  const diags = (sf as unknown as { parseDiagnostics?: ts.DiagnosticWithLocation[] }).parseDiagnostics;
   if (diags && diags.length > 0) {
-    return diags[0].messageText as string;
+    const msg = diags[0].messageText;
+    return typeof msg === "string" ? msg : msg.messageText;
   }
   return null;
 }
