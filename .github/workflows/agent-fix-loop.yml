@@ -143,8 +143,9 @@ jobs:
           # Type check
           npx tsc --noEmit > "${RUNNER_TEMP}/tsc.log" 2>&1 || true
 
-          # Next.js build
-          npx next build > "${RUNNER_TEMP}/build.log" 2>&1 || true
+          # Next.js build — skipped: hangs without DB env vars, and tests infra not DS correctness
+          # npx next build > "${RUNNER_TEMP}/build.log" 2>&1 || true
+          echo "SKIPPED — next build requires runtime env vars (DATABASE_URL etc.)" > "${RUNNER_TEMP}/build.log"
 
           # Idempotency: second audit --fix (should be no-op)
           claude-ds audit --fix > "${RUNNER_TEMP}/audit-idempotency.log" 2>&1 || true
