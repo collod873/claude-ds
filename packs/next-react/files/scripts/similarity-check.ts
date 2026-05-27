@@ -15,7 +15,7 @@ import { join, basename, extname } from "node:path";
 
 const SCAN_DIRS = ["atoms", "composites"];
 
-/** Levenshtein distance — mirrors src/lib/lookalike.ts threshold logic. */
+/** Levenshtein distance. */
 function levenshtein(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
