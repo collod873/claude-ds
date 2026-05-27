@@ -37,7 +37,7 @@ function makeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
 async function scaffoldTiers(): Promise<void> {
   await mkdir(join(cwd, "design-system", "atoms"), { recursive: true });
   await mkdir(join(cwd, "design-system", "composites"), { recursive: true });
-  await mkdir(join(cwd, "design-system", "references"), { recursive: true });
+  await mkdir(join(cwd, "design-system", "patterns"), { recursive: true });
 }
 
 describe("retireStates migration op", () => {
@@ -158,6 +158,31 @@ describe("retireStates migration op", () => {
   it("handles missing design-system dirs without error", async () => {
     const changes = await retireStates.plan(makeCtx());
     expect(changes).toEqual([]);
+  });
+
+  it("scans the patterns tier (not the retired references tier)", async () => {
+    await mkdir(join(cwd, "design-system", "atoms"), { recursive: true });
+    await mkdir(join(cwd, "design-system", "composites"), { recursive: true });
+    await mkdir(join(cwd, "design-system", "patterns"), { recursive: true });
+
+    const source = [
+      `import type { Meta } from "@/design-system/types/meta";`,
+      `export const meta: Meta = {`,
+      `  kind: "pattern",`,
+      `  examples: [],`,
+      `  states: { hover: { name: "hover", slots: {} } },`,
+      `};`,
+      `export function AppShell() { return null; }`,
+      ``,
+    ].join("\n");
+    await writeFile(join(cwd, "design-system", "patterns", "app-shell.tsx"), source, "utf8");
+
+    const changes = await retireStates.plan(makeCtx());
+    const writes = changes.filter((c): c is Extract<Change, { kind: "write" }> => c.kind === "write");
+    const patternWrite = writes.find(c => c.path === "design-system/patterns/app-shell.tsx");
+    expect(patternWrite).toBeDefined();
+    const after = patternWrite!.after.toString("utf8");
+    expect(after).not.toContain("states:");
   });
 
   it("skips companion .tsx files (showcase, test)", async () => {

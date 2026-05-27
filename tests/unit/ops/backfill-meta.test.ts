@@ -59,19 +59,30 @@ describe("backfillMeta op", () => {
     expect(changes[0].after.toString("utf8")).toMatch(/skip: \[\]/);
   });
 
-  it("reference: stub uses title + render:null", async () => {
+  it("skips design-system/references/ (pack-managed, not a consumer tier)", async () => {
     await mkdir(join(cwd, "design-system", "references"), { recursive: true });
     await writeFile(
       join(cwd, "design-system", "references", "design-tokens.tsx"),
       `export default function DesignTokens() { return null; }\n`,
     );
     const changes = await backfillMeta.plan(fakeCtx());
+    expect(changes).toEqual([]);
+  });
+
+  it("pattern: stub uses kind 'pattern' with empty examples array", async () => {
+    await mkdir(join(cwd, "design-system", "patterns"), { recursive: true });
+    await writeFile(
+      join(cwd, "design-system", "patterns", "app-shell.tsx"),
+      `export function AppShell({ children }: { children: React.ReactNode }) { return <div>{children}</div>; }\n`,
+    );
+    const changes = await backfillMeta.plan(fakeCtx());
     expect(changes).toHaveLength(1);
     if (changes[0].kind !== "write") throw new Error("expected write");
     const after = changes[0].after.toString("utf8");
-    expect(after).toMatch(/kind: "reference"/);
-    expect(after).toMatch(/title: "Design Tokens"/);
-    expect(after).toMatch(/render: \(\) => null/);
+    expect(after).toMatch(/kind: "pattern"/);
+    expect(after).toMatch(/examples: \[\]/);
+    expect(after).not.toMatch(/kind: "reference"/);
+    expect(after).not.toMatch(/title:/);
   });
 
   it("does not duplicate Meta import when source already has it", async () => {

@@ -28,9 +28,10 @@ describe("regenIndexes", () => {
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(barrelChange).toBeDefined();
       const content = (barrelChange as any).after.toString("utf8");
-      expect(content).toBe(
-        `export * from "./button";\nexport * from "./input";\n`,
-      );
+      expect(content).toContain("Button");
+      expect(content).toContain("Input");
+      expect(content).not.toContain("meta");
+      expect(content).not.toContain("export *");
     });
 
     it("generates barrel exports for composites", async () => {
@@ -42,7 +43,9 @@ describe("regenIndexes", () => {
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/composites/index.ts");
       expect(barrelChange).toBeDefined();
       const content = (barrelChange as any).after.toString("utf8");
-      expect(content).toBe(`export * from "./toolbar";\n`);
+      expect(content).toContain("Toolbar");
+      expect(content).not.toContain("meta");
+      expect(content).not.toContain("export *");
     });
 
     it("generates barrel exports for patterns", async () => {
@@ -54,7 +57,9 @@ describe("regenIndexes", () => {
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/patterns/index.ts");
       expect(barrelChange).toBeDefined();
       const content = (barrelChange as any).after.toString("utf8");
-      expect(content).toBe(`export * from "./layout";\n`);
+      expect(content).toContain("Layout");
+      expect(content).not.toContain("meta");
+      expect(content).not.toContain("export *");
     });
 
     it("excludes companion files from barrel exports", async () => {
@@ -70,11 +75,39 @@ describe("regenIndexes", () => {
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(barrelChange).toBeDefined();
       const content = (barrelChange as any).after.toString("utf8");
-      expect(content).toBe(`export * from "./button";\n`);
+      expect(content).toContain("Button");
+      expect(content).not.toContain("export *");
       expect(content).not.toContain("showcase");
       expect(content).not.toContain("test");
       expect(content).not.toContain("stories");
       expect(content).not.toContain("snapshot");
+    });
+
+    it("excludes meta from barrel exports to avoid cross-component name collisions", async () => {
+      await setupTierDir("atoms", {
+        "button.tsx": `export function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+        "input.tsx": `export function Input() { return <input />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+      });
+
+      const changes = await regenIndexes(dir);
+      const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
+      expect(barrelChange).toBeDefined();
+      const content = (barrelChange as any).after.toString("utf8");
+      expect(content).not.toContain("export *");
+      expect(content).toContain("Button");
+      expect(content).toContain("Input");
+      expect(content).not.toContain("meta");
+    });
+
+    it("excludes export-default names from barrel (default is not a named export)", async () => {
+      await setupTierDir("atoms", {
+        "button.tsx": `export default function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+      });
+
+      const changes = await regenIndexes(dir);
+      const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
+      // File has no named exports (only default + meta), so no barrel entry
+      expect(barrelChange).toBeUndefined();
     });
 
     it("sorts exports alphabetically", async () => {
@@ -97,10 +130,12 @@ describe("regenIndexes", () => {
       await setupTierDir("atoms", {
         "button.tsx": `export function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
       });
-      await writeFile(
-        join(dir, "design-system/atoms/index.ts"),
-        `export * from "./button";\n`,
-      );
+      // First generate to get the expected content
+      const firstChanges = await regenIndexes(dir);
+      const firstBarrel = firstChanges.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
+      expect(firstBarrel).toBeDefined();
+      const expectedContent = (firstBarrel as any).after.toString("utf8");
+      await writeFile(join(dir, "design-system/atoms/index.ts"), expectedContent);
 
       const changes = await regenIndexes(dir);
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");

@@ -2,7 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { info } from "../log.js";
 
-const SCAN_DIRS = ["design-system/atoms", "design-system/composites", "design-system/references"];
+const SCAN_DIRS = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
 const META_RE = /export\s+const\s+meta\b/;

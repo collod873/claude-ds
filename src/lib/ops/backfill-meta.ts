@@ -1,35 +1,20 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 
 /** Dirs scanned for `.tsx` components that must export `meta`. */
-const SCAN_DIRS = ["design-system/atoms", "design-system/composites", "design-system/references"];
+const SCAN_DIRS = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
 const META_RE = /export\s+const\s+meta\b/;
-
-function toTitleCase(name: string): string {
-  return name
-    .split(/[-_]/)
-    .map(s => s.charAt(0).toUpperCase() + s.slice(1))
-    .join(" ");
-}
 
 function metaStubAtomComposite(kind: "atom" | "composite", hasCva: boolean): string {
   if (hasCva) {
     return `export const meta: Meta = { kind: "${kind}", examples: [], skip: [] };\n`;
   }
   return `export const meta: Meta = { kind: "${kind}", examples: [{ name: "default", props: {} }] };\n`;
-}
-
-function metaStubReference(title: string): string {
-  return [
-    `// TODO(claude-ds): replace stub render`,
-    `export const meta: Meta = { kind: "reference", title: ${JSON.stringify(title)}, render: () => null };`,
-    ``,
-  ].join("\n");
 }
 
 /**
@@ -79,20 +64,18 @@ function ensureMetaImport(source: string): { source: string; injected: boolean }
   return { source: headPart + importLine + tailPart, injected: true };
 }
 
-/**
- * Build the bytes a meta-backfill would write for a single file. Returns null
- * when the file path falls outside the atom/composite/reference tiers (the Op
- * skips it).
- */
+function metaStubPattern(): string {
+  return `export const meta: Meta = { kind: "pattern", examples: [] };\n`;
+}
+
 function buildBackfilledSource(relPath: string, source: string): { after: string; injectedMetaImport: boolean } | null {
-  const isReference = relPath.includes("design-system/references/");
   const isAtom = relPath.includes("design-system/atoms/");
   const isComposite = relPath.includes("design-system/composites/");
+  const isPattern = relPath.includes("design-system/patterns/");
 
   let stub: string;
-  if (isReference) {
-    const componentName = basename(relPath, ".tsx");
-    stub = metaStubReference(toTitleCase(componentName));
+  if (isPattern) {
+    stub = metaStubPattern();
   } else if (isAtom || isComposite) {
     const kind: "atom" | "composite" = isAtom ? "atom" : "composite";
     const hasCva = source.includes("cva(");
@@ -107,13 +90,13 @@ function buildBackfilledSource(relPath: string, source: string): { after: string
 }
 
 /**
- * Plan meta-export backfill for atoms/composites/references missing
+ * Plan meta-export backfill for atoms/composites/patterns missing
  * `export const meta`. Companion files (`.showcase.tsx`, `.test.tsx`,
  * `.stories.tsx`) and skip patterns (`index.ts`, `.logic.ts`, `.d.ts`) are
  * exempt — they never need a meta export.
  *
  * For each missing-meta file: append the appropriate stub (`atom` /
- * `composite` / `reference`) and, when not already present, inject
+ * `composite` / `pattern`) and, when not already present, inject
  * `import type { Meta } from "@/design-system/types/meta"`.
  *
  * Idempotent: after apply, every file matches META_RE → re-plan returns `[]`.
