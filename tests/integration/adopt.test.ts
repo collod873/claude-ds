@@ -96,6 +96,20 @@ describe("adopt", () => {
     expect(postCommands).toContain(".claude/hooks/regenerate-companions.sh");
   });
 
+  it("#192 adopt runs without --yes and without stdin (no confirmation gate)", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.mode).toBe("warn");
+  });
+
+  it("#192 adopt --dry-run renders preview without applying changes", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Should NOT have created .claude-ds.json
+    await expect(stat(join(dir, ".claude-ds.json"))).rejects.toThrow();
+  });
+
   it("v0.1.3 regression: refuses adopt when lookalikes exist (CrewOps-shaped fixture)", async () => {
     // Simulate a project with different vocabulary — these are the parallel files the v0.1.3 bug created
     await writeFile(join(dir, "design-tokens.json"), "{}");

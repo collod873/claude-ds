@@ -414,7 +414,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
     expect(allCmds).not.toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
   });
 
-  it("warns about CLAUDE.md collision in non-TTY mode without auto-deleting", async () => {
+  it("auto-resolves CLAUDE.md collision by deleting root CLAUDE.md", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
       version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
       claude_md_target: "CLAUDE.md",
@@ -424,11 +424,9 @@ describe("audit --fix — reconcile integration (#171)", () => {
     await writeFile(join(dir, ".claude/CLAUDE.md"), "# Pre-existing project context\n");
 
     const r = await runCli(["audit", "--fix"], { cwd: dir });
-    // Both files preserved — non-TTY can't prompt
-    expect(await exists(join(dir, "CLAUDE.md"))).toBe(true);
+    // Root CLAUDE.md auto-deleted; .claude/CLAUDE.md kept
+    expect(await exists(join(dir, "CLAUDE.md"))).toBe(false);
     expect(await exists(join(dir, ".claude/CLAUDE.md"))).toBe(true);
-    // Warning printed
-    expect(r.stdout).toMatch(/CLAUDE\.md collision/i);
   });
 
   it("standalone reconcile command still works independently", async () => {

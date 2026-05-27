@@ -58,10 +58,11 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
   program
     .command("adopt")
     .option("--pack <name>", "pack to adopt (auto-detected when only one pack is available)")
-    .option("--yes", "skip confirmation prompt")
+    .option("--yes", "skip confirmation prompt (no-op, kept for back-compat)")
+    .option("--dry-run", "preview what adopt would do without applying changes")
     .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
-    .action(async (opts: { pack?: string; yes?: boolean; ignore?: string }) => {
-      await adoptCmd({ pack: opts.pack, yes: opts.yes, ignore: opts.ignore, cwd: defaults.cwd });
+    .action(async (opts: { pack?: string; yes?: boolean; dryRun?: boolean; ignore?: string }) => {
+      await adoptCmd({ pack: opts.pack, yes: opts.yes, dryRun: opts.dryRun, ignore: opts.ignore, cwd: defaults.cwd });
     });
 
   program
@@ -92,9 +93,10 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
   program
     .command("sync")
     .option("--offline-fixture <path>", "use local pack directory instead of fetching upstream")
-    .option("-y, --yes", "skip confirmation prompt")
-    .action(async (opts: { offlineFixture?: string; yes?: boolean }) => {
-      await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd, yes: opts.yes });
+    .option("-y, --yes", "skip confirmation prompt (no-op, kept for back-compat)")
+    .option("--dry-run", "preview what sync would do without applying changes")
+    .action(async (opts: { offlineFixture?: string; yes?: boolean; dryRun?: boolean }) => {
+      await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd, yes: opts.yes, dryRun: opts.dryRun });
     });
 
   program

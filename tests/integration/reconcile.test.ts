@@ -83,7 +83,7 @@ describe("reconcile", () => {
     expect(await exists(join(dir, ".claude/skills/badge-system/SKILL.md"))).toBe(true);
   });
 
-  it("--force deletes all deprecated-path orphans without prompting, skips CLAUDE.md collision", async () => {
+  it("--force deletes all deprecated-path orphans and auto-resolves CLAUDE.md collision", async () => {
     await buildCrewopsFixture(dir);
     const r = await runCli(["reconcile", "--force"], { cwd: dir });
     expect(r.code).toBe(0);
@@ -99,11 +99,9 @@ describe("reconcile", () => {
     expect(await exists(join(dir, ".claude/skills/design-review/SKILL.md"))).toBe(false);
     expect(await exists(join(dir, ".claude/skills/icons/SKILL.md"))).toBe(false);
 
-    // CLAUDE.md collision: --force must NOT auto-delete either file — both may have user content
-    // Instead it warns and skips; manual resolution required
-    expect(await exists(join(dir, "CLAUDE.md"))).toBe(true);
+    // CLAUDE.md collision auto-resolved: root deleted, .claude/CLAUDE.md kept
+    expect(await exists(join(dir, "CLAUDE.md"))).toBe(false);
     expect(await exists(join(dir, ".claude/CLAUDE.md"))).toBe(true);
-    expect(r.stdout).toMatch(/CLAUDE\.md collision needs manual resolution/);
 
     // Canonical copies preserved
     expect(await exists(join(dir, "design-system/contracts.md"))).toBe(true);
@@ -347,6 +345,21 @@ function extractAllCommands(hooks: Record<string, Array<{ hooks: Array<{ command
   }
   return commands;
 }
+
+describe("#192 — reconcile runs without confirmation prompt", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("reconcile deletes deprecated orphans without prompting (no --force required)", async () => {
+    await buildCrewopsFixture(dir);
+    const r = await runCli(["reconcile"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("reconcile complete");
+    expect(r.stdout).not.toContain("aborted");
+    expect(await exists(join(dir, "contracts.md"))).toBe(false);
+  });
+});
 
 describe("audit — deprecated-path orphan reporting", () => {
   let dir: string;

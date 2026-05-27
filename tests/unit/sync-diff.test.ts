@@ -6,9 +6,11 @@ describe("sync-diff (managed)", () => {
     const v = diffFile({ category: "managed" }, { prev: "A", upstream: "B", current: "A" });
     expect(v).toEqual<FileVerdict>({ action: "rewrite", reason: "upstream changed" });
   });
-  it("abort when on-disk diverges from previous (hand-edited managed file)", () => {
+  it("rewrite when on-disk diverges from previous (hand-edited managed file)", () => {
     const v = diffFile({ category: "managed" }, { prev: "A", upstream: "B", current: "A-modified" });
-    expect(v.action).toBe("abort");
+    expect(v.action).toBe("rewrite");
+    expect(v.reason).toContain("had local edits");
+    expect(v.reason).toContain("original in git history");
   });
   it("skip when nothing changed", () => {
     const v = diffFile({ category: "managed" }, { prev: "A", upstream: "A", current: "A" });
