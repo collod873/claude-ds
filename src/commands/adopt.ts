@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { info, err } from "../lib/log.js";
+import { info, err, printNextStep } from "../lib/log.js";
 import { detectLookalikes } from "../lib/lookalike.js";
 import { detectPackageManager, runCmd } from "../lib/package-manager.js";
 import { detectAppDir, detectClaudeMdCandidates, DEFAULT_CLAUDE_MD_TARGET } from "../lib/paths.js";
@@ -332,4 +332,5 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   info(`adopted claude-ds (${pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);
   info(`CI scripts installed. Run: ${runCmd(pm, "ci:hook-contract")} and ${runCmd(pm, "ci:consistency")}`);
   info(`A starter GitHub Actions workflow was seeded at .github/workflows/claude-ds-governance.yml (delete if not on GH Actions). See docs/ci-wiring.md for details.`);
+  printNextStep("adopt", {});
 }

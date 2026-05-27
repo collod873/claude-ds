@@ -2,7 +2,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DeprecatedPath } from "../lib/manifest.js";
 import { loadProject } from "../lib/project.js";
-import { info, err } from "../lib/log.js";
+import { info, err, printNextStep } from "../lib/log.js";
 import { scanRootDupes, RootDupeFinding } from "../lib/root-dupes.js";
 import { run, type Operation } from "../lib/runner.js";
 import { makeDeleteFiles, makeMergeRootToCanonical, makePruneDanglingHooks } from "../lib/ops/reconcile-mutations.js";
@@ -251,6 +251,7 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
 
   if (allFindings.length === 0 && rootDupeFindings.length === 0) {
     info("reconcile: no orphans or collisions found — tree is clean");
+    printNextStep("reconcile", {});
     return;
   }
 
@@ -295,4 +296,5 @@ export async function reconcileCmd(opts: { dryRun?: boolean; force?: boolean; cw
   if (result.pruned > 0) parts.push(`settings.json pruned`);
   if (result.skipped > 0) parts.push(`${result.skipped} skipped`);
   info(`reconcile complete — ${parts.length > 0 ? parts.join(", ") : "nothing to do"}`);
+  printNextStep("reconcile", {});
 }

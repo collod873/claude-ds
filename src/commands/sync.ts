@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { info, err } from "../lib/log.js";
+import { info, err, printNextStep } from "../lib/log.js";
 
 const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
@@ -123,4 +123,5 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
   }
 
   info(`sync complete → ${target}`);
+  printNextStep("sync", {});
 }

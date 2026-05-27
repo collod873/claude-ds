@@ -6,6 +6,8 @@ import { join } from "node:path";
 vi.mock("../../src/lib/log.js", () => ({
   info: vi.fn(),
   err: vi.fn(),
+  printNextStep: vi.fn(),
+  detectBuildCommand: vi.fn().mockResolvedValue("npm run build"),
 }));
 
 import { auditCmd } from "../../src/commands/audit";

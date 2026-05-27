@@ -3,7 +3,7 @@ import { mkdirSync, renameSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { info, err, confirm } from "../lib/log.js";
+import { info, err, confirm, printNextStep } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
@@ -152,6 +152,7 @@ export async function classifyCmd(opts: {
 
   if (classified.length === 0) {
     info(`classify: no classifiable files found in ${srcRel}`);
+    printNextStep("classify", {});
     return;
   }
 
@@ -266,6 +267,7 @@ export async function classifyCmd(opts: {
 
   if (moved === 0) {
     info("classify: no files moved");
+    printNextStep("classify", {});
     return;
   }
 
@@ -277,4 +279,5 @@ export async function classifyCmd(opts: {
   await run(ctx2, [rewriteImports], "apply");
 
   info("classify: complete");
+  printNextStep("classify", {});
 }

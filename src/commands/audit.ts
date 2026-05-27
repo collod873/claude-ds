@@ -3,7 +3,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest, isManifestOrKeepfile, type DeprecatedPath, type ManagedRoot } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
-import { info, err } from "../lib/log.js";
+import { info, err, printNextStep, detectBuildCommand } from "../lib/log.js";
 import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
@@ -596,10 +596,16 @@ export async function auditCmd(opts: AuditOpts) {
   if (activeFindings.length > 0) parts.push(`Errors: ${activeFindings.length}`);
   info(parts.join(" | "));
 
+  const buildCmd = await detectBuildCommand(cwd);
   if (activeFindings.length > 0) {
     info(`${activeFindings.length} error(s) require attention`);
+    printNextStep("audit", { hasFindings: true });
     process.exit(1);
+  } else if (fixedCount > 0) {
+    info("No action required.");
+    printNextStep("audit-fix", { buildCmd });
   } else {
     info("No action required.");
+    printNextStep("audit", { hasFindings: false, buildCmd });
   }
 }
