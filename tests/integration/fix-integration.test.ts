@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { checkThreeSignals } from "../../src/lib/three-signal";
 import { runFixPass } from "../../src/lib/fix-pass";
 import type { DriftFinding } from "../../src/lib/drift-rules";
-import type { FixerPrompt } from "../../src/lib/drift-fixers";
+import type { FixerPrompt, PromptOption } from "../../src/lib/drift-fixers";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -223,7 +223,7 @@ describe("integration: full --fix pass on fixture project", () => {
     // ── Mock prompt: always pick first option ──
     const promptLog: string[] = [];
     const mockPrompt: FixerPrompt = async (question, options) => {
-      promptLog.push(`${question} → [0] ${options[0]}`);
+      promptLog.push(`${question} → [0] ${options[0].label}`);
       return 0;
     };
 
@@ -436,17 +436,16 @@ describe("integration: full --fix pass on fixture project", () => {
     const findings = await collectFindings(dir);
     expect(findings.some(f => f.ruleId === "DRIFT-RAW-PRIMITIVE")).toBe(true);
 
-    // No-TTY prompt: always defers
-    const noTtyPrompt: FixerPrompt = async () => "defer";
+    // Non-TTY prompt: picks first option (safe default)
+    const noTtyPrompt: FixerPrompt = async () => 0;
     const result = await runFixPass(dir, findings, { prompt: noTtyPrompt });
 
     expect(result.aborted).toBe(false);
-    const deferred = result.results.filter(r => !r.fixed);
-    expect(deferred.length).toBeGreaterThanOrEqual(1);
-    expect(deferred.some(r => r.finding.ruleId === "DRIFT-RAW-PRIMITIVE")).toBe(true);
+    // First option is picked — raw primitive should be fixed
+    const fixed = result.results.filter(r => r.fixed);
+    expect(fixed.some(r => r.finding.ruleId === "DRIFT-RAW-PRIMITIVE")).toBe(true);
 
-    // Original file unchanged
     const formSource = await readFile(join(dir, "design-system/composites/form.tsx"), "utf8");
-    expect(formSource).toContain("<button");
+    expect(formSource).toContain("<Button");
   });
 });

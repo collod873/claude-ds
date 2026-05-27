@@ -147,16 +147,91 @@ describe("drift-fixers", () => {
   });
 
   describe("makeNoTtyPrompt", () => {
-    it("always returns 'defer'", async () => {
+    it("always picks the first option (safe default)", async () => {
       const prompt = makeNoTtyPrompt();
-      const result = await prompt("Which variant?", ["default", "ghost", "outline"]);
-      expect(result).toBe("defer");
+      const result = await prompt("Which variant?", [
+        { label: "default", description: "Default variant" },
+        { label: "ghost", description: "Ghost variant" },
+        { label: "outline", description: "Outline variant" },
+      ]);
+      expect(result).toBe(0);
     });
 
-    it("returns 'defer' regardless of question or options", async () => {
+    it("returns 0 regardless of question or options", async () => {
       const prompt = makeNoTtyPrompt();
-      expect(await prompt("Pick one", ["a"])).toBe("defer");
-      expect(await prompt("Another?", ["x", "y", "z"])).toBe("defer");
+      expect(await prompt("Pick one", [{ label: "a", description: "Option A" }])).toBe(0);
+      expect(await prompt("Another?", [
+        { label: "x", description: "Option X" },
+        { label: "y", description: "Option Y" },
+        { label: "z", description: "Option Z" },
+      ])).toBe(0);
+    });
+  });
+
+  describe("structured prompt options", () => {
+    it("prompt receives options with label and description fields", async () => {
+      const dir = await freshTmpDir();
+      try {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+        await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        const tokensJson = { spacing: { "p-4": "1rem", "p-5": "1rem" } };
+        await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify(tokensJson));
+
+        const source = `export function Card() {\n  return <div style={{ padding: "1rem" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+        await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+        const received: Array<Array<{ label: string; description: string }>> = [];
+        const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
+          received.push(opts);
+          for (const opt of opts) {
+            expect(opt).toHaveProperty("label");
+            expect(opt).toHaveProperty("description");
+            expect(typeof opt.label).toBe("string");
+            expect(typeof opt.description).toBe("string");
+          }
+          return 0 as number | "defer";
+        };
+
+        const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+        const finding: DriftFinding = {
+          ruleId: "DRIFT-INLINE-STATIC-STYLE",
+          file: "design-system/atoms/card.tsx",
+          message: "inline static style",
+        };
+        await fixer(finding, dir, { prompt: mockPrompt });
+
+        expect(received.length).toBeGreaterThan(0);
+      } finally {
+        await cleanup(dir);
+      }
+    });
+
+    it("non-TTY prompt picks safe default (first option) for ambiguous token match", async () => {
+      const dir = await freshTmpDir();
+      try {
+        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+
+        const tokensJson = { color: { primary: "#ff0000", danger: "#ff0000" } };
+        await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify(tokensJson));
+
+        const source = `export function Alert() {\n  return <div style={{ color: "#ff0000" }}>warn</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+        await writeFile(join(dir, "design-system/atoms/alert.tsx"), source);
+
+        const prompt = makeNoTtyPrompt();
+        const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+        const finding: DriftFinding = {
+          ruleId: "DRIFT-INLINE-STATIC-STYLE",
+          file: "design-system/atoms/alert.tsx",
+          message: "inline static style",
+        };
+        const result = await fixer(finding, dir, { prompt });
+
+        expect(result.fixed).toBe(true);
+        expect(result.changes.length).toBeGreaterThan(0);
+      } finally {
+        await cleanup(dir);
+      }
     });
   });
 
@@ -539,8 +614,8 @@ describe("drift-fixers", () => {
       const source = `export function Card() {\n  return <div style={{ color: "#ffffff" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
       await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-      const choices: string[][] = [];
-      const mockPrompt = async (_q: string, opts: string[]) => {
+      const choices: Array<Array<{ label: string; description: string }>> = [];
+      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
         choices.push(opts);
         return 0 as number | "defer";
       };
@@ -549,8 +624,8 @@ describe("drift-fixers", () => {
 
       expect(result.fixed).toBe(true);
       expect(choices.length).toBeGreaterThan(0);
-      expect(choices[0]).toContain("color-background");
-      expect(choices[0]).toContain("color-surface");
+      expect(choices[0].map(o => o.label)).toContain("color-background");
+      expect(choices[0].map(o => o.label)).toContain("color-surface");
     });
 
     it("defers ambiguous match when prompt returns defer", async () => {
@@ -738,8 +813,8 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/user-badge.tsx"), dsSource);
 
-      const promptOptions: string[][] = [];
-      const mockPrompt = async (_q: string, opts: string[]) => {
+      const promptOptions: Array<Array<{ label: string; description: string }>> = [];
+      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
         promptOptions.push(opts);
         return 0 as number | "defer";
       };
@@ -747,9 +822,9 @@ describe("drift-fixers", () => {
       await fixAndApply(fixer,makeFinding("design-system/composites/user-badge.tsx"), dir, { prompt: mockPrompt });
 
       expect(promptOptions.length).toBeGreaterThan(0);
-      const options = promptOptions[0];
-      expect(options.some(o => o.toLowerCase().includes("extract"))).toBe(false);
-      expect(options.some(o => o.toLowerCase().includes("prop"))).toBe(true);
+      const labels = promptOptions[0].map(o => o.label.toLowerCase());
+      expect(labels.some(l => l.includes("extract"))).toBe(false);
+      expect(labels.some(l => l.includes("prop"))).toBe(true);
     });
 
     it("offers convert-to-prop only for pure functions with ≤2 params", async () => {
@@ -766,8 +841,8 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
 
-      const promptOptions: string[][] = [];
-      const mockPrompt = async (_q: string, opts: string[]) => {
+      const promptOptions: Array<Array<{ label: string; description: string }>> = [];
+      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
         promptOptions.push(opts);
         return 0 as number | "defer";
       };
@@ -775,9 +850,9 @@ describe("drift-fixers", () => {
       await fixAndApply(fixer,makeFinding("design-system/composites/widget.tsx"), dir, { prompt: mockPrompt });
 
       expect(promptOptions.length).toBeGreaterThan(0);
-      const options = promptOptions[0];
-      expect(options.some(o => o.toLowerCase().includes("extract"))).toBe(true);
-      expect(options.some(o => o.toLowerCase().includes("prop"))).toBe(false);
+      const labels = promptOptions[0].map(o => o.label.toLowerCase());
+      expect(labels.some(l => l.includes("extract"))).toBe(true);
+      expect(labels.some(l => l.includes("prop"))).toBe(false);
     });
 
     it("offers convert-to-prop for simple constants", async () => {
@@ -794,8 +869,8 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
 
-      const promptOptions: string[][] = [];
-      const mockPrompt = async (_q: string, opts: string[]) => {
+      const promptOptions: Array<Array<{ label: string; description: string }>> = [];
+      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
         promptOptions.push(opts);
         return 0 as number | "defer";
       };
@@ -803,9 +878,9 @@ describe("drift-fixers", () => {
       await fixAndApply(fixer,makeFinding("design-system/composites/badge.tsx"), dir, { prompt: mockPrompt });
 
       expect(promptOptions.length).toBeGreaterThan(0);
-      const options = promptOptions[0];
-      expect(options.some(o => o.toLowerCase().includes("extract"))).toBe(true);
-      expect(options.some(o => o.toLowerCase().includes("prop"))).toBe(true);
+      const labels = promptOptions[0].map(o => o.label.toLowerCase());
+      expect(labels.some(l => l.includes("extract"))).toBe(true);
+      expect(labels.some(l => l.includes("prop"))).toBe(true);
     });
 
     it("converts to prop injection — removes import and adds prop", async () => {
@@ -824,8 +899,8 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
-      const mockPrompt = async (_q: string, opts: string[]) => {
-        return opts.findIndex(o => o.toLowerCase().includes("prop")) as number | "defer";
+      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
+        return opts.findIndex(o => o.label.toLowerCase().includes("prop")) as number | "defer";
       };
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
       const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });

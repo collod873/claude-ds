@@ -16,7 +16,12 @@ export interface FixResult {
   changes: Change[];
 }
 
-export type FixerPrompt = (question: string, options: string[]) => Promise<number | "defer">;
+export interface PromptOption {
+  label: string;
+  description: string;
+}
+
+export type FixerPrompt = (question: string, options: PromptOption[]) => Promise<number | "defer">;
 
 export type DriftFixer = (finding: DriftFinding, cwd: string, opts?: FixerOpts) => Promise<FixResult>;
 
@@ -64,18 +69,18 @@ export function getFixerPriority(ruleId: DriftRuleId): number {
 }
 
 export function makeNoTtyPrompt(): FixerPrompt {
-  return async () => "defer";
+  return async () => 0;
 }
 
 export function makeTtyPrompt(): FixerPrompt {
-  return async (question: string, options: string[]): Promise<number | "defer"> => {
+  return async (question: string, options: PromptOption[]): Promise<number | "defer"> => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     try {
       const maxOptions = 5;
       const displayOptions = options.length > maxOptions
-        ? [...options.slice(0, maxOptions - 1), `... and ${options.length - maxOptions + 1} more (defer to review)`]
+        ? [...options.slice(0, maxOptions - 1), { label: `... and ${options.length - maxOptions + 1} more`, description: "defer to review" }]
         : options;
-      const lines = displayOptions.map((opt, i) => `  \x1b[36m[${i + 1}]\x1b[0m ${opt}`).join("\n");
+      const lines = displayOptions.map((opt, i) => `  \x1b[36m[${i + 1}]\x1b[0m ${opt.label} — ${opt.description}`).join("\n");
       const display = `\n\x1b[1m${question}\x1b[0m\n${lines}\n  \x1b[90m[s] Skip/defer\x1b[0m\n\x1b[36m>\x1b[0m `;
       const answer = await new Promise<string>(resolve => {
         rl.question(display, resolve);
@@ -525,7 +530,7 @@ async function fixInlineStaticStyle(finding: DriftFinding, cwd: string, opts?: F
       if (matches.length === 1) {
         resolved.push({ prop, className: matches[0].className });
       } else if (matches.length > 1 && opts?.prompt) {
-        const options = matches.map(m => m.className);
+        const options = matches.map(m => ({ label: m.className, description: `Use token class "${m.className}"` }));
         const choice = await opts.prompt(
           `${finding.file}: ambiguous token for ${prop.name}: ${prop.normalizedValue}`,
           options,
@@ -819,10 +824,10 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
         (symbolInfo.isFunction && symbolInfo.paramCount <= 2)
       );
 
-      const options: string[] = [];
-      if (canExtract) options.push(`Extract "${symbolName}" to design-system/utils/`);
-      if (canConvertToProp) options.push(`Convert "${symbolName}" to prop injection`);
-      options.push("Defer (add exception)");
+      const options: PromptOption[] = [];
+      if (canExtract) options.push({ label: `Extract "${symbolName}" to design-system/utils/`, description: "Move this import to the design system utilities folder" });
+      if (canConvertToProp) options.push({ label: `Convert "${symbolName}" to prop injection`, description: "Pass this value as a prop instead of importing it" });
+      options.push({ label: "Defer (add exception)", description: "Skip for now and add an exception entry" });
 
       if (options.length === 1) {
         continue;
@@ -832,14 +837,14 @@ async function fixDsImportsFeature(finding: DriftFinding, cwd: string, opts?: Fi
       const autoExtract = canExtract && symbolInfo && symbolInfo.isFunction && symbolInfo.paramCount <= 2 && !hasDomainDeps;
       let selectedOption: string;
       if (autoExtract) {
-        selectedOption = options[0];
+        selectedOption = options[0].label;
       } else if (opts?.prompt) {
         const choice = await opts.prompt(
           `${finding.file}: "${symbolName}" imported from domain root`,
           options,
         );
         if (choice === "defer") continue;
-        selectedOption = options[choice];
+        selectedOption = options[choice].label;
       } else {
         continue;
       }
@@ -1642,13 +1647,18 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
           .join("\n");
         const context = `${finding.file}:${lineNum}\n${snippet}`;
 
-        const options = [...buildVariantOptions(cvaVariants), "Use default (no variant prop)", "Skip"];
+        const variantLabels = buildVariantOptions(cvaVariants);
+        const options: PromptOption[] = [
+          ...variantLabels.map(v => ({ label: v, description: `Apply ${v} variant` })),
+          { label: "Use default (no variant prop)", description: "Replace with no variant specified" },
+          { label: "Skip", description: "Leave this element unchanged" },
+        ];
         const choice = await opts.prompt(
           `${context}\nraw <${element}> — replace with <${atomComponent}>?`,
           options,
         );
         if (choice === "defer") continue;
-        const selected = options[choice];
+        const selected = options[choice].label;
         if (selected === "Skip") continue;
 
         const variantProp = selected === "Use default (no variant prop)" ? null : selected;
@@ -1675,7 +1685,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     if (existingAtom) {
       // Collision — prompt only if available
       if (!opts?.prompt) continue;
-      const collisionOptions = ["Skip"];
+      const collisionOptions: PromptOption[] = [{ label: "Skip", description: "Leave this component as-is" }];
       const choice = await opts.prompt(
         `${finding.file}: derived atom name "${atomName}" collides with existing atom — skip extraction?`,
         collisionOptions,
