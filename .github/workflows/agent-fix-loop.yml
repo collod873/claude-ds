@@ -94,6 +94,10 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Setup pnpm
+        if: steps.limit.outputs.exceeded != 'true'
+        run: corepack enable && corepack prepare pnpm@latest --activate
+
       - name: Install deps, build, and link claude-ds
         if: steps.limit.outputs.exceeded != 'true'
         run: |
@@ -121,9 +125,9 @@ jobs:
           git clean -fdx
           # Remove local link: dependency before install (path doesn't exist in CI)
           node -e "const p=require('./package.json'); delete p.dependencies?.['claude-ds']; delete p.devDependencies?.['claude-ds']; require('fs').writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n')"
-          npm install --legacy-peer-deps
-          # Wire in the globally-linked claude-ds from the build step
-          npm link claude-ds
+          pnpm install --no-frozen-lockfile
+          # Link the locally-built claude-ds into crewops
+          pnpm link "$GITHUB_WORKSPACE"
 
       - name: Run mechanical checks
         if: steps.limit.outputs.exceeded != 'true'
