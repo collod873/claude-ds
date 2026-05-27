@@ -8,6 +8,12 @@ source "$(dirname "$0")/lib/read-hook-input.sh"
 file="$HOOK_FILE_PATH"
 if [ -z "$file" ]; then exit 0; fi
 
+# Only fire for files under design-system/
+case "$file" in
+  *design-system/*) ;;
+  *) exit 0 ;;
+esac
+
 similarity_script="scripts/similarity-check.ts"
 
 if [ ! -f "$similarity_script" ]; then

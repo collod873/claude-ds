@@ -2,7 +2,7 @@
 /**
  * similarity-check.ts — Scans component bundle names under
  * design-system/{atoms,composites}/ and flags any name pair with
- * Levenshtein distance ≤ 3 (matching the heuristic in src/lib/lookalike.ts).
+ * Levenshtein ratio (distance / max length) < 0.4.
  *
  * Emits SIM-001 per pair on stderr.
  * Exit 0 clean, 1 self-error, 2 any near-duplicate found.
@@ -15,7 +15,7 @@ import { join, basename, extname } from "node:path";
 
 const SCAN_DIRS = ["atoms", "composites"];
 
-/** Levenshtein distance — mirrors src/lib/lookalike.ts threshold logic. */
+/** Levenshtein distance. */
 function levenshtein(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
@@ -76,7 +76,8 @@ function main(): void {
       const b = names[j];
       if (a.name === b.name) continue; // exact match — different tier, same name is fine to flag separately
       const dist = levenshtein(a.name.toLowerCase(), b.name.toLowerCase());
-      if (dist <= 3) {
+      const maxLen = Math.max(a.name.length, b.name.length);
+      if (maxLen > 0 && dist / maxLen < 0.4) {
         const pathA = join(dsRoot, a.dir, `${a.name}.tsx`);
         const pathB = join(dsRoot, b.dir, `${b.name}.tsx`);
         process.stderr.write(
