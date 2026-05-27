@@ -45,7 +45,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-MISCLASSIFIED-COMPOSITE": { fixer: fixMisclassified, interactive: false, priority: 3 },
   "DRIFT-INLINE-STATIC-STYLE": { fixer: fixInlineStaticStyle, interactive: false, priority: 2 },
   "DRIFT-DS-IMPORTS-FEATURE": { fixer: fixDsImportsFeature, interactive: false, priority: 2 },
-  "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: true, priority: 0 },
+  "DRIFT-RAW-PRIMITIVE": { fixer: fixRawPrimitive, interactive: false, priority: 0 },
   "DRIFT-CVA-VARIANT-UNRENDERED": { fixer: fixCvaVariantUnrendered, interactive: false, priority: 3 },
   "DRIFT-META-EXAMPLES-DUPLICATE": { fixer: fixMetaExamplesDuplicate, interactive: false, priority: 4 },
   "DRIFT-META-EXAMPLES-CORRUPT": { fixer: fixMetaExamplesCorrupt, interactive: false, priority: 5 },
@@ -1635,12 +1635,20 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
   const rawElements = findRawElements(currentSource);
   const uniqueElements = [...new Set(rawElements.map(m => m.element))];
 
+  const skippedElements: string[] = [];
+
   for (const element of uniqueElements) {
     const atomFileName = ELEMENT_TO_ATOM[element];
-    if (!atomFileName) continue;
+    if (!atomFileName) {
+      skippedElements.push(element);
+      continue;
+    }
 
     const atomPath = await atomFileExists(cwd, atomFileName);
-    if (!atomPath) continue;
+    if (!atomPath) {
+      skippedElements.push(element);
+      continue;
+    }
 
     const atomComponent = capitalize(element);
     let atomSource: string;
@@ -1690,39 +1698,15 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
       anyFixed = true;
     }
 
-    // Prompt only for genuinely ambiguous instances
-    if (ambiguousInstances.length > 0 && opts?.prompt) {
-      // Re-find after auto-rewrites shifted indices
+    // Ambiguous instances: safe default is base atom with no variant prop
+    if (ambiguousInstances.length > 0) {
       const remaining = findRawElements(currentSource).filter(m => m.element === element);
-      const remainingRewrites: InstanceRewrite[] = [];
-
-      for (const inst of remaining) {
-        const lineNum = currentSource.slice(0, inst.index).split("\n").length;
-        const lines = currentSource.split("\n");
-        const start = Math.max(0, lineNum - 2);
-        const end = Math.min(lines.length, lineNum + 1);
-        const snippet = lines.slice(start, end)
-          .map((l, idx) => `  ${start + idx + 1}| ${l}`)
-          .join("\n");
-        const context = `${finding.file}:${lineNum}\n${snippet}`;
-
-        const variantLabels = buildVariantOptions(cvaVariants);
-        const options: PromptOption[] = [
-          ...variantLabels.map(v => ({ label: v, description: `Apply ${v} variant` })),
-          { label: "Use default (no variant prop)", description: "Replace with no variant specified" },
-          { label: "Skip", description: "Leave this element unchanged" },
-        ];
-        const choice = await opts.prompt(
-          `${context}\nraw <${element}> — replace with <${atomComponent}>?`,
-          options,
-        );
-        if (choice === "defer") continue;
-        const selected = options[choice].label;
-        if (selected === "Skip") continue;
-
-        const variantProp = selected === "Use default (no variant prop)" ? null : selected;
-        remainingRewrites.push({ element, atomComponent, variantProp, index: inst.index });
-      }
+      const remainingRewrites: InstanceRewrite[] = remaining.map(inst => ({
+        element,
+        atomComponent,
+        variantProp: null,
+        index: inst.index,
+      }));
 
       if (remainingRewrites.length > 0) {
         currentSource = rewriteInstances(currentSource, remainingRewrites);
@@ -1741,17 +1725,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     const atomFileKebab = toKebab(atomName);
     const existingAtom = await atomFileExists(cwd, atomFileKebab);
 
-    if (existingAtom) {
-      // Collision — prompt only if available
-      if (!opts?.prompt) continue;
-      const collisionOptions: PromptOption[] = [{ label: "Skip", description: "Leave this component as-is" }];
-      const choice = await opts.prompt(
-        `${finding.file}: derived atom name "${atomName}" collides with existing atom — skip extraction?`,
-        collisionOptions,
-      );
-      if (choice === "defer" || choice === 0) continue;
-      continue;
-    }
+    if (existingAtom) continue;
 
     // Auto-accept derived name (no prompt needed)
     let finalAtomName = atomName;
@@ -1808,7 +1782,11 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
   }
 
   if (!anyFixed) {
-    return { finding, fixed: false, message: `deferred raw primitive fixes for ${finding.file}`, changes: [] };
+    if (skippedElements.length > 0) {
+      const tags = skippedElements.map(e => `<${e}>`).join(", ");
+      return { finding, fixed: false, message: `no base atom mapping for ${tags} — create the atom in design-system/atoms/ first`, changes: [] };
+    }
+    return { finding, fixed: false, message: `no fixable raw primitives in ${finding.file}`, changes: [] };
   }
 
   changes.push({

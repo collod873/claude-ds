@@ -119,6 +119,10 @@ describe("drift-fixers", () => {
     it("returns false for DRIFT-MISCLASSIFIED-COMPOSITE (deterministic fixer)", () => {
       expect(isInteractive("DRIFT-MISCLASSIFIED-COMPOSITE")).toBe(false);
     });
+
+    it("returns false for DRIFT-RAW-PRIMITIVE (automated safe default)", () => {
+      expect(isInteractive("DRIFT-RAW-PRIMITIVE" as DriftRuleId)).toBe(false);
+    });
   });
 
   describe("getFixerPriority", () => {
@@ -1231,9 +1235,8 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
-        const mockPrompt = async () => 0 as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+        await fixAndApply(fixer,makeFinding(), dir);
 
         const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
         expect(content).toMatch(/import\s+\{\s*Button\s*\}\s+from\s+/);
@@ -1266,12 +1269,10 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/search-form.tsx"), compositeSource);
 
-        const mockPrompt = async () => 0 as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
         const result = await fixAndApply(fixer,
           makeFinding("design-system/composites/search-form.tsx"),
           dir,
-          { prompt: mockPrompt },
         );
 
         expect(result.fixed).toBe(true);
@@ -1284,7 +1285,7 @@ describe("drift-fixers", () => {
         expect(content).toContain("@/design-system/atoms/input");
       });
 
-      it("defers when prompt returns defer for ambiguous variant", async () => {
+      it("auto-replaces ambiguous variants with base atom (no variant prop)", async () => {
         await mkdir(join(dir, "design-system/atoms"), { recursive: true });
         await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -1304,11 +1305,13 @@ describe("drift-fixers", () => {
           `export const meta = { kind: "composite" as const, examples: [] };`,
         ].join("\n") + "\n");
 
-        const mockPrompt = async () => "defer" as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+        const result = await fixAndApply(fixer,makeFinding(), dir);
 
-        expect(result.fixed).toBe(false);
+        expect(result.fixed).toBe(true);
+        const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
+        expect(content).toContain("<Button");
+        expect(content).not.toContain("<button");
       });
 
       it("preserves non-className attributes on raw elements", async () => {
@@ -1327,9 +1330,8 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
-        const mockPrompt = async () => 0 as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+        await fixAndApply(fixer,makeFinding(), dir);
 
         const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
         expect(content).toContain("onClick={handleClick}");
@@ -1536,7 +1538,7 @@ describe("drift-fixers", () => {
       expect(result.fixed).toBe(false);
     });
 
-    it("requires interactive prompt", async () => {
+    it("skips with remediation message when no atom file exists", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await writeFile(join(dir, "design-system/composites/toolbar.tsx"), [
         `export function Toolbar() { return <div><button>X</button></div>; }`,
@@ -1546,6 +1548,8 @@ describe("drift-fixers", () => {
       const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
       const result = await fixAndApply(fixer,makeFinding(), dir);
       expect(result.fixed).toBe(false);
+      expect(result.message).toContain("no base atom mapping");
+      expect(result.message).toContain("design-system/atoms/");
     });
   });
 
@@ -1684,7 +1688,7 @@ describe("drift-fixers", () => {
         expect(promptCalls).toHaveLength(0);
       });
 
-      it("prompts when className matches 2+ variant keywords", async () => {
+      it("auto-applies default (no variant) when className matches 2+ variant keywords", async () => {
         await mkdir(join(dir, "design-system/atoms"), { recursive: true });
         await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -1713,25 +1717,19 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/actions.tsx"), compositeSource);
 
-        const promptCalls: string[] = [];
-        const mockPrompt = async (q: string) => {
-          promptCalls.push(q);
-          return 0 as number | "defer";
-        };
-
         const finding: DriftFinding = {
           ruleId: "DRIFT-RAW-PRIMITIVE",
           file: "design-system/composites/actions.tsx",
           message: "raw <button>",
         };
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+        const result = await fixAndApply(fixer, finding, dir, {});
 
-        // Should have prompted due to ambiguity
-        expect(promptCalls.length).toBeGreaterThan(0);
-        // Gap 3: prompt includes code context (file reference and surrounding code)
-        expect(promptCalls[0]).toContain("actions.tsx");
-        expect(promptCalls[0]).toContain("className");
+        expect(result.fixed).toBe(true);
+        const content = await readFile(join(dir, "design-system/composites/actions.tsx"), "utf8");
+        expect(content).toContain("<Button");
+        expect(content).not.toContain("<button");
+        expect(content).toContain("@/design-system/atoms/button");
       });
     });
 

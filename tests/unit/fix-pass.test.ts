@@ -205,8 +205,7 @@ describe("fix-pass", () => {
         },
       ];
 
-      const mockPrompt = async () => 0 as number | "defer";
-      const result = await runFixPass(dir, findings, { prompt: mockPrompt });
+      const result = await runFixPass(dir, findings, {});
 
       expect(result.aborted).toBe(false);
 
