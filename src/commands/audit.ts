@@ -371,11 +371,16 @@ export async function auditCmd(opts: AuditOpts) {
       allFindings.push(...findings);
       for (const f of findings) filesWithFindings.add(f.file);
 
-      // Ambiguity detection: atom files that compose many components may be misclassified
+      // Ambiguity detection: atom files that compose many components may be misclassified.
+      // Count both relative imports and DS-alias imports to sibling tier directories.
       if (signals.locationTier === "atom" && !findings.some(f => f.ruleId === "DRIFT-MISPLACED")) {
         const relativeImports = (source.match(/from\s+["']\.\.?\//g) ?? []).length;
-        if (relativeImports >= 5) {
-          ambiguousFiles.push({ file: filePath, importCount: relativeImports, locationTier: "atom" });
+        const aliasPattern = dsAliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+        const dsImportRe = aliasPattern ? new RegExp(`from\\s+["'](?:${aliasPattern})/(?:atoms|composites)/`, "g") : null;
+        const dsImports = dsImportRe ? (source.match(dsImportRe) ?? []).length : 0;
+        const componentImports = relativeImports + dsImports;
+        if (componentImports >= 3) {
+          ambiguousFiles.push({ file: filePath, importCount: componentImports, locationTier: "atom" });
         }
       }
     }
