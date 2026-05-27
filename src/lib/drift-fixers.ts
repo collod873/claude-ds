@@ -1281,7 +1281,7 @@ async function fixStaleDsImport(finding: DriftFinding, cwd: string, opts?: Fixer
     return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
-  const canonicalAlias = (opts?.dsAliases ?? []).find(a => a !== "@/design-system") ?? "@ds";
+  const canonicalAlias = (opts?.dsAliases ?? []).find(a => a !== "@/design-system") ?? "@/design-system";
   let result = source.replace(STALE_ALIAS_RE, `$1${canonicalAlias}/$2$3`);
 
   // Deduplicate identical import lines created by the rewrite
@@ -1464,8 +1464,9 @@ function rewriteInstances(source: string, rewrites: InstanceRewrite[]): string {
 }
 
 function addImportIfMissing(source: string, componentName: string, importPath: string): string {
-  const importRe = new RegExp(`import\\s+\\{[^}]*\\b${componentName}\\b[^}]*\\}\\s+from\\s+["']${importPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`);
-  if (importRe.test(source)) return source;
+  // Check if already imported from ANY path (prevents duplicates across alias variants)
+  const anyImportRe = new RegExp(`import\\s+\\{[^}]*\\b${componentName}\\b[^}]*\\}\\s+from\\s+["']`);
+  if (anyImportRe.test(source)) return source;
 
   const importLine = `import { ${componentName} } from "${importPath}";\n`;
   const firstImportMatch = source.match(/^import\s/m);
@@ -1630,6 +1631,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
   let currentSource = source;
   let anyFixed = false;
   const changes: Change[] = [];
+  const canonicalAlias = (opts?.dsAliases ?? []).find(a => a !== "@/design-system") ?? "@/design-system";
 
   // Path A: replace raw primitives with existing atoms (per-instance inference)
   const rawElements = findRawElements(currentSource);
@@ -1663,7 +1665,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     if (!cvaVariants) {
       // No variants — auto-replace all instances
       currentSource = rewriteRawElement(currentSource, element, atomComponent, null);
-      currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
+      currentSource = addImportIfMissing(currentSource, atomComponent, `${canonicalAlias}/atoms/${atomFileName}`);
       anyFixed = true;
       continue;
     }
@@ -1694,7 +1696,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     // Auto-apply unambiguous instances
     if (autoRewrites.length > 0) {
       currentSource = rewriteInstances(currentSource, autoRewrites);
-      currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
+      currentSource = addImportIfMissing(currentSource, atomComponent, `${canonicalAlias}/atoms/${atomFileName}`);
       anyFixed = true;
     }
 
@@ -1710,7 +1712,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
 
       if (remainingRewrites.length > 0) {
         currentSource = rewriteInstances(currentSource, remainingRewrites);
-        currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
+        currentSource = addImportIfMissing(currentSource, atomComponent, `${canonicalAlias}/atoms/${atomFileName}`);
         anyFixed = true;
       }
     }
@@ -1776,7 +1778,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
       );
     }
 
-    updatedSource = addImportIfMissing(updatedSource, finalAtomName, `@/design-system/atoms/${finalFileName}`);
+    updatedSource = addImportIfMissing(updatedSource, finalAtomName, `${canonicalAlias}/atoms/${finalFileName}`);
     currentSource = updatedSource;
     anyFixed = true;
   }
