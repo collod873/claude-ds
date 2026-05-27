@@ -119,7 +119,11 @@ jobs:
           cd "$crewops_dir"
           git reset --hard "$CREWOPS_BASELINE"
           git clean -fdx
+          # Remove local link: dependency before install (path doesn't exist in CI)
+          node -e "const p=require('./package.json'); delete p.dependencies?.['claude-ds']; delete p.devDependencies?.['claude-ds']; require('fs').writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n')"
           npm install --legacy-peer-deps
+          # Wire in the globally-linked claude-ds from the build step
+          npm link claude-ds
 
       - name: Run mechanical checks
         if: steps.limit.outputs.exceeded != 'true'
