@@ -123,9 +123,9 @@ jobs:
           cd "$crewops_dir"
           git reset --hard "$CREWOPS_BASELINE"
           git clean -fdx
-          # Remove local link: dependency and approve all build scripts for CI
-          node -e "const p=require('./package.json'); delete p.dependencies?.['claude-ds']; delete p.devDependencies?.['claude-ds']; if(p.pnpm) p.pnpm.onlyBuiltDependencies=['*']; require('fs').writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n')"
-          pnpm install --no-frozen-lockfile
+          # Remove local link: dependency before install (path doesn't exist in CI)
+          node -e "const p=require('./package.json'); delete p.dependencies?.['claude-ds']; delete p.devDependencies?.['claude-ds']; require('fs').writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n')"
+          pnpm install --no-frozen-lockfile --ignore-scripts
           # Link the locally-built claude-ds into crewops
           pnpm link "$GITHUB_WORKSPACE"
 
