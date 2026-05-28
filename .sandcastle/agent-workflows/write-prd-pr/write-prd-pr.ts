@@ -38,4 +38,3 @@ fs.writeFileSync(
 
 console.log(`\nWrote PR metadata to ${outputDir()}`);
 console.log(`  title: ${result.output.prTitle}`);
-

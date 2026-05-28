@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { runWithRetry } from "../shared/run-with-retry";
-import { required, claudeAgent } from "../shared/common";
+import { required, outputDir, claudeAgent } from "../shared/common";
 
 const PRD_NUMBER = required("PRD_NUMBER");
 const PRD_TITLE = required("PRD_TITLE");
@@ -123,4 +123,3 @@ ${opts.whatToBuild}
 ${criteria}
 `;
 }
-

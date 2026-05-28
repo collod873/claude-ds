@@ -1,7 +1,7 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import * as path from "node:path";
-import { required, claudeAgent } from "../shared/common";
+import { required, outputDir, claudeAgent } from "../shared/common";
 
 const PRD_NUMBER = required("PRD_NUMBER");
 const PRD_TITLE = required("PRD_TITLE");
@@ -31,4 +31,3 @@ const result = await sandcastle.run({
 
 console.log(`\nImplementation finished for sub-issue #${SUB_ISSUE_NUMBER}.`);
 console.log(`  commits this run: ${result.commits.length}`);
-

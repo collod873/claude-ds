@@ -53,4 +53,3 @@ if (result.output.status === "proposed") {
   console.log(`\nSkipped — no fresh candidates.`);
   console.log(`  reason: ${result.output.reason}`);
 }
-
