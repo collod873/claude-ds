@@ -35,6 +35,7 @@ const result = await sandcastle.run({
     env: {
       CLAUDE_CODE_OAUTH_TOKEN: required("CLAUDE_CODE_OAUTH_TOKEN"),
     },
+    idleTimeout: 1200,
   }),
   sandbox: noSandbox(),
   logging: { type: "stdout" },
