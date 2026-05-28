@@ -1,21 +1,23 @@
 name: Agent Implement (PR)
 
 on:
+  # See agent-review.yml — pull_request_target fires reliably on labels
+  # even when the PR is out-of-date or conflicting.
   pull_request_target:
     types: [labeled]
 
 jobs:
   implement-pr:
     if: github.event.label.name == 'agent:implement'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Shared with agent-review.yml — both push to the PR branch.
     concurrency:
       group: agent-mutate-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
-      issues: read
 
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -69,7 +71,7 @@ jobs:
 
       - name: Checkout PR branch
         if: steps.state.outputs.proceed == 'true' && steps.inputs.outputs.proceed == 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -83,7 +85,7 @@ jobs:
 
       - name: Setup Node.js 22
         if: steps.state.outputs.proceed == 'true' && steps.inputs.outputs.proceed == 'true'
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: "22"
 
@@ -107,7 +109,7 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           OUTPUT_DIR: ${{ runner.temp }}
-        run: npx tsx .sandcastle/implement-pr/implement-pr.ts
+        run: npx tsx .sandcastle/agent-workflows/implement-pr/implement-pr.ts
 
       - name: Push branch (abort cleanly if non-fast-forward)
         if: steps.state.outputs.proceed == 'true' && steps.inputs.outputs.proceed == 'true' && success()
@@ -138,7 +140,7 @@ jobs:
           REPLIES: ${{ runner.temp }}/implement_thread_replies.json
         run: |
           count=$(jq 'length' "$REPLIES")
-          for ((i=0; i<count; i++)); do
+          for i in $(seq 0 $((count - 1))); do
             commentId=$(jq -r ".[$i].commentId" "$REPLIES")
             body=$(jq -r ".[$i].body" "$REPLIES")
             rest_id=$(gh api graphql -f query="query(\$id:ID!){ node(id:\$id){ ... on PullRequestReviewComment { databaseId } } }" -F id="$commentId" --jq '.data.node.databaseId')
@@ -159,7 +161,7 @@ jobs:
         run: |
           commit_id=$(jq -r '.commit_id' "$INLINE")
           count=$(jq '.comments | length' "$INLINE")
-          for ((i=0; i<count; i++)); do
+          for i in $(seq 0 $((count - 1))); do
             path=$(jq -r ".comments[$i].path" "$INLINE")
             line=$(jq -r ".comments[$i].line" "$INLINE")
             side=$(jq -r ".comments[$i].side" "$INLINE")
@@ -180,7 +182,7 @@ jobs:
           TOP: ${{ runner.temp }}/implement_top_level_comments.json
         run: |
           count=$(jq 'length' "$TOP")
-          for ((i=0; i<count; i++)); do
+          for i in $(seq 0 $((count - 1))); do
             body=$(jq -r ".[$i].body" "$TOP")
             gh pr comment "$PR_NUMBER" --body "$body"
           done

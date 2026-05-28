@@ -7,7 +7,7 @@ on:
 jobs:
   to-issues-prd:
     if: github.event.label.name == 'agent:to-issues'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
       group: agent-to-issues-prd-issue-${{ github.event.issue.number }}
@@ -34,6 +34,7 @@ jobs:
             -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { parent { number } } } }' \
             -f owner="$owner" -f repo="$repo" -F num="$PRD_NUMBER" \
             --jq '.data.repository.issue.parent.number // empty' 2>/dev/null || echo "")
+
           if [ "$sub_count" != "0" ]; then
             mode="refuse-has-sub-issues"
           elif [ -n "$parent_number" ]; then
@@ -41,6 +42,7 @@ jobs:
           else
             mode="run"
           fi
+
           echo "sub_count=$sub_count" >> "$GITHUB_OUTPUT"
           echo "parent_number=$parent_number" >> "$GITHUB_OUTPUT"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
@@ -72,14 +74,14 @@ jobs:
 
       - name: Checkout main
         if: steps.shape.outputs.mode == 'run'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 1
 
       - name: Setup Node.js 22
         if: steps.shape.outputs.mode == 'run'
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: "22"
 
@@ -98,7 +100,7 @@ jobs:
           PRD_NUMBER: ${{ env.PRD_NUMBER }}
           PRD_TITLE: ${{ env.PRD_TITLE }}
           GH_REPO: ${{ env.GH_REPO }}
-        run: npx tsx .sandcastle/to-issues-prd/to-issues-prd.ts
+        run: npx tsx .sandcastle/agent-workflows/to-issues-prd/to-issues-prd.ts
 
       - name: Mark blocked on failure
         if: steps.shape.outputs.mode == 'run' && failure()

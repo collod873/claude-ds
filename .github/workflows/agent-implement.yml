@@ -7,7 +7,7 @@ on:
 jobs:
   implement:
     if: github.event.label.name == 'agent:implement'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
       group: agent-implement-issue-${{ github.event.issue.number }}
@@ -56,7 +56,6 @@ jobs:
           PARENT_NUMBER: ${{ steps.shape.outputs.parent_number }}
         run: |
           gh issue edit "$ISSUE_NUMBER" --remove-label "agent:implement" || true
-          gh issue edit "$ISSUE_NUMBER" --remove-label "ready-for-agent" || true
           gh issue edit "$ISSUE_NUMBER" --add-label "agent:blocked" || true
           gh issue comment "$ISSUE_NUMBER" --body "Refused to run: this issue is a sub-issue of #${PARENT_NUMBER}. Sub-issues are not labeled directly — add \`agent:implement\` to the parent PRD instead. Cleared \`agent:implement\` and added \`agent:blocked\`."
 
@@ -86,7 +85,6 @@ jobs:
           EXISTING_PR_URL: ${{ steps.preflight.outputs.existing_pr_url }}
         run: |
           gh issue edit "$ISSUE_NUMBER" --remove-label "agent:implement" || true
-          gh issue edit "$ISSUE_NUMBER" --remove-label "ready-for-agent" || true
           gh issue comment "$ISSUE_NUMBER" --body "Refused to run: PR $EXISTING_PR_URL already targets this issue. Close it first, then re-add \`agent:implement\`."
           exit 0
 
@@ -95,15 +93,18 @@ jobs:
         run: |
           gh issue edit "$ISSUE_NUMBER" --remove-label "agent:implement" || true
           gh issue edit "$ISSUE_NUMBER" --remove-label "agent:blocked" || true
-          gh issue edit "$ISSUE_NUMBER" --remove-label "ready-for-agent" || true
           gh issue edit "$ISSUE_NUMBER" --add-label "agent:in-progress"
 
       - name: Checkout main
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
+          # Use AGENT_PAT so pushes can include changes to files under
+          # .github/workflows/ (GITHUB_TOKEN lacks the `workflows` scope).
+          # Falls back to GITHUB_TOKEN if AGENT_PAT is unset; in that case
+          # workflow-file changes will be rejected on push.
           token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Compute branch name
@@ -128,7 +129,7 @@ jobs:
 
       - name: Setup Node.js 22
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: "22"
 
@@ -147,12 +148,16 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           BRANCH: ${{ steps.branch.outputs.name }}
           OUTPUT_DIR: ${{ runner.temp }}
-        run: npx tsx .sandcastle/implement/implement.ts
+        run: npx tsx .sandcastle/agent-workflows/implement/implement.ts
 
       - name: Push branch
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
+        # Force-push so we recover from leftover branches whose PR has since
+        # closed/merged. Safe because the preflight step refuses when an open
+        # PR exists for this issue, and the branch name is deterministic from
+        # the issue number — any remote ref here is an orphan.
         run: git push --force origin "$BRANCH"
 
       - name: Write PR title and description
@@ -161,7 +166,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           BRANCH: ${{ steps.branch.outputs.name }}
           OUTPUT_DIR: ${{ runner.temp }}
-        run: npx tsx .sandcastle/write-pr/write-pr.ts
+        run: npx tsx .sandcastle/agent-workflows/write-pr/write-pr.ts
 
       - name: Open PR
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
@@ -184,6 +189,11 @@ jobs:
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
         env:
           PR_NUMBER: ${{ steps.open_pr.outputs.pr_number }}
+          # Prefer AGENT_PAT so the labeled event triggers agent-review.yml
+          # (GITHUB_TOKEN-driven label adds do not trigger downstream workflows).
+          # Fall back to GITHUB_TOKEN if AGENT_PAT is unset or lacks
+          # pull-requests permission; in that case a human will need to
+          # re-add `agent:review` manually to fire the review workflow.
           AGENT_PAT: ${{ secrets.AGENT_PAT }}
           GITHUB_TOKEN_FALLBACK: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -197,10 +207,6 @@ jobs:
             echo "AGENT_PAT label add failed (status $status); falling back to GITHUB_TOKEN."
           fi
           GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh pr edit "$PR_NUMBER" --add-label "agent:review"
-
-      - name: Mark issue as having a PR
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
-        run: gh issue edit "$ISSUE_NUMBER" --add-label "has-pr" || true
 
       - name: Mark blocked on failure
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && failure()
