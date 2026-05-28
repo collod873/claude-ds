@@ -1574,7 +1574,7 @@ const NAMED_COMPONENT_START_RE = /^function\s+([A-Z][A-Za-z0-9]+)\s*\(/gm;
 
 const LOCAL_DECL_RE = /^(?:type|interface|const|let|var|function)\s+([A-Za-z_$][\w$]*)/gm;
 
-interface InternalComponent {
+export interface InternalComponent {
   name: string;
   startIndex: number;
   endIndex: number;
@@ -1606,7 +1606,7 @@ function extractFullFunction(source: string, start: number): string {
   return source.slice(start);
 }
 
-function findInternalComponents(source: string): InternalComponent[] {
+export function findInternalComponents(source: string): InternalComponent[] {
   const components: InternalComponent[] = [];
   NAMED_COMPONENT_START_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -1637,7 +1637,7 @@ function deriveAtomName(componentName: string, parentFileName: string): string {
   return componentName;
 }
 
-function toKebab(pascal: string): string {
+export function toKebab(pascal: string): string {
   return pascal
     .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
     .replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")

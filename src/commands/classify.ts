@@ -265,18 +265,39 @@ export async function classifyCmd(opts: {
     }
   }
 
-  if (moved === 0) {
+  if (moved > 0) {
+    info(`classify: ${moved} file(s) moved — running import rewrite pass`);
+
+    // Reload context (files have moved) and run rewriteImports Op to fix stale paths
+    const { rewriteImports } = await import("../lib/ops/rewrite-imports.js");
+    const ctx2 = await loadProject(cwd);
+    await run(ctx2, [rewriteImports], "apply");
+  }
+
+  // Extraction is structural and lives in classify (ADR-0015): lift any inline
+  // component defined inside a tier file into its own atom. Runs after moves so
+  // it sees composites in their final design-system/ location. Safe to re-run —
+  // already-extracted atoms have no inline components left to lift.
+  const canonicalAlias = dsAliases.find(a => a !== "@/design-system") ?? "@/design-system";
+  const { extractInlineComponents } = await import("../lib/ops/extract-inline-components.js");
+  const extractOp = extractInlineComponents(canonicalAlias);
+  const ctx3 = await loadProject(cwd);
+  await run(ctx3, [extractOp], "apply");
+
+  if (extractOp.extractions.length > 0) {
+    info(
+      `classify: extracted ${extractOp.extractions.length} inline component(s) into design-system/atoms/:`,
+    );
+    for (const e of extractOp.extractions) {
+      info(`  ${e.componentName} (from ${e.parentRel}) → ${e.atomRel}`);
+    }
+  }
+
+  if (moved === 0 && extractOp.extractions.length === 0) {
     info("classify: no files moved");
     printNextStep("classify", {});
     return;
   }
-
-  info(`classify: ${moved} file(s) moved — running import rewrite pass`);
-
-  // Reload context (files have moved) and run rewriteImports Op to fix stale paths
-  const { rewriteImports } = await import("../lib/ops/rewrite-imports.js");
-  const ctx2 = await loadProject(cwd);
-  await run(ctx2, [rewriteImports], "apply");
 
   info("classify: complete");
   printNextStep("classify", {});
