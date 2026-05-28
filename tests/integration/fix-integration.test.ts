@@ -106,7 +106,10 @@ describe("integration: full --fix pass on fixture project", () => {
     ].join("\n"));
 
     // ── Composite 2: raw <button> + inlined named component ≥20 lines → DRIFT-RAW-PRIMITIVE
-    //    (both use-existing and extract paths triggered by the fixer)
+    //    Mixed case: audit could Path-A the raw <button>, but the inline component is a
+    //    structural extraction decision owned by classify (ADR-0015). audit is surgical and
+    //    never creates files, so it DEFERS the whole file — leaving it untouched and pointing
+    //    the consumer at `claude-ds classify` rather than half-fixing it.
     // Must import from DS so classifier sees composite, not atom
     const chipLines = Array.from({ length: 20 }, (_, i) =>
       `  const v${i} = ${i};`
@@ -241,7 +244,10 @@ describe("integration: full --fix pass on fixture project", () => {
     // Some findings may remain (e.g. card now has children → pattern classification),
     // but the original rule IDs should be resolved
     const postRuleIds = new Set(postFindings.map(f => f.ruleId));
-    expect(postRuleIds.has("DRIFT-RAW-PRIMITIVE")).toBe(false);
+    // toolbar's raw <button> was resolved via Path A. The only DRIFT-RAW-PRIMITIVE
+    // left is filter-bar's, which audit deferred to classify (asserted below).
+    const postRaw = postFindings.filter(f => f.ruleId === "DRIFT-RAW-PRIMITIVE");
+    expect(postRaw.every(f => f.file.includes("filter-bar"))).toBe(true);
     expect(postRuleIds.has("DRIFT-INLINE-STATIC-STYLE")).toBe(false);
 
     // ── Assert: badge relocated from composites/ to atoms/ ──
@@ -252,16 +258,19 @@ describe("integration: full --fix pass on fixture project", () => {
     expect(await exists(join(dir, "design-system/atoms/badge.test.tsx"))).toBe(true);
     expect(await exists(join(dir, "design-system/composites/badge.test.tsx"))).toBe(false);
 
-    // ── Assert: extracted atom exists (FilterBarChip → Chip) ──
-    expect(await exists(join(dir, "design-system/atoms/chip.tsx"))).toBe(true);
-    const chipSource = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
-    expect(chipSource).toContain('kind: "atom"');
-    expect(chipSource).toContain("Chip");
-
-    // ── Assert: filter-bar.tsx now imports extracted atom ──
+    // ── Assert: filter-bar deferred to classify (ADR-0015), not extracted ──
+    // Audit never creates files, so no chip atom appears and the file is left untouched.
+    expect(await exists(join(dir, "design-system/atoms/chip.tsx"))).toBe(false);
     const filterBarSource = await readFile(join(dir, "design-system/composites/filter-bar.tsx"), "utf8");
-    expect(filterBarSource).toContain("@/design-system/atoms/chip");
-    expect(filterBarSource).not.toContain("function FilterBarChip");
+    expect(filterBarSource).toContain("function FilterBarChip");
+    expect(filterBarSource).toMatch(/<button[\s>]/);
+    // The fixer surfaced an unfixed finding pointing at classify
+    const filterBarResult = result.results.find(
+      r => r.finding.ruleId === "DRIFT-RAW-PRIMITIVE" && r.finding.file.includes("filter-bar"),
+    );
+    expect(filterBarResult?.fixed).toBe(false);
+    expect(filterBarResult?.message).toContain("needs extraction");
+    expect(filterBarResult?.message).toContain("claude-ds classify");
 
     // ── Assert: raw <button> replaced with <Button> in toolbar ──
     const toolbarSource = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
@@ -298,7 +307,6 @@ describe("integration: full --fix pass on fixture project", () => {
     const atomsBarrel = await readFile(join(dir, "design-system/atoms/index.ts"), "utf8");
     expect(atomsBarrel).toContain("badge");
     expect(atomsBarrel).toContain("button");
-    expect(atomsBarrel).toContain("chip");
     expect(atomsBarrel).toContain("input");
 
     const compositesBarrel = await readFile(join(dir, "design-system/composites/index.ts"), "utf8");
@@ -311,7 +319,6 @@ describe("integration: full --fix pass on fixture project", () => {
     const manifest = JSON.parse(await readFile(join(dir, "design-system/manifest.json"), "utf8"));
     const componentNames = manifest.components.map((c: { name: string }) => c.name);
     expect(componentNames).toContain("badge");
-    expect(componentNames).toContain("chip");
     expect(componentNames).toContain("button");
 
     // Stale exception cleanup is handled by auditCmd (not runFixPass),

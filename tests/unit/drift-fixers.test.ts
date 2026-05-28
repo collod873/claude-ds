@@ -1341,14 +1341,15 @@ describe("drift-fixers", () => {
       });
     });
 
-    describe("Path B — extract to atom", () => {
-      it("extracts a named internal component ≥20 lines to a new atom", async () => {
+    describe("inline components defer to classify (ADR-0015)", () => {
+      const internalLines = Array.from({ length: 20 }, (_, i) =>
+        `    const x${i} = ${i};`,
+      ).join("\n");
+
+      it("returns an unfixed finding pointing at classify, creating no files", async () => {
         await mkdir(join(dir, "design-system/atoms"), { recursive: true });
         await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-        const internalLines = Array.from({ length: 20 }, (_, i) =>
-          `    const x${i} = ${i};`,
-        ).join("\n");
         const compositeSource = [
           `function FilterBarChip({ label, onRemove }) {`,
           internalLines,
@@ -1371,141 +1372,68 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
-        const mockPrompt = async () => 0 as number | "defer"; // accept as "Chip"
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
         const result = await fixAndApply(fixer,
           makeFinding("design-system/composites/filter-bar.tsx"),
           dir,
-          { prompt: mockPrompt },
         );
 
-        expect(result.fixed).toBe(true);
+        expect(result.fixed).toBe(false);
+        expect(result.changes).toHaveLength(0);
+        // Remediation names the component, says it needs extraction, and routes to classify
+        expect(result.message).toContain("FilterBarChip");
+        expect(result.message).toContain("needs extraction");
+        expect(result.message).toContain("claude-ds classify");
+        expect(result.message).toContain("design-system/atoms/");
 
-        // New atom file should exist
-        const atomContent = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
-        expect(atomContent).toContain("export function Chip");
-        expect(atomContent).toContain('kind: "atom"');
-
-        // Composite should now import from atom
+        // audit never creates files — no atom should appear
+        await expect(stat(join(dir, "design-system/atoms/chip.tsx"))).rejects.toThrow();
+        // The composite is left untouched
         const compositeContent = await readFile(join(dir, "design-system/composites/filter-bar.tsx"), "utf8");
-        expect(compositeContent).toContain("@/design-system/atoms/chip");
-        expect(compositeContent).toContain("<Chip");
-        expect(compositeContent).not.toMatch(/^function FilterBarChip/m);
+        expect(compositeContent).toBe(compositeSource);
       });
 
-      it("naming heuristic strips parent prefix", async () => {
-        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      it("names every inline component in the deferral message", async () => {
         await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-        const internalLines = Array.from({ length: 20 }, (_, i) =>
-          `    const x${i} = ${i};`,
-        ).join("\n");
         const compositeSource = [
-          `function SearchBarInput({ value }) {`,
-          internalLines,
-          `  return <input value={value} />;`,
-          `}`,
-          ``,
-          `export function SearchBar() {`,
-          `  return <div><SearchBarInput value="" /></div>;`,
-          `}`,
-          `export const meta = { kind: "composite" as const, examples: [] };`,
-        ].join("\n") + "\n";
-        await writeFile(join(dir, "design-system/composites/search-bar.tsx"), compositeSource);
-
-        const mockPrompt = async () => 0 as number | "defer";
-        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        const result = await fixAndApply(fixer,
-          makeFinding("design-system/composites/search-bar.tsx"),
-          dir,
-          { prompt: mockPrompt },
-        );
-
-        expect(result.fixed).toBe(true);
-        // Atom file should be named input.tsx (prefix "SearchBar" stripped)
-        const atomContent = await readFile(join(dir, "design-system/atoms/input.tsx"), "utf8");
-        expect(atomContent).toContain("export function Input");
-      });
-
-      it("moves local deps used only by extracted component", async () => {
-        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-        await mkdir(join(dir, "design-system/composites"), { recursive: true });
-
-        const internalLines = Array.from({ length: 18 }, (_, i) =>
-          `    const x${i} = ${i};`,
-        ).join("\n");
-        const compositeSource = [
-          `type ChipProps = { label: string; onRemove: () => void };`,
-          ``,
-          `function FilterBarChip({ label, onRemove }: ChipProps) {`,
-          internalLines,
-          `  return <span>{label}<button onClick={onRemove}>×</button></span>;`,
-          `}`,
-          ``,
-          `export function FilterBar() {`,
-          `  return <div><FilterBarChip label="hi" onRemove={() => {}} /></div>;`,
-          `}`,
-          `export const meta = { kind: "composite" as const, examples: [] };`,
-        ].join("\n") + "\n";
-        await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
-
-        const mockPrompt = async () => 0 as number | "defer";
-        const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        await fixAndApply(fixer,
-          makeFinding("design-system/composites/filter-bar.tsx"),
-          dir,
-          { prompt: mockPrompt },
-        );
-
-        const atomContent = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
-        expect(atomContent).toContain("ChipProps");
-
-        const compositeContent = await readFile(join(dir, "design-system/composites/filter-bar.tsx"), "utf8");
-        expect(compositeContent).not.toContain("ChipProps");
-      });
-
-      it("keeps local deps used by both extracted component and remaining code", async () => {
-        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-        await mkdir(join(dir, "design-system/composites"), { recursive: true });
-
-        const internalLines = Array.from({ length: 18 }, (_, i) =>
-          `    const x${i} = ${i};`,
-        ).join("\n");
-        const compositeSource = [
-          `const SHARED_CLASS = "shared-style";`,
-          ``,
           `function FilterBarChip({ label }) {`,
           internalLines,
-          `  return <span className={SHARED_CLASS}>{label}</span>;`,
+          `  return <span>{label}</span>;`,
+          `}`,
+          ``,
+          `function FilterBarMenu({ items }) {`,
+          internalLines,
+          `  return <ul>{items}</ul>;`,
           `}`,
           ``,
           `export function FilterBar() {`,
-          `  return <div className={SHARED_CLASS}><FilterBarChip label="hi" /></div>;`,
+          `  return <div><FilterBarChip label="hi" /><FilterBarMenu items={[]} /></div>;`,
           `}`,
           `export const meta = { kind: "composite" as const, examples: [] };`,
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
-        const mockPrompt = async () => 0 as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        await fixAndApply(fixer,
+        const result = await fixAndApply(fixer,
           makeFinding("design-system/composites/filter-bar.tsx"),
           dir,
-          { prompt: mockPrompt },
         );
 
-        // Shared dep should remain in composite
-        const compositeContent = await readFile(join(dir, "design-system/composites/filter-bar.tsx"), "utf8");
-        expect(compositeContent).toContain("SHARED_CLASS");
-
-        // Extracted atom should also have it (duplicated)
-        const atomContent = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
-        expect(atomContent).toContain("SHARED_CLASS");
+        expect(result.fixed).toBe(false);
+        expect(result.message).toContain("FilterBarChip");
+        expect(result.message).toContain("FilterBarMenu");
+        expect(result.message).toContain("needs extraction");
       });
 
-      it("skips extraction when component is <20 lines", async () => {
+      it("ignores short helper components (<20 lines), leaving Path A to run", async () => {
         await mkdir(join(dir, "design-system/atoms"), { recursive: true });
         await mkdir(join(dir, "design-system/composites"), { recursive: true });
+
+        await writeFile(join(dir, "design-system/atoms/button.tsx"), [
+          `export function Button(props) { return <button {...props} />; }`,
+          `export const meta = { kind: "atom" as const, examples: [] };`,
+        ].join("\n") + "\n");
 
         const compositeSource = [
           `function FilterBarChip({ label }) {`,
@@ -1513,22 +1441,22 @@ describe("drift-fixers", () => {
           `}`,
           ``,
           `export function FilterBar() {`,
-          `  return <div><FilterBarChip label="hi" /></div>;`,
+          `  return <div><FilterBarChip label="hi" /><button>X</button></div>;`,
           `}`,
           `export const meta = { kind: "composite" as const, examples: [] };`,
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
-        const mockPrompt = async () => 0 as number | "defer";
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
         const result = await fixAndApply(fixer,
           makeFinding("design-system/composites/filter-bar.tsx"),
           dir,
-          { prompt: mockPrompt },
         );
 
-        // Should not have created an atom file (component too short)
-        await expect(stat(join(dir, "design-system/atoms/chip.tsx"))).rejects.toThrow();
+        // Short inline component doesn't trip the deferral — Path A replaces the raw <button>
+        expect(result.fixed).toBe(true);
+        const compositeContent = await readFile(join(dir, "design-system/composites/filter-bar.tsx"), "utf8");
+        expect(compositeContent).toContain("<Button");
       });
     });
 
@@ -1733,8 +1661,8 @@ describe("drift-fixers", () => {
       });
     });
 
-    describe("DRIFT-RAW-PRIMITIVE Path B: auto-accept derived name", () => {
-      it("auto-accepts derived atom name without prompting (no collision)", async () => {
+    describe("DRIFT-RAW-PRIMITIVE inline component: never prompts, never extracts", () => {
+      it("defers without prompting the user", async () => {
         await mkdir(join(dir, "design-system/atoms"), { recursive: true });
         await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -1768,9 +1696,10 @@ describe("drift-fixers", () => {
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
         const result = await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
 
-        expect(result.fixed).toBe(true);
-        await expect(stat(join(dir, "design-system/atoms/chip.tsx"))).resolves.toBeTruthy();
-        // Should NOT have prompted — auto-accepted name
+        // Extraction is classify's job — audit defers, creates nothing, asks nothing
+        expect(result.fixed).toBe(false);
+        expect(result.message).toContain("needs extraction");
+        await expect(stat(join(dir, "design-system/atoms/chip.tsx"))).rejects.toThrow();
         expect(promptCalls).toHaveLength(0);
       });
     });

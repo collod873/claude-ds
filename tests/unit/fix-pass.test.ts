@@ -167,26 +167,24 @@ describe("fix-pass", () => {
       expect(result.applied).toHaveLength(0);
     });
 
-    it("extract-to-atom runs before relocation in Change list", async () => {
+    it("raw-primitive fix runs before relocation in Change list", async () => {
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-      // File that triggers DRIFT-RAW-PRIMITIVE (extract path)
-      const internalLines = Array.from({ length: 20 }, (_, i) =>
-        `    const x${i} = ${i};`,
-      ).join("\n");
+      // Atom that Path A swaps the raw <input> for
+      await writeFile(
+        join(dir, "design-system/atoms/input.tsx"),
+        `export function Input(props) { return <input {...props} />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+      );
+
+      // File that triggers DRIFT-RAW-PRIMITIVE (Path A: raw <input> → <Input>)
       const compositeSource = [
-        `function FilterBarChip({ label }) {`,
-        internalLines,
-        `  return <span>{label}</span>;`,
-        `}`,
-        ``,
-        `export function FilterBar() {`,
-        `  return <div><FilterBarChip label="hi" /></div>;`,
+        `export function SearchBar() {`,
+        `  return <div><input placeholder="search" /></div>;`,
         `}`,
         `export const meta = { kind: "composite" as const, examples: [] };`,
       ].join("\n") + "\n";
-      await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
+      await writeFile(join(dir, "design-system/composites/search-bar.tsx"), compositeSource);
 
       // File that triggers DRIFT-MISPLACED (atom in composites/)
       const atomSource = `export function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
@@ -200,7 +198,7 @@ describe("fix-pass", () => {
         },
         {
           ruleId: "DRIFT-RAW-PRIMITIVE",
-          file: "design-system/composites/filter-bar.tsx",
+          file: "design-system/composites/search-bar.tsx",
           message: "raw HTML primitive",
         },
       ];
@@ -209,9 +207,9 @@ describe("fix-pass", () => {
 
       expect(result.aborted).toBe(false);
 
-      // Verify RAW-PRIMITIVE (P0) ran first: atom file was extracted
-      const chipExists = await stat(join(dir, "design-system/atoms/chip.tsx")).catch(() => null);
-      expect(chipExists).toBeTruthy();
+      // Verify RAW-PRIMITIVE (P0) ran first: raw <input> replaced in place
+      const searchBar = await readFile(join(dir, "design-system/composites/search-bar.tsx"), "utf8");
+      expect(searchBar).toContain("<Input");
 
       // Verify MISPLACED (P1) ran second: button moved to atoms/
       const buttonExists = await stat(join(dir, "design-system/atoms/button.tsx")).catch(() => null);

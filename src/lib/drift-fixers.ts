@@ -2,7 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join, basename, dirname, extname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { DriftFinding, DriftRuleId } from "./drift-rules.js";
-import { parseCvaVariants } from "./drift-rules.js";
+import { parseCvaVariants, EXTRACTION_NEEDED_MARKER } from "./drift-rules.js";
 import type { Tier } from "./classifier.js";
 import { classifySource, DEFAULT_DOMAIN_ROOTS } from "./classifier.js";
 import { locationTierFromPath, metaKindFromSource } from "./three-signal.js";
@@ -1727,6 +1727,26 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
   const changes: Change[] = [];
   const canonicalAlias = (opts?.dsAliases ?? []).find(a => a !== "@/design-system") ?? "@/design-system";
 
+  // Extracting an inline component into its own atom is a structural decision
+  // (does it deserve to be a reusable atom? what's its prop surface?) owned by
+  // `classify`, not `audit` (ADR-0015). audit is surgical: it edits in place and
+  // never creates files. So when a tier file defines an inline component, audit
+  // can't replace it via Path A and defers — it emits an unfixed finding whose
+  // message carries EXTRACTION_NEEDED_MARKER, which audit's breadcrumb routes on
+  // to point the consumer at `claude-ds classify`. We check this first so audit
+  // never half-fixes a file whose real blocker is an un-extracted component.
+  const internalComponents = findInternalComponents(currentSource);
+  if (internalComponents.length > 0) {
+    const names = internalComponents.map(c => c.name).join(", ");
+    const it = internalComponents.length > 1 ? "them" : "it";
+    return {
+      finding,
+      fixed: false,
+      message: `${names} in ${finding.file} ${EXTRACTION_NEEDED_MARKER} — run \`claude-ds classify\` to extract ${it} into design-system/atoms/`,
+      changes: [],
+    };
+  }
+
   // Path A: replace raw primitives with existing atoms (per-instance inference)
   const rawElements = findRawElements(currentSource);
   const uniqueElements = [...new Set(rawElements.map(m => m.element))];
@@ -1810,71 +1830,6 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
         anyFixed = true;
       }
     }
-  }
-
-  // Path B: extract internal components to new atoms
-  const internalComponents = findInternalComponents(currentSource);
-  const parentFileName = basename(finding.file);
-
-  for (const comp of internalComponents) {
-    const atomName = deriveAtomName(comp.name, parentFileName);
-    const atomFileKebab = toKebab(atomName);
-    const existingAtom = await atomFileExists(cwd, atomFileKebab);
-
-    if (existingAtom) continue;
-
-    // Auto-accept derived name (no prompt needed)
-    let finalAtomName = atomName;
-
-    const finalFileName = toKebab(finalAtomName);
-    const localDeps = findLocalDeps(comp.body, currentSource);
-
-    const depsToMove = localDeps.filter(d => d.usedOnlyByComponent);
-    const depsToKeep = localDeps.filter(d => !d.usedOnlyByComponent);
-
-    let atomFileContent = "";
-    for (const dep of depsToMove) {
-      atomFileContent += dep.declaration.trimEnd() + "\n\n";
-    }
-    for (const dep of depsToKeep) {
-      atomFileContent += dep.declaration.trimEnd() + "\n\n";
-    }
-
-    const renamedBody = comp.body.replace(
-      new RegExp(`\\b${comp.name}\\b`),
-      finalAtomName,
-    );
-    atomFileContent += `export ${renamedBody.trimEnd()}\n`;
-    atomFileContent += `\nexport const meta = { kind: "atom" as const, examples: [{ name: "default", props: {} }] };\n`;
-
-    changes.push({
-      kind: "write",
-      path: `design-system/atoms/${finalFileName}.tsx`,
-      before: null,
-      after: Buffer.from(atomFileContent),
-    });
-
-    let updatedSource = currentSource;
-    for (const dep of depsToMove) {
-      updatedSource = updatedSource.replace(dep.declaration, "");
-    }
-    updatedSource = updatedSource.replace(comp.body, "");
-    updatedSource = updatedSource.replace(/\n{3,}/g, "\n\n");
-
-    if (comp.name !== finalAtomName) {
-      updatedSource = updatedSource.replace(
-        new RegExp(`<${comp.name}(\\s|>|\\/)`, "g"),
-        `<${finalAtomName}$1`,
-      );
-      updatedSource = updatedSource.replace(
-        new RegExp(`</${comp.name}>`, "g"),
-        `</${finalAtomName}>`,
-      );
-    }
-
-    updatedSource = addImportIfMissing(updatedSource, finalAtomName, `${canonicalAlias}/atoms/${finalFileName}`);
-    currentSource = updatedSource;
-    anyFixed = true;
   }
 
   if (!anyFixed) {
