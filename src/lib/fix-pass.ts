@@ -69,6 +69,20 @@ function findDuplicateImportIdentifiers(source: string): string | null {
   return null;
 }
 
+function findSelfImport(source: string, filePath: string): string | null {
+  const fileRelNoExt = filePath.replace(/\.\w+$/, "");
+  const importRe = /from\s+["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = importRe.exec(source)) !== null) {
+    const importPath = m[1];
+    const resolved = importPath.replace(/^@\//, "");
+    if (resolved === fileRelNoExt) {
+      return `Self-referential import '${importPath}' resolves to the file itself`;
+    }
+  }
+  return null;
+}
+
 export function validateFixerOutput(
   change: Change,
   ruleId: string,
@@ -80,6 +94,16 @@ export function validateFixerOutput(
   if (!PARSEABLE_EXTS.has(ext)) return null;
 
   const afterSource = change.after.toString("utf8");
+
+  const selfImportError = findSelfImport(afterSource, change.path);
+  if (selfImportError) {
+    const beforeSelf = findSelfImport(change.before.toString("utf8"), change.path);
+    if (!beforeSelf) {
+      return {
+        message: `Fixer ${ruleId} introduced circular self-import in ${change.path}: ${selfImportError}`,
+      };
+    }
+  }
 
   const dupError = findDuplicateImportIdentifiers(afterSource);
   if (dupError) {

@@ -170,6 +170,8 @@ async function collectProjectImportRewriteChanges(
   newImportPath: string,
 ): Promise<Change[]> {
   const changes: Change[] = [];
+  // Resolve the target file so we can skip it (prevents circular self-imports)
+  const targetRelPath = newImportPath.replace(/^@\//, "");
 
   async function walk(dir: string): Promise<void> {
     let entries: string[];
@@ -182,11 +184,13 @@ async function collectProjectImportRewriteChanges(
       if (s.isDirectory()) { await walk(full); continue; }
       if (!s.isFile()) continue;
       if (!(entry.endsWith(".ts") || entry.endsWith(".tsx") || entry.endsWith(".js") || entry.endsWith(".jsx"))) continue;
+      const relPath = full.slice(cwd.length + 1);
+      const relPathNoExt = relPath.replace(/\.\w+$/, "");
+      if (relPathNoExt === targetRelPath) continue;
       let content: string;
       try { content = await readFile(full, "utf8"); } catch { continue; }
       if (content.includes(oldImportPath)) {
         const updated = content.split(oldImportPath).join(newImportPath);
-        const relPath = full.slice(cwd.length + 1);
         changes.push({
           kind: "write",
           path: relPath,
@@ -1320,36 +1324,57 @@ async function fixStaleDsImport(finding: DriftFinding, cwd: string, opts?: Fixer
 // --- DRIFT-STALE-META-STATES fixer ---
 
 function stripMetaStates(source: string): string {
-  const re = /\bstates\s*:\s*\{/;
+  const re = /\bstates\s*:\s*/;
   const match = re.exec(source);
   if (!match) return source;
 
-  const openBraceIdx = match.index + match[0].lastIndexOf("{");
-  let depth = 0;
-  let closeBraceIdx = -1;
-  let i = openBraceIdx;
-  while (i < source.length) {
-    const ch = source[i];
-    if (ch === "{") { depth++; }
-    else if (ch === "}") { depth--; if (depth === 0) { closeBraceIdx = i; break; } }
-    else if (ch === '"' || ch === "'" || ch === "`") {
-      const quote = ch;
-      i++;
-      while (i < source.length) {
-        if (source[i] === "\\") { i += 2; continue; }
-        if (source[i] === quote) break;
+  const valueStart = match.index + match[0].length;
+  if (valueStart >= source.length) return source;
+
+  const firstChar = source[valueStart];
+
+  let endIdx = -1;
+  if (firstChar === "{" || firstChar === "[") {
+    const open = firstChar;
+    const close = open === "{" ? "}" : "]";
+    let depth = 0;
+    let i = valueStart;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === open) { depth++; }
+      else if (ch === close) { depth--; if (depth === 0) { endIdx = i; break; } }
+      else if (ch === '"' || ch === "'" || ch === "`") {
+        const quote = ch;
         i++;
+        while (i < source.length) {
+          if (source[i] === "\\") { i += 2; continue; }
+          if (source[i] === quote) break;
+          i++;
+        }
       }
+      i++;
     }
-    i++;
+    if (endIdx === -1) return source;
+    endIdx += 1;
+  } else if (firstChar === '"' || firstChar === "'" || firstChar === "`") {
+    let i = valueStart + 1;
+    while (i < source.length) {
+      if (source[i] === "\\") { i += 2; continue; }
+      if (source[i] === firstChar) { endIdx = i + 1; break; }
+      i++;
+    }
+    if (endIdx === -1) return source;
+  } else {
+    let i = valueStart;
+    while (i < source.length && source[i] !== "," && source[i] !== "\n" && source[i] !== "}") i++;
+    endIdx = i;
   }
-  if (closeBraceIdx === -1) return source;
 
   let start = match.index;
   while (start > 0 && (source[start - 1] === " " || source[start - 1] === "\t")) start--;
   if (start > 0 && source[start - 1] === "\n") start--;
 
-  let end = closeBraceIdx + 1;
+  let end = endIdx;
   while (end < source.length && (source[end] === "," || source[end] === " " || source[end] === "\t")) end++;
   if (end < source.length && source[end] === "\n") end++;
 
