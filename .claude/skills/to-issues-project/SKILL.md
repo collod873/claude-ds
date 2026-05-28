@@ -32,7 +32,7 @@ If non-zero, stop and ask the user whether to (a) abort, (b) add more on top of 
 
 ### 3. Explore the codebase (optional)
 
-If you haven't already, explore the repo to understand the area you're touching. Use the project's domain glossary (`CONTEXT.md`, if present) and respect ADRs under `docs/adr/`. Sub-issue titles and bodies should use the project's vocabulary.
+If you haven't already, explore the repo to understand the area you're touching. Use the project's domain glossary (`CONTEXT.md`) and respect ADRs under `docs/adr/`. Sub-issue titles and bodies should use the project's vocabulary.
 
 ### 4. Draft vertical slices
 
@@ -57,7 +57,6 @@ Present the proposed breakdown as a numbered list. For each slice, show:
 
 - **Title** — short, imperative
 - **What it builds** — one or two sentences
-- **Consumer safety impact** — `none`, `migration-required`, or `breaking`
 - **Depends on** — which earlier slice(s) it builds on (by position in the list), or "none"
 
 Ask:
@@ -105,7 +104,7 @@ Do **not** apply `agent:implement` to the sub-issues — they're never labeled d
 <sub-issue-template>
 ## Parent PRD
 
-#<PRD_NUMBER>
+#&lt;PRD_NUMBER&gt;
 
 ## What to build
 
@@ -115,10 +114,6 @@ Avoid specific file paths or code snippets — they go stale fast.
 
 Exception: a prototype-derived snippet (state machine, reducer, schema, type shape) may be inlined when prose can't encode the decision as precisely. Trim to the decision-rich parts.
 
-## Consumer safety impact
-
-`none` | `migration-required` | `breaking` — with explanation if not `none`.
-
 ## Acceptance criteria
 
 - [ ] Concrete, checkable outcome 1
@@ -127,7 +122,7 @@ Exception: a prototype-derived snippet (state machine, reducer, schema, type sha
 
 ## Depends on
 
-If this slice builds on an earlier sub-issue's work, name it (e.g. "Sub-issue #N — <title>"). If not, omit this section.
+If this slice builds on an earlier sub-issue's work, name it (e.g. "Sub-issue #N — &lt;title&gt;"). If not, omit this section.
 </sub-issue-template>
 
 The body intentionally does NOT include a `Closes` directive. Closing this sub-issue is the PRD-mode workflow's job (it closes the sub-issue at the end of its implementation run). Closing the PRD itself happens when the bundled PR merges via `Closes #<PRD>` in the PR description.
@@ -135,5 +130,5 @@ The body intentionally does NOT include a `Closes` directive. Closing this sub-i
 ## After publishing
 
 - Output the PRD URL and the count of sub-issues attached.
-- Tell the user: "Add `agent:implement` to PRD #<N> when ready. The workflow will implement sub-issues in order, accumulating commits on a single `agent/prd-<N>-...` branch, and open a draft PR after the first sub-issue."
+- Tell the user: "Add `agent:implement` to PRD #&lt;N&gt; when ready. The workflow will implement sub-issues in order, accumulating commits on a single `agent/prd-<N>-...` branch, and open a draft PR after the first sub-issue."
 - Remind them that the order of sub-issues in the PRD determines execution order. If they want to reorder, they can drag in the GitHub UI before labeling, or use the `PATCH /repos/{owner}/{repo}/issues/{issue_number}/sub_issues/priority` endpoint.

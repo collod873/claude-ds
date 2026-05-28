@@ -3,23 +3,21 @@ name: to-prd-project
 description: Turn the current conversation context into a PRD and publish it as a GitHub issue that is ready to receive sub-issues from /to-issues-project. Project-local variant of /to-prd, adapted for this repo's PRD-as-parent-issue + sub-issues + agent:implement workflow.
 ---
 
-This skill writes a PRD and publishes it as a GitHub issue. It does **not** apply `agent:implement` — labeling happens _after_ sub-issues have been created.
+This skill writes a PRD and publishes it as a GitHub issue in `mattpocock/course-video-manager`. It does **not** apply `agent:implement` — labeling happens _after_ sub-issues have been created.
 
 Do NOT interview the user — just synthesize what you already know from the conversation. If context is thin, ask the user to talk through the problem first; don't run the skill on an empty plate.
 
 ## Process
 
-1. **Explore the repo** to understand the current state of the codebase, if you haven't already. Use the project's domain glossary (`CONTEXT.md`, if present) and respect ADRs under `docs/adr/` for areas you're touching.
+1. **Explore the repo** to understand the current state of the codebase, if you haven't already. Use the project's domain glossary (`CONTEXT.md`) and respect ADRs under `docs/adr/` for areas you're touching.
 
 2. **Sketch the major modules** you'd build or modify. Actively look for opportunities to extract deep modules that can be tested in isolation. A deep module encapsulates a lot of functionality behind a simple, testable interface that rarely changes.
 
    Check with the user that these modules match their expectations and which they want tests written for.
 
-3. **Assess consumer safety.** Every change in claude-ds must be safe to drop into any consumer repo without breaking it. Evaluate whether the PRD introduces any consumer-facing risk (migration-required, breaking, or none).
+3. **Write the PRD** using the template below and publish it via `gh issue create`. Use a heredoc for the body. Do **not** apply `agent:implement` — that's reserved for after sub-issues exist. Add no labels unless the user asks.
 
-4. **Write the PRD** using the template below and publish it via `gh issue create`. Use a heredoc for the body. Do **not** apply `agent:implement` — that's reserved for after sub-issues exist. Add no labels unless the user asks.
-
-5. **Output the issue URL** so the user can pass it to `/to-issues-project` next.
+4. **Output the issue URL** so the user can pass it to `/to-issues-project` next.
 
 ## PRD template
 
@@ -42,15 +40,11 @@ The problem the user is facing, from the user's perspective.
 
 The solution to the problem, from the user's perspective.
 
-## Consumer Safety Impact
-
-One of: `none`, `migration-required`, or `breaking`. If not `none`, explain the impact and the migration path.
-
 ## User Stories
 
 A LONG, numbered list of user stories. Each in the format:
 
-1. As a <actor>, I want <feature>, so that <benefit>
+1. As a &lt;actor&gt;, I want &lt;feature&gt;, so that &lt;benefit&gt;
 
 This list should cover all aspects of the feature.
 
@@ -88,5 +82,5 @@ Anything else worth recording: open questions, known risks, deferred decisions.
 
 ## After publishing
 
-- Tell the user: "PRD published at <URL>. Run `/to-issues-project <issue-number>` to break it into sub-issues, then add `agent:implement` to start work."
-- Do **not** add `agent:implement` yourself.
+- Tell the user: "PRD published at &lt;URL&gt;. Run `/to-issues-project &lt;issue-number&gt;` to break it into sub-issues, then add `agent:implement` to start work."
+- Do **not** add `agent:implement` yourself. The PRD has no sub-issues yet, so labeling it now would either silently bounce (regular single-issue workflow would try to run it as a leaf and might do unexpected work) or land in the wrong place. The user labels once sub-issues are in place.
