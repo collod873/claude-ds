@@ -93,6 +93,14 @@ Examples: `INTEGRITY-UNPARSEABLE`, `INTEGRITY-ORPHANED-FROM`,
 contract as drift rules. See ADR-0014.
 _Contrast_: drift rule.
 
+### Extraction
+The act of pulling an inline component declared inside a tier file (e.g. a
+`DayList` defined inside `month-view.tsx`) out into its own file under
+`design-system/atoms/`. Owned by `classify`, not `audit` (ADR-0015): audit
+is surgical and never creates files; classify is the one-shot brownfield
+pass that makes structural decisions, including extraction.
+_Contrast_: classification (placement of an existing file into the right tier).
+
 ### Fixer output validation
 Gate inside every audit fixer: parse the rewritten file before writing to
 disk. If the output doesn't parse but the input did, the fixer preserves the
