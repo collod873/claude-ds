@@ -343,45 +343,52 @@ export async function auditCmd(opts: AuditOpts) {
   const filesWithFindings = new Set<string>();
   interface AmbiguousFile { file: string; importCount: number; locationTier: string }
   const ambiguousFiles: AmbiguousFile[] = [];
-  for (const tierDir of driftTierDirs) {
-    const abs = join(cwd, tierDir);
-    let entries: string[];
-    try { entries = await readdir(abs); } catch { continue; }
-    for (const entry of entries) {
-      if (!entry.endsWith(".tsx")) continue;
-      if (entry.endsWith(".showcase.tsx") || entry.endsWith(".test.tsx") || entry.endsWith(".stories.tsx")) continue;
-      const filePath = `${tierDir}/${entry}`;
-      let source: string;
-      try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
-      scannedFiles.add(filePath);
 
-      const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases, tsconfigPaths });
-      const blockingIntegrity = integrityFindings.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
-      const nonBlockingIntegrity = integrityFindings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
-      allFindings.push(...nonBlockingIntegrity);
-      if (nonBlockingIntegrity.length > 0) for (const f of nonBlockingIntegrity) filesWithFindings.add(f.file);
-      if (blockingIntegrity.length > 0) {
-        allFindings.push(...blockingIntegrity);
-        for (const f of blockingIntegrity) filesWithFindings.add(f.file);
-        integrityFailedFiles.add(filePath);
-        continue;
-      }
+  // Collect all .tsx files under design-system/ — tier dirs plus reference files
+  const dsFiles = await walkDir(cwd, "design-system");
+  const tierDirEntries: string[] = [];
+  for (const f of dsFiles) {
+    if (!f.endsWith(".tsx")) continue;
+    if (f.endsWith(".showcase.tsx") || f.endsWith(".test.tsx") || f.endsWith(".stories.tsx")) continue;
+    const subPath = f.slice("design-system/".length);
+    // Include files in tier dirs (flat, not nested) and reference files in known subdirs
+    const inTierDir = driftTierDirs.some(d => f.startsWith(d + "/") && !subPath.slice(subPath.indexOf("/") + 1).includes("/"));
+    const inReferencesDir = f.startsWith("design-system/references/") && !subPath.slice("references/".length).includes("/");
+    if (inTierDir || inReferencesDir) tierDirEntries.push(f);
+  }
 
-      const { signals, findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
-      allFindings.push(...findings);
-      for (const f of findings) filesWithFindings.add(f.file);
+  for (const filePath of tierDirEntries) {
+    let source: string;
+    try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+    scannedFiles.add(filePath);
 
-      // Ambiguity detection: atom files that compose many components may be misclassified.
-      // Count both relative imports and DS-alias imports to sibling tier directories.
-      if (signals.locationTier === "atom" && !findings.some(f => f.ruleId === "DRIFT-MISPLACED")) {
-        const relativeImports = (source.match(/from\s+["']\.\.?\//g) ?? []).length;
-        const aliasPattern = dsAliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-        const dsImportRe = aliasPattern ? new RegExp(`from\\s+["'](?:${aliasPattern})/(?:atoms|composites)/`, "g") : null;
-        const dsImports = dsImportRe ? (source.match(dsImportRe) ?? []).length : 0;
-        const componentImports = relativeImports + dsImports;
-        if (componentImports >= 3) {
-          ambiguousFiles.push({ file: filePath, importCount: componentImports, locationTier: "atom" });
-        }
+    const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases, tsconfigPaths });
+    const blockingIntegrity = integrityFindings.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
+    const nonBlockingIntegrity = integrityFindings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
+    allFindings.push(...nonBlockingIntegrity);
+    if (nonBlockingIntegrity.length > 0) for (const f of nonBlockingIntegrity) filesWithFindings.add(f.file);
+    if (blockingIntegrity.length > 0) {
+      allFindings.push(...blockingIntegrity);
+      for (const f of blockingIntegrity) filesWithFindings.add(f.file);
+      integrityFailedFiles.add(filePath);
+      continue;
+    }
+
+    const { signals, findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
+    allFindings.push(...findings);
+    for (const f of findings) filesWithFindings.add(f.file);
+
+    // Ambiguity detection: atom files that compose many components may be misclassified.
+    // Count both import statements and JSX component references (uppercase element names).
+    if (signals.locationTier === "atom" && !findings.some(f => f.ruleId === "DRIFT-MISPLACED")) {
+      const relativeImports = (source.match(/from\s+["']\.\.?\//g) ?? []).length;
+      const aliasPattern = dsAliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+      const dsImportRe = aliasPattern ? new RegExp(`from\\s+["'](?:${aliasPattern})/(?:atoms|composites)/`, "g") : null;
+      const dsImports = dsImportRe ? (source.match(dsImportRe) ?? []).length : 0;
+      const jsxComponents = new Set((source.match(/<([A-Z][A-Za-z0-9]+)/g) ?? []).map(m => m.slice(1)));
+      const componentRefs = Math.max(relativeImports + dsImports, jsxComponents.size);
+      if (componentRefs >= 3) {
+        ambiguousFiles.push({ file: filePath, importCount: componentRefs, locationTier: "atom" });
       }
     }
   }
