@@ -29,31 +29,45 @@ console.log(
   `Iteration ${ITERATION}: ${failingItems.length} failing item(s) — ${failingItems.map((i) => i.id).join(", ")}`
 );
 
-const result = await sandcastle.run({
-  name: `fix-loop-iter-${ITERATION}`,
-  agent: sandcastle.claudeCode("claude-opus-4-6", {
-    env: {
-      CLAUDE_CODE_OAUTH_TOKEN: required("CLAUDE_CODE_OAUTH_TOKEN"),
-    },
-    idleTimeout: 1200,
-  }),
-  sandbox: noSandbox(),
-  logging: { type: "stdout" },
-  promptFile: path.join(import.meta.dirname, "fix-prompt.md"),
-  promptArgs: {
-    ISSUE_NUMBER,
-    BRANCH,
-    ITERATION,
-    SCORECARD_JSON: JSON.stringify(scorecard, null, 2),
-    AUDIT_LOG,
-    TSC_LOG,
-    BUILD_LOG,
-    AUDIT_IDEMPOTENCY_LOG,
-    AUDIT_READONLY_LOG,
-  },
-});
+const MAX_ATTEMPTS = 3;
+let result: sandcastle.RunResult | undefined;
+let lastErr: unknown;
 
-if (result.commits.length === 0) {
+for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  try {
+    if (attempt > 1) console.log(`\nRetry ${attempt}/${MAX_ATTEMPTS}...`);
+    result = await sandcastle.run({
+      name: `fix-loop-iter-${ITERATION}${attempt > 1 ? `-retry${attempt - 1}` : ""}`,
+      agent: sandcastle.claudeCode("claude-opus-4-6", {
+        env: {
+          CLAUDE_CODE_OAUTH_TOKEN: required("CLAUDE_CODE_OAUTH_TOKEN"),
+        },
+        idleTimeout: 1200,
+      }),
+      sandbox: noSandbox(),
+      logging: { type: "stdout" },
+      promptFile: path.join(import.meta.dirname, "fix-prompt.md"),
+      promptArgs: {
+        ISSUE_NUMBER,
+        BRANCH,
+        ITERATION,
+        SCORECARD_JSON: JSON.stringify(scorecard, null, 2),
+        AUDIT_LOG,
+        TSC_LOG,
+        BUILD_LOG,
+        AUDIT_IDEMPOTENCY_LOG,
+        AUDIT_READONLY_LOG,
+      },
+    });
+    break;
+  } catch (err) {
+    lastErr = err;
+    console.error(`Attempt ${attempt} failed: ${err}`);
+    if (attempt === MAX_ATTEMPTS) throw lastErr;
+  }
+}
+
+if (!result || result.commits.length === 0) {
   const msg =
     "Fixer agent made no commits — may need human intervention for the remaining failures.";
   console.warn(`\nWARNING: ${msg}`);

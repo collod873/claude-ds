@@ -63,8 +63,10 @@ jobs:
       - name: Count iteration
         id: iteration
         run: |
-          count=$(git rev-list --count main..HEAD)
-          iteration=$((count + 1))
+          # Count actual iterations from scorecard comments, not commits
+          api_count=$(gh api "repos/${GH_REPO}/issues/${ISSUE_NUMBER}/comments" \
+            --jq '[.[] | select(.body | test("^\\*\\*Iteration"))] | length' 2>/dev/null || echo "0")
+          iteration=$((api_count + 1))
           echo "number=$iteration" >> "$GITHUB_OUTPUT"
           echo "Iteration $iteration"
 
@@ -129,29 +131,29 @@ jobs:
           # Link the locally-built claude-ds into crewops
           pnpm link "$GITHUB_WORKSPACE"
 
-      - name: Run mechanical checks
+      - name: "Check: audit --fix"
         if: steps.limit.outputs.exceeded != 'true'
-        env:
-          CREWOPS_DIR: ${{ runner.temp }}/crewops
-        run: |
-          set -x
-          cd "$CREWOPS_DIR"
+        working-directory: ${{ runner.temp }}/crewops
+        run: claude-ds audit --fix > "${RUNNER_TEMP}/audit.log" 2>&1 || true
 
-          # Primary audit --fix
-          claude-ds audit --fix > "${RUNNER_TEMP}/audit.log" 2>&1 || true
+      - name: "Check: tsc --noEmit"
+        if: steps.limit.outputs.exceeded != 'true'
+        working-directory: ${{ runner.temp }}/crewops
+        run: npx tsc --noEmit > "${RUNNER_TEMP}/tsc.log" 2>&1 || true
 
-          # Type check
-          npx tsc --noEmit > "${RUNNER_TEMP}/tsc.log" 2>&1 || true
+      - name: "Check: next build (skipped)"
+        if: steps.limit.outputs.exceeded != 'true'
+        run: echo "SKIPPED — next build requires runtime env vars (DATABASE_URL etc.)" > "${RUNNER_TEMP}/build.log"
 
-          # Next.js build — skipped: hangs without DB env vars, and tests infra not DS correctness
-          # npx next build > "${RUNNER_TEMP}/build.log" 2>&1 || true
-          echo "SKIPPED — next build requires runtime env vars (DATABASE_URL etc.)" > "${RUNNER_TEMP}/build.log"
+      - name: "Check: audit --fix (idempotency)"
+        if: steps.limit.outputs.exceeded != 'true'
+        working-directory: ${{ runner.temp }}/crewops
+        run: claude-ds audit --fix > "${RUNNER_TEMP}/audit-idempotency.log" 2>&1 || true
 
-          # Idempotency: second audit --fix (should be no-op)
-          claude-ds audit --fix > "${RUNNER_TEMP}/audit-idempotency.log" 2>&1 || true
-
-          # Readonly audit (should report zero findings)
-          claude-ds audit > "${RUNNER_TEMP}/audit-readonly.log" 2>&1 || true
+      - name: "Check: audit (readonly)"
+        if: steps.limit.outputs.exceeded != 'true'
+        working-directory: ${{ runner.temp }}/crewops
+        run: claude-ds audit > "${RUNNER_TEMP}/audit-readonly.log" 2>&1 || true
 
       - name: Run grader agent
         if: steps.limit.outputs.exceeded != 'true'
@@ -176,26 +178,48 @@ jobs:
           score=$(jq '.score' "${RUNNER_TEMP}/scorecard.json")
           echo "score=$score" >> "$GITHUB_OUTPUT"
 
-      - name: Post or update rolling scorecard comment
+      - name: Post scorecard comment
         if: steps.limit.outputs.exceeded != 'true'
         env:
           ITERATION: ${{ steps.iteration.outputs.number }}
+          SCORE: ${{ steps.result.outputs.score }}
         run: |
           set -euo pipefail
-          marker="<!-- fix-loop-scorecard -->"
           scorecard=$(cat "${RUNNER_TEMP}/scorecard.md")
-          body=$(printf '%s\n\n**Iteration %s** | [Workflow run](%s/%s/actions/runs/%s)\n\n%s' \
-            "$marker" "$ITERATION" "$GITHUB_SERVER_URL" "$GH_REPO" "$GITHUB_RUN_ID" "$scorecard")
+          body=$(printf '**Iteration %s** — **%s/23** | [Workflow run](%s/%s/actions/runs/%s)\n\n%s' \
+            "$ITERATION" "$SCORE" "$GITHUB_SERVER_URL" "$GH_REPO" "$GITHUB_RUN_ID" "$scorecard")
+          gh issue comment "$ISSUE_NUMBER" --body "$body"
 
-          existing_id=$(gh api "repos/${GH_REPO}/issues/${ISSUE_NUMBER}/comments" \
-            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | .[0] // empty" 2>/dev/null || echo "")
+      - name: Plateau detection
+        if: steps.limit.outputs.exceeded != 'true' && steps.result.outputs.all_pass != 'true'
+        id: plateau
+        env:
+          SCORE: ${{ steps.result.outputs.score }}
+        run: |
+          set -euo pipefail
+          # Extract scores from recent scorecard comments (newest first)
+          recent_scores=$(gh api "repos/${GH_REPO}/issues/${ISSUE_NUMBER}/comments?per_page=10&direction=desc" \
+            --jq '[.[] | select(.body | test("^\\*\\*Iteration")) | .body | capture("\\*\\*(?P<s>[0-9]+)/23\\*\\*").s] | .[0:3]' 2>/dev/null || echo '[]')
+          echo "Recent scores: $recent_scores"
 
-          if [ -n "$existing_id" ]; then
-            gh api --method PATCH "repos/${GH_REPO}/issues/comments/${existing_id}" \
-              -f body="$body" > /dev/null
+          # Check if last 3 scores (including this one) are identical
+          unique=$(echo "$recent_scores" | jq 'unique | length')
+          count=$(echo "$recent_scores" | jq 'length')
+          if [ "$count" -ge 3 ] && [ "$unique" -eq 1 ]; then
+            echo "stalled=true" >> "$GITHUB_OUTPUT"
+            echo "Score stuck at $SCORE for 3 iterations — plateau detected."
           else
-            gh issue comment "$ISSUE_NUMBER" --body "$body"
+            echo "stalled=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Stop on plateau
+        if: steps.plateau.outputs.stalled == 'true'
+        env:
+          SCORE: ${{ steps.result.outputs.score }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" --add-label "agent:blocked" || true
+          gh issue comment "$ISSUE_NUMBER" --body "Fix loop plateaued — score stuck at **${SCORE}/23** for 3 consecutive iterations. Remaining failures need a different approach. Stopping to avoid wasting iterations."
+          exit 1
 
       - name: Run fixer agent
         id: fixer
