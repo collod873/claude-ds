@@ -3,6 +3,7 @@ import { isFixable, getFixer, isInteractive, makeNoTtyPrompt, getFixerPriority, 
 import type { DriftFixer, FixResult, FixerOpts } from "../../src/lib/drift-fixers";
 import type { DriftRuleId } from "../../src/lib/drift-rules";
 import type { DriftFinding } from "../../src/lib/drift-rules";
+import { evaluateDrift, type DriftRuleInput } from "../../src/lib/drift-rules";
 import type { Change } from "../../src/lib/operation";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile, stat, rename, unlink } from "node:fs/promises";
@@ -2008,6 +2009,88 @@ export const meta = {
       const fixer = getFixer("DRIFT-META-EXAMPLES-DUPLICATE")!;
       const result = await fixer(finding, dir);
       expect(result.fixed).toBe(false);
+    });
+  });
+
+  describe("fixStaleMetaStates — object shape with comments (issue #205)", () => {
+    let dir: string;
+    beforeEach(async () => { dir = await freshTmpDir(); });
+    afterEach(async () => { await cleanup(dir); });
+
+    // Reproduces design-system/atoms/toaster.tsx from the crewops baseline
+    // (commit e816cf4): object-shaped meta.states whose value contains a line
+    // comment with an apostrophe ("route's") and backticks. The pre-fix
+    // brace-walker mistook those for string delimiters, ran past the closing
+    // brace, and returned the source unchanged — so the fixer reported "no
+    // states field found" while the detector still fired. Detector and fixer
+    // must agree, and the fix must be idempotent.
+    const TOASTER_SRC = [
+      `import type { Meta } from "@ds/types/meta";`,
+      ``,
+      `export function Toaster() {`,
+      `\treturn <div />;`,
+      `}`,
+      ``,
+      `export const meta: Meta = {`,
+      `\tkind: "atom",`,
+      `\texamples: [`,
+      `\t\t{ name: "default", props: {} },`,
+      `\t],`,
+      `\tstates: {`,
+      `\t\tstacked: {`,
+      `\t\t\t// Sonner stacks via portal at runtime. The \`/design\` route's`,
+      `\t\t\t// Toaster page wires trigger Buttons that fire \`toast.success\`.`,
+      `\t\t\tname: "3+ toasts visible",`,
+      `\t\t\tprops: { expand: true, closeButton: true, visibleToasts: 5 },`,
+      `\t\t},`,
+      `\t\tloading: {`,
+      `\t\t\tname: "Loading icon",`,
+      `\t\t\tprops: { closeButton: true },`,
+      `\t\t},`,
+      `\t},`,
+      `};`,
+      ``,
+    ].join("\n");
+
+    const detect = (source: string): DriftFinding[] => {
+      const input: DriftRuleInput = {
+        file: "design-system/atoms/toaster.tsx",
+        locationTier: "atom",
+        metaKind: "atom",
+        classifierVerdict: { tier: "atom", signals: [] },
+        source,
+      };
+      return evaluateDrift(input).filter((f) => f.ruleId === "DRIFT-STALE-META-STATES");
+    };
+
+    it("detector and fixer agree, and the fix is idempotent", async () => {
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      const file = join(dir, "design-system/atoms/toaster.tsx");
+      await writeFile(file, TOASTER_SRC);
+
+      // Detector fires on the original source.
+      expect(detect(TOASTER_SRC)).toHaveLength(1);
+
+      // First fix run strips the field.
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-STALE-META-STATES",
+        file: "design-system/atoms/toaster.tsx",
+        message: "meta contains retired `states` field — remove per ADR-0007",
+      };
+      const fixer = getFixer("DRIFT-STALE-META-STATES")!;
+      const result = await fixAndApply(fixer, finding, dir);
+      expect(result.fixed).toBe(true);
+
+      const after = await readFile(file, "utf8");
+      expect(after).not.toMatch(/\bstates\s*:/);
+      // Sibling fields and the comment's surviving content are untouched.
+      expect(after).toContain(`kind: "atom"`);
+      expect(after).toContain("examples:");
+
+      // Second run: detector reports zero findings (idempotent).
+      expect(detect(after)).toHaveLength(0);
+      const second = await fixer(finding, dir);
+      expect(second.fixed).toBe(false);
     });
   });
 });

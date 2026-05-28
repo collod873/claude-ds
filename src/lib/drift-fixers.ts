@@ -1341,7 +1341,19 @@ function stripMetaStates(source: string): string {
     let i = valueStart;
     while (i < source.length) {
       const ch = source[i];
-      if (ch === open) { depth++; }
+      if (ch === "/" && source[i + 1] === "/") {
+        // Line comment: skip to newline so apostrophes/backticks inside
+        // comment prose aren't mistaken for string delimiters.
+        i += 2;
+        while (i < source.length && source[i] !== "\n") i++;
+        continue;
+      } else if (ch === "/" && source[i + 1] === "*") {
+        // Block comment: skip to the closing */.
+        i += 2;
+        while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) i++;
+        i += 2;
+        continue;
+      } else if (ch === open) { depth++; }
       else if (ch === close) { depth--; if (depth === 0) { endIdx = i; break; } }
       else if (ch === '"' || ch === "'" || ch === "`") {
         const quote = ch;

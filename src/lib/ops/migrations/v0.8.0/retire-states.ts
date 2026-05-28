@@ -24,7 +24,19 @@ function stripMetaStates(source: string): string {
   let i = openBraceIdx;
   while (i < source.length) {
     const ch = source[i];
-    if (ch === "{") {
+    if (ch === "/" && source[i + 1] === "/") {
+      // Line comment: skip to newline so apostrophes/backticks inside
+      // comment prose aren't mistaken for string delimiters.
+      i += 2;
+      while (i < source.length && source[i] !== "\n") i++;
+      continue;
+    } else if (ch === "/" && source[i + 1] === "*") {
+      // Block comment: skip to the closing */.
+      i += 2;
+      while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    } else if (ch === "{") {
       depth++;
     } else if (ch === "}") {
       depth--;
