@@ -50,6 +50,7 @@ const FIXABLE_RULES: Partial<Record<DriftRuleId, FixerEntry>> = {
   "DRIFT-META-EXAMPLES-DUPLICATE": { fixer: fixMetaExamplesDuplicate, interactive: false, priority: 4 },
   "DRIFT-META-EXAMPLES-CORRUPT": { fixer: fixMetaExamplesCorrupt, interactive: false, priority: 5 },
   "DRIFT-STALE-DS-IMPORT": { fixer: fixStaleDsImport, interactive: false, priority: 0 },
+  "DRIFT-STALE-META-STATES": { fixer: fixStaleMetaStates, interactive: false, priority: 0 },
 };
 
 export function isFixable(ruleId: DriftRuleId): boolean {
@@ -169,6 +170,8 @@ async function collectProjectImportRewriteChanges(
   newImportPath: string,
 ): Promise<Change[]> {
   const changes: Change[] = [];
+  // Resolve the target file so we can skip it (prevents circular self-imports)
+  const targetRelPath = newImportPath.replace(/^@\//, "");
 
   async function walk(dir: string): Promise<void> {
     let entries: string[];
@@ -181,11 +184,13 @@ async function collectProjectImportRewriteChanges(
       if (s.isDirectory()) { await walk(full); continue; }
       if (!s.isFile()) continue;
       if (!(entry.endsWith(".ts") || entry.endsWith(".tsx") || entry.endsWith(".js") || entry.endsWith(".jsx"))) continue;
+      const relPath = full.slice(cwd.length + 1);
+      const relPathNoExt = relPath.replace(/\.\w+$/, "");
+      if (relPathNoExt === targetRelPath) continue;
       let content: string;
       try { content = await readFile(full, "utf8"); } catch { continue; }
       if (content.includes(oldImportPath)) {
         const updated = content.split(oldImportPath).join(newImportPath);
-        const relPath = full.slice(cwd.length + 1);
         changes.push({
           kind: "write",
           path: relPath,
@@ -1281,7 +1286,7 @@ async function fixStaleDsImport(finding: DriftFinding, cwd: string, opts?: Fixer
     return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
-  const canonicalAlias = (opts?.dsAliases ?? []).find(a => a !== "@/design-system") ?? "@ds";
+  const canonicalAlias = (opts?.dsAliases ?? []).find(a => a !== "@/design-system") ?? "@/design-system";
   let result = source.replace(STALE_ALIAS_RE, `$1${canonicalAlias}/$2$3`);
 
   // Deduplicate identical import lines created by the rewrite
@@ -1312,6 +1317,95 @@ async function fixStaleDsImport(finding: DriftFinding, cwd: string, opts?: Fixer
     finding,
     fixed: true,
     message: `rewrote stale @/design-system/ imports to ${canonicalAlias}/ in ${finding.file}`,
+    changes,
+  };
+}
+
+// --- DRIFT-STALE-META-STATES fixer ---
+
+function stripMetaStates(source: string): string {
+  const re = /\bstates\s*:\s*/;
+  const match = re.exec(source);
+  if (!match) return source;
+
+  const valueStart = match.index + match[0].length;
+  if (valueStart >= source.length) return source;
+
+  const firstChar = source[valueStart];
+
+  let endIdx = -1;
+  if (firstChar === "{" || firstChar === "[") {
+    const open = firstChar;
+    const close = open === "{" ? "}" : "]";
+    let depth = 0;
+    let i = valueStart;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === open) { depth++; }
+      else if (ch === close) { depth--; if (depth === 0) { endIdx = i; break; } }
+      else if (ch === '"' || ch === "'" || ch === "`") {
+        const quote = ch;
+        i++;
+        while (i < source.length) {
+          if (source[i] === "\\") { i += 2; continue; }
+          if (source[i] === quote) break;
+          i++;
+        }
+      }
+      i++;
+    }
+    if (endIdx === -1) return source;
+    endIdx += 1;
+  } else if (firstChar === '"' || firstChar === "'" || firstChar === "`") {
+    let i = valueStart + 1;
+    while (i < source.length) {
+      if (source[i] === "\\") { i += 2; continue; }
+      if (source[i] === firstChar) { endIdx = i + 1; break; }
+      i++;
+    }
+    if (endIdx === -1) return source;
+  } else {
+    let i = valueStart;
+    while (i < source.length && source[i] !== "," && source[i] !== "\n" && source[i] !== "}") i++;
+    endIdx = i;
+  }
+
+  let start = match.index;
+  while (start > 0 && (source[start - 1] === " " || source[start - 1] === "\t")) start--;
+  if (start > 0 && source[start - 1] === "\n") start--;
+
+  let end = endIdx;
+  while (end < source.length && (source[end] === "," || source[end] === " " || source[end] === "\t")) end++;
+  if (end < source.length && source[end] === "\n") end++;
+
+  return source.slice(0, start) + source.slice(end);
+}
+
+async function fixStaleMetaStates(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(cwd, finding.file);
+  let source: string;
+  try {
+    source = await readFile(absPath, "utf8");
+  } catch {
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
+  }
+
+  const result = stripMetaStates(source);
+  if (result === source) {
+    return { finding, fixed: false, message: `no states field found in ${finding.file}`, changes: [] };
+  }
+
+  const changes: Change[] = [{
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(result),
+  }];
+
+  return {
+    finding,
+    fixed: true,
+    message: `stripped retired meta.states from ${finding.file}`,
     changes,
   };
 }
@@ -1464,8 +1558,9 @@ function rewriteInstances(source: string, rewrites: InstanceRewrite[]): string {
 }
 
 function addImportIfMissing(source: string, componentName: string, importPath: string): string {
-  const importRe = new RegExp(`import\\s+\\{[^}]*\\b${componentName}\\b[^}]*\\}\\s+from\\s+["']${importPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`);
-  if (importRe.test(source)) return source;
+  // Check if already imported from ANY path (prevents duplicates across alias variants)
+  const anyImportRe = new RegExp(`import\\s+\\{[^}]*\\b${componentName}\\b[^}]*\\}\\s+from\\s+["']`);
+  if (anyImportRe.test(source)) return source;
 
   const importLine = `import { ${componentName} } from "${importPath}";\n`;
   const firstImportMatch = source.match(/^import\s/m);
@@ -1630,6 +1725,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
   let currentSource = source;
   let anyFixed = false;
   const changes: Change[] = [];
+  const canonicalAlias = (opts?.dsAliases ?? []).find(a => a !== "@/design-system") ?? "@/design-system";
 
   // Path A: replace raw primitives with existing atoms (per-instance inference)
   const rawElements = findRawElements(currentSource);
@@ -1663,7 +1759,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     if (!cvaVariants) {
       // No variants — auto-replace all instances
       currentSource = rewriteRawElement(currentSource, element, atomComponent, null);
-      currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
+      currentSource = addImportIfMissing(currentSource, atomComponent, `${canonicalAlias}/atoms/${atomFileName}`);
       anyFixed = true;
       continue;
     }
@@ -1694,7 +1790,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
     // Auto-apply unambiguous instances
     if (autoRewrites.length > 0) {
       currentSource = rewriteInstances(currentSource, autoRewrites);
-      currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
+      currentSource = addImportIfMissing(currentSource, atomComponent, `${canonicalAlias}/atoms/${atomFileName}`);
       anyFixed = true;
     }
 
@@ -1710,7 +1806,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
 
       if (remainingRewrites.length > 0) {
         currentSource = rewriteInstances(currentSource, remainingRewrites);
-        currentSource = addImportIfMissing(currentSource, atomComponent, `@/design-system/atoms/${atomFileName}`);
+        currentSource = addImportIfMissing(currentSource, atomComponent, `${canonicalAlias}/atoms/${atomFileName}`);
         anyFixed = true;
       }
     }
@@ -1776,7 +1872,7 @@ async function fixRawPrimitive(finding: DriftFinding, cwd: string, opts?: FixerO
       );
     }
 
-    updatedSource = addImportIfMissing(updatedSource, finalAtomName, `@/design-system/atoms/${finalFileName}`);
+    updatedSource = addImportIfMissing(updatedSource, finalAtomName, `${canonicalAlias}/atoms/${finalFileName}`);
     currentSource = updatedSource;
     anyFixed = true;
   }

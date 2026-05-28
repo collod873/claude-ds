@@ -339,29 +339,85 @@ export async function auditCmd(opts: AuditOpts) {
   type AuditFinding = DriftFinding | IntegrityFinding;
   const allFindings: AuditFinding[] = [];
   const integrityFailedFiles = new Set<string>();
-  for (const tierDir of driftTierDirs) {
-    const abs = join(cwd, tierDir);
-    let entries: string[];
-    try { entries = await readdir(abs); } catch { continue; }
-    for (const entry of entries) {
-      if (!entry.endsWith(".tsx")) continue;
-      if (entry.endsWith(".showcase.tsx") || entry.endsWith(".test.tsx") || entry.endsWith(".stories.tsx")) continue;
-      const filePath = `${tierDir}/${entry}`;
-      let source: string;
-      try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+  const scannedFiles = new Set<string>();
+  const filesWithFindings = new Set<string>();
+  interface AmbiguousFile { file: string; importCount: number; locationTier: string }
+  const ambiguousFiles: AmbiguousFile[] = [];
 
-      const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases, tsconfigPaths });
-      const blockingIntegrity = integrityFindings.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
-      const nonBlockingIntegrity = integrityFindings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
-      allFindings.push(...nonBlockingIntegrity);
-      if (blockingIntegrity.length > 0) {
-        allFindings.push(...blockingIntegrity);
-        integrityFailedFiles.add(filePath);
-        continue;
+  // Collect all .tsx files under design-system/ — tier dirs plus reference files
+  const dsFiles = await walkDir(cwd, "design-system");
+  const tierDirEntries: string[] = [];
+  for (const f of dsFiles) {
+    if (!f.endsWith(".tsx")) continue;
+    if (f.endsWith(".showcase.tsx") || f.endsWith(".test.tsx") || f.endsWith(".stories.tsx")) continue;
+    const subPath = f.slice("design-system/".length);
+    // Include files in tier dirs (flat, not nested) and reference files in known subdirs
+    const inTierDir = driftTierDirs.some(d => f.startsWith(d + "/") && !subPath.slice(subPath.indexOf("/") + 1).includes("/"));
+    const inReferencesDir = f.startsWith("design-system/references/") && !subPath.slice("references/".length).includes("/");
+    if (inTierDir || inReferencesDir) tierDirEntries.push(f);
+  }
+
+  for (const filePath of tierDirEntries) {
+    let source: string;
+    try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
+    scannedFiles.add(filePath);
+
+    const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases, tsconfigPaths });
+    const blockingIntegrity = integrityFindings.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
+    const nonBlockingIntegrity = integrityFindings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
+    allFindings.push(...nonBlockingIntegrity);
+    if (nonBlockingIntegrity.length > 0) for (const f of nonBlockingIntegrity) filesWithFindings.add(f.file);
+    if (blockingIntegrity.length > 0) {
+      allFindings.push(...blockingIntegrity);
+      for (const f of blockingIntegrity) filesWithFindings.add(f.file);
+      integrityFailedFiles.add(filePath);
+      continue;
+    }
+
+    const { signals, findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
+    allFindings.push(...findings);
+    for (const f of findings) filesWithFindings.add(f.file);
+
+    // Ambiguity detection: atom files that compose many components may be misclassified.
+    // Count both import statements and JSX component references (uppercase element names).
+    if (signals.locationTier === "atom" && !findings.some(f => f.ruleId === "DRIFT-MISPLACED")) {
+      const relativeImports = (source.match(/from\s+["']\.\.?\//g) ?? []).length;
+      const aliasPattern = dsAliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+      const dsImportRe = aliasPattern ? new RegExp(`from\\s+["'](?:${aliasPattern})/(?:atoms|composites)/`, "g") : null;
+      const dsImports = dsImportRe ? (source.match(dsImportRe) ?? []).length : 0;
+      const jsxComponents = new Set((source.match(/<([A-Z][A-Za-z0-9]+)/g) ?? []).map(m => m.slice(1)));
+      const componentRefs = Math.max(relativeImports + dsImports, jsxComponents.size);
+      if (componentRefs >= 3) {
+        ambiguousFiles.push({ file: filePath, importCount: componentRefs, locationTier: "atom" });
       }
+    }
+  }
 
-      const { findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
-      allFindings.push(...findings);
+  // Log coverage summary
+  const cleanCount = scannedFiles.size - filesWithFindings.size;
+  info(`evaluated ${scannedFiles.size} file(s) across ${driftTierDirs.length} tier directories (${cleanCount} clean, ${filesWithFindings.size} with findings)`);
+
+  // Ambiguity check: ask simple questions for genuinely ambiguous classifications (ADR-0014)
+  if (ambiguousFiles.length > 0) {
+    const isTTYAmbiguity = process.stdout.isTTY === true;
+    const ambiguityPrompt: FixerPrompt = isTTYAmbiguity ? makeTtyPrompt() : makeNoTtyPrompt();
+    for (const { file, importCount, locationTier } of ambiguousFiles) {
+      const fileName = file.split("/").pop()?.replace(/\.tsx$/, "") ?? file;
+      const question = `${fileName} is in ${locationTier}s/ but imports ${importCount} other components. Is it a simple building block (atom) or does it combine multiple components (composite)?`;
+      const options: { label: string; description: string }[] = [
+        { label: "Keep as atom", description: "It is a self-contained building block" },
+        { label: "Move to composites", description: "It combines other components and belongs in composites/" },
+      ];
+      const answer = await ambiguityPrompt(question, options);
+      if (answer === 1) {
+        allFindings.push({
+          ruleId: "DRIFT-MISPLACED" as DriftRuleId,
+          file,
+          message: `User confirmed: should be in composites/ (currently in ${locationTier}s/)`,
+        });
+        filesWithFindings.add(file);
+      }
+      info(`ambiguity: ${file} — ${answer === 1 ? "move to composites" : "keep as atom"}`);
     }
   }
 
@@ -539,6 +595,34 @@ export async function auditCmd(opts: AuditOpts) {
       }
       if (revalidationCount > 0) {
         info(`re-validation: ${revalidationCount} new finding(s) after fix pass`);
+
+        // Re-fix pass: auto-fix newly detected drift (e.g. stale imports introduced by prior fixers)
+        const reFixFindings = activeFindings.filter(
+          (f): f is DriftFinding =>
+            !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
+        );
+        if (reFixFindings.length > 0) {
+          const reFixResult = await runFixPass(cwd, reFixFindings, {
+            domainRoots, allowedImports, dsAliases, prompt,
+          });
+          if (!reFixResult.aborted) {
+            const reFixedCount = reFixResult.results.filter(r => r.fixed).length;
+            if (reFixedCount > 0) {
+              fixedCount += reFixedCount;
+              for (const r of reFixResult.results) {
+                if (r.fixed) {
+                  info(`fixed [${r.finding.ruleId}]: ${r.message}`);
+                }
+              }
+              const reFixedKeys = new Set(
+                reFixResult.results.filter(r => r.fixed).map(r => suppressedKey(r.finding.ruleId, r.finding.file))
+              );
+              activeFindings = activeFindings.filter(
+                f => !reFixedKeys.has(suppressedKey(f.ruleId, f.file))
+              );
+            }
+          }
+        }
       }
     }
 

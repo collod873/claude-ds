@@ -20,6 +20,8 @@ export type DriftRuleId =
   // Patterns-tier rules
   | "DRIFT-PATTERN-NO-SLOTS"
   | "DRIFT-PATTERN-IMPORTS-PATTERN"
+  // Legacy field cleanup
+  | "DRIFT-STALE-META-STATES"
   // Code-quality drift rules (IDs stable)
   | "DRIFT-RAW-PRIMITIVE"
   | "DRIFT-CVA-VARIANT-UNRENDERED"
@@ -77,6 +79,8 @@ const RULE_REGISTRY: Record<DriftRuleId, string> = {
     "meta.examples has unbalanced braces — entries truncated by a prior dedup fix",
   "DRIFT-STALE-DS-IMPORT":
     "File imports via @/design-system/ instead of the canonical @ds/ alias",
+  "DRIFT-STALE-META-STATES":
+    "meta object contains a retired `states` field (ADR-0007) — strip it",
 };
 
 export function ruleDescription(id: DriftRuleId): string {
@@ -103,6 +107,7 @@ const SEVERITY_MAP: Record<DriftRuleId, Severity> = {
   "DRIFT-META-EXAMPLES-DUPLICATE": "error",
   "DRIFT-META-EXAMPLES-CORRUPT": "error",
   "DRIFT-STALE-DS-IMPORT": "error",
+  "DRIFT-STALE-META-STATES": "error",
 };
 
 export function ruleSeverity(id: DriftRuleId): Severity {
@@ -483,6 +488,25 @@ function evalMetaExamplesCorrupt(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
+const META_STATES_RE = /\bstates\s*:\s*\{/;
+
+/** DRIFT-STALE-META-STATES: meta contains retired `states` field (ADR-0007). */
+function evalStaleMetaStates(input: DriftRuleInput): DriftFinding | null {
+  const { file, locationTier, source } = input;
+  if (locationTier === null) return null;
+  if (source === undefined) return null;
+  if (!source.includes("export const meta")) return null;
+  const metaMatch = source.match(/export\s+const\s+meta[\s:=]/);
+  if (!metaMatch) return null;
+  const afterMeta = source.slice(metaMatch.index!);
+  if (!META_STATES_RE.test(afterMeta)) return null;
+  return {
+    ruleId: "DRIFT-STALE-META-STATES",
+    file,
+    message: "meta contains retired `states` field — remove per ADR-0007",
+  };
+}
+
 const STALE_DS_IMPORT_RE = /from\s+["']@\/design-system\//;
 
 /** DRIFT-STALE-DS-IMPORT: file uses @/design-system/ when @ds/ alias is available. */
@@ -531,5 +555,7 @@ export function evaluateDrift(input: DriftRuleInput): DriftFinding[] {
   if (metaExamplesCorrupt) findings.push(metaExamplesCorrupt);
   const staleDsImport = evalStaleDsImport(input);
   if (staleDsImport) findings.push(staleDsImport);
+  const staleMetaStates = evalStaleMetaStates(input);
+  if (staleMetaStates) findings.push(staleMetaStates);
   return findings;
 }
