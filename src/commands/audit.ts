@@ -10,7 +10,7 @@ import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
 import { countDsComponentImports } from "../lib/classifier.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
-import { ruleSeverity, isExtractionNeededFinding, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
+import { ruleSeverity, isExtractionNeededFinding, isAmbiguousTierFinding, AMBIGUOUS_TIER_MARKER, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
 import { evaluateIntegrity, integrityRuleSeverity, type IntegrityRuleId, type IntegrityFinding } from "../lib/integrity-rules.js";
 import { detectDsAliases, detectTsconfigPaths } from "../lib/ds-aliases.js";
 import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
@@ -342,8 +342,6 @@ export async function auditCmd(opts: AuditOpts) {
   const integrityFailedFiles = new Set<string>();
   const scannedFiles = new Set<string>();
   const filesWithFindings = new Set<string>();
-  interface AmbiguousFile { file: string; importCount: number; locationTier: string }
-  const ambiguousFiles: AmbiguousFile[] = [];
 
   // Collect all .tsx files under design-system/ — tier dirs plus reference files
   const dsFiles = await walkDir(cwd, "design-system");
@@ -382,10 +380,17 @@ export async function auditCmd(opts: AuditOpts) {
     // Ambiguity detection: atom files that compose many real DS components may be misclassified.
     // Count only imports that resolve to a design-system tier file (atom/composite/pattern) —
     // utility helpers (cn/cva), types, hooks, and external libs must not count (issue #200).
+    // audit no longer prompts here (ADR-0015): it emits an unfixed finding that points the
+    // consumer at `classify`, which owns the keep/move structural decision (issue #203).
     if (signals.locationTier === "atom" && !findings.some(f => f.ruleId === "DRIFT-MISPLACED")) {
       const componentRefs = countDsComponentImports(source, dsAliases);
       if (componentRefs >= 3) {
-        ambiguousFiles.push({ file: filePath, importCount: componentRefs, locationTier: "atom" });
+        allFindings.push({
+          ruleId: "DRIFT-MISPLACED" as DriftRuleId,
+          file: filePath,
+          message: `imports ${componentRefs} design-system components but is classified as an atom — ${AMBIGUOUS_TIER_MARKER}; run \`claude-ds classify\` to confirm whether it belongs in composites/`,
+        });
+        filesWithFindings.add(filePath);
       }
     }
   }
@@ -393,30 +398,6 @@ export async function auditCmd(opts: AuditOpts) {
   // Log coverage summary
   const cleanCount = scannedFiles.size - filesWithFindings.size;
   info(`evaluated ${scannedFiles.size} file(s) across ${driftTierDirs.length} tier directories (${cleanCount} clean, ${filesWithFindings.size} with findings)`);
-
-  // Ambiguity check: ask simple questions for genuinely ambiguous classifications (ADR-0014)
-  if (ambiguousFiles.length > 0) {
-    const isTTYAmbiguity = process.stdout.isTTY === true;
-    const ambiguityPrompt: FixerPrompt = isTTYAmbiguity ? makeTtyPrompt() : makeNoTtyPrompt();
-    for (const { file, importCount, locationTier } of ambiguousFiles) {
-      const fileName = file.split("/").pop()?.replace(/\.tsx$/, "") ?? file;
-      const question = `${fileName} is in ${locationTier}s/ but imports ${importCount} other components. Is it a simple building block (atom) or does it combine multiple components (composite)?`;
-      const options: { label: string; description: string }[] = [
-        { label: "Keep as atom", description: "It is a self-contained building block" },
-        { label: "Move to composites", description: "It combines other components and belongs in composites/" },
-      ];
-      const answer = await ambiguityPrompt(question, options);
-      if (answer === 1) {
-        allFindings.push({
-          ruleId: "DRIFT-MISPLACED" as DriftRuleId,
-          file,
-          message: `User confirmed: should be in composites/ (currently in ${locationTier}s/)`,
-        });
-        filesWithFindings.add(file);
-      }
-      info(`ambiguity: ${file} — ${answer === 1 ? "move to composites" : "keep as atom"}`);
-    }
-  }
 
   // Filter out suppressed findings.
   let activeFindings = allFindings.filter(
@@ -498,7 +479,7 @@ export async function auditCmd(opts: AuditOpts) {
     const prompt: FixerPrompt = isTTY ? makeTtyPrompt() : makeNoTtyPrompt();
     const driftFindings = activeFindings.filter(
       (f): f is DriftFinding =>
-        !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
+        !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file) && !isAmbiguousTierFinding(f),
     );
     const fixPassResult = await runFixPass(cwd, driftFindings, {
       domainRoots, allowedImports, dsAliases, prompt,
@@ -596,7 +577,7 @@ export async function auditCmd(opts: AuditOpts) {
         // Re-fix pass: auto-fix newly detected drift (e.g. stale imports introduced by prior fixers)
         const reFixFindings = activeFindings.filter(
           (f): f is DriftFinding =>
-            !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
+            !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file) && !isAmbiguousTierFinding(f),
         );
         if (reFixFindings.length > 0) {
           const reFixResult = await runFixPass(cwd, reFixFindings, {
@@ -705,7 +686,8 @@ export async function auditCmd(opts: AuditOpts) {
   if (activeFindings.length > 0) {
     info(`${activeFindings.length} error(s) require attention`);
     const extractionCount = activeFindings.filter(isExtractionNeededFinding).length;
-    printNextStep("audit", { hasFindings: true, extractionCount });
+    const ambiguityCount = activeFindings.filter(isAmbiguousTierFinding).length;
+    printNextStep("audit", { hasFindings: true, extractionCount, ambiguityCount });
     process.exit(1);
   } else if (fixedCount > 0) {
     info("No action required.");

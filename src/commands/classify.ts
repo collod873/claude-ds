@@ -5,8 +5,10 @@ import { basename, dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { info, err, confirm, printNextStep } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
-import { classifySource, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
+import { classifySource, countDsComponentImports, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
+import { makeTtyPrompt, type FixerPrompt } from "../lib/drift-fixers.js";
+import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import { run } from "../lib/runner.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
@@ -95,6 +97,11 @@ export async function classifyCmd(opts: {
   dryRun?: boolean;
   yes?: boolean;
   cwd?: string;
+  /**
+   * Override the ambiguity prompt (keep/move/skip). Tests inject a stub; the CLI
+   * leaves it undefined and classify builds a TTY prompt when interactive (issue #203).
+   */
+  prompt?: FixerPrompt;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const dryRun = opts.dryRun ?? false;
@@ -152,6 +159,14 @@ export async function classifyCmd(opts: {
 
   if (classified.length === 0) {
     info(`classify: no classifiable files found in ${srcRel}`);
+    // Still run the ambiguity pass: audit may have routed the user here to resolve an
+    // already-placed atom, even though there are no new files to classify (issue #203).
+    if (!dryRun) {
+      const amb = await applyAmbiguityPass();
+      if (amb.moved > 0 || amb.kept > 0) {
+        info("classify: complete");
+      }
+    }
     printNextStep("classify", {});
     return;
   }
@@ -293,7 +308,14 @@ export async function classifyCmd(opts: {
     }
   }
 
-  if (moved === 0 && extractOp.extractions.length === 0) {
+  const { moved: ambiguityMoved, kept: ambiguityKept } = await applyAmbiguityPass();
+
+  if (
+    moved === 0 &&
+    extractOp.extractions.length === 0 &&
+    ambiguityMoved === 0 &&
+    ambiguityKept === 0
+  ) {
     info("classify: no files moved");
     printNextStep("classify", {});
     return;
@@ -301,4 +323,102 @@ export async function classifyCmd(opts: {
 
   info("classify: complete");
   printNextStep("classify", {});
+
+  // Ambiguity pass (ADR-0015, issue #203): an atom that imports >= 3 design-system
+  // components may actually be a composite. The classifier can't decide, so classify asks
+  // the user — audit refuses to (it just emits a pointer-to-classify finding). Only runs
+  // interactively; in CI / --yes there's nobody to answer, so we leave the files for audit
+  // to keep flagging rather than silently moving or suppressing them. Hoisted so it can run
+  // even when --src has no new files to classify (the common re-run case: audit flagged an
+  // ambiguity, the user re-runs classify to resolve it, but src is already migrated).
+  async function applyAmbiguityPass(): Promise<{ moved: number; kept: number }> {
+    const ambiguityPrompt: FixerPrompt | null =
+      opts.prompt ?? (!yes && process.stdout.isTTY === true ? makeTtyPrompt() : null);
+    if (!ambiguityPrompt) return { moved: 0, kept: 0 };
+
+    let movedCount = 0;
+    let keptCount = 0;
+    const atomAbs = join(cwd, "design-system/atoms");
+    let atomEntries: Dirent[] = [];
+    try {
+      atomEntries = await readdir(atomAbs, { withFileTypes: true });
+    } catch {
+      atomEntries = [];
+    }
+    const exceptionsToAdd: Exception[] = [];
+    for (const e of atomEntries) {
+      if (!e.isFile() || !e.name.endsWith(".tsx")) continue;
+      if (COMPANION_SUFFIXES.some(s => e.name.endsWith(s))) continue;
+      const atomRel = `design-system/atoms/${e.name}`;
+      let source: string;
+      try {
+        source = await readFile(join(cwd, atomRel), "utf8");
+      } catch {
+        continue;
+      }
+      if (countDsComponentImports(source, dsAliases) < 3) continue;
+
+      const fileName = e.name.replace(/\.tsx$/, "");
+      const answer = await ambiguityPrompt(
+        `${fileName} is in atoms/ but imports multiple design-system components. Is it a simple building block (atom) or does it combine multiple components (composite)?`,
+        [
+          { label: "Keep as atom", description: "It is a self-contained building block" },
+          { label: "Move to composites", description: "It combines other components and belongs in composites/" },
+        ],
+      );
+
+      if (answer === 1) {
+        // Move to composites — respect the user's answer regardless of the classifier (issue #206).
+        const destRel = `design-system/composites/${e.name}`;
+        await mkdir(join(cwd, "design-system/composites"), { recursive: true });
+        try {
+          moveFile(cwd, atomRel, destRel);
+        } catch (moveErr) {
+          err(`classify: ${(moveErr as Error).message}`);
+          continue;
+        }
+        // Flip meta.kind atom -> composite so audit doesn't immediately re-flag the moved file.
+        const movedSrc = await readFile(join(cwd, destRel), "utf8");
+        const flipped = movedSrc.replace(/(\bkind\s*:\s*["'])atom(["'])/, "$1composite$2");
+        if (flipped !== movedSrc) await writeFile(join(cwd, destRel), flipped, "utf8");
+        info(`classify: ${atomRel} → ${destRel} (composite — user confirmed)`);
+        movedCount++;
+      } else if (answer === 0) {
+        // Keep as atom — suppress audit's ambiguity finding for this file going forward.
+        exceptionsToAdd.push({
+          rule: "DRIFT-MISPLACED",
+          path: atomRel,
+          reason: "classify: user confirmed atom despite multiple component imports",
+          permanent: true,
+        });
+        keptCount++;
+        info(`classify: ${atomRel} — kept as atom (suppressing future ambiguity finding)`);
+      } else {
+        // "defer"/skip — leave the file untouched; audit will surface it again next run.
+        info(`classify: ${atomRel} — skipped (will be flagged again on next audit)`);
+      }
+    }
+
+    if (exceptionsToAdd.length > 0) {
+      const exceptionsPath = join(cwd, "design-system/exceptions.json");
+      let existing: Exception[] = [];
+      try {
+        existing = parseExceptions(await readFile(exceptionsPath, "utf8"));
+      } catch {
+        existing = [];
+      }
+      await mkdir(dirname(exceptionsPath), { recursive: true });
+      await writeFile(exceptionsPath, serializeExceptions([...existing, ...exceptionsToAdd]), "utf8");
+      info(`classify: ${exceptionsToAdd.length} ambiguity exception(s) written to design-system/exceptions.json`);
+    }
+
+    if (movedCount > 0) {
+      // Relocations changed import paths — rewrite again so references stay resolvable.
+      const { rewriteImports } = await import("../lib/ops/rewrite-imports.js");
+      const ctx4 = await loadProject(cwd);
+      await run(ctx4, [rewriteImports], "apply");
+    }
+
+    return { moved: movedCount, kept: keptCount };
+  }
 }
