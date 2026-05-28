@@ -44,6 +44,30 @@ function countDistinctDsComponentImports(source: string, dsAliases: string[]): n
   return seen.size;
 }
 
+const DS_TIER_IMPORT_RE = /from\s+["']([^"']*(?:@\/)?design-system\/(?:atoms|composites|patterns)\/[^"']+)["']/g;
+
+function buildDsTierImportRe(dsAliases: string[]): RegExp {
+  const escaped = dsAliases.map(a => a.replace(REGEX_META_RE, "\\$&"));
+  const alt = `(?:(?:@\\/)?design-system|${escaped.join("|")})`;
+  return new RegExp(`from\\s+["']([^"']*${alt}\\/(?:atoms|composites|patterns)\\/[^"']+)["']`, "g");
+}
+
+/**
+ * Count distinct design-system component imports (atoms/composites/patterns) in a source.
+ *
+ * Only imports that resolve to a DS tier file count — utility helpers (cn/cva), type
+ * imports, hooks, and external library imports are ignored. Used by audit's ambiguity
+ * heuristic so it stops prompting on utility-only atoms (issue #200): counting *any*
+ * relative import (the old behaviour) tripped the prompt on shadcn atoms like button.tsx
+ * that only import cn/cva.
+ */
+export function countDsComponentImports(source: string, dsAliases: string[] = []): number {
+  const re = dsAliases.length > 0 ? buildDsTierImportRe(dsAliases) : DS_TIER_IMPORT_RE;
+  const seen = new Set<string>();
+  for (const m of source.matchAll(re)) seen.add(m[1]);
+  return seen.size;
+}
+
 function domainRootRegex(root: string): RegExp {
   return new RegExp(`from\\s+["'][^"']*\\/${root.replace(REGEX_META_RE, "\\$&")}\\/`);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifySource, type TierVerdict } from "../../src/lib/classifier";
+import { classifySource, countDsComponentImports, type TierVerdict } from "../../src/lib/classifier";
 
 // ── Atom fixtures ────────────────────────────────────────────────────────────
 
@@ -370,4 +370,110 @@ export function SubmitButton() {
     const v = classifySource(src, undefined, undefined, ["@design"]);
     expect(v.tier).toBe("composite");
   });
+});
+
+// ── Ambiguity-heuristic count (issue #200) ───────────────────────────────────
+// countDsComponentImports backs audit's ambiguity prompt. It must count ONLY
+// imports that resolve to a design-system tier file (atom/composite/pattern) —
+// utility helpers (cn/cva), type imports, hooks, and external libs must not count.
+
+describe("countDsComponentImports — only real DS component imports count", () => {
+  it("utility-only atom (cn/cva/types/hooks/external) counts zero", () => {
+    const src = `
+import { useState } from "react";
+import { cva } from "class-variance-authority";
+import { cn } from "@/lib/utils";
+import type { VariantProps } from "class-variance-authority";
+export function Thing() {
+  const [open, setOpen] = useState(false);
+  return <div className={cn("base")}>{open}</div>;
+}`;
+    expect(countDsComponentImports(src)).toBe(0);
+  });
+
+  it("multiple real DS component imports count toward the threshold", () => {
+    const src = `
+import { Button } from "@/design-system/atoms/button";
+import { Badge } from "@/design-system/atoms/badge";
+import { Card } from "@/design-system/composites/card";
+import { cn } from "@/lib/utils";
+export function Toolbar() {
+  return <div className={cn("row")}><Button /><Badge /><Card /></div>;
+}`;
+    expect(countDsComponentImports(src)).toBeGreaterThanOrEqual(3);
+  });
+
+  it("pattern-tier imports count as DS components too", () => {
+    const src = `
+import { Page } from "@/design-system/patterns/page";
+import { Section } from "@/design-system/patterns/section";
+export function Layout() {
+  return <Page><Section /></Page>;
+}`;
+    expect(countDsComponentImports(src)).toBe(2);
+  });
+
+  it("counts distinct imports, not duplicate references", () => {
+    const src = `
+import { Button } from "@/design-system/atoms/button";
+import { Button as B2 } from "@/design-system/atoms/button";
+export function Pair() {
+  return <><Button /><B2 /></>;
+}`;
+    expect(countDsComponentImports(src)).toBe(1);
+  });
+
+  it("respects custom ds aliases", () => {
+    const src = `
+import { Button } from "@ds/atoms/button";
+import { Card } from "@ds/composites/card";
+import { cn } from "@ds/lib/cn";
+export function X() { return <div className={cn("x")}><Button /><Card /></div>; }`;
+    expect(countDsComponentImports(src, ["@ds"])).toBe(2);
+  });
+
+  // The 8 canonical shadcn-style atoms must never trip the ambiguity prompt:
+  // they import only utilities/primitives, no DS tier files.
+  const SHADCN_ATOMS: Record<string, string> = {
+    button: `
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "@/lib/utils";
+import { Slot } from "@radix-ui/react-slot";
+export function Button() { return <Slot className={cn("btn")} />; }`,
+    badge: `
+import { cva } from "class-variance-authority";
+import { cn } from "@/lib/utils";
+export function Badge() { return <span className={cn("badge")} />; }`,
+    input: `
+import * as React from "react";
+import { cn } from "@/lib/utils";
+export const Input = React.forwardRef<HTMLInputElement>((p, ref) => <input ref={ref} className={cn("in")} />);`,
+    checkbox: `
+import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
+import { Check } from "lucide-react";
+import { cn } from "@/lib/utils";
+export function Checkbox() { return <CheckboxPrimitive.Root className={cn("cb")}><Check /></CheckboxPrimitive.Root>; }`,
+    radio: `
+import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
+import { cn } from "@/lib/utils";
+export function Radio() { return <RadioGroupPrimitive.Item className={cn("r")} />; }`,
+    tag: `
+import { cva } from "class-variance-authority";
+import { cn } from "@/lib/utils";
+export function Tag() { return <span className={cn("tag")} />; }`,
+    tabs: `
+import * as TabsPrimitive from "@radix-ui/react-tabs";
+import { cn } from "@/lib/utils";
+export function Tabs() { return <TabsPrimitive.Root className={cn("tabs")} />; }`,
+    tooltip: `
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+import { cn } from "@/lib/utils";
+export function Tooltip() { return <TooltipPrimitive.Root className={cn("tt")} />; }`,
+  };
+
+  for (const [name, src] of Object.entries(SHADCN_ATOMS)) {
+    it(`canonical shadcn atom "${name}" counts zero (no ambiguity prompt)`, () => {
+      expect(countDsComponentImports(src)).toBe(0);
+    });
+  }
 });

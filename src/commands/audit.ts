@@ -8,6 +8,7 @@ import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
+import { countDsComponentImports } from "../lib/classifier.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import { ruleSeverity, isExtractionNeededFinding, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
 import { evaluateIntegrity, integrityRuleSeverity, type IntegrityRuleId, type IntegrityFinding } from "../lib/integrity-rules.js";
@@ -378,15 +379,11 @@ export async function auditCmd(opts: AuditOpts) {
     allFindings.push(...findings);
     for (const f of findings) filesWithFindings.add(f.file);
 
-    // Ambiguity detection: atom files that compose many components may be misclassified.
-    // Count both import statements and JSX component references (uppercase element names).
+    // Ambiguity detection: atom files that compose many real DS components may be misclassified.
+    // Count only imports that resolve to a design-system tier file (atom/composite/pattern) —
+    // utility helpers (cn/cva), types, hooks, and external libs must not count (issue #200).
     if (signals.locationTier === "atom" && !findings.some(f => f.ruleId === "DRIFT-MISPLACED")) {
-      const relativeImports = (source.match(/from\s+["']\.\.?\//g) ?? []).length;
-      const aliasPattern = dsAliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-      const dsImportRe = aliasPattern ? new RegExp(`from\\s+["'](?:${aliasPattern})/(?:atoms|composites)/`, "g") : null;
-      const dsImports = dsImportRe ? (source.match(dsImportRe) ?? []).length : 0;
-      const jsxComponents = new Set((source.match(/<([A-Z][A-Za-z0-9]+)/g) ?? []).map(m => m.slice(1)));
-      const componentRefs = Math.max(relativeImports + dsImports, jsxComponents.size);
+      const componentRefs = countDsComponentImports(source, dsAliases);
       if (componentRefs >= 3) {
         ambiguousFiles.push({ file: filePath, importCount: componentRefs, locationTier: "atom" });
       }
