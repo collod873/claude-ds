@@ -8,23 +8,23 @@ The skill is a **setup-only tool** — no drift detection, no update mode. Re-ru
 
 ## Steps
 
-- [ ] **Step 1: Delete files created earlier this session** — remove the partial architecture-review and shared utility files we added to claude-ds before deciding to rewrite the skill instead.
+- [x] **Step 1: Delete files created earlier this session** — remove the partial architecture-review and shared utility files we added to claude-ds before deciding to rewrite the skill instead.
   Files: `.sandcastle/retry-feedback.ts`, `.sandcastle/run-with-retry.ts`, `.sandcastle/run-with-extraction.ts`, `.sandcastle/architecture-review/` (entire dir), `.github/workflows/architecture-review.yml`
   Scope: claude-ds repo only — cleanup, no functional change
 
-- [ ] **Step 2: Write SKILL.md** — replace the existing sandcastle-setup skill with the new 13-step process that fetches from upstream repos.
+- [x] **Step 2: Write SKILL.md** — replace the existing sandcastle-setup skill with the new 13-step process that fetches from upstream repos.
   Files: `~/.claude/skills/sandcastle-setup/SKILL.md`
   Scope: 13 steps covering detect → preserve → clean → fetch → adapt → install → secrets → labels → coding standards → restore → verify
 
-- [ ] **Step 3: Write REFERENCE.md** — the file manifest, adaptation rules, labels, and preserve list. SKILL.md links to this by section anchor.
+- [x] **Step 3: Write REFERENCE.md** — the file manifest, adaptation rules, labels, and preserve list. SKILL.md links to this by section anchor.
   Files: `~/.claude/skills/sandcastle-setup/REFERENCE.md`
   Scope: 7 sections: #source-urls, #file-manifest, #adaptation-rules, #workflow-adaptations, #labels, #preserve-list, #docs-adaptations
 
-- [ ] **Step 4: Verify URLs** — spot-check that raw GitHub URLs in the manifest return 200.
+- [x] **Step 4: Verify URLs** — spot-check that raw GitHub URLs in the manifest return 200.
   Files: (none — read-only verification)
   Scope: curl -sI against a sample of URLs from both repos
 
-- [ ] **Step 5: Update sandcastle-adoption-blueprint.md** — update the General project blueprint to reflect the new skill's source-of-truth (sandcastle repo + CVM, not claude-ds).
+- [x] **Step 5: Update sandcastle-adoption-blueprint.md** — update the General project blueprint to reflect the new skill's source-of-truth (sandcastle repo + CVM, not claude-ds).
   Files: `~/Claude Projects/General/sandcastle-adoption-blueprint.md`
   Scope: Update Layer 0 (skip init), Layer 2 source references, Layer 4 CVM extension notes
 
