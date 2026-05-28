@@ -18,6 +18,12 @@ type NextStepCommand = "adopt" | "classify" | "audit" | "audit-fix" | "sync" | "
 interface NextStepContext {
   hasFindings?: boolean;
   buildCmd?: string;
+  /**
+   * Count of unfixed DRIFT-RAW-PRIMITIVE findings that need extraction (ADR-0015).
+   * When > 0, the audit breadcrumb routes to `classify` — the unblocking action —
+   * regardless of what other unfixed findings remain.
+   */
+  extractionCount?: number;
 }
 
 export function printNextStep(command: NextStepCommand, ctx: NextStepContext): void {
@@ -32,7 +38,11 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
       message = "run 'claude-ds audit' to check for drift";
       break;
     case "audit":
-      if (ctx.hasFindings) {
+      if (ctx.extractionCount && ctx.extractionCount > 0) {
+        const n = ctx.extractionCount;
+        const noun = n === 1 ? "inline component" : "inline components";
+        message = `run 'claude-ds classify' to extract ${n} ${noun}, then re-run 'claude-ds audit'`;
+      } else if (ctx.hasFindings) {
         message = "run 'claude-ds audit --fix' to auto-repair, or 'claude-ds audit --except' to register exceptions";
       } else {
         message = `run ${buildCmd} to verify everything compiles`;

@@ -36,6 +36,20 @@ export interface DriftFinding {
   message: string;
 }
 
+/**
+ * Stable marker embedded in a DRIFT-RAW-PRIMITIVE remediation message when the
+ * fixer hit an inline component it can't replace and is deferring the structural
+ * decision to `classify` (ADR-0015). Both the fixer that emits the finding and
+ * the breadcrumb logic that routes on it reference this single constant so the
+ * two never drift apart.
+ */
+export const EXTRACTION_NEEDED_MARKER = "needs extraction";
+
+/** True when a finding is a DRIFT-RAW-PRIMITIVE that `audit` deferred to `classify`. */
+export function isExtractionNeededFinding(f: { ruleId: string; message: string }): boolean {
+  return f.ruleId === "DRIFT-RAW-PRIMITIVE" && f.message.includes(EXTRACTION_NEEDED_MARKER);
+}
+
 export interface DriftRuleInput {
   /** Relative file path, e.g. "design-system/atoms/button.tsx" */
   file: string;

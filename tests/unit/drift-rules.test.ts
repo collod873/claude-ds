@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evaluateDrift, allRuleIds, ruleDescription, parseCvaVariants, type DriftRuleInput } from "../../src/lib/drift-rules";
+import { evaluateDrift, allRuleIds, ruleDescription, parseCvaVariants, isExtractionNeededFinding, EXTRACTION_NEEDED_MARKER, type DriftRuleInput } from "../../src/lib/drift-rules";
 
 describe("drift rule registry", () => {
   it("exposes a stable set of rule IDs including DRIFT-MISPLACED", () => {
@@ -1000,5 +1000,28 @@ const v = cva("base", {
   it("returns null for source without cva()", () => {
     const result = parseCvaVariants("export function Foo() { return <div />; }");
     expect(result).toBeNull();
+  });
+});
+
+describe("isExtractionNeededFinding", () => {
+  it("matches a DRIFT-RAW-PRIMITIVE finding carrying the extraction marker", () => {
+    const f = {
+      ruleId: "DRIFT-RAW-PRIMITIVE",
+      message: `DayList in month-view.tsx ${EXTRACTION_NEEDED_MARKER} — run \`claude-ds classify\` to extract it`,
+    };
+    expect(isExtractionNeededFinding(f)).toBe(true);
+  });
+
+  it("ignores a DRIFT-RAW-PRIMITIVE finding without the extraction marker", () => {
+    const f = {
+      ruleId: "DRIFT-RAW-PRIMITIVE",
+      message: "raw HTML primitive: 1 <button> — use design-system atoms instead",
+    };
+    expect(isExtractionNeededFinding(f)).toBe(false);
+  });
+
+  it("ignores a non-raw-primitive finding even if it mentions extraction", () => {
+    const f = { ruleId: "DRIFT-MISPLACED", message: `something ${EXTRACTION_NEEDED_MARKER}` };
+    expect(isExtractionNeededFinding(f)).toBe(false);
   });
 });

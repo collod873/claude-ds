@@ -68,6 +68,27 @@ describe("printNextStep", () => {
     expect(logged.some(l => l.includes("claude-ds audit --fix"))).toBe(true);
   });
 
+  it("routes audit breadcrumb to classify when extraction-needed findings remain", () => {
+    printNextStep("audit", { hasFindings: true, extractionCount: 2 });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds classify");
+    expect(line).toContain("2 inline components");
+    expect(line).not.toContain("claude-ds audit --fix");
+  });
+
+  it("singularizes the extraction breadcrumb for a single component", () => {
+    printNextStep("audit", { hasFindings: true, extractionCount: 1 });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("1 inline component");
+    expect(line).not.toContain("inline components");
+  });
+
+  it("keeps the default with-findings breadcrumb when extractionCount is 0", () => {
+    printNextStep("audit", { hasFindings: true, extractionCount: 0 });
+    expect(logged.some(l => l.includes("claude-ds audit --fix"))).toBe(true);
+    expect(logged.some(l => l.includes("claude-ds classify"))).toBe(false);
+  });
+
   it("prints audit-fix breadcrumb with build command", () => {
     printNextStep("audit-fix", { buildCmd: "npm run build" });
     expect(logged.some(l => l.includes("npm run build"))).toBe(true);

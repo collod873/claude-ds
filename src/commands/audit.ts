@@ -9,7 +9,7 @@ import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
-import { ruleSeverity, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
+import { ruleSeverity, isExtractionNeededFinding, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
 import { evaluateIntegrity, integrityRuleSeverity, type IntegrityRuleId, type IntegrityFinding } from "../lib/integrity-rules.js";
 import { detectDsAliases, detectTsconfigPaths } from "../lib/ds-aliases.js";
 import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
@@ -707,7 +707,8 @@ export async function auditCmd(opts: AuditOpts) {
   const buildCmd = await detectBuildCommand(cwd);
   if (activeFindings.length > 0) {
     info(`${activeFindings.length} error(s) require attention`);
-    printNextStep("audit", { hasFindings: true });
+    const extractionCount = activeFindings.filter(isExtractionNeededFinding).length;
+    printNextStep("audit", { hasFindings: true, extractionCount });
     process.exit(1);
   } else if (fixedCount > 0) {
     info("No action required.");
