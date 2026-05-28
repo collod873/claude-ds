@@ -198,7 +198,9 @@ jobs:
           fi
 
       - name: Run fixer agent
+        id: fixer
         if: steps.limit.outputs.exceeded != 'true' && steps.result.outputs.all_pass != 'true'
+        continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -213,10 +215,15 @@ jobs:
         run: npx tsx .sandcastle/fix-loop/fix.ts
 
       - name: Push branch
-        if: steps.limit.outputs.exceeded != 'true' && success()
+        if: steps.limit.outputs.exceeded != 'true' && (success() || steps.fixer.outcome == 'failure')
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
-        run: git push origin "$BRANCH"
+        run: |
+          if git diff --quiet HEAD; then
+            echo "No changes to push."
+          else
+            git push origin "$BRANCH"
+          fi
 
       - name: All pass — open PR and request review
         if: steps.limit.outputs.exceeded != 'true' && steps.result.outputs.all_pass == 'true'
@@ -250,7 +257,7 @@ jobs:
           GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh pr edit "$existing_pr" --add-label "agent:review"
 
       - name: Chain next iteration
-        if: steps.limit.outputs.exceeded != 'true' && steps.result.outputs.all_pass != 'true' && success()
+        if: steps.limit.outputs.exceeded != 'true' && steps.result.outputs.all_pass != 'true'
         env:
           AGENT_PAT: ${{ secrets.AGENT_PAT }}
           GITHUB_TOKEN_FALLBACK: ${{ secrets.GITHUB_TOKEN }}
@@ -264,7 +271,7 @@ jobs:
           GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh issue edit "$ISSUE_NUMBER" --add-label "agent:fix-loop"
 
       - name: Mark blocked on failure
-        if: steps.limit.outputs.exceeded != 'true' && failure()
+        if: steps.limit.outputs.exceeded != 'true' && failure() && steps.fixer.outcome != 'failure'
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
