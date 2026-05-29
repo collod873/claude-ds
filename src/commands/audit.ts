@@ -1,130 +1,40 @@
-import { readFile, writeFile, stat, readdir, mkdir, unlink } from "node:fs/promises";
+import { readFile, writeFile, stat, mkdir, unlink } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseManifest, isManifestOrKeepfile, type DeprecatedPath, type ManagedRoot } from "../lib/manifest.js";
+import { parseManifest } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
 import { info, err, printNextStep, detectBuildCommand } from "../lib/log.js";
-import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
+import { detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
-import picomatch from "picomatch";
-import { checkThreeSignals } from "../lib/three-signal.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
-import { ruleSeverity, isExtractionNeededFinding, type DriftFinding, type DriftRuleId } from "../lib/drift/index.js";
-import { evaluateIntegrity, integrityRuleSeverity, type IntegrityRuleId, type IntegrityFinding } from "../lib/integrity-rules.js";
+import {
+  isExtractionNeededFinding,
+  makeNoTtyPrompt,
+  makeTtyPrompt,
+  isInteractive,
+  type DriftFinding,
+  type FixerPrompt,
+} from "../lib/drift/index.js";
+import {
+  evaluateIntegrity,
+  type IntegrityRuleId,
+  type IntegrityFinding,
+} from "../lib/integrity-rules.js";
 import { detectDsAliases, detectTsconfigPaths } from "../lib/ds-aliases.js";
-import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift/index.js";
 import { runFixPass } from "../lib/fix-pass.js";
 import { fixIntegrity, isIntegrityFixable } from "../lib/integrity-fixers.js";
 import { runReconcileActions } from "./reconcile.js";
+import { checkThreeSignals } from "../lib/three-signal.js";
+import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
+import {
+  scanUnexpectedFiles,
+  formatStrictWarnings,
+  formatDeprecatedMatchWarnings,
+} from "../lib/reports/unexpected-files.js";
+import { scanDriftAndIntegrity, type AuditFinding } from "../lib/reports/drift-integrity-scan.js";
+import { formatFindings, formatScorecard } from "../lib/reports/findings-format.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
-
-const DS_KEYWORDS_RE = /\b(design[- _]?system|atoms?|composites?|tokens?|design[- _]?tokens|tailwind|css[- _]?variables)\b/i;
-
-async function isDsRelatedSkill(cwd: string, skillPath: string): Promise<boolean> {
-  if (DS_KEYWORDS_RE.test(skillPath)) return true;
-  try {
-    const content = await readFile(join(cwd, skillPath), "utf8");
-    return DS_KEYWORDS_RE.test(content);
-  } catch { return false; }
-}
-
-/**
- * Recursively collect all files (not dirs) under a root dir, returning paths
- * relative to `base`. Returns [] if the root doesn't exist.
- */
-async function walkDir(base: string, rel: string): Promise<string[]> {
-  const abs = join(base, rel);
-  let entries;
-  try { entries = await readdir(abs, { withFileTypes: true }); } catch { return []; }
-  const results: string[] = [];
-  for (const e of entries) {
-    const childRel = rel ? `${rel}/${e.name}` : e.name;
-    if (e.isDirectory()) {
-      results.push(...await walkDir(base, childRel));
-    } else {
-      results.push(childRel);
-    }
-  }
-  return results;
-}
-
-/**
- * Fallback managed roots used when the manifest does not declare managed_roots.
- * All are strict (closed set) — matches pre-#57 behavior.
- */
-const FALLBACK_MANAGED_ROOTS = [
-  { root: ".claude/skills/", strict: true },
-  { root: ".claude/hooks/", strict: true },
-  { root: "design-system/", strict: true },
-];
-
-interface UnexpectedFileFinding {
-  path: string;
-  root: string;
-  strict: boolean;
-  deprecatedMatch: DeprecatedPath | null;
-}
-
-function findDeprecatedMatch(
-  filePath: string,
-  deprecatedPaths: DeprecatedPath[],
-  managedRootSet: Set<string>,
-): DeprecatedPath | null {
-  const fileDir = filePath.substring(0, filePath.lastIndexOf("/") + 1);
-  for (const dp of deprecatedPaths) {
-    if (filePath === dp.path) return dp;
-    const dpAsDir = dp.path.endsWith("/") ? dp.path : dp.path + "/";
-    if (filePath.startsWith(dpAsDir)) return dp;
-    const dpDir = dp.path.substring(0, dp.path.lastIndexOf("/") + 1);
-    if (dpDir && fileDir === dpDir && !managedRootSet.has(dpDir)) return dp;
-  }
-  return null;
-}
-
-/**
- * Scan managed roots and return enriched findings for files not in the manifest.
- * Scans both strict and open roots — callers decide how to handle each type.
- */
-async function findUnexpectedFiles(
-  cwd: string,
-  manifestPaths: Set<string>,
-  ignoreGlobs: string[],
-  managedRoots: ManagedRoot[],
-  generatedPatterns: string[],
-  deprecatedPaths: DeprecatedPath[],
-): Promise<UnexpectedFileFinding[]> {
-  const roots = managedRoots.length > 0 ? managedRoots : FALLBACK_MANAGED_ROOTS;
-
-  const openPrefixes = roots
-    .filter(r => !r.strict)
-    .map(r => r.root.endsWith("/") ? r.root : `${r.root}/`);
-
-  const managedRootSet = new Set(roots.map(r => r.root));
-
-  const isGenerated = generatedPatterns.length > 0
-    ? picomatch(generatedPatterns, { dot: true })
-    : null;
-
-  const isIgnored = ignoreGlobs.length > 0
-    ? picomatch(ignoreGlobs, { dot: true })
-    : null;
-
-  const unexpected: UnexpectedFileFinding[] = [];
-  for (const { root, strict } of roots) {
-    const rootDir = root.endsWith("/") ? root.slice(0, -1) : root;
-    const files = await walkDir(cwd, rootDir);
-    for (const f of files) {
-      if (strict && openPrefixes.some(prefix => f.startsWith(prefix))) continue;
-      if (isManifestOrKeepfile(f, manifestPaths)) continue;
-      if (isGenerated && isGenerated(f)) continue;
-      if (isIgnored && isIgnored(f)) continue;
-      const deprecatedMatch = findDeprecatedMatch(f, deprecatedPaths, managedRootSet);
-      unexpected.push({ path: f, root, strict, deprecatedMatch });
-    }
-  }
-  return unexpected;
-}
 
 async function addToConsumerManifest(cwd: string, packDir: string, paths: string[]): Promise<void> {
   const consumerPath = join(cwd, "design-system/manifest.json");
@@ -158,6 +68,8 @@ export interface AuditOpts {
   cwd?: string;
 }
 
+const suppressedKey = (rule: string, path: string) => `${rule}:${path}`;
+
 export async function auditCmd(opts: AuditOpts) {
   const cwd = opts.cwd ?? process.cwd();
   let pack = opts.pack;
@@ -186,28 +98,10 @@ export async function auditCmd(opts: AuditOpts) {
   const claudeMdTarget = cfg?.claude_md_target ?? "CLAUDE.md";
 
   const verbose = opts.verbose ?? false;
-  let scaffoldTotal = 0;
-  let scaffoldPresent = 0;
   let warningCount = 0;
 
-  // Build the set of suppression globs: manifest-level + project config lookalike_ignore
-  const configIgnore: string[] = cfg?.lookalike_ignore ?? [];
-  const unexpectedIgnoreGlobs = [...manifest.lookalike_ignore, ...configIgnore];
-  for (const f of manifest.files) {
-    if (f.category === "generated") continue;
-    scaffoldTotal++;
-    const checkPath = f.path === "CLAUDE.md"
-      ? claudeMdTarget
-      : resolveManifestPath(f.path, appDir);
-    const here = await exists(join(cwd, checkPath));
-    if (here) scaffoldPresent++;
-    const display = (checkPath === f.path) ? f.path : `${f.path} (at ${checkPath})`;
-    if (here && verbose) {
-      info(`present: ${display} (${f.category})`);
-    } else if (!here) {
-      info(`missing: ${display} (${f.category})`);
-    }
-  }
+  const scaffold = await scanScaffoldPresence({ cwd, manifest, appDir, claudeMdTarget, verbose });
+  for (const line of scaffold.lines) info(line);
 
   // #171: when --fix is active and we have a project context, run reconcile as a pre-step.
   // This auto-deletes deprecated orphans, prunes dangling hooks, and handles collisions.
@@ -238,7 +132,8 @@ export async function auditCmd(opts: AuditOpts) {
   }
 
   // #29/#57/#174: unexpected-file scan — enumerate files under managed roots.
-  // Returns enriched findings with root context, strictness, and deprecated-path matches.
+  const configIgnore: string[] = cfg?.lookalike_ignore ?? [];
+  const unexpectedIgnoreGlobs = [...manifest.lookalike_ignore, ...configIgnore];
   const manifestFilePaths = new Set(manifest.files.map(f => f.path));
   // Also read consumer manifest for user-tracked extensions
   const consumerManifestPath = join(cwd, "design-system/manifest.json");
@@ -247,68 +142,40 @@ export async function auditCmd(opts: AuditOpts) {
     for (const f of consumerManifest.files) manifestFilePaths.add(f.path);
   } catch { /* no consumer manifest or parse error — use pack manifest only */ }
   const orphanPaths = new Set(manifest.deprecated_paths.map(d => d.path));
-  const unexpectedFindings = await findUnexpectedFiles(
-    cwd, manifestFilePaths, unexpectedIgnoreGlobs,
-    manifest.managed_roots, manifest.generated_patterns, manifest.deprecated_paths,
-  );
+  const unexpected = await scanUnexpectedFiles({
+    cwd,
+    manifestPaths: manifestFilePaths,
+    ignoreGlobs: unexpectedIgnoreGlobs,
+    managedRoots: manifest.managed_roots,
+    generatedPatterns: manifest.generated_patterns,
+    deprecatedPaths: manifest.deprecated_paths,
+    orphanPaths,
+  });
 
-  const strictFindings: UnexpectedFileFinding[] = [];
-  const openFindings: UnexpectedFileFinding[] = [];
-  const deprecatedMatches: UnexpectedFileFinding[] = [];
-  const nonDsUnexpected: string[] = [];
-
-  for (const f of unexpectedFindings) {
-    if (orphanPaths.has(f.path)) continue;
-    if (f.deprecatedMatch) {
-      deprecatedMatches.push(f);
-    } else if (f.strict) {
-      const isSkill = f.path.startsWith(".claude/skills/");
-      if (isSkill && !(await isDsRelatedSkill(cwd, f.path))) {
-        nonDsUnexpected.push(f.path);
-      } else {
-        strictFindings.push(f);
-      }
-    } else {
-      openFindings.push(f);
-    }
+  for (const line of formatStrictWarnings(unexpected.strictFindings, unexpected.nonDsUnexpected)) {
+    info(line);
   }
-
-  // Strict root: warn with specific remediation
-  for (const f of strictFindings) {
-    const isSkill = f.path.startsWith(".claude/skills/");
-    if (isSkill) {
-      info(`WARNING  unexpected (DS-related): ${f.path} (in ${f.root}) — add to lookalike_ignore in .claude-ds.json, or delete if unintended`);
-    } else {
-      info(`WARNING  unexpected: ${f.path} (in ${f.root}) — add to lookalike_ignore in .claude-ds.json, or delete if unintended`);
-    }
-  }
-  warningCount += strictFindings.length;
-  if (strictFindings.length > 0) {
-    info(`${strictFindings.length} unexpected file(s) under strict managed roots — add to lookalike_ignore in .claude-ds.json to suppress`);
-  }
-  if (nonDsUnexpected.length > 0) {
-    info(`${nonDsUnexpected.length} non-DS skill(s) detected under .claude/skills/ (ignored: ${nonDsUnexpected.map(f => f.replace(".claude/skills/", "").replace(/\/.*/, "")).join(", ")})`);
-  }
+  warningCount += unexpected.strictFindings.length;
 
   // --fix: handle open roots and deprecated matches
   if (opts.fix) {
-    if (openFindings.length > 0) {
+    if (unexpected.openFindings.length > 0) {
       try {
-        await addToConsumerManifest(cwd, packDir, openFindings.map(f => f.path));
-        info(`tracked ${openFindings.length} user extension(s) in consumer manifest`);
+        await addToConsumerManifest(cwd, packDir, unexpected.openFindings.map(f => f.path));
+        info(`tracked ${unexpected.openFindings.length} user extension(s) in consumer manifest`);
       } catch { /* best-effort — consumer manifest may not be writable */ }
     }
-    for (const f of deprecatedMatches) {
+    for (const f of unexpected.deprecatedMatches) {
       try {
         await unlink(join(cwd, f.path));
         info(`deleted (deprecated-related): ${f.path}`);
       } catch { /* already gone */ }
     }
   } else {
-    for (const f of deprecatedMatches) {
-      info(`WARNING  unexpected (deprecated-related): ${f.path} — related to deprecated ${f.deprecatedMatch!.path}; run --fix to delete`);
-      warningCount++;
+    for (const line of formatDeprecatedMatchWarnings(unexpected.deprecatedMatches)) {
+      info(line);
     }
+    warningCount += unexpected.deprecatedMatches.length;
   }
 
   if (opts.suggestRemovals) info("--suggest-removals: (heuristic) no ad-hoc removals detected at v1");
@@ -323,10 +190,9 @@ export async function auditCmd(opts: AuditOpts) {
       err("exceptions.json could not be parsed — all drift findings will be reported");
     }
   }
-  const suppressedKey = (rule: string, path: string) => `${rule}:${path}`;
   const suppressedSet = new Set(exceptions.map(e => suppressedKey(e.rule, e.path)));
 
-  // Drift check: collect findings across all DS tier dirs.
+  // Drift + integrity scan.
   const domainRoots = cfg?.domain_roots;
   const metaKindStrict = cfg?.meta_kind_strict ?? false;
   const allowedImports = cfg?.allowed_imports ?? [];
@@ -335,54 +201,15 @@ export async function auditCmd(opts: AuditOpts) {
     dsAliases = await detectDsAliases(cwd, cfg?.srcRoot ?? "src");
   }
   const tsconfigPaths = await detectTsconfigPaths(cwd, cfg?.srcRoot ?? "src");
-  const driftTierDirs = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
-  type AuditFinding = DriftFinding | IntegrityFinding;
-  const allFindings: AuditFinding[] = [];
-  const integrityFailedFiles = new Set<string>();
-  const scannedFiles = new Set<string>();
-  const filesWithFindings = new Set<string>();
 
-  // Collect all .tsx files under design-system/ — tier dirs plus reference files
-  const dsFiles = await walkDir(cwd, "design-system");
-  const tierDirEntries: string[] = [];
-  for (const f of dsFiles) {
-    if (!f.endsWith(".tsx")) continue;
-    if (f.endsWith(".showcase.tsx") || f.endsWith(".test.tsx") || f.endsWith(".stories.tsx")) continue;
-    const subPath = f.slice("design-system/".length);
-    // Include files in tier dirs (flat, not nested) and reference files in known subdirs
-    const inTierDir = driftTierDirs.some(d => f.startsWith(d + "/") && !subPath.slice(subPath.indexOf("/") + 1).includes("/"));
-    const inReferencesDir = f.startsWith("design-system/references/") && !subPath.slice("references/".length).includes("/");
-    if (inTierDir || inReferencesDir) tierDirEntries.push(f);
-  }
-
-  for (const filePath of tierDirEntries) {
-    let source: string;
-    try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
-    scannedFiles.add(filePath);
-
-    const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases, tsconfigPaths });
-    const blockingIntegrity = integrityFindings.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
-    const nonBlockingIntegrity = integrityFindings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
-    allFindings.push(...nonBlockingIntegrity);
-    if (nonBlockingIntegrity.length > 0) for (const f of nonBlockingIntegrity) filesWithFindings.add(f.file);
-    if (blockingIntegrity.length > 0) {
-      allFindings.push(...blockingIntegrity);
-      for (const f of blockingIntegrity) filesWithFindings.add(f.file);
-      integrityFailedFiles.add(filePath);
-      continue;
-    }
-
-    const { findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
-    allFindings.push(...findings);
-    for (const f of findings) filesWithFindings.add(f.file);
-  }
-
-  // Log coverage summary
-  const cleanCount = scannedFiles.size - filesWithFindings.size;
-  info(`evaluated ${scannedFiles.size} file(s) across ${driftTierDirs.length} tier directories (${cleanCount} clean, ${filesWithFindings.size} with findings)`);
+  const driftIntegrity = await scanDriftAndIntegrity({
+    cwd, domainRoots, metaKindStrict, allowedImports, dsAliases, tsconfigPaths,
+  });
+  info(driftIntegrity.coverageLine);
+  const driftTierDirs = driftIntegrity.tierDirs;
 
   // Filter out suppressed findings.
-  let activeFindings = allFindings.filter(
+  let activeFindings: AuditFinding[] = driftIntegrity.findings.filter(
     f => !suppressedSet.has(suppressedKey(f.ruleId, f.file))
   );
 
@@ -635,34 +462,16 @@ export async function auditCmd(opts: AuditOpts) {
     activeFindings = [];
   }
 
-  // Group remaining findings by rule ID and output with severity prefix.
-  const byRule = new Map<string, AuditFinding[]>();
-  for (const f of activeFindings) {
-    const group = byRule.get(f.ruleId);
-    if (group) group.push(f);
-    else byRule.set(f.ruleId, [f]);
-  }
-  for (const [ruleId, ruleFindings] of byRule) {
-    const severity = ruleId.startsWith("INTEGRITY-")
-      ? integrityRuleSeverity(ruleId as IntegrityRuleId)
-      : ruleSeverity(ruleId as DriftRuleId);
-    const prefix = severity === "error" ? "ERROR" : severity === "warning" ? "WARNING" : "INFO";
-    const noun = ruleFindings.length === 1 ? "finding" : "findings";
-    info(`${prefix}  [${ruleId}] (${ruleFindings.length} ${noun})`);
-    for (const f of ruleFindings) {
-      info(`  ${f.file}: ${f.message}`);
-    }
-  }
-
-  // Scorecard
-  const parts: string[] = [];
-  parts.push(`Scaffold: ${scaffoldPresent}/${scaffoldTotal}`);
-  if (scaffoldPresent === scaffoldTotal) parts[0] += " ✓";
-  if (reconciledCount > 0) parts.push(`Reconciled: ${reconciledCount}`);
-  if (fixedCount > 0) parts.push(`Fixed: ${fixedCount}`);
-  if (warningCount > 0) parts.push(`Warnings: ${warningCount}`);
-  if (activeFindings.length > 0) parts.push(`Errors: ${activeFindings.length}`);
-  info(parts.join(" | "));
+  // Grouped findings output + scorecard.
+  for (const line of formatFindings(activeFindings)) info(line);
+  info(formatScorecard({
+    scaffoldPresent: scaffold.present,
+    scaffoldTotal: scaffold.total,
+    reconciledCount,
+    fixedCount,
+    warningCount,
+    errorCount: activeFindings.length,
+  }));
 
   const buildCmd = await detectBuildCommand(cwd);
   if (activeFindings.length > 0) {
