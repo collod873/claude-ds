@@ -8,8 +8,6 @@ import { run, rollbackChanges } from "./runner.js";
 import { info } from "./log.js";
 import { validateFixerOutput } from "./fixer-validate.js";
 
-export { validateFixerOutput } from "./fixer-validate.js";
-
 export interface FixPassResult {
   results: FixResult[];
   applied: Change[];

@@ -1,6 +1,5 @@
 import ts from "typescript";
-import type { IntegrityFinding } from "../rule.js";
-import type { IntegrityRule } from "../rule.js";
+import type { IntegrityFinding, IntegrityRule } from "../rule.js";
 import { restoreFromHead } from "../restore-from-head.js";
 
 function detect(file: string, source: string): IntegrityFinding[] {

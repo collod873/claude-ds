@@ -13,7 +13,7 @@ vi.mock("../../src/lib/drift/index.js", async (importOriginal) => {
 });
 
 import { runFixPass } from "../../src/lib/fix-pass";
-import { validateFixerOutput } from "../../src/lib/fix-pass";
+import { validateFixerOutput } from "../../src/lib/fixer-validate";
 import { getFixer } from "../../src/lib/drift/index.js";
 import type { DriftFinding } from "../../src/lib/drift/index.js";
 

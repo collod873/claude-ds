@@ -7,6 +7,7 @@ import {
   allIntegrityRuleIds,
   integrityRuleDescription,
   integrityRuleSeverity,
+  isIntegrityBlocking,
   isIntegrityFixable,
   type IntegrityRuleId,
 } from "../../../src/lib/integrity/index";
@@ -56,6 +57,12 @@ describe("INTEGRITY_RULES_BY_ID (registry totality)", () => {
     expect(INTEGRITY_RULES_BY_ID["INTEGRITY-UNRESOLVABLE-IMPORT"].blocking).toBe(false);
     expect(INTEGRITY_RULES_BY_ID["INTEGRITY-UNPARSEABLE"].blocking).not.toBe(false);
     expect(INTEGRITY_RULES_BY_ID["INTEGRITY-ORPHANED-FROM"].blocking).not.toBe(false);
+  });
+
+  it("isIntegrityBlocking treats absent `blocking` as true and `false` as false", () => {
+    expect(isIntegrityBlocking("INTEGRITY-UNPARSEABLE")).toBe(true);
+    expect(isIntegrityBlocking("INTEGRITY-ORPHANED-FROM")).toBe(true);
+    expect(isIntegrityBlocking("INTEGRITY-UNRESOLVABLE-IMPORT")).toBe(false);
   });
 });
 

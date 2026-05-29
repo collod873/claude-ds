@@ -40,6 +40,16 @@ export function isIntegrityFixable(id: IntegrityRuleId): boolean {
 }
 
 /**
+ * True if the integrity rule gates downstream drift evaluation. Defaults to
+ * `true`; only rules declaring `blocking: false` (today: UNRESOLVABLE-IMPORT)
+ * are non-blocking. Centralises the `blocking !== false` coalescing so callers
+ * can't drift into `blocking === true` and get a different answer.
+ */
+export function isIntegrityBlocking(id: IntegrityRuleId): boolean {
+  return INTEGRITY_RULES_BY_ID[id].blocking !== false;
+}
+
+/**
  * Evaluate all registered integrity rules against a single file's source.
  *
  * The synchronous overload runs only rules whose `detect` does not need a
