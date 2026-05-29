@@ -1,11 +1,12 @@
-import { mkdir, writeFile, rename, unlink } from "node:fs/promises";
-import { join, dirname, extname } from "node:path";
+import { extname } from "node:path";
 import ts from "typescript";
 import type { DriftFinding } from "./drift/index.js";
-import type { Change } from "./operation.js";
+import type { Change, Operation } from "./operation.js";
+import type { ProjectContext } from "./project.js";
 import type { FixResult, FixerOpts } from "./drift/index.js";
 import { getFixer, getFixerPriority } from "./drift/index.js";
 import { regenIndexes } from "./finalizers/regen-indexes.js";
+import { run, rollbackChanges } from "./runner.js";
 import { info } from "./log.js";
 
 export interface FixPassResult {
@@ -83,6 +84,14 @@ function findSelfImport(source: string, filePath: string): string | null {
   return null;
 }
 
+/**
+ * ADR-0014 gate: a fixer's output must parse if its input did, must not
+ * introduce circular self-imports, and must not collapse two import statements
+ * into a duplicate identifier. Returns `{ message }` on failure (caller emits
+ * an abort Change), `null` on pass.
+ *
+ * Pure: looks only at the Change itself; no disk access.
+ */
 export function validateFixerOutput(
   change: Change,
   ruleId: string,
@@ -152,50 +161,12 @@ function renderDiff(changes: Change[]): string {
       lines.push(`rename: ${c.path} -> ${c.after}`);
     } else if (c.kind === "delete") {
       lines.push(`--- ${c.path} (delete)`);
+    } else if (c.kind === "abort") {
+      lines.push(`abort: ${c.path} (${c.reason})`);
     }
     lines.push("");
   }
   return lines.join("\n");
-}
-
-async function applyChange(cwd: string, c: Change): Promise<void> {
-  if (c.kind === "abort") return;
-  if (c.kind === "write") {
-    const abs = join(cwd, c.path);
-    await mkdir(dirname(abs), { recursive: true });
-    const tmp = `${abs}.tmp`;
-    await writeFile(tmp, c.after);
-    await rename(tmp, abs);
-  } else if (c.kind === "delete") {
-    const abs = join(cwd, c.path);
-    try { await unlink(abs); } catch (e: any) {
-      if (e.code !== "ENOENT") throw e;
-    }
-  } else {
-    const absFrom = join(cwd, c.path);
-    const absTo = join(cwd, c.after);
-    await mkdir(dirname(absTo), { recursive: true });
-    await rename(absFrom, absTo);
-  }
-}
-
-async function rollbackChange(cwd: string, c: Change): Promise<void> {
-  if (c.kind === "abort") return;
-  if (c.kind === "write") {
-    if (c.before === null) {
-      try { await unlink(join(cwd, c.path)); } catch { /* */ }
-    } else {
-      await writeFile(join(cwd, c.path), c.before);
-    }
-  } else if (c.kind === "delete") {
-    await mkdir(dirname(join(cwd, c.path)), { recursive: true });
-    await writeFile(join(cwd, c.path), c.before);
-  } else {
-    const absFrom = join(cwd, c.after);
-    const absTo = join(cwd, c.path);
-    await mkdir(dirname(absTo), { recursive: true });
-    await rename(absFrom, absTo);
-  }
 }
 
 function deduplicateChanges(changes: Change[]): Change[] {
@@ -224,97 +195,138 @@ export function sortFindingsByPriority(findings: DriftFinding[]): DriftFinding[]
   });
 }
 
+/**
+ * The wrapper that makes fix-pass go through the Runner. An Operation whose
+ * `plan()` invokes the fixer, runs `validateFixerOutput` on each returned
+ * Change, and either returns the valid `write`/`delete`/`rename` Changes or —
+ * if validation fails — a single `abort` Change carrying the reason.
+ *
+ * Side-channels its own outcome on `result`:
+ *   - `null` until `plan()` runs
+ *   - `"no-fixer"` when the rule has no registered fixer (the orchestrator
+ *     emits no FixResult for these, matching pre-#224 behavior)
+ *   - `FixResult` otherwise; `fixed:false` for validation aborts and
+ *     fixer-self-deferrals, `fixed:true` when changes are emitted
+ *
+ * Exported so callers can plan once and inspect what the wrapper produced
+ * without re-invoking the fixer.
+ */
+export interface FixerOperation extends Operation {
+  finding: DriftFinding;
+  result: FixResult | "no-fixer" | null;
+}
+
+export function fixerAsOperation(
+  finding: DriftFinding,
+  opts: FixPassOpts,
+): FixerOperation {
+  const op: FixerOperation = {
+    name: finding.ruleId,
+    finding,
+    result: null,
+    async plan(ctx: ProjectContext): Promise<Change[]> {
+      const fixer = getFixer(finding.ruleId);
+      if (!fixer) {
+        op.result = "no-fixer";
+        return [];
+      }
+      const r = await fixer(finding, ctx.cwd, opts);
+
+      if (r.fixed && r.changes.length > 0) {
+        for (const ch of r.changes) {
+          const gate = validateFixerOutput(ch, finding.ruleId);
+          if (gate) {
+            info(gate.message);
+            op.result = { finding, fixed: false, message: gate.message, changes: [] };
+            return [{ kind: "abort", path: finding.file, reason: gate.message }];
+          }
+        }
+      }
+
+      op.result = r;
+      return r.fixed ? r.changes : [];
+    },
+  };
+  return op;
+}
+
+function minimalCtx(cwd: string): ProjectContext {
+  return { cwd } as unknown as ProjectContext;
+}
+
+const REGEN_INDEXES_OP: Operation = {
+  name: "regenIndexes",
+  async plan(ctx: ProjectContext): Promise<Change[]> {
+    return regenIndexes(ctx.cwd);
+  },
+};
+
+/**
+ * Sort findings by fixer priority, wrap each in a `fixerAsOperation`, and run
+ * each Op through `run()` in sequence so every Op's `plan()` reads the current
+ * disk state — i.e. sees the previous Op's writes. Multiple findings on the
+ * same file (e.g. RAW-PRIMITIVE + MISPLACED on the same composite) routinely
+ * have conflicting plans against the *original* source; sequencing per-Op via
+ * `run()` matches the old per-finding plan-then-apply loop and avoids those
+ * conflicts without giving up the chokepoint (each Op still applies through
+ * `run(..., { rollbackOnFailure: true })`).
+ *
+ * If any fixer Op fails mid-apply, the failing Op's batch unwinds via
+ * `rollbackOnFailure`; the prior Ops' applied changes unwind via
+ * `rollbackChanges`. If anything applied, the `regenIndexes` finalizer runs as
+ * a follow-on `run()`; on finalizer failure all fixer changes roll back too.
+ *
+ * Confirm is the historical apply-then-confirm-then-rollback gate: the user
+ * sees the final diff (including the finalizer) and a "no" unwinds everything.
+ *
+ * Translates the underlying `RunReport`s back into the `FixPassResult` shape
+ * audit's existing consumers expect (results / applied / aborted), so this
+ * migration is invisible to callers.
+ */
 export async function runFixPass(
   cwd: string,
   findings: DriftFinding[],
   opts: FixPassOpts,
 ): Promise<FixPassResult> {
-  const sorted = sortFindingsByPriority(findings);
-  const results: FixResult[] = [];
-  const allChanges: Change[] = [];
-  const appliedChanges: Change[] = [];
+  const ctx = minimalCtx(cwd);
+  const ops = sortFindingsByPriority(findings).map(f => fixerAsOperation(f, opts));
 
-  for (const finding of sorted) {
-    const fixer = getFixer(finding.ruleId);
-    if (!fixer) continue;
+  const collectResults = (): FixResult[] =>
+    ops
+      .map(op => op.result)
+      .filter((r): r is FixResult => r !== null && r !== "no-fixer");
 
-    const result = await fixer(finding, cwd, opts);
-    results.push(result);
-
-    if (result.fixed && result.changes.length > 0) {
-      let gated = false;
-      for (const change of result.changes) {
-        const gateResult = validateFixerOutput(change, finding.ruleId);
-        if (gateResult) {
-          info(gateResult.message);
-          results[results.length - 1] = {
-            finding,
-            fixed: false,
-            message: gateResult.message,
-            changes: [],
-          };
-          gated = true;
-          break;
-        }
-      }
-      if (gated) continue;
-
-      for (const change of result.changes) {
-        try {
-          await applyChange(cwd, change);
-          appliedChanges.push(change);
-          allChanges.push(change);
-        } catch (err) {
-          info(`error applying change for ${finding.ruleId}: ${(err as Error).message}`);
-          for (let i = appliedChanges.length - 1; i >= 0; i--) {
-            try { await rollbackChange(cwd, appliedChanges[i]); } catch { /* best effort */ }
-          }
-          return { results, applied: [], aborted: true };
-        }
-      }
+  const allApplied: Change[] = [];
+  for (const op of ops) {
+    const report = await run(ctx, [op], "apply", { rollbackOnFailure: true });
+    if (report.failed) {
+      await rollbackChanges(ctx, allApplied);
+      return { results: collectResults(), applied: [], aborted: true };
     }
+    allApplied.push(...report.applied);
   }
 
-  if (allChanges.length === 0) {
-    return { results, applied: [], aborted: false };
+  const fixerByteChanges = allApplied.filter(c => c.kind !== "abort");
+  if (fixerByteChanges.length === 0) {
+    return { results: collectResults(), applied: [], aborted: false };
   }
 
-  // Finalizer: regenerate barrel exports and manifest.json from disk state
-  try {
-    const finalizerChanges = await regenIndexes(cwd);
-    for (const change of finalizerChanges) {
-      try {
-        await applyChange(cwd, change);
-        appliedChanges.push(change);
-        allChanges.push(change);
-      } catch (applyErr) {
-        info(`error applying finalizer change: ${(applyErr as Error).message}`);
-        for (let i = appliedChanges.length - 1; i >= 0; i--) {
-          try { await rollbackChange(cwd, appliedChanges[i]); } catch { /* best effort */ }
-        }
-        return { results, applied: [], aborted: true };
-      }
-    }
-  } catch (finalizerErr) {
-    info(`finalizer failed: ${(finalizerErr as Error).message}`);
-    for (let i = appliedChanges.length - 1; i >= 0; i--) {
-      try { await rollbackChange(cwd, appliedChanges[i]); } catch { /* best effort */ }
-    }
-    return { results, applied: [], aborted: true };
+  const finalReport = await run(ctx, [REGEN_INDEXES_OP], "apply", { rollbackOnFailure: true });
+  if (finalReport.failed) {
+    await rollbackChanges(ctx, allApplied);
+    return { results: collectResults(), applied: [], aborted: true };
   }
 
+  const allChanges = [...allApplied, ...finalReport.applied];
   const deduped = deduplicateChanges(allChanges);
 
   if (opts.confirm) {
-    const diffText = renderDiff(deduped);
-    const confirmed = await opts.confirm(diffText);
+    const confirmed = await opts.confirm(renderDiff(deduped));
     if (!confirmed) {
-      for (let i = appliedChanges.length - 1; i >= 0; i--) {
-        try { await rollbackChange(cwd, appliedChanges[i]); } catch { /* best effort */ }
-      }
-      return { results, applied: [], aborted: true };
+      await rollbackChanges(ctx, allChanges);
+      return { results: collectResults(), applied: [], aborted: true };
     }
   }
 
-  return { results, applied: deduped, aborted: false };
+  return { results: collectResults(), applied: deduped, aborted: false };
 }

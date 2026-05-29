@@ -134,6 +134,19 @@ async function rollbackChange(ctx: ProjectContext, c: Change): Promise<void> {
 }
 
 /**
+ * Best-effort LIFO unwind of an already-applied Change list. Exposed for
+ * callers that orchestrate multiple `run()` batches and need to undo an
+ * earlier batch when a later one fails (e.g. fix-pass's fixer batch when
+ * its finalizer batch fails). Each rollback is wrapped — failures are
+ * swallowed so one bad undo doesn't block the rest.
+ */
+export async function rollbackChanges(ctx: ProjectContext, applied: Change[]): Promise<void> {
+  for (let i = applied.length - 1; i >= 0; i--) {
+    try { await rollbackChange(ctx, applied[i]); } catch { /* best effort */ }
+  }
+}
+
+/**
  * Run a list of Operations against a ProjectContext.
  *
  * Planning is best-effort: if one Op's `plan()` throws, the error is recorded on
