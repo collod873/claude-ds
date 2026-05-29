@@ -3,7 +3,7 @@ name: to-prd-project
 description: Turn the current conversation context into a PRD and publish it as a GitHub issue that is ready to receive sub-issues from /to-issues-project. Project-local variant of /to-prd, adapted for this repo's PRD-as-parent-issue + sub-issues + agent:implement workflow.
 ---
 
-This skill writes a PRD and publishes it as a GitHub issue in `mattpocock/course-video-manager`. It does **not** apply `agent:implement` — labeling happens _after_ sub-issues have been created.
+This skill writes a PRD and publishes it as a GitHub issue in the current repo (via `gh issue create`, which targets `origin`). It does **not** apply `agent:implement` — labeling happens _after_ sub-issues have been created.
 
 Do NOT interview the user — just synthesize what you already know from the conversation. If context is thin, ask the user to talk through the problem first; don't run the skill on an empty plate.
 
