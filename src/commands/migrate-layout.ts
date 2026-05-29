@@ -1,12 +1,15 @@
-import { readFile, mkdir, stat } from "node:fs/promises";
-import { join, dirname, resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { join, dirname, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { parseManifest, type Manifest } from "../lib/manifest.js";
-import { loadProject } from "../lib/project.js";
+import { loadProject, type ProjectContext } from "../lib/project.js";
 import { detectLookalikes } from "../lib/lookalike.js";
 import { info, err, confirm } from "../lib/log.js";
+import { run } from "../lib/runner.js";
+import type { Change, Operation } from "../lib/operation.js";
+import type { Config } from "../lib/config.js";
 
 const execFile = promisify(execFileCb);
 
@@ -43,13 +46,14 @@ export async function migrateLayoutCmd(opts: {
   let pack: string;
   let packDir: string;
   let manifest: Manifest;
+  let baseCtx: ProjectContext | null = null;
   const cfgPath = join(cwd, ".claude-ds.json");
   if (await exists(cfgPath)) {
-    const ctx = await loadProject(cwd);
-    pack = opts.pack ?? ctx.cfg.pack;
-    if (pack === ctx.cfg.pack) {
-      packDir = ctx.packDir;
-      manifest = ctx.manifest;
+    baseCtx = await loadProject(cwd);
+    pack = opts.pack ?? baseCtx.cfg.pack;
+    if (pack === baseCtx.cfg.pack) {
+      packDir = baseCtx.packDir;
+      manifest = baseCtx.manifest;
     } else {
       const here = dirname(fileURLToPath(import.meta.url));
       const repoRoot = resolve(here, "..", "..");
@@ -106,11 +110,28 @@ export async function migrateLayoutCmd(opts: {
     return;
   }
 
-  // Execute renames
-  for (const r of renames) {
-    const destAbs = join(cwd, r.to);
-    await mkdir(dirname(destAbs), { recursive: true });
-    await execFile("git", ["mv", r.from, r.to], { cwd });
+  // Pre-adopt invocations have no `.claude-ds.json` so no ProjectContext exists.
+  // For our rename Changes the Runner only needs `ctx.cwd`; fabricate the rest so
+  // the byte-mutation still flows through the chokepoint (#221).
+  const ctx: ProjectContext = baseCtx ?? ({
+    cwd,
+    cfg: { pack } as Config,
+    packDir,
+    manifest,
+    exists: async (p: string) => exists(isAbsolute(p) ? p : join(cwd, p)),
+    decisions: {},
+  } as ProjectContext);
+
+  const renamesOp: Operation = {
+    name: "migrate-layout-renames",
+    async plan(): Promise<Change[]> {
+      return renames.map((r) => ({ kind: "rename", path: r.from, after: r.to }));
+    },
+  };
+  const report = await run(ctx, [renamesOp], "apply");
+  if (report.failed) {
+    err(`migrate-layout failed: ${report.failed.error}`);
+    process.exit(2);
   }
 
   // Commit the renames
