@@ -1,4 +1,4 @@
-import { readFile, writeFile, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
@@ -101,9 +101,6 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
   if (formatter && rewrittenPaths.length > 0) {
     await runFormatter(formatter, rewrittenPaths, cwd);
   }
-
-  const nextCfg = { ...cfg, packVersion: target };
-  await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(nextCfg, null, 2) + "\n", "utf8");
 
   const buildScript = join(cwd, "scripts", "build-manifest.ts");
   if (existsSync(buildScript)) {
