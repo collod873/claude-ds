@@ -1,5 +1,5 @@
 import { allRuleIds, type DriftRuleId } from "./drift/index.js";
-import { allIntegrityRuleIds, type IntegrityRuleId } from "./integrity-rules.js";
+import { allIntegrityRuleIds, type IntegrityRuleId } from "./integrity/index.js";
 
 export type AuditRuleId = DriftRuleId | IntegrityRuleId;
 

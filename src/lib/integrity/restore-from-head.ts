@@ -1,10 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { IntegrityFinding } from "../integrity-rules.js";
-import { evaluateIntegrity } from "../integrity-rules.js";
 import type { Change } from "../operation.js";
-import type { IntegrityFixResult } from "../integrity-fixers.js";
+import type { IntegrityFinding, IntegrityFixResult } from "./rule.js";
+import { evaluateIntegrity } from "./index.js";
 
 function getHeadContent(cwd: string, filePath: string): string | null {
   try {
@@ -24,12 +23,12 @@ function headPassesIntegrity(filePath: string, headContent: string): boolean {
 }
 
 /**
- * Shared git-restore-from-HEAD helper. Promoted from `fixIntegrity`'s body so
- * each fixable integrity rule's `fix` can delegate here. Skip reasons (not
- * tracked, HEAD also broken, read failed) are preserved verbatim. The seam
- * leaves room for a future integrity rule whose fix is anything else (a
- * programmatic repair, a tsconfig-derived rewrite) without changing the
- * subsystem shape — that rule defines its own `fix` and skips this helper.
+ * Shared git-restore-from-HEAD helper. Each fixable integrity rule's `fix`
+ * delegates here. Skip reasons (not tracked, HEAD also broken, read failed)
+ * are preserved verbatim. The seam leaves room for a future integrity rule
+ * whose fix is anything else (a programmatic repair, a tsconfig-derived
+ * rewrite) without changing the subsystem shape — that rule defines its own
+ * `fix` and skips this helper.
  *
  * `headPassesIntegrity` calls `evaluateIntegrity` synchronously, which works
  * because the rules it gates on (UNPARSEABLE, ORPHANED-FROM) are exactly the

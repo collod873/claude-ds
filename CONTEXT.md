@@ -90,7 +90,10 @@ A named audit check for structural file health. Prefix: `INTEGRITY-`. Fires
 **before** drift rules — if a file fails integrity, convention fixers skip it.
 Examples: `INTEGRITY-UNPARSEABLE`, `INTEGRITY-ORPHANED-FROM`,
 `INTEGRITY-UNRESOLVABLE-IMPORT`. Subject to the same ADR-0013 actionability
-contract as drift rules. See ADR-0014.
+contract as drift rules. Shape is parallel to `DriftRule` — discriminated
+union (`fixable: true | false`), totality-checked registry, one file per rule
+under `src/lib/integrity/rules/`. Reader who learned the drift shape knows
+this one. See ADR-0014.
 _Contrast_: drift rule.
 
 ### Extraction

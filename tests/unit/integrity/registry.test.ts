@@ -7,9 +7,9 @@ import {
   allIntegrityRuleIds,
   integrityRuleDescription,
   integrityRuleSeverity,
+  isIntegrityFixable,
   type IntegrityRuleId,
-} from "../../../src/lib/integrity-rules";
-import { isIntegrityFixable } from "../../../src/lib/integrity-fixers";
+} from "../../../src/lib/integrity/index";
 
 describe("INTEGRITY_RULES_BY_ID (registry totality)", () => {
   it("has one entry per IntegrityRuleId", () => {

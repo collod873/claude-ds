@@ -14,10 +14,12 @@ import {
 } from "../drift/index.js";
 import {
   evaluateIntegrity,
+  isIntegrityFixable,
+  integrityFixerAsOperation,
   type IntegrityFinding,
   type IntegrityRuleId,
-} from "../integrity-rules.js";
-import { isIntegrityFixable, integrityFixerAsOperation } from "../integrity-fixers.js";
+} from "../integrity/index.js";
+import { INTEGRITY_RULES_BY_ID } from "../integrity/registry.js";
 import { runFixPass } from "../fix-pass.js";
 import { checkThreeSignals } from "../three-signal.js";
 import { addToConsumerManifest } from "../ops/add-to-consumer-manifest.js";
@@ -200,7 +202,7 @@ export async function runAuditFix(
         let source: string;
         try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
         const recheck = evaluateIntegrity(filePath, source);
-        const blocking = recheck.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
+        const blocking = recheck.filter(f => INTEGRITY_RULES_BY_ID[f.ruleId].blocking !== false);
         if (blocking.length > 0) {
           stillBrokenFiles.add(filePath);
         } else {

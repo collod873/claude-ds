@@ -8,7 +8,7 @@ import {
   integrityRuleDescription,
   integrityRuleSeverity,
   type IntegrityRuleId,
-} from "../../src/lib/integrity-rules";
+} from "../../src/lib/integrity/index";
 
 describe("integrity rule registry", () => {
   it("exposes INTEGRITY-UNPARSEABLE as a rule ID", () => {

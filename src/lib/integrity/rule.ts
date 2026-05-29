@@ -1,10 +1,34 @@
+import type { Change } from "../operation.js";
 import type { Severity } from "../severity.js";
-import type {
-  IntegrityContext,
-  IntegrityFinding,
-  IntegrityRuleId,
-} from "../integrity-rules.js";
-import type { IntegrityFixResult } from "../integrity-fixers.js";
+
+/**
+ * Stable public vocabulary for integrity rule IDs (ADR-0014).
+ * Entries are part of the pack's public surface (referenced by
+ * `exceptions.json` forever); do not remove or rename.
+ */
+export type IntegrityRuleId =
+  | "INTEGRITY-UNPARSEABLE"
+  | "INTEGRITY-ORPHANED-FROM"
+  | "INTEGRITY-UNRESOLVABLE-IMPORT";
+
+export interface IntegrityFinding {
+  ruleId: IntegrityRuleId;
+  file: string;
+  message: string;
+}
+
+export interface IntegrityContext {
+  cwd: string;
+  dsAliases: string[];
+  tsconfigPaths?: Record<string, string[]>;
+}
+
+export interface IntegrityFixResult {
+  finding: IntegrityFinding;
+  fixed: boolean;
+  message: string;
+  changes: Change[];
+}
 
 /**
  * One integrity rule, co-locating its detect + (optional) fix + metadata.

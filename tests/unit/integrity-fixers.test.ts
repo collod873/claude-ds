@@ -3,9 +3,9 @@ import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { isIntegrityFixable, integrityFixerAsOperation } from "../../src/lib/integrity-fixers";
+import { isIntegrityFixable, integrityFixerAsOperation } from "../../src/lib/integrity/index";
 import { restoreFromHead } from "../../src/lib/integrity/restore-from-head";
-import type { IntegrityFinding } from "../../src/lib/integrity-rules";
+import type { IntegrityFinding } from "../../src/lib/integrity/index";
 import type { ProjectContext } from "../../src/lib/project";
 
 function initGitRepo(dir: string): void {
