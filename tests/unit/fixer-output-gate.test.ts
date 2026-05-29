@@ -4,8 +4,8 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change } from "../../src/lib/operation";
 
-vi.mock("../../src/lib/drift-fixers", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../src/lib/drift-fixers")>();
+vi.mock("../../src/lib/drift/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../src/lib/drift/index.js")>();
   return {
     ...original,
     getFixer: vi.fn(original.getFixer),
@@ -14,8 +14,8 @@ vi.mock("../../src/lib/drift-fixers", async (importOriginal) => {
 
 import { runFixPass } from "../../src/lib/fix-pass";
 import { validateFixerOutput } from "../../src/lib/fix-pass";
-import { getFixer } from "../../src/lib/drift-fixers";
-import type { DriftFinding } from "../../src/lib/drift-rules";
+import { getFixer } from "../../src/lib/drift/index.js";
+import type { DriftFinding } from "../../src/lib/drift/index.js";
 
 const mockedGetFixer = vi.mocked(getFixer);
 

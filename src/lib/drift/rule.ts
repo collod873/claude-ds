@@ -1,8 +1,36 @@
 import type { Tier, TierVerdict } from "../classifier.js";
-import type { DriftRuleId } from "../drift-rules.js";
 import type { Change } from "../operation.js";
 import type { Severity } from "../severity.js";
 import type { FixerPrompt } from "./prompt.js";
+
+/**
+ * Stable public vocabulary for drift rule IDs (ADR-0006).
+ * Entries are valid across pack versions — do not remove or rename.
+ * Add new IDs here when a new rule ships; guard unimplemented rules
+ * with a comment so consumers can reference them in exceptions.json
+ * before the evaluator logic lands.
+ */
+export type DriftRuleId =
+  // Tier-placement rules (three-signal checker)
+  | "DRIFT-MISPLACED"
+  | "DRIFT-MISCLASSIFIED-ATOM"
+  | "DRIFT-MISCLASSIFIED-COMPOSITE"
+  // Meta declaration rule (requires meta_kind_strict in config)
+  | "DRIFT-META-KIND-MISSING"
+  // Feature-boundary rule
+  | "DRIFT-DS-IMPORTS-FEATURE"
+  // Patterns-tier rules
+  | "DRIFT-PATTERN-NO-SLOTS"
+  | "DRIFT-PATTERN-IMPORTS-PATTERN"
+  // Legacy field cleanup
+  | "DRIFT-STALE-META-STATES"
+  // Code-quality drift rules (IDs stable)
+  | "DRIFT-RAW-PRIMITIVE"
+  | "DRIFT-CVA-VARIANT-UNRENDERED"
+  | "DRIFT-INLINE-STATIC-STYLE"
+  | "DRIFT-META-EXAMPLES-DUPLICATE"
+  | "DRIFT-META-EXAMPLES-CORRUPT"
+  | "DRIFT-STALE-DS-IMPORT";
 
 export interface DriftFinding {
   ruleId: DriftRuleId;

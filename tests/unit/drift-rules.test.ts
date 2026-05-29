@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evaluateDrift, allRuleIds, ruleDescription, parseCvaVariants, isExtractionNeededFinding, EXTRACTION_NEEDED_MARKER, type DriftRuleInput } from "../../src/lib/drift-rules";
+import { evaluateDrift, allRuleIds, ruleDescription, parseCvaVariants, isExtractionNeededFinding, EXTRACTION_NEEDED_MARKER, type DriftRuleInput } from "../../src/lib/drift/index.js";
 
 describe("drift rule registry", () => {
   it("exposes a stable set of rule IDs including DRIFT-MISPLACED", () => {

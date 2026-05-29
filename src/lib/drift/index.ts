@@ -1,21 +1,19 @@
-import type { DriftRuleId } from "../drift-rules.js";
-
 import { DRIFT_RULES, DRIFT_RULES_BY_ID } from "./registry.js";
 import type {
   DriftFinding,
   DriftFixer,
-  DriftRule,
+  DriftRuleId,
   DriftRuleInput,
 } from "./rule.js";
 
 export type {
   DriftFinding,
   DriftFixer,
+  DriftRuleId,
   DriftRuleInput,
   FixResult,
   FixerOpts,
 } from "./rule.js";
-export type { DriftRuleId } from "../drift-rules.js";
 export type { Severity } from "../severity.js";
 export type { FixerPrompt, PromptOption } from "./prompt.js";
 export type { InternalComponent } from "./rules/raw-primitive.js";

@@ -1,5 +1,5 @@
 import { classifySource, type Tier, type TierVerdict } from "./classifier.js";
-import { evaluateDrift, type DriftFinding } from "./drift-rules.js";
+import { evaluateDrift, type DriftFinding } from "./drift/index.js";
 
 export interface ThreeSignals {
   /** Tier inferred from folder path, null if not under a known DS tier dir. */

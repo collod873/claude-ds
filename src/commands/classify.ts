@@ -7,7 +7,7 @@ import { info, err, confirm, printNextStep } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, countDsComponentImports, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
-import { makeTtyPrompt, type FixerPrompt } from "../lib/drift-fixers.js";
+import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import { run } from "../lib/runner.js";
 

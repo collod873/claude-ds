@@ -1,6 +1,4 @@
-import type { DriftRuleId } from "../drift-rules.js";
-
-import type { DriftRule } from "./rule.js";
+import type { DriftRule, DriftRuleId } from "./rule.js";
 
 import { cvaVariantUnrenderedRule } from "./rules/cva-variant-unrendered.js";
 import { dsImportsFeatureRule } from "./rules/ds-imports-feature.js";
