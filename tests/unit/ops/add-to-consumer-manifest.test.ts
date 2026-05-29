@@ -1,0 +1,129 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { addToConsumerManifest } from "../../../src/lib/ops/add-to-consumer-manifest";
+import type { ProjectContext } from "../../../src/lib/project";
+import type { Manifest } from "../../../src/lib/manifest";
+import type { Config } from "../../../src/lib/config";
+import type { Change } from "../../../src/lib/operation";
+import { cleanup, freshTmpDir } from "../../helpers/tmpdir";
+
+let cwd: string;
+let packDir: string;
+beforeEach(async () => {
+  cwd = await freshTmpDir("add-manifest-cwd-");
+  packDir = await freshTmpDir("add-manifest-pack-");
+});
+afterEach(async () => {
+  await cleanup(cwd);
+  await cleanup(packDir);
+});
+
+const baseCfg: Config = {
+  version: "v0.0.0",
+  pack: "next-react",
+  mode: "warn",
+  enforce_threshold: 10,
+  removed: [],
+  lookalike_ignore: [],
+  app_dir: "app",
+  claude_md_target: ".claude/CLAUDE.md",
+};
+
+const emptyManifest: Manifest = {
+  files: [],
+  canonical_paths: [],
+  lookalike_ignore: [],
+  deprecated_paths: [],
+  managed_roots: [],
+  generated_patterns: [],
+};
+
+function makeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
+  return {
+    cwd,
+    cfg: baseCfg,
+    packDir,
+    manifest: emptyManifest,
+    exists: async () => false,
+    decisions: {},
+    ...overrides,
+  };
+}
+
+describe("addToConsumerManifest op", () => {
+  it("appends new seeded entry to existing consumer manifest", async () => {
+    await mkdir(join(cwd, "design-system"), { recursive: true });
+    await writeFile(
+      join(cwd, "design-system/manifest.json"),
+      JSON.stringify({ files: [{ path: "design-system/contracts.md", category: "managed" }] }, null, 2) + "\n",
+    );
+    const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
+    const changes = await op.plan(makeCtx());
+    expect(changes).toHaveLength(1);
+    const c = changes[0] as Extract<Change, { kind: "write" }>;
+    expect(c.kind).toBe("write");
+    expect(c.path).toBe("design-system/manifest.json");
+    const parsed = JSON.parse(c.after.toString("utf8"));
+    expect(parsed.files).toHaveLength(2);
+    expect(parsed.files[1]).toEqual({ path: "design-system/atoms/my-button.tsx", category: "seeded" });
+  });
+
+  it("falls back to pack manifest when consumer manifest is missing", async () => {
+    await writeFile(
+      join(packDir, "manifest.json"),
+      JSON.stringify({ files: [{ path: "design-system/contracts.md", category: "managed" }] }, null, 2) + "\n",
+    );
+    const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
+    const changes = await op.plan(makeCtx());
+    expect(changes).toHaveLength(1);
+    const c = changes[0] as Extract<Change, { kind: "write" }>;
+    const parsed = JSON.parse(c.after.toString("utf8"));
+    // Pack manifest content + the new entry
+    expect(parsed.files.some((f: { path: string }) => f.path === "design-system/atoms/my-button.tsx")).toBe(true);
+    expect(c.before).toBeNull();
+  });
+
+  it("does not duplicate an entry that is already present", async () => {
+    await mkdir(join(cwd, "design-system"), { recursive: true });
+    await writeFile(
+      join(cwd, "design-system/manifest.json"),
+      JSON.stringify({ files: [{ path: "design-system/atoms/my-button.tsx", category: "seeded" }] }, null, 2) + "\n",
+    );
+    const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
+    const changes = await op.plan(makeCtx());
+    // No change needed — already present
+    expect(changes).toEqual([]);
+  });
+
+  it("emits no Change when paths list is empty", async () => {
+    const op = addToConsumerManifest([]);
+    const changes = await op.plan(makeCtx());
+    expect(changes).toEqual([]);
+  });
+
+  it("preserves before bytes for accurate dry-run diff", async () => {
+    await mkdir(join(cwd, "design-system"), { recursive: true });
+    const beforeRaw = JSON.stringify({ files: [{ path: "design-system/contracts.md", category: "managed" }] }, null, 2) + "\n";
+    await writeFile(join(cwd, "design-system/manifest.json"), beforeRaw);
+    const op = addToConsumerManifest(["design-system/atoms/new.tsx"]);
+    const changes = await op.plan(makeCtx());
+    const c = changes[0] as Extract<Change, { kind: "write" }>;
+    expect(c.before?.toString("utf8")).toBe(beforeRaw);
+  });
+
+  it("applied via run() actually writes to disk", async () => {
+    await mkdir(join(cwd, "design-system"), { recursive: true });
+    await writeFile(
+      join(cwd, "design-system/manifest.json"),
+      JSON.stringify({ files: [] }, null, 2) + "\n",
+    );
+    const { run } = await import("../../../src/lib/runner");
+    const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
+    await run(makeCtx(), [op], "apply");
+    const raw = await readFile(join(cwd, "design-system/manifest.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.files).toHaveLength(1);
+    expect(parsed.files[0]).toEqual({ path: "design-system/atoms/my-button.tsx", category: "seeded" });
+  });
+});

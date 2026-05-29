@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { readdir, readFile, writeFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { info, err, confirm } from "../lib/log.js";
@@ -9,6 +9,8 @@ const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
 import { computeMigrationChain, runMigrations } from "../lib/migration-framework.js";
 import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
+import { run } from "../lib/runner.js";
+import { finalizeUpgrade } from "../lib/ops/finalize-upgrade.js";
 import { syncCmd } from "./sync.js";
 import pkg from "../../package.json" with { type: "json" };
 
@@ -78,8 +80,12 @@ export async function upgradeCmd(opts: {
 
   // Auto-detect shared utility imports used by many DS files
   const detectedImports = await detectAllowedImports(cwd, ctx.cfg.domain_roots);
-  const nextCfg = { ...ctx.cfg, packVersion: to, allowed_imports: detectedImports };
-  await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(nextCfg, null, 2) + "\n", "utf8");
+  const postCtx = await loadProject(cwd);
+  const finalizeReport = await run(postCtx, [finalizeUpgrade(to, detectedImports)], "apply");
+  if (finalizeReport.failed) {
+    err(`finalize-upgrade failed: ${finalizeReport.failed.error}`);
+    process.exit(2);
+  }
   if (detectedImports.length > 0) {
     info(`auto-detected allowed_imports: ${detectedImports.join(", ")}`);
   }

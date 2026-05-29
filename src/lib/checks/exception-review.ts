@@ -1,25 +1,32 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseExceptions, type Exception } from "../exceptions.js";
 import type { DriftRuleId } from "../drift/index.js";
 import { info } from "../log.js";
+import { run } from "../runner.js";
+import { appendExceptions } from "../ops/append-exceptions.js";
+import type { ProjectContext } from "../project.js";
 import type { Violation } from "./run-check-scripts.js";
 
 /**
  * Interactive review of check-script violations. For each, prompt
- * [F]ix-now / [R]egister-exception / [S]kip. Registered exceptions append to
- * `design-system/exceptions.json`; lint surfaces missing/closed issue links
- * separately (no expiry — removal is driven by issue closure).
+ * [F]ix-now / [R]egister-exception / [S]kip. Registered exceptions are written
+ * via the shared `appendExceptions` Op routed through `run()` — the chokepoint
+ * stays single. Lint surfaces missing/closed issue links separately (no expiry
+ * — removal is driven by issue closure).
  *
- * Side-effect orchestration helper: prompts on stdin/stdout and writes a
- * single file (exceptions.json). Kept inline-shaped because the prompt-driven
- * flow is command-shaped, not bytes-shaped.
+ * The prompt loop is command-shaped (stdin/stdout TTY interaction); only the
+ * resulting bytes-on-disk write goes through the Runner.
  *
  * Non-TTY behaviour (issue #49): stdin is slurped upfront and replayed line by
  * line so piped answers don't race EOF on the second question.
  */
-export async function reviewExceptions(cwd: string, violations: Violation[], dryRun: boolean): Promise<void> {
+export async function reviewExceptions(
+  ctx: ProjectContext,
+  violations: Violation[],
+  dryRun: boolean,
+): Promise<void> {
   if (dryRun) {
     if (violations.length > 0) {
       info(`[dry-run] ${violations.length} violation(s) found (would prompt for each):`);
@@ -33,6 +40,7 @@ export async function reviewExceptions(cwd: string, violations: Violation[], dry
     return;
   }
 
+  const cwd = ctx.cwd;
   const exPath = join(cwd, "design-system", "exceptions.json");
   let cur: Exception[];
   try {
@@ -96,6 +104,6 @@ export async function reviewExceptions(cwd: string, violations: Violation[], dry
   }
 
   closeAsker();
-  await writeFile(exPath, JSON.stringify({ exceptions: cur }, null, 2) + "\n", "utf8");
+  await run(ctx, [appendExceptions(cur)], "apply");
   info(`exceptions.json updated (${cur.length} total)`);
 }

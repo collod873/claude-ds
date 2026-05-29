@@ -200,4 +200,115 @@ describe("runner — apply failure handling", () => {
     expect(report.applied).toHaveLength(0);
     await expect(stat(join(dir, "ok.txt"))).rejects.toThrow();
   });
+
+  it("default (no rollbackOnFailure) leaves already-applied changes on disk", async () => {
+    await writeFile(join(dir, "one.txt"), "orig");
+    await writeFile(join(dir, "blocker"), "i am a file");
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "write", path: "one.txt", before: Buffer.from("orig"), after: Buffer.from("written") },
+      { kind: "write", path: "blocker/child.txt", before: null, after: Buffer.from("nope") },
+    ]);
+    const report = await run(ctx, [op], "apply");
+    expect(report.failed).toBeDefined();
+    // First change applied; not rolled back
+    expect(await readFile(join(dir, "one.txt"), "utf8")).toBe("written");
+  });
+});
+
+describe("runner — rollbackOnFailure", () => {
+  it("with rollbackOnFailure: true, unwinds applied writes LIFO on later failure", async () => {
+    await writeFile(join(dir, "existing.txt"), "orig");
+    await writeFile(join(dir, "blocker"), "i am a file");
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "write", path: "existing.txt", before: Buffer.from("orig"), after: Buffer.from("modified") },
+      { kind: "write", path: "created.txt", before: null, after: Buffer.from("new") },
+      { kind: "write", path: "blocker/child.txt", before: null, after: Buffer.from("fails") },
+    ]);
+    const report = await run(ctx, [op], "apply", { rollbackOnFailure: true });
+    expect(report.failed).toBeDefined();
+    expect(report.applied).toHaveLength(0);
+    // Modified file restored to original content
+    expect(await readFile(join(dir, "existing.txt"), "utf8")).toBe("orig");
+    // Created file removed
+    await expect(stat(join(dir, "created.txt"))).rejects.toThrow();
+  });
+
+  it("with rollbackOnFailure: true, restores deletes by writing the saved bytes back", async () => {
+    await writeFile(join(dir, "delete-me.txt"), "saved");
+    await writeFile(join(dir, "blocker"), "i am a file");
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "delete", path: "delete-me.txt", before: Buffer.from("saved") },
+      { kind: "write", path: "blocker/child.txt", before: null, after: Buffer.from("fails") },
+    ]);
+    const report = await run(ctx, [op], "apply", { rollbackOnFailure: true });
+    expect(report.failed).toBeDefined();
+    expect(await readFile(join(dir, "delete-me.txt"), "utf8")).toBe("saved");
+  });
+
+  it("with rollbackOnFailure: true, undoes renames", async () => {
+    await writeFile(join(dir, "a.txt"), "contents");
+    await writeFile(join(dir, "blocker"), "i am a file");
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "rename", path: "a.txt", after: "b.txt" },
+      { kind: "write", path: "blocker/child.txt", before: null, after: Buffer.from("fails") },
+    ]);
+    const report = await run(ctx, [op], "apply", { rollbackOnFailure: true });
+    expect(report.failed).toBeDefined();
+    expect(await readFile(join(dir, "a.txt"), "utf8")).toBe("contents");
+    await expect(stat(join(dir, "b.txt"))).rejects.toThrow();
+  });
+
+  it("with rollbackOnFailure: true and no failure, behaves identically to default", async () => {
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "write", path: "a.txt", before: null, after: Buffer.from("a") },
+      { kind: "write", path: "b.txt", before: null, after: Buffer.from("b") },
+    ]);
+    const report = await run(ctx, [op], "apply", { rollbackOnFailure: true });
+    expect(report.failed).toBeUndefined();
+    expect(report.applied).toHaveLength(2);
+    expect(await readFile(join(dir, "a.txt"), "utf8")).toBe("a");
+    expect(await readFile(join(dir, "b.txt"), "utf8")).toBe("b");
+  });
+});
+
+describe("runner — Change.mode executable", () => {
+  it("write with mode: 'executable' lands as 0o755", async () => {
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "write", path: "hook.sh", before: null, after: Buffer.from("#!/bin/sh\n"), mode: "executable" },
+    ]);
+    const report = await run(ctx, [op], "apply");
+    expect(report.failed).toBeUndefined();
+    const s = await stat(join(dir, "hook.sh"));
+    expect(s.mode & 0o777).toBe(0o755);
+  });
+
+  it("write without mode is unchanged from today (no chmod)", async () => {
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "write", path: "regular.txt", before: null, after: Buffer.from("plain") },
+    ]);
+    const report = await run(ctx, [op], "apply");
+    expect(report.failed).toBeUndefined();
+    const s = await stat(join(dir, "regular.txt"));
+    // Default file creation mode masked by umask; executable bits must be absent.
+    expect(s.mode & 0o111).toBe(0);
+  });
+
+  it("modifying an existing file with mode: 'executable' promotes it to 0o755", async () => {
+    await writeFile(join(dir, "hook.sh"), "old\n");
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "write", path: "hook.sh", before: Buffer.from("old\n"), after: Buffer.from("new\n"), mode: "executable" },
+    ]);
+    const report = await run(ctx, [op], "apply");
+    expect(report.failed).toBeUndefined();
+    const s = await stat(join(dir, "hook.sh"));
+    expect(s.mode & 0o777).toBe(0o755);
+  });
 });

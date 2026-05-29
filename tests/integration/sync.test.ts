@@ -147,20 +147,23 @@ describe("Issue #15 — sync chmod +x on hooks and scripts", () => {
   beforeEach(async () => { dir = await freshTmpDir(); });
   afterEach(async () => { await cleanup(dir); });
 
-  it("#15 .claude/hooks/ files are executable after sync", async () => {
+  it("#15 .claude/hooks/ files are 0o755 after sync", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }));
     const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
     expect(r.code).toBe(0);
     const hookStat = await stat(join(dir, ".claude/hooks/atom-imports.sh"));
-    expect(hookStat.mode & 0o111).not.toBe(0);
+    // #221/#230: explicit 0o755 — the Runner applies the Change.mode hint after the
+    // atomic write. Looser checks (`& 0o111 !== 0`) would silently regress if the
+    // post-write chmod path crept back in.
+    expect(hookStat.mode & 0o777).toBe(0o755);
   });
 
-  it("#15 scripts/ shell files are executable after sync", async () => {
+  it("#15 scripts/ shell files are 0o755 after sync", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }));
     const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
     expect(r.code).toBe(0);
     const scriptStat = await stat(join(dir, "scripts/check-hook-contract.sh"));
-    expect(scriptStat.mode & 0o111).not.toBe(0);
+    expect(scriptStat.mode & 0o777).toBe(0o755);
   });
 });
 

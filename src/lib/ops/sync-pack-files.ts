@@ -114,7 +114,14 @@ export function makeSyncPackFiles(opts: SyncPackFilesOpts = {}): SyncPackFilesOp
         const after = verdict.action === "rewrite-region"
           ? Buffer.from(verdict.newContent, "utf8")
           : Buffer.from(verdict.newContent ?? upstream, "utf8");
-        changes.push({ kind: "write", path: writePath, before, after });
+        // #15: hook and script files must land as 0o755. The Runner honours the `mode`
+        // hint via `chmod` after the atomic temp-file rename, replacing the post-write
+        // loop sync used to do at the command boundary.
+        const isExecutable = writePath.startsWith(".claude/hooks/") || writePath.startsWith("scripts/");
+        const change: Change = isExecutable
+          ? { kind: "write", path: writePath, before, after, mode: "executable" }
+          : { kind: "write", path: writePath, before, after };
+        changes.push(change);
       }
 
       cached = { changes, decisions };

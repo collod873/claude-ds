@@ -139,6 +139,50 @@ describe("syncPackFiles op — plan()", () => {
     expect(op.decisions).toHaveLength(0);
   });
 
+  it("sets mode: 'executable' on write Changes under .claude/hooks/", async () => {
+    await mkdir(join(packDir, "files", ".claude", "hooks"), { recursive: true });
+    await writeFile(join(packDir, "files", ".claude/hooks/atom-imports.sh"), "#!/bin/sh\necho hi\n");
+    const manifest: Manifest = {
+      files: [{ path: ".claude/hooks/atom-imports.sh", category: "managed" }],
+      canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
+    };
+    const op = makeSyncPackFiles();
+    const changes = await op.plan(makeCtx(manifest));
+    expect(changes).toHaveLength(1);
+    const c = changes[0] as Extract<Change, { kind: "write" }>;
+    expect(c.kind).toBe("write");
+    expect(c.mode).toBe("executable");
+  });
+
+  it("sets mode: 'executable' on write Changes under scripts/", async () => {
+    await mkdir(join(packDir, "files", "scripts"), { recursive: true });
+    await writeFile(join(packDir, "files", "scripts/check-hook-contract.sh"), "#!/bin/sh\nexit 0\n");
+    const manifest: Manifest = {
+      files: [{ path: "scripts/check-hook-contract.sh", category: "managed" }],
+      canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
+    };
+    const op = makeSyncPackFiles();
+    const changes = await op.plan(makeCtx(manifest));
+    expect(changes).toHaveLength(1);
+    const c = changes[0] as Extract<Change, { kind: "write" }>;
+    expect(c.kind).toBe("write");
+    expect(c.mode).toBe("executable");
+  });
+
+  it("does not set mode on write Changes for non-hook/script paths", async () => {
+    await writeFile(join(packDir, "files", "a.txt"), "new\n");
+    const manifest: Manifest = {
+      files: [{ path: "a.txt", category: "managed" }],
+      canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
+    };
+    const op = makeSyncPackFiles();
+    const changes = await op.plan(makeCtx(manifest));
+    expect(changes).toHaveLength(1);
+    const c = changes[0] as Extract<Change, { kind: "write" }>;
+    expect(c.kind).toBe("write");
+    expect(c.mode).toBeUndefined();
+  });
+
   it("plan() is cached — repeat calls return the same array, no double diffFile work", async () => {
     await writeFile(join(packDir, "files", "a.txt"), "new\n");
     const manifest: Manifest = {

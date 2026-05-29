@@ -1,4 +1,4 @@
-import { readFile, writeFile, stat, readdir, chmod } from "node:fs/promises";
+import { readFile, stat, readdir, chmod } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { join, dirname, resolve } from "node:path";
@@ -13,6 +13,8 @@ import { run } from "../lib/runner.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { makeSeedClaudeMdMarkers } from "../lib/ops/seed-claude-md-markers.js";
+import { patchTsconfigPathAlias } from "../lib/ops/patch-tsconfig-path-alias.js";
+import { writeBootstrapClaudeDsConfig } from "../lib/bootstrap-config.js";
 
 const execFile = promisify(execFileCb);
 
@@ -32,47 +34,26 @@ async function exists(p: string): Promise<boolean> { try { await stat(p); return
  * Without this, @/* resolves to ./src/* but design-system/ lives at repo root,
  * causing build errors on every /design route. (#52)
  *
- * Only runs when the consumer uses a src/app layout. Idempotent.
- *
- * NOTE: this remains a direct write (not routed through the Runner) because
- * tsconfig.json is not a pack-owned file — it's a consumer config the CLI
- * surgically patches once at adopt time. It is not in the manifest, so
- * syncPackFiles cannot plan a Change for it.
+ * Only runs when the consumer uses a src/app layout. Idempotent. The actual
+ * byte mutation flows through the Runner via the `patchTsconfigPathAlias` Op
+ * (#221 capstone); this wrapper handles the unparseable-tsconfig log and the
+ * "alias patched" success log.
  */
 async function patchTsconfigForSrcApp(cwd: string): Promise<void> {
-  const tsconfigPath = join(cwd, "tsconfig.json");
-  if (!await exists(tsconfigPath)) return; // no tsconfig to patch
-
-  let raw: string;
-  try {
-    raw = await readFile(tsconfigPath, "utf8");
-  } catch {
-    return;
-  }
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    // tsconfig has comments or is malformed — skip silently to avoid breaking it
+  const ctx = await loadProject(cwd);
+  const { op, unparseable } = patchTsconfigPathAlias("@/design-system/*", "../design-system/*");
+  const report = await run(ctx, [op], "apply");
+  if (unparseable()) {
     info("warning: could not parse tsconfig.json (comments?); skipping @/design-system/* path injection. Add manually: compilerOptions.paths[\"@/design-system/*\"] = [\"../design-system/*\"]");
     return;
   }
-
-  const compilerOptions = (parsed.compilerOptions ?? {}) as Record<string, unknown>;
-  const paths = (compilerOptions.paths ?? {}) as Record<string, string[]>;
-
-  // Already patched — idempotent.
-  if (paths["@/design-system/*"]) return;
-
-  paths["@/design-system/*"] = ["../design-system/*"];
-  compilerOptions.paths = paths;
-  parsed.compilerOptions = compilerOptions;
-
-  const firstIndented = raw.split("\n").find(l => l.startsWith(" ") || l.startsWith("\t"));
-  const indent = firstIndented && firstIndented.startsWith("\t") ? "\t" : 2;
-  await writeFile(tsconfigPath, JSON.stringify(parsed, null, indent) + "\n", "utf8");
-  info("patched tsconfig.json: added @/design-system/* path alias for src/app layout (#52)");
+  if (report.failed) {
+    err(`patch tsconfig failed: ${report.failed.error}`);
+    return;
+  }
+  if (report.applied.some(c => c.kind === "write" && c.path === "tsconfig.json")) {
+    info("patched tsconfig.json: added @/design-system/* path alias for src/app layout (#52)");
+  }
 }
 
 export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: string; dryRun?: boolean; cwd?: string }) {
@@ -199,7 +180,7 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     claude_md_target: claudeMdTarget,
   };
   if (flagGlobs.length > 0) cfg.lookalike_ignore = flagGlobs;
-  await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
+  await writeBootstrapClaudeDsConfig(cwd, cfg);
 
   // ---- Boot ProjectContext and route file writes through the Runner ----
   // First install becomes the special case where diffFile sees `current = null`:
