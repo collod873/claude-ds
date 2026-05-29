@@ -1,4 +1,4 @@
-import { readFile, writeFile, stat, chmod } from "node:fs/promises";
+import { readFile, writeFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
@@ -88,15 +88,12 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
     process.exit(2);
   }
 
-  // #15: hook and script files must be executable. Runner writes bytes only; chmod is
-  // a post-write concern that stays at the command boundary until/unless Change gains a mode.
+  // #15: hook/script chmod is now a `Change.mode: "executable"` hint applied by the Runner
+  // (#221 / #230). Sync only collects rewritten paths here for the formatter pass.
   const rewrittenPaths: string[] = [];
   for (const c of report.applied) {
     if (c.kind !== "write") continue;
     rewrittenPaths.push(c.path);
-    if (c.path.startsWith(".claude/hooks/") || c.path.startsWith("scripts/")) {
-      await chmod(join(cwd, c.path), 0o755);
-    }
   }
 
   // #54: format rewritten files with the consumer's formatter (biome or prettier) if detected.
