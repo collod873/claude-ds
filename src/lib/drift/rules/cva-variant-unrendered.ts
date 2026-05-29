@@ -71,23 +71,6 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 
 // --- DRIFT-CVA-VARIANT-UNRENDERED fixer ---
 
-function parseExercisedVariantsFromSource(source: string, axes: string[]): Map<string, Set<string>> {
-  const exercised = new Map<string, Set<string>>();
-  for (const axis of axes) exercised.set(axis, new Set());
-
-  const examplesMatch = source.match(/examples\s*:\s*\[([\s\S]*?)\]\s*(?:,|\})/);
-  if (!examplesMatch) return exercised;
-
-  for (const axis of axes) {
-    const re = new RegExp(`${axis}\\s*:\\s*["']([^"']+)["']`, "g");
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(examplesMatch[1])) !== null) {
-      exercised.get(axis)!.add(m[1]);
-    }
-  }
-  return exercised;
-}
-
 function buildExampleStub(axis: string, value: string): string {
   return `{ name: "${value}", props: { ${axis}: "${value}" } }`;
 }
@@ -107,7 +90,7 @@ async function fix(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promi
   }
 
   const axes = Object.keys(cvaVariants);
-  const exercised = parseExercisedVariantsFromSource(source, axes);
+  const exercised = parseExercisedVariants(source, axes);
 
   const stubs: string[] = [];
   for (const axis of axes) {

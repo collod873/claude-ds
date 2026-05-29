@@ -45,26 +45,15 @@ export const DRIFT_RULES_BY_ID: Record<DriftRuleId, DriftRule> = {
  * (Map insertion order) is determined here. `allRuleIds()` derives from
  * the same array so the two orderings can't diverge.
  *
- * Canonical order:
+ * Derived from `DRIFT_RULES_BY_ID` so the typed record's totality check
+ * propagates here — a new id added to the union without an entry in the
+ * record fails to build, and the array can't silently miss it.
+ *
+ * Canonical order (the record's literal order):
  * META-KIND-MISSING, MISPLACED, MISCLASSIFIED-ATOM, MISCLASSIFIED-COMPOSITE,
  * DS-IMPORTS-FEATURE, PATTERN-NO-SLOTS, PATTERN-IMPORTS-PATTERN,
  * INLINE-STATIC-STYLE, RAW-PRIMITIVE, CVA-VARIANT-UNRENDERED,
  * META-EXAMPLES-DUPLICATE, META-EXAMPLES-CORRUPT, STALE-DS-IMPORT,
  * STALE-META-STATES.
  */
-export const DRIFT_RULES: readonly DriftRule[] = [
-  metaKindMissingRule,
-  misplacedRule,
-  misclassifiedAtomRule,
-  misclassifiedCompositeRule,
-  dsImportsFeatureRule,
-  patternNoSlotsRule,
-  patternImportsPatternRule,
-  inlineStaticStyleRule,
-  rawPrimitiveRule,
-  cvaVariantUnrenderedRule,
-  metaExamplesDuplicateRule,
-  metaExamplesCorruptRule,
-  staleDsImportRule,
-  staleMetaStatesRule,
-];
+export const DRIFT_RULES: readonly DriftRule[] = Object.values(DRIFT_RULES_BY_ID);
