@@ -1,14 +1,15 @@
-import { readFile, readdir, stat, writeFile, mkdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 import { info, err, confirm, printNextStep } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, countDsComponentImports, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
 import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
-import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
+import { parseExceptions, type Exception } from "../lib/exceptions.js";
 import { run } from "../lib/runner.js";
 import { moveTierFile } from "../lib/ops/move-tier-file.js";
+import { appendExceptions } from "../lib/ops/append-exceptions.js";
 import type { Operation } from "../lib/operation.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
@@ -392,8 +393,8 @@ export async function classifyCmd(opts: {
       } catch {
         existing = [];
       }
-      await mkdir(dirname(exceptionsPath), { recursive: true });
-      await writeFile(exceptionsPath, serializeExceptions([...existing, ...exceptionsToAdd]), "utf8");
+      const ctxEx = await loadProject(cwd);
+      await run(ctxEx, [appendExceptions([...existing, ...exceptionsToAdd])], "apply");
       info(`classify: ${exceptionsToAdd.length} ambiguity exception(s) written to design-system/exceptions.json`);
     }
 
