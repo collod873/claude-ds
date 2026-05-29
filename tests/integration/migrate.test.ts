@@ -24,12 +24,48 @@ describe("migrate", () => {
     await stat(join(dir, "design-system/atoms/button.tsx"));
   });
 
-  it("rejects a tier-violation source", async () => {
-    await mkdir(join(dir, "src"), { recursive: true });
-    await writeFile(join(dir, "src/bad.tsx"), `import { Card } from "@/design-system/composites/card";\nexport const Bad = () => null;`);
-    const r = await runCli(["migrate", "src/bad.tsx", "--reason", "x", "--yes"], { cwd: dir });
-    expect(r.code).not.toBe(0);
-    expect(r.stderr).toMatch(/tier violation/i);
+  it("places a composite-importing source in composites/ (no longer a tier violation, #220)", async () => {
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    await writeFile(join(dir, "src/components/panel.tsx"), `import { Card } from "@/design-system/composites/card";\nexport const Panel = () => null;`);
+    const r = await runCli(["migrate", "src/components/panel.tsx", "--reason", "ok", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    await stat(join(dir, "design-system/composites/panel.tsx"));
+  });
+
+  it("rejects a feature-tier source with a pointer to classify (#220)", async () => {
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    await writeFile(join(dir, "src/components/dash.tsx"), `import { foo } from "@/features/dash/data";\nexport const Dash = () => null;`);
+    const r = await runCli(["migrate", "src/components/dash.tsx", "--reason", "x", "--yes"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/classifies as feature/);
+    expect(r.stderr).toMatch(/claude-ds classify/);
+  });
+
+  it("rejects a pattern-tier source with a pointer to classify (#220)", async () => {
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    await writeFile(join(dir, "src/components/slot.tsx"), `export const Slot = ({ children }: { children: React.ReactNode }) => <div>{children}</div>;`);
+    const r = await runCli(["migrate", "src/components/slot.tsx", "--reason", "x", "--yes"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/classifies as pattern/);
+    expect(r.stderr).toMatch(/claude-ds classify/);
+  });
+
+  it("rejects an unknown-tier source (imports a pattern) with a pointer to classify (#220)", async () => {
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    await writeFile(join(dir, "src/components/uses-pattern.tsx"), `import { List } from "@/design-system/patterns/list";\nexport const UsesPattern = () => null;`);
+    const r = await runCli(["migrate", "src/components/uses-pattern.tsx", "--reason", "x", "--yes"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/classifies as unknown/);
+    expect(r.stderr).toMatch(/claude-ds classify/);
+  });
+
+  it("honors --tier override, bypassing classification (#220)", async () => {
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    // Source would classify as feature, but --tier forces composite.
+    await writeFile(join(dir, "src/components/forced.tsx"), `import { foo } from "@/features/dash/data";\nexport const Forced = () => null;`);
+    const r = await runCli(["migrate", "src/components/forced.tsx", "--tier", "composite", "--reason", "ok", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    await stat(join(dir, "design-system/composites/forced.tsx"));
   });
 
   it("refuses on collision without --rename", async () => {

@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve, relative } from "node:path";
-import { classify } from "../lib/classify.js";
+import { classifySource } from "../lib/classifier.js";
+import { detectDsAliases } from "../lib/ds-aliases.js";
 import { parseExceptions } from "../lib/exceptions.js";
 import { info, err, confirm } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
@@ -34,7 +35,20 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   if (!abs.endsWith(".tsx")) { err("only .tsx components are supported at v1"); process.exit(2); }
   const src = await readFile(abs, "utf8");
   let tier: "atom"|"composite";
-  try { tier = opts.tier ?? classify(src); } catch (e) { err((e as Error).message); process.exit(2); return; }
+  if (opts.tier) {
+    tier = opts.tier;
+  } else {
+    // Classify with the same 5-tier engine as `classify` and the drift rules (#220).
+    let dsAliases = ctx.cfg.ds_aliases ?? [];
+    if (dsAliases.length === 0) dsAliases = await detectDsAliases(cwd, ctx.cfg.srcRoot ?? "src");
+    const verdict = classifySource(src, ctx.cfg.domain_roots, ctx.cfg.allowed_imports ?? [], dsAliases);
+    if (verdict.tier !== "atom" && verdict.tier !== "composite") {
+      err(`${opts.source} classifies as ${verdict.tier} — migrate only handles atom/composite. Run \`claude-ds classify\`, or pass \`--tier atom|composite\` to override.`);
+      process.exit(2);
+      return;
+    }
+    tier = verdict.tier;
+  }
   const destName = opts.rename ?? basename(abs);
   const dest = join(cwd, "design-system", tier === "atom" ? "atoms" : "composites", destName);
   if (await ctx.exists(dest)) { err(`destination exists: ${dest} (pass --rename to override)`); process.exit(2); }
