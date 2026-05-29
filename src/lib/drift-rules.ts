@@ -105,7 +105,8 @@ export function allRuleIds(): DriftRuleId[] {
   return Object.keys(RULE_REGISTRY) as DriftRuleId[];
 }
 
-export type Severity = "error" | "warning" | "info";
+export type { Severity } from "./severity.js";
+import type { Severity } from "./severity.js";
 
 const SEVERITY_MAP: Record<DriftRuleId, Severity> = {
   "DRIFT-MISPLACED": "error",
