@@ -1,10 +1,19 @@
-import { mkdir, rename, unlink, writeFile, stat } from "node:fs/promises";
+import { mkdir, rename, unlink, writeFile, stat, chmod } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { ProjectContext } from "./project.js";
 import type { Change, Operation } from "./operation.js";
 
 export type RunMode = "dry-run" | "apply";
+
+export interface RunOptions {
+  /**
+   * When true, the Runner records each successfully-applied Change and unwinds
+   * them LIFO if any later Change in the batch fails. Default `false` keeps the
+   * historical best-effort, stop-on-first-failure, no-unwind behavior.
+   */
+  rollbackOnFailure?: boolean;
+}
 
 export interface RunReport {
   ops: { name: string; changes: Change[]; error?: string }[];
@@ -80,6 +89,7 @@ async function applyChange(ctx: ProjectContext, c: Change): Promise<void> {
     const tmp = `${abs}.tmp`;
     await writeFile(tmp, c.after);
     await rename(tmp, abs);
+    if (c.mode === "executable") await chmod(abs, 0o755);
   } else if (c.kind === "delete") {
     const abs = resolveIn(ctx.cwd, c.path);
     try {
@@ -101,14 +111,40 @@ async function applyChange(ctx: ProjectContext, c: Change): Promise<void> {
   }
 }
 
+async function rollbackChange(ctx: ProjectContext, c: Change): Promise<void> {
+  if (c.kind === "abort") return;
+  if (c.kind === "write") {
+    const abs = resolveIn(ctx.cwd, c.path);
+    if (c.before === null) {
+      try { await unlink(abs); } catch { /* best effort */ }
+    } else {
+      await mkdir(dirname(abs), { recursive: true });
+      await writeFile(abs, c.before);
+    }
+  } else if (c.kind === "delete") {
+    const abs = resolveIn(ctx.cwd, c.path);
+    await mkdir(dirname(abs), { recursive: true });
+    await writeFile(abs, c.before);
+  } else {
+    const absFrom = resolveIn(ctx.cwd, c.after);
+    const absTo = resolveIn(ctx.cwd, c.path);
+    await mkdir(dirname(absTo), { recursive: true });
+    await rename(absFrom, absTo);
+  }
+}
+
 /**
  * Run a list of Operations against a ProjectContext.
  *
  * Planning is best-effort: if one Op's `plan()` throws, the error is recorded on
- * that Op's report entry and the remaining Ops still plan. Apply is best-effort
- * and **non-transactional**: Changes apply in order until one fails, at which
- * point `failed` is set and the remaining Changes are skipped. Already-applied
- * Changes are NOT rolled back.
+ * that Op's report entry and the remaining Ops still plan. Apply defaults to
+ * best-effort and **non-transactional**: Changes apply in order until one fails,
+ * at which point `failed` is set and the remaining Changes are skipped.
+ * Already-applied Changes are NOT rolled back.
+ *
+ * Pass `{ rollbackOnFailure: true }` to make the batch transactional: on
+ * mid-batch failure the Runner unwinds previously-applied Changes LIFO and
+ * empties `applied` in the report. Best-effort fidelity — same as fix-pass had.
  *
  * In `dry-run` mode no disk mutations occur; a unified-ish diff per Change is
  * written to stdout, prefixed `[op-name] path` so the user can trace authorship.
@@ -117,6 +153,7 @@ export async function run(
   ctx: ProjectContext,
   ops: Operation[],
   mode: RunMode,
+  options: RunOptions = {},
 ): Promise<RunReport> {
   const report: RunReport = { ops: [], applied: [] };
 
@@ -146,6 +183,12 @@ export async function run(
       report.applied.push(change);
     } catch (e) {
       report.failed = { change, error: (e as Error).message };
+      if (options.rollbackOnFailure) {
+        for (let i = report.applied.length - 1; i >= 0; i--) {
+          try { await rollbackChange(ctx, report.applied[i]); } catch { /* best effort */ }
+        }
+        report.applied = [];
+      }
       return report;
     }
   }
