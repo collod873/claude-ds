@@ -3,8 +3,9 @@ import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { fixIntegrity, isIntegrityFixable } from "../../src/lib/integrity-fixers";
+import { fixIntegrity, isIntegrityFixable, integrityFixerAsOperation } from "../../src/lib/integrity-fixers";
 import type { IntegrityFinding } from "../../src/lib/integrity-rules";
+import type { ProjectContext } from "../../src/lib/project";
 
 function initGitRepo(dir: string): void {
   execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
@@ -167,6 +168,64 @@ describe("integrity-fixers", () => {
 
       expect(result.fixed).toBe(false);
       expect(result.changes).toHaveLength(0);
+    });
+  });
+
+  describe("integrityFixerAsOperation (#225)", () => {
+    it("plan() returns the fixer's write Changes when the fixer succeeds", async () => {
+      initGitRepo(dir);
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+
+      const cleanSource = `export function Chip() { return <span />; }\n`;
+      await writeFile(join(dir, "design-system/atoms/chip.tsx"), cleanSource);
+      gitAdd(dir, "design-system/atoms/chip.tsx");
+      gitCommit(dir, "add chip");
+
+      const brokenSource = `export function Chip( { return <span />; }\n`;
+      await writeFile(join(dir, "design-system/atoms/chip.tsx"), brokenSource);
+
+      const finding: IntegrityFinding = {
+        ruleId: "INTEGRITY-UNPARSEABLE",
+        file: "design-system/atoms/chip.tsx",
+        message: "File has syntax errors",
+      };
+
+      const op = integrityFixerAsOperation(finding);
+      const ctx = { cwd: dir } as unknown as ProjectContext;
+      const changes = await op.plan(ctx);
+
+      expect(op.name).toBe("INTEGRITY-UNPARSEABLE");
+      expect(changes).toHaveLength(1);
+      expect(changes[0].kind).toBe("write");
+      expect(op.result).not.toBeNull();
+      expect(op.result!.fixed).toBe(true);
+      expect(op.result!.finding).toBe(finding);
+
+      // plan() is read-only — the broken file should not yet be repaired
+      const onDisk = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
+      expect(onDisk).toBe(brokenSource);
+    });
+
+    it("plan() returns [] and result.fixed=false when fixer declines", async () => {
+      // No git repo → fixIntegrity declines.
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      const brokenSource = `export function Chip( { return <span />; }\n`;
+      await writeFile(join(dir, "design-system/atoms/chip.tsx"), brokenSource);
+
+      const finding: IntegrityFinding = {
+        ruleId: "INTEGRITY-UNPARSEABLE",
+        file: "design-system/atoms/chip.tsx",
+        message: "File has syntax errors",
+      };
+
+      const op = integrityFixerAsOperation(finding);
+      const ctx = { cwd: dir } as unknown as ProjectContext;
+      const changes = await op.plan(ctx);
+
+      expect(changes).toHaveLength(0);
+      expect(op.result).not.toBeNull();
+      expect(op.result!.fixed).toBe(false);
+      expect(op.result!.finding).toBe(finding);
     });
   });
 });

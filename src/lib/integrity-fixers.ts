@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { IntegrityFinding, IntegrityRuleId } from "./integrity-rules.js";
 import { evaluateIntegrity } from "./integrity-rules.js";
-import type { Change } from "./operation.js";
+import type { Change, Operation } from "./operation.js";
+import type { ProjectContext } from "./project.js";
 
 export interface IntegrityFixResult {
   finding: IntegrityFinding;
@@ -98,4 +99,33 @@ export async function fixIntegrity(
     message: `Restored ${finding.file} from git HEAD`,
     changes,
   };
+}
+
+/**
+ * Adapter that exposes `fixIntegrity` as a Runner Operation. `plan()` invokes
+ * the fixer (read-only — `fixIntegrity` returns Changes without touching disk),
+ * stashes the `IntegrityFixResult` on `op.result` so callers can drive their
+ * own message printing / scorecard accounting, and returns the fixer's Changes
+ * for the Runner to apply. Declined fixes return `[]` (no writes); `op.result`
+ * still carries the remediation message.
+ */
+export interface IntegrityFixerOperation extends Operation {
+  finding: IntegrityFinding;
+  result: IntegrityFixResult | null;
+}
+
+export function integrityFixerAsOperation(
+  finding: IntegrityFinding,
+): IntegrityFixerOperation {
+  const op: IntegrityFixerOperation = {
+    name: finding.ruleId,
+    finding,
+    result: null,
+    async plan(ctx: ProjectContext): Promise<Change[]> {
+      const r = await fixIntegrity(finding, ctx.cwd);
+      op.result = r;
+      return r.fixed ? r.changes : [];
+    },
+  };
+  return op;
 }

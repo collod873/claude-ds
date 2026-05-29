@@ -22,7 +22,9 @@ import {
 } from "../lib/integrity-rules.js";
 import { detectDsAliases, detectTsconfigPaths } from "../lib/ds-aliases.js";
 import { runFixPass } from "../lib/fix-pass.js";
-import { fixIntegrity, isIntegrityFixable } from "../lib/integrity-fixers.js";
+import { isIntegrityFixable, integrityFixerAsOperation } from "../lib/integrity-fixers.js";
+import { run } from "../lib/runner.js";
+import type { ProjectContext } from "../lib/project.js";
 import { runReconcileActions } from "./reconcile.js";
 import { checkThreeSignals } from "../lib/three-signal.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
@@ -223,20 +225,22 @@ export async function auditCmd(opts: AuditOpts) {
         f.ruleId.startsWith("INTEGRITY-") && isIntegrityFixable(f.ruleId as IntegrityRuleId),
     );
 
+    const integrityOps = integrityToFix.map(integrityFixerAsOperation);
+    const integrityCtx = (projectCtx ?? ({ cwd } as unknown as ProjectContext));
+    const integrityReport = await run(integrityCtx, integrityOps, "apply", { rollbackOnFailure: true });
+    if (integrityReport.failed) {
+      err(`Integrity-fix pass failed — all changes rolled back. ${integrityReport.failed.error}`);
+      process.exit(1);
+    }
+
     const integrityResults: Array<{ finding: IntegrityFinding; fixed: boolean; message: string }> = [];
-    for (const finding of integrityToFix) {
-      const result = await fixIntegrity(finding, cwd);
-      integrityResults.push(result);
-      if (result.fixed) {
-        for (const change of result.changes) {
-          if (change.kind === "write") {
-            const abs = join(cwd, change.path);
-            await writeFile(abs, change.after);
-          }
-        }
-        info(`fixed [${finding.ruleId}]: ${result.message}`);
+    for (const op of integrityOps) {
+      const r = op.result!;
+      integrityResults.push(r);
+      if (r.fixed) {
+        info(`fixed [${r.finding.ruleId}]: ${r.message}`);
       } else {
-        info(`deferred [${finding.ruleId}]: ${result.message}`);
+        info(`deferred [${r.finding.ruleId}]: ${r.message}`);
       }
     }
 
