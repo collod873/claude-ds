@@ -323,6 +323,78 @@ export function Calendar() {
     expect(atom).not.toMatch(/from "@\/design-system\/atoms\/day-list"/);
   });
 
+  it("carries a parent-exported type referenced by the extracted component (and keeps the parent's export)", async () => {
+    await scaffold();
+    // Mirrors the crewops baseline regression: the composite EXPORTS a type
+    // (PageHeaderAction) that an inline component references in its props, plus a
+    // transitive type (Tone) reached only through the first. Before the fix the
+    // closure short-circuited on `exported`, so neither type made it into the
+    // atom → 26 TS2304 "Cannot find name" errors. The parent's export must also
+    // survive (external files import it), so the type is copied, never moved.
+    await writeFile(
+      join(dir, "src/components/page-header.tsx"),
+      `import { Button } from "@/design-system/atoms/button";
+
+export type Tone = "primary" | "ghost";
+
+export type PageHeaderAction = {
+  label: string;
+  tone: Tone;
+};
+
+function ActionButton(props: { action: PageHeaderAction }) {
+  // Inline component referencing a parent-EXPORTED type in its props.
+  // Padded out to clear the >=20 line extraction threshold so it is picked
+  // up as an extractable inline component rather than skipped as a helper.
+  // grow line one to clear the threshold
+  // grow line two to clear the threshold
+  // grow line three to clear the threshold
+  // grow line four to clear the threshold
+  const { action } = props;
+  const label = action.label;
+  const cls = action.tone === "primary" ? "btn-primary" : "btn-ghost";
+  const parts = [cls, label];
+  return (
+    <button className={cls}>
+      {parts.map((p, i) => (
+        <span key={i}>{p}</span>
+      ))}
+    </button>
+  );
+}
+
+export function PageHeader(props: { actions: PageHeaderAction[] }) {
+  return (
+    <div>
+      <Button />
+      <ActionButton action={props.actions[0]} />
+    </div>
+  );
+}
+`,
+    );
+
+    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // The atom carries both the directly-referenced type and its transitive dep.
+    const atom = await readDsAtom(dir, "action-button");
+    expect(atom).toMatch(/export function ActionButton\b/);
+    expect(atom).toMatch(/type PageHeaderAction =/);
+    expect(atom).toMatch(/type Tone =/);
+
+    // The parent keeps its exports intact — copied, not moved.
+    const parent = await readFile(join(dir, "design-system/composites/page-header.tsx"), "utf8");
+    expect(parent).toMatch(/export type PageHeaderAction =/);
+    expect(parent).toMatch(/export type Tone =/);
+    expect(parent).not.toMatch(/function ActionButton\b/);
+
+    // And it all compiles — no TS2304.
+    const tsc = runTsc(dir);
+    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+
   it("does not extract from a file with no inline components (relocation only)", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
     await mkdir(join(dir, "src/components"), { recursive: true });

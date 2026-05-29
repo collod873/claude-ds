@@ -44,6 +44,8 @@ interface LocalDecl {
   start: number;
   end: number;
   exported: boolean;
+  /** A pure type-only construct (type alias / interface) — no runtime value. */
+  typeOnly: boolean;
 }
 
 interface ComponentNode {
@@ -222,14 +224,15 @@ function planFile(source: string, parentRel: string, canonicalAlias: string, tak
     }
     // Module-level local declarations the component might depend on.
     let names: string[] = [];
+    let typeOnly = false;
     if (ts.isFunctionDeclaration(stmt) && stmt.name) names = [stmt.name.text];
     else if (ts.isVariableStatement(stmt)) names = stmt.declarationList.declarations.flatMap(d => bindingNamesOf(d));
-    else if (ts.isTypeAliasDeclaration(stmt)) names = [stmt.name.text];
-    else if (ts.isInterfaceDeclaration(stmt)) names = [stmt.name.text];
+    else if (ts.isTypeAliasDeclaration(stmt)) { names = [stmt.name.text]; typeOnly = true; }
+    else if (ts.isInterfaceDeclaration(stmt)) { names = [stmt.name.text]; typeOnly = true; }
     else if (ts.isEnumDeclaration(stmt)) names = [stmt.name.text];
     else if (ts.isClassDeclaration(stmt) && stmt.name) names = [stmt.name.text];
     if (names.length > 0) {
-      locals.push({ names, text: stmt.getText(sf), start: stmt.getStart(sf), end: stmt.getEnd(), exported: isExported(stmt) });
+      locals.push({ names, text: stmt.getText(sf), start: stmt.getStart(sf), end: stmt.getEnd(), exported: isExported(stmt), typeOnly });
     }
   }
 
@@ -277,9 +280,16 @@ function planFile(source: string, parentRel: string, canonicalAlias: string, tak
     while (queue.length > 0) {
       const n = queue.shift()!;
       for (const name of collectReferencedNames(n)) referenced.add(name);
-      // Pull in any not-yet-included local decl this node references.
+      // Pull in any not-yet-included local decl this node references. Exported
+      // *runtime* decls (consts, functions, enums, classes) are skipped: copying
+      // them would duplicate a value, and the parent must keep ownership.
+      // Exported *type-only* decls (type aliases, interfaces) DO get carried —
+      // a type has no runtime identity, so a copy in the atom is sound, and the
+      // alternative (importing it from the parent composite) would be an
+      // atom→composite layering violation (issue #196).
       locals.forEach((d, i) => {
-        if (includedLocalIdx.has(i) || d.exported) return;
+        if (includedLocalIdx.has(i)) return;
+        if (d.exported && !d.typeOnly) return;
         if (d.names.some(nm => referenced.has(nm))) {
           includedLocalIdx.add(i);
           queue.push(...findStatementByRange(sf, d.start, d.end));
@@ -325,6 +335,10 @@ function planFile(source: string, parentRel: string, canonicalAlias: string, tak
     for (let i = 0; i < locals.length; i++) {
       if (!includedLocalIdx.has(i)) continue;
       const d = locals[i];
+      // An exported decl is always copied, never moved: external files import it
+      // by name, and `referencedOutside` only sees this file — so a "not used
+      // elsewhere" verdict would be a false positive that breaks those importers.
+      if (d.exported) continue;
       const usedElsewhere = d.names.some(nm => referencedOutside(sf, nm, protectedRanges));
       if (!usedElsewhere && !movedLocalKeys.has(i)) {
         movedLocalKeys.add(i);
