@@ -1,6 +1,8 @@
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 import type { Severity } from "../severity.js";
+import { validateFixerOutput } from "../fixer-validate.js";
+import { info } from "../log.js";
 import { INTEGRITY_RULES, INTEGRITY_RULES_BY_ID } from "./registry.js";
 import type {
   IntegrityContext,
@@ -76,12 +78,19 @@ export function evaluateIntegrity(
  * Adapter that exposes an integrity rule's `fix` as a Runner Operation.
  * `plan()` looks up the rule from the registry and invokes `rule.fix(finding,
  * ctx.cwd)` (read-only — fixers return Changes without touching disk),
- * stashes the `IntegrityFixResult` on `op.result` so callers can drive their
- * own message printing / scorecard accounting, and returns the fix's Changes
- * for the Runner to apply. Declined fixes return `[]` (no writes); `op.result`
- * still carries the remediation message. A non-fixable rule produces no
- * Changes and an explanatory `op.result` — defensive, since `audit-fix.ts`
- * already filters by `isIntegrityFixable` before constructing the Operation.
+ * runs the ADR-0014 `validateFixerOutput` gate on every emitted Change so
+ * integrity fixers carry the same parse-before-write guarantee as drift
+ * fixers (PRD #234), stashes the `IntegrityFixResult` on `op.result` so
+ * callers can drive their own message printing / scorecard accounting, and
+ * returns the fix's Changes for the Runner to apply.
+ *
+ * Declined fixes return `[]` (no writes); `op.result` still carries the
+ * remediation message. A non-fixable rule produces no Changes and an
+ * explanatory `op.result` — defensive, since `audit-fix.ts` already filters
+ * by `isIntegrityFixable` before constructing the Operation. A validation
+ * failure returns exactly one `abort` Change carrying the gate's reason and
+ * `op.result.fixed = false`, mirroring `fixerAsOperation`'s per-finding
+ * skip-and-continue established for drift in PRD #221.
  */
 export interface IntegrityFixerOperation extends Operation {
   finding: IntegrityFinding;
@@ -107,6 +116,18 @@ export function integrityFixerAsOperation(
         return [];
       }
       const r = await rule.fix(finding, ctx.cwd);
+
+      if (r.fixed && r.changes.length > 0) {
+        for (const ch of r.changes) {
+          const gate = validateFixerOutput(ch, finding.ruleId);
+          if (gate) {
+            info(gate.message);
+            op.result = { finding, fixed: false, message: gate.message, changes: [] };
+            return [{ kind: "abort", path: finding.file, reason: gate.message }];
+          }
+        }
+      }
+
       op.result = r;
       return r.fixed ? r.changes : [];
     },
