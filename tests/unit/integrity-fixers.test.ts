@@ -3,7 +3,8 @@ import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { fixIntegrity, isIntegrityFixable, integrityFixerAsOperation } from "../../src/lib/integrity-fixers";
+import { isIntegrityFixable, integrityFixerAsOperation } from "../../src/lib/integrity-fixers";
+import { restoreFromHead } from "../../src/lib/integrity/restore-from-head";
 import type { IntegrityFinding } from "../../src/lib/integrity-rules";
 import type { ProjectContext } from "../../src/lib/project";
 
@@ -65,7 +66,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await fixIntegrity(finding, dir);
+      const result = await restoreFromHead(finding, dir);
 
       expect(result.fixed).toBe(true);
       expect(result.changes).toHaveLength(1);
@@ -96,7 +97,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await fixIntegrity(finding, dir);
+      const result = await restoreFromHead(finding, dir);
 
       expect(result.fixed).toBe(false);
       expect(result.changes).toHaveLength(0);
@@ -118,7 +119,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await fixIntegrity(finding, dir);
+      const result = await restoreFromHead(finding, dir);
 
       expect(result.fixed).toBe(false);
       expect(result.changes).toHaveLength(0);
@@ -145,7 +146,7 @@ describe("integrity-fixers", () => {
         message: "Orphaned '} from' at line 1",
       };
 
-      const result = await fixIntegrity(finding, dir);
+      const result = await restoreFromHead(finding, dir);
 
       expect(result.fixed).toBe(true);
       expect(result.changes).toHaveLength(1);
@@ -164,7 +165,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await fixIntegrity(finding, dir);
+      const result = await restoreFromHead(finding, dir);
 
       expect(result.fixed).toBe(false);
       expect(result.changes).toHaveLength(0);
@@ -207,7 +208,7 @@ describe("integrity-fixers", () => {
     });
 
     it("plan() returns [] and result.fixed=false when fixer declines", async () => {
-      // No git repo → fixIntegrity declines.
+      // No git repo → restoreFromHead declines.
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });
       const brokenSource = `export function Chip( { return <span />; }\n`;
       await writeFile(join(dir, "design-system/atoms/chip.tsx"), brokenSource);
@@ -226,6 +227,23 @@ describe("integrity-fixers", () => {
       expect(op.result).not.toBeNull();
       expect(op.result!.fixed).toBe(false);
       expect(op.result!.finding).toBe(finding);
+    });
+
+    it("plan() returns [] and a 'no auto-fix' result for non-fixable rules", async () => {
+      const finding: IntegrityFinding = {
+        ruleId: "INTEGRITY-UNRESOLVABLE-IMPORT",
+        file: "design-system/atoms/chip.tsx",
+        message: 'Import "missing" does not resolve to an existing file',
+      };
+
+      const op = integrityFixerAsOperation(finding);
+      const ctx = { cwd: dir } as unknown as ProjectContext;
+      const changes = await op.plan(ctx);
+
+      expect(changes).toHaveLength(0);
+      expect(op.result).not.toBeNull();
+      expect(op.result!.fixed).toBe(false);
+      expect(op.result!.message).toMatch(/no auto-fix/i);
     });
   });
 });

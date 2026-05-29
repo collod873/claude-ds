@@ -6,7 +6,7 @@ import {
   type IntegrityFinding,
   type IntegrityRuleId,
 } from "../integrity-rules.js";
-import { fixIntegrity } from "../integrity-fixers.js";
+import { restoreFromHead } from "./restore-from-head.js";
 import type { IntegrityRule } from "./rule.js";
 
 const unparseableRule: IntegrityRule = {
@@ -19,7 +19,7 @@ const unparseableRule: IntegrityRule = {
     return r ? [r] : [];
   },
   fixable: true,
-  fix: (finding, cwd) => fixIntegrity(finding, cwd),
+  fix: (finding, cwd) => restoreFromHead(finding, cwd),
 };
 
 const orphanedFromRule: IntegrityRule = {
@@ -32,7 +32,7 @@ const orphanedFromRule: IntegrityRule = {
     return r ? [r] : [];
   },
   fixable: true,
-  fix: (finding, cwd) => fixIntegrity(finding, cwd),
+  fix: (finding, cwd) => restoreFromHead(finding, cwd),
 };
 
 const unresolvableImportRule: IntegrityRule = {
@@ -58,10 +58,10 @@ const unresolvableImportRule: IntegrityRule = {
  * adding a new id to the `IntegrityRuleId` union without adding the matching
  * rule here fails to build. Mirrors `DRIFT_RULES_BY_ID`'s seam exactly.
  *
- * This is purely additive in this slice: no call site reads it yet. The
- * legacy `RULE_REGISTRY`, `SEVERITY_MAP`, `FIXABLE_INTEGRITY_RULES`,
- * `evaluateIntegrity`, and `fixIntegrity` continue to serve every caller.
- * Subsequent slices migrate callers onto this registry.
+ * `evaluateIntegrity`, `integrityRuleDescription`, `integrityRuleSeverity`,
+ * `allIntegrityRuleIds`, `isIntegrityFixable`, and `integrityFixerAsOperation`
+ * all route through this record. Subsequent slices reshape the file layout
+ * (one file per rule) and extract the ADR-0014 fixer-output validation gate.
  */
 export const INTEGRITY_RULES_BY_ID: Record<IntegrityRuleId, IntegrityRule> = {
   "INTEGRITY-UNPARSEABLE": unparseableRule,
