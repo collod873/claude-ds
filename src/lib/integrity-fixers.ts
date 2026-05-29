@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { IntegrityFinding, IntegrityRuleId } from "./integrity-rules.js";
 import { evaluateIntegrity } from "./integrity-rules.js";
+import { INTEGRITY_RULES_BY_ID } from "./integrity/registry.js";
 import type { Change, Operation } from "./operation.js";
 import type { ProjectContext } from "./project.js";
 
@@ -30,20 +31,15 @@ function headPassesIntegrity(filePath: string, headContent: string): boolean {
   return findings.length === 0;
 }
 
-const FIXABLE_INTEGRITY_RULES = new Set<IntegrityRuleId>([
-  "INTEGRITY-UNPARSEABLE",
-  "INTEGRITY-ORPHANED-FROM",
-]);
-
 export function isIntegrityFixable(ruleId: IntegrityRuleId): boolean {
-  return FIXABLE_INTEGRITY_RULES.has(ruleId);
+  return INTEGRITY_RULES_BY_ID[ruleId].fixable;
 }
 
 export async function fixIntegrity(
   finding: IntegrityFinding,
   cwd: string,
 ): Promise<IntegrityFixResult> {
-  if (!FIXABLE_INTEGRITY_RULES.has(finding.ruleId)) {
+  if (!INTEGRITY_RULES_BY_ID[finding.ruleId].fixable) {
     return {
       finding,
       fixed: false,

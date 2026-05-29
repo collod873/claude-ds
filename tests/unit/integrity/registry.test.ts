@@ -34,19 +34,19 @@ describe("INTEGRITY_RULES_BY_ID (registry totality)", () => {
     }
   });
 
-  it("every entry's description matches the legacy RULE_REGISTRY lookup", () => {
+  it("every entry's description matches integrityRuleDescription", () => {
     for (const id of allIntegrityRuleIds()) {
       expect(INTEGRITY_RULES_BY_ID[id].description).toBe(integrityRuleDescription(id));
     }
   });
 
-  it("every entry's severity matches the legacy SEVERITY_MAP lookup", () => {
+  it("every entry's severity matches integrityRuleSeverity", () => {
     for (const id of allIntegrityRuleIds()) {
       expect(INTEGRITY_RULES_BY_ID[id].severity).toBe(integrityRuleSeverity(id));
     }
   });
 
-  it("every entry's fixable flag matches the legacy isIntegrityFixable", () => {
+  it("every entry's fixable flag matches isIntegrityFixable", () => {
     for (const id of allIntegrityRuleIds()) {
       expect(INTEGRITY_RULES_BY_ID[id].fixable).toBe(isIntegrityFixable(id));
     }

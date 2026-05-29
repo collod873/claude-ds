@@ -2,6 +2,7 @@ import ts from "typescript";
 import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Severity } from "./severity.js";
+import { INTEGRITY_RULES, INTEGRITY_RULES_BY_ID } from "./integrity/registry.js";
 
 export type IntegrityRuleId =
   | "INTEGRITY-UNPARSEABLE"
@@ -20,31 +21,16 @@ export interface IntegrityContext {
   tsconfigPaths?: Record<string, string[]>;
 }
 
-const RULE_REGISTRY: Record<IntegrityRuleId, string> = {
-  "INTEGRITY-UNPARSEABLE":
-    "File cannot be parsed as TypeScript/JSX — may have broken syntax from a fixer bug or manual edit",
-  "INTEGRITY-ORPHANED-FROM":
-    "File contains '} from' without a matching import opener — likely a fixer stripped the import declaration",
-  "INTEGRITY-UNRESOLVABLE-IMPORT":
-    "File imports a path that does not resolve to an existing file or directory index",
-};
-
-const SEVERITY_MAP: Record<IntegrityRuleId, Severity> = {
-  "INTEGRITY-UNPARSEABLE": "error",
-  "INTEGRITY-ORPHANED-FROM": "error",
-  "INTEGRITY-UNRESOLVABLE-IMPORT": "error",
-};
-
 export function integrityRuleDescription(id: IntegrityRuleId): string {
-  return RULE_REGISTRY[id];
+  return INTEGRITY_RULES_BY_ID[id].description;
 }
 
 export function allIntegrityRuleIds(): IntegrityRuleId[] {
-  return Object.keys(RULE_REGISTRY) as IntegrityRuleId[];
+  return Object.keys(INTEGRITY_RULES_BY_ID) as IntegrityRuleId[];
 }
 
 export function integrityRuleSeverity(id: IntegrityRuleId): Severity {
-  return SEVERITY_MAP[id];
+  return INTEGRITY_RULES_BY_ID[id].severity;
 }
 
 export function evalUnparseable(file: string, source: string): IntegrityFinding | null {
@@ -210,19 +196,20 @@ export function evaluateIntegrity(
   source: string,
   ctx?: IntegrityContext,
 ): IntegrityFinding[] | Promise<IntegrityFinding[]> {
-  const findings: IntegrityFinding[] = [];
-
-  const unparseable = evalUnparseable(file, source);
-  if (unparseable) findings.push(unparseable);
-
-  const orphaned = evalOrphanedFrom(file, source);
-  if (orphaned) findings.push(orphaned);
-
-  if (!ctx) return findings;
+  if (!ctx) {
+    const findings: IntegrityFinding[] = [];
+    for (const rule of INTEGRITY_RULES) {
+      const r = rule.detect(file, source);
+      if (Array.isArray(r)) findings.push(...r);
+    }
+    return findings;
+  }
 
   return (async () => {
-    const unresolvable = await evalUnresolvableImport(file, source, ctx);
-    findings.push(...unresolvable);
+    const findings: IntegrityFinding[] = [];
+    for (const rule of INTEGRITY_RULES) {
+      findings.push(...(await rule.detect(file, source, ctx)));
+    }
     return findings;
   })();
 }
