@@ -1,25 +1,26 @@
 ---
 name: merge
-description: Merge open reviewed PRs in smart order and pull to local. Use when Collin types /merge to land a batch of agent PRs.
+description: Merge open PRs in smart order and pull to local. Use when Collin types /merge to land a batch of agent PRs.
 ---
 
-# /merge — batch-merge reviewed PRs
+# /merge — batch-merge open PRs
 
-Merge all `ready-to-merge` PRs in smart order, then pull main locally.
+Merge all open PRs in smart order, then pull main locally.
 
 ## Steps
 
 1. List candidates:
    ```
-   gh pr list --repo collod873/claude-ds --label ready-to-merge --state open --json number,title,mergeable,mergeStateStatus
+   gh pr list --repo collod873/claude-ds --state open --json number,title,mergeable,mergeStateStatus,labels
    ```
 
-2. If none found, tell Collin "no PRs ready to merge" and stop.
+2. If none found, tell Collin "no open PRs" and stop.
 
 3. Sort order:
    - Mergeable (CLEAN) PRs first
    - Among those, lower PR number first (oldest = fewest potential conflicts)
    - CONFLICTING PRs last (these may resolve after earlier merges land)
+   - Skip anything in a non-mergeable state for reasons other than conflicts (e.g. BLOCKED on failing checks or required review) — report it, don't merge.
 
 4. Show the ordered list and confirm: "Merging N PRs in this order — go?"
 
