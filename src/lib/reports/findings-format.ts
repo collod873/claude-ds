@@ -1,5 +1,5 @@
 import { ruleSeverity, type DriftRuleId } from "../drift/index.js";
-import { integrityRuleSeverity, type IntegrityRuleId } from "../integrity-rules.js";
+import { integrityRuleSeverity, type IntegrityRuleId } from "../integrity/index.js";
 
 export interface FindingForFormat {
   ruleId: string;

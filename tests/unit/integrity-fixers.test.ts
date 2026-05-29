@@ -3,8 +3,10 @@ import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { fixIntegrity, isIntegrityFixable, integrityFixerAsOperation } from "../../src/lib/integrity-fixers";
-import type { IntegrityFinding } from "../../src/lib/integrity-rules";
+import { isIntegrityFixable, integrityFixerAsOperation } from "../../src/lib/integrity/index";
+import { restoreFromHead } from "../../src/lib/integrity/restore-from-head";
+import { INTEGRITY_RULES_BY_ID } from "../../src/lib/integrity/registry";
+import type { IntegrityFinding, IntegrityFixResult } from "../../src/lib/integrity/index";
 import type { ProjectContext } from "../../src/lib/project";
 
 function initGitRepo(dir: string): void {
@@ -65,7 +67,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await fixIntegrity(finding, dir);
+      const result = await restoreFromHead(finding, dir);
 
       expect(result.fixed).toBe(true);
       expect(result.changes).toHaveLength(1);
@@ -96,7 +98,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await fixIntegrity(finding, dir);
+      const result = await restoreFromHead(finding, dir);
 
       expect(result.fixed).toBe(false);
       expect(result.changes).toHaveLength(0);
@@ -118,7 +120,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await fixIntegrity(finding, dir);
+      const result = await restoreFromHead(finding, dir);
 
       expect(result.fixed).toBe(false);
       expect(result.changes).toHaveLength(0);
@@ -145,7 +147,7 @@ describe("integrity-fixers", () => {
         message: "Orphaned '} from' at line 1",
       };
 
-      const result = await fixIntegrity(finding, dir);
+      const result = await restoreFromHead(finding, dir);
 
       expect(result.fixed).toBe(true);
       expect(result.changes).toHaveLength(1);
@@ -164,7 +166,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await fixIntegrity(finding, dir);
+      const result = await restoreFromHead(finding, dir);
 
       expect(result.fixed).toBe(false);
       expect(result.changes).toHaveLength(0);
@@ -207,7 +209,7 @@ describe("integrity-fixers", () => {
     });
 
     it("plan() returns [] and result.fixed=false when fixer declines", async () => {
-      // No git repo → fixIntegrity declines.
+      // No git repo → restoreFromHead declines.
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });
       const brokenSource = `export function Chip( { return <span />; }\n`;
       await writeFile(join(dir, "design-system/atoms/chip.tsx"), brokenSource);
@@ -226,6 +228,115 @@ describe("integrity-fixers", () => {
       expect(op.result).not.toBeNull();
       expect(op.result!.fixed).toBe(false);
       expect(op.result!.finding).toBe(finding);
+    });
+
+    it("plan() returns [] and a 'no auto-fix' result for non-fixable rules", async () => {
+      const finding: IntegrityFinding = {
+        ruleId: "INTEGRITY-UNRESOLVABLE-IMPORT",
+        file: "design-system/atoms/chip.tsx",
+        message: 'Import "missing" does not resolve to an existing file',
+      };
+
+      const op = integrityFixerAsOperation(finding);
+      const ctx = { cwd: dir } as unknown as ProjectContext;
+      const changes = await op.plan(ctx);
+
+      expect(changes).toHaveLength(0);
+      expect(op.result).not.toBeNull();
+      expect(op.result!.fixed).toBe(false);
+      expect(op.result!.message).toMatch(/no auto-fix/i);
+    });
+  });
+
+  describe("integrityFixerAsOperation: ADR-0014 validation gate (#239)", () => {
+    // Temporarily replace a real rule's `fix` with one that emits broken
+    // output. Mirrors `fixerAsOperation`'s validation-gate test (#221) — the
+    // gate runs `validateFixerOutput` on every Change the rule's `fix`
+    // returns and converts a rejection into one `abort` Change.
+    let originalFix:
+      | ((finding: IntegrityFinding, cwd: string) => Promise<IntegrityFixResult>)
+      | undefined;
+
+    beforeEach(() => {
+      const rule = INTEGRITY_RULES_BY_ID["INTEGRITY-UNPARSEABLE"];
+      if (rule.fixable) originalFix = rule.fix;
+    });
+
+    afterEach(() => {
+      const rule = INTEGRITY_RULES_BY_ID["INTEGRITY-UNPARSEABLE"];
+      if (rule.fixable && originalFix) rule.fix = originalFix;
+    });
+
+    it("plan() returns one abort Change when fix output fails validateFixerOutput", async () => {
+      const validBefore = `export function Chip() { return <span />; }\n`;
+      const brokenAfter = `export function Chip( { return <span />; }\n`;
+
+      const rule = INTEGRITY_RULES_BY_ID["INTEGRITY-UNPARSEABLE"];
+      if (!rule.fixable) throw new Error("test setup expects a fixable rule");
+      rule.fix = async (finding: IntegrityFinding) => ({
+        finding,
+        fixed: true,
+        message: "applied",
+        changes: [{
+          kind: "write" as const,
+          path: finding.file,
+          before: Buffer.from(validBefore),
+          after: Buffer.from(brokenAfter),
+        }],
+      });
+
+      const finding: IntegrityFinding = {
+        ruleId: "INTEGRITY-UNPARSEABLE",
+        file: "design-system/atoms/chip.tsx",
+        message: "File has syntax errors",
+      };
+
+      const op = integrityFixerAsOperation(finding);
+      const ctx = { cwd: dir } as unknown as ProjectContext;
+      const changes = await op.plan(ctx);
+
+      expect(changes).toHaveLength(1);
+      expect(changes[0].kind).toBe("abort");
+      if (changes[0].kind === "abort") {
+        expect(changes[0].path).toBe("design-system/atoms/chip.tsx");
+        expect(changes[0].reason).toMatch(/INTEGRITY-UNPARSEABLE/);
+      }
+      expect(op.result).not.toBeNull();
+      expect(op.result!.fixed).toBe(false);
+      expect(op.result!.message).toMatch(/INTEGRITY-UNPARSEABLE/);
+    });
+
+    it("plan() returns the fix Changes unchanged when validation passes", async () => {
+      const validBefore = `export function Chip() { return <span />; }\n`;
+      const validAfter = `export function Chip() { return <div />; }\n`;
+
+      const rule = INTEGRITY_RULES_BY_ID["INTEGRITY-UNPARSEABLE"];
+      if (!rule.fixable) throw new Error("test setup expects a fixable rule");
+      rule.fix = async (finding: IntegrityFinding) => ({
+        finding,
+        fixed: true,
+        message: "applied",
+        changes: [{
+          kind: "write" as const,
+          path: finding.file,
+          before: Buffer.from(validBefore),
+          after: Buffer.from(validAfter),
+        }],
+      });
+
+      const finding: IntegrityFinding = {
+        ruleId: "INTEGRITY-UNPARSEABLE",
+        file: "design-system/atoms/chip.tsx",
+        message: "File has syntax errors",
+      };
+
+      const op = integrityFixerAsOperation(finding);
+      const ctx = { cwd: dir } as unknown as ProjectContext;
+      const changes = await op.plan(ctx);
+
+      expect(changes).toHaveLength(1);
+      expect(changes[0].kind).toBe("write");
+      expect(op.result!.fixed).toBe(true);
     });
   });
 });

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { checkThreeSignals } from "../three-signal.js";
-import { evaluateIntegrity, type IntegrityFinding } from "../integrity-rules.js";
+import { evaluateIntegrity, isIntegrityBlocking, type IntegrityFinding } from "../integrity/index.js";
 import type { DriftFinding } from "../drift/index.js";
 import { walkDir } from "./unexpected-files.js";
 
@@ -74,8 +74,8 @@ export async function scanDriftAndIntegrity(opts: {
     scannedFiles.add(filePath);
 
     const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases, tsconfigPaths });
-    const blockingIntegrity = integrityFindings.filter(f => f.ruleId !== "INTEGRITY-UNRESOLVABLE-IMPORT");
-    const nonBlockingIntegrity = integrityFindings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
+    const blockingIntegrity = integrityFindings.filter(f => isIntegrityBlocking(f.ruleId));
+    const nonBlockingIntegrity = integrityFindings.filter(f => !isIntegrityBlocking(f.ruleId));
     findings.push(...nonBlockingIntegrity);
     for (const f of nonBlockingIntegrity) filesWithFindings.add(f.file);
     if (blockingIntegrity.length > 0) {
