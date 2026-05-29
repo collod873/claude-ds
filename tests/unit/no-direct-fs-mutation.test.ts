@@ -23,19 +23,20 @@ const ALLOWLIST = new Set<string>([
 ]);
 
 // Word-boundary patterns — only match the bare identifier, not substrings.
+// `rename` uses a call-site pattern (`\brename\s*\(`) so that destructured,
+// namespace-imported, and dynamically-imported call sites are all caught,
+// while harmless occurrences like `Change.kind === "rename"`, `kind: "rename"`,
+// and `import { rename }` (no `(`) are skipped — those don't actually mutate
+// bytes, the trailing `(` does.
 const MUTATING_FNS = [
   /\bwriteFile\b/,
   /\bwriteFileSync\b/,
   /\bunlink\b/,
   /\bunlinkSync\b/,
+  /\brename\s*\(/,
   /\brenameSync\b/,
   /\bmkdirSync\b/,
 ];
-
-// `rename` is too ambiguous on its own (it appears in `Change.kind === "rename"`,
-// in comments, in variable names). Detect it by the import line instead — only
-// `import { rename, ... } from "node:fs/promises"` (in either order).
-const FS_PROMISES_RENAME = /import\s+\{[^}]*\brename\b[^}]*\}\s+from\s+["']node:fs\/promises["']/;
 
 async function* walkTs(dir: string): AsyncIterable<string> {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -62,11 +63,6 @@ async function scanForOffenders(rootDir: string): Promise<string[]> {
     const code = stripComments(content);
     for (const pattern of MUTATING_FNS) {
       if (pattern.test(code)) offenders.push(`${rel}: matches ${pattern}`);
-    }
-    for (const line of code.split("\n")) {
-      if (FS_PROMISES_RENAME.test(line)) {
-        offenders.push(`${rel}: imports rename from node:fs/promises`);
-      }
     }
   }
   return offenders;
