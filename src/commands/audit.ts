@@ -1,12 +1,12 @@
-import { readFile, writeFile, stat, mkdir, unlink } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseManifest } from "../lib/manifest.js";
+import { parseManifest, type Manifest } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
 import { info, err, printNextStep, detectBuildCommand } from "../lib/log.js";
 import { detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
-import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
+import { parseExceptions, type Exception } from "../lib/exceptions.js";
 import {
   isExtractionNeededFinding,
   makeNoTtyPrompt,
@@ -35,27 +35,28 @@ import {
 } from "../lib/reports/unexpected-files.js";
 import { scanDriftAndIntegrity, type AuditFinding } from "../lib/reports/drift-integrity-scan.js";
 import { formatFindings, formatScorecard } from "../lib/reports/findings-format.js";
+import { addToConsumerManifest } from "../lib/ops/add-to-consumer-manifest.js";
+import { appendExceptions } from "../lib/ops/append-exceptions.js";
+import { makeDeleteFiles } from "../lib/ops/reconcile-mutations.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
-async function addToConsumerManifest(cwd: string, packDir: string, paths: string[]): Promise<void> {
-  const consumerPath = join(cwd, "design-system/manifest.json");
-  let manifestJson: Record<string, unknown>;
-  try {
-    manifestJson = JSON.parse(await readFile(consumerPath, "utf8"));
-  } catch {
-    manifestJson = JSON.parse(await readFile(join(packDir, "manifest.json"), "utf8"));
-  }
-  const files = (manifestJson.files ?? []) as Array<{ path: string; category: string }>;
-  const existingPaths = new Set(files.map(f => f.path));
-  for (const p of paths) {
-    if (!existingPaths.has(p)) {
-      files.push({ path: p, category: "seeded" });
-    }
-  }
-  manifestJson.files = files;
-  await mkdir(dirname(consumerPath), { recursive: true });
-  await writeFile(consumerPath, JSON.stringify(manifestJson, null, 2) + "\n", "utf8");
+function makeAuditCtx(
+  projectCtx: ProjectContext | null,
+  cwd: string,
+  cfg: Config | null,
+  packDir: string,
+  manifest: Manifest,
+): ProjectContext {
+  if (projectCtx) return projectCtx;
+  return {
+    cwd,
+    cfg: (cfg ?? {}) as Config,
+    packDir,
+    manifest,
+    exists: (p: string) => exists(join(cwd, p)),
+    decisions: {},
+  };
 }
 
 export interface AuditOpts {
@@ -159,19 +160,29 @@ export async function auditCmd(opts: AuditOpts) {
   }
   warningCount += unexpected.strictFindings.length;
 
+  const auditCtx = makeAuditCtx(projectCtx, cwd, cfg, packDir, manifest);
+
   // --fix: handle open roots and deprecated matches
   if (opts.fix) {
     if (unexpected.openFindings.length > 0) {
-      try {
-        await addToConsumerManifest(cwd, packDir, unexpected.openFindings.map(f => f.path));
+      const manifestReport = await run(
+        auditCtx,
+        [addToConsumerManifest(unexpected.openFindings.map(f => f.path))],
+        "apply",
+      );
+      if (!manifestReport.failed) {
         info(`tracked ${unexpected.openFindings.length} user extension(s) in consumer manifest`);
-      } catch { /* best-effort — consumer manifest may not be writable */ }
+      }
     }
-    for (const f of unexpected.deprecatedMatches) {
-      try {
-        await unlink(join(cwd, f.path));
-        info(`deleted (deprecated-related): ${f.path}`);
-      } catch { /* already gone */ }
+    if (unexpected.deprecatedMatches.length > 0) {
+      const deleteReport = await run(
+        auditCtx,
+        [makeDeleteFiles(unexpected.deprecatedMatches.map(f => f.path))],
+        "apply",
+      );
+      for (const c of deleteReport.applied) {
+        if (c.kind === "delete") info(`deleted (deprecated-related): ${c.path}`);
+      }
     }
   } else {
     for (const line of formatDeprecatedMatchWarnings(unexpected.deprecatedMatches)) {
@@ -226,8 +237,7 @@ export async function auditCmd(opts: AuditOpts) {
     );
 
     const integrityOps = integrityToFix.map(integrityFixerAsOperation);
-    const integrityCtx = (projectCtx ?? ({ cwd } as unknown as ProjectContext));
-    const integrityReport = await run(integrityCtx, integrityOps, "apply", { rollbackOnFailure: true });
+    const integrityReport = await run(auditCtx, integrityOps, "apply", { rollbackOnFailure: true });
     if (integrityReport.failed) {
       err(`Integrity-fix pass failed — all changes rolled back. ${integrityReport.failed.error}`);
       process.exit(1);
@@ -340,8 +350,7 @@ export async function auditCmd(opts: AuditOpts) {
       }
       if (remainingExceptions.length < exceptions.length) {
         const removed = exceptions.length - remainingExceptions.length;
-        await mkdir(dirname(exceptionsPath), { recursive: true });
-        await writeFile(exceptionsPath, serializeExceptions(remainingExceptions), "utf8");
+        await run(auditCtx, [appendExceptions(remainingExceptions)], "apply");
         info(`${removed} stale exception(s) removed from exceptions.json`);
         exceptions = remainingExceptions;
         suppressedSet.clear();
@@ -438,8 +447,7 @@ export async function auditCmd(opts: AuditOpts) {
 
       if (autoDeferred.length > 0) {
         const merged = [...exceptions, ...autoDeferred];
-        await mkdir(dirname(exceptionsPath), { recursive: true });
-        await writeFile(exceptionsPath, serializeExceptions(merged), "utf8");
+        await run(auditCtx, [appendExceptions(merged)], "apply");
         info(`${autoDeferred.length} finding(s) auto-deferred to exceptions.json (non-TTY mode)`);
       }
 
@@ -460,8 +468,7 @@ export async function auditCmd(opts: AuditOpts) {
       return entry;
     });
     const merged = [...exceptions, ...newExceptions];
-    await mkdir(dirname(exceptionsPath), { recursive: true });
-    await writeFile(exceptionsPath, serializeExceptions(merged), "utf8");
+    await run(auditCtx, [appendExceptions(merged)], "apply");
     info(`${newExceptions.length} exception(s) written to design-system/exceptions.json`);
     activeFindings = [];
   }
