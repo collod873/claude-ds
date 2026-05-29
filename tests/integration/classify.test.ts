@@ -62,6 +62,26 @@ describe("classify", () => {
     expect(r.stdout).toMatch(/invoice-list\.tsx/);
   });
 
+  it("dry-run: emits Runner diff format for moves and meta.kind injection", async () => {
+    await setupBrownfieldFixture();
+    const r = await runCli(["classify", "--src", "src/components", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Runner diff prefixes each line with [op-name] path (rename/modify)
+    expect(r.stdout).toMatch(
+      /\[classify-move-tier-file\] src\/components\/button\.tsx -> design-system\/atoms\/button\.tsx \(rename\)/,
+    );
+    expect(r.stdout).toMatch(
+      /\[classify-move-tier-file\] design-system\/atoms\/button\.tsx \(modify\)/,
+    );
+    // The injected meta.kind stub appears as an added line in the diff
+    expect(r.stdout).toMatch(/\+export const meta = \{ kind: "atom",/);
+    // Composite is rendered too
+    expect(r.stdout).toMatch(
+      /\[classify-move-tier-file\] src\/components\/card\.tsx -> design-system\/composites\/card\.tsx \(rename\)/,
+    );
+    expect(r.stdout).toMatch(/\+export const meta = \{ kind: "composite",/);
+  });
+
   it("dry-run: does not mutate any files", async () => {
     await setupBrownfieldFixture();
     await runCli(["classify", "--src", "src/components", "--dry-run"], { cwd: dir });

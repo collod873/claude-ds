@@ -1,8 +1,6 @@
-import { readFile, readdir, stat, mkdir, writeFile } from "node:fs/promises";
-import { mkdirSync, renameSync } from "node:fs";
+import { readFile, readdir, stat, writeFile, mkdir } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { info, err, confirm, printNextStep } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, countDsComponentImports, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
@@ -10,6 +8,8 @@ import { detectDsAliases } from "../lib/ds-aliases.js";
 import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
 import { run } from "../lib/runner.js";
+import { moveTierFile } from "../lib/ops/move-tier-file.js";
+import type { Operation } from "../lib/operation.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
@@ -62,34 +62,10 @@ function tierToDir(tier: "atom" | "composite"): string {
   return tier === "atom" ? "design-system/atoms" : "design-system/composites";
 }
 
-/** Inject meta.kind stub into source if not already present. */
-function ensureMetaKind(source: string, kind: "atom" | "composite"): string {
-  const META_RE = /export\s+const\s+meta\b/;
-  if (META_RE.test(source)) return source;
-
-  const hasCva = source.includes("cva(");
-  const stub = hasCva
-    ? `export const meta = { kind: "${kind}", examples: [], skip: [] } as const;\n`
-    : `export const meta = { kind: "${kind}", examples: [{ name: "default", props: {} }] } as const;\n`;
-
-  const sep = source.endsWith("\n\n") ? "" : source.endsWith("\n") ? "\n" : "\n\n";
-  return source + sep + stub;
-}
-
-function moveFile(cwd: string, fromRel: string, toRel: string): void {
-  const isGitRepo =
-    spawnSync("git", ["rev-parse", "--git-dir"], { cwd, stdio: "ignore" }).status === 0;
-
-  mkdirSync(dirname(join(cwd, toRel)), { recursive: true });
-
-  if (isGitRepo) {
-    const r = spawnSync("git", ["mv", fromRel, toRel], { cwd, encoding: "utf8" });
-    if (r.status !== 0) {
-      throw new Error(`git mv ${fromRel} → ${toRel} failed: ${r.stderr || r.stdout}`);
-    }
-  } else {
-    renameSync(join(cwd, fromRel), join(cwd, toRel));
-  }
+interface MovePlan {
+  srcRel: string;
+  destRel: string;
+  label: string;
 }
 
 export async function classifyCmd(opts: {
@@ -205,7 +181,34 @@ export async function classifyCmd(opts: {
     for (const f of unknowns) info(`  ${basename(f.srcRel)}`);
   }
 
+  // Build planned moves for atoms + composites (always) and features (apply-time
+  // gated by per-bucket confirmation; included in dry-run for full preview).
+  const tierPlans: MovePlan[] = [];
+  for (const f of [...atoms, ...composites]) {
+    if (f.tier !== "atom" && f.tier !== "composite") continue;
+    const tier = f.tier;
+    const destDir = tierToDir(tier);
+    const destRel = `${destDir}/${basename(f.srcRel)}`;
+    tierPlans.push({ srcRel: f.srcRel, destRel, label: tier });
+  }
+
   if (dryRun) {
+    const featurePlans: MovePlan[] = features.map(f => {
+      const bucket = f.domainBucket ?? "features/unknown";
+      const destRel = `${bucket}/${basename(f.srcRel)}`;
+      return { srcRel: f.srcRel, destRel, label: "feature" };
+    });
+    const allPlans = [...tierPlans, ...featurePlans];
+    if (allPlans.length > 0) {
+      const ops: Operation[] = allPlans.map(p =>
+        moveTierFile(
+          p.srcRel,
+          p.destRel,
+          p.label === "atom" || p.label === "composite" ? { kind: p.label } : undefined,
+        ),
+      );
+      await run(ctx, ops, "dry-run");
+    }
     info(`[dry-run] ${classified.length} file(s) classified — run without --dry-run to apply`);
     return;
   }
@@ -223,60 +226,35 @@ export async function classifyCmd(opts: {
     }
   }
 
-  // Apply: move DS-tier files (atoms + composites)
-  let moved = 0;
-  for (const f of [...atoms, ...composites]) {
-    if (f.tier !== "atom" && f.tier !== "composite") continue; // narrows tier
-    const tier = f.tier;
-    const destDir = tierToDir(tier);
-    const destRel = `${destDir}/${basename(f.srcRel)}`;
-
-    // Read source before moving (git mv or rename changes the path)
-    let source: string;
-    try {
-      source = await readFile(join(cwd, f.srcRel), "utf8");
-    } catch {
-      err(`classify: could not read ${f.srcRel} — skipping`);
-      continue;
-    }
-
-    // Ensure destination dir exists
-    await mkdir(join(cwd, destDir), { recursive: true });
-
-    // Move the file
-    try {
-      moveFile(cwd, f.srcRel, destRel);
-    } catch (e) {
-      err(`classify: ${(e as Error).message}`);
-      continue;
-    }
-
-    // Write meta.kind into the moved file if absent
-    const withMeta = ensureMetaKind(source, tier);
-    if (withMeta !== source) {
-      await writeFile(join(cwd, destRel), withMeta, "utf8");
-    }
-
-    info(`classify: ${f.srcRel} → ${destRel} (${tier})`);
-    moved++;
-  }
-
-  // Apply: move feature-tier files to confirmed buckets
+  // Add confirmed feature moves to the plan
   for (const f of features) {
     const bucket = f.domainBucket ?? "features/unknown";
     if (!confirmedBuckets.has(bucket)) continue;
+    const destRel = `${bucket}/${basename(f.srcRel)}`;
+    tierPlans.push({ srcRel: f.srcRel, destRel, label: "feature" });
+  }
 
-    const destDir = bucket;
-    const destRel = `${destDir}/${basename(f.srcRel)}`;
-
-    await mkdir(join(cwd, destDir), { recursive: true });
-
-    try {
-      moveFile(cwd, f.srcRel, destRel);
-      info(`classify: ${f.srcRel} → ${destRel} (feature)`);
+  // Apply all planned moves through the Runner
+  let moved = 0;
+  if (tierPlans.length > 0) {
+    const ops: Operation[] = tierPlans.map(p =>
+      moveTierFile(
+        p.srcRel,
+        p.destRel,
+        p.label === "atom" || p.label === "composite" ? { kind: p.label } : undefined,
+      ),
+    );
+    const report = await run(ctx, ops, "apply");
+    const planBySrc = new Map(tierPlans.map(p => [p.srcRel, p]));
+    for (const c of report.applied) {
+      if (c.kind !== "rename") continue;
+      const p = planBySrc.get(c.path);
+      if (!p) continue;
+      info(`classify: ${p.srcRel} → ${p.destRel} (${p.label})`);
       moved++;
-    } catch (e) {
-      err(`classify: ${(e as Error).message}`);
+    }
+    if (report.failed) {
+      err(`classify: ${report.failed.error}`);
     }
   }
 
@@ -346,6 +324,7 @@ export async function classifyCmd(opts: {
       atomEntries = [];
     }
     const exceptionsToAdd: Exception[] = [];
+    const ambiguityMoves: MovePlan[] = [];
     for (const e of atomEntries) {
       if (!e.isFile() || !e.name.endsWith(".tsx")) continue;
       if (COMPANION_SUFFIXES.some(s => e.name.endsWith(s))) continue;
@@ -368,21 +347,8 @@ export async function classifyCmd(opts: {
       );
 
       if (answer === 1) {
-        // Move to composites — respect the user's answer regardless of the classifier (issue #206).
         const destRel = `design-system/composites/${e.name}`;
-        await mkdir(join(cwd, "design-system/composites"), { recursive: true });
-        try {
-          moveFile(cwd, atomRel, destRel);
-        } catch (moveErr) {
-          err(`classify: ${(moveErr as Error).message}`);
-          continue;
-        }
-        // Flip meta.kind atom -> composite so audit doesn't immediately re-flag the moved file.
-        const movedSrc = await readFile(join(cwd, destRel), "utf8");
-        const flipped = movedSrc.replace(/(\bkind\s*:\s*["'])atom(["'])/, "$1composite$2");
-        if (flipped !== movedSrc) await writeFile(join(cwd, destRel), flipped, "utf8");
-        info(`classify: ${atomRel} → ${destRel} (composite — user confirmed)`);
-        movedCount++;
+        ambiguityMoves.push({ srcRel: atomRel, destRel, label: "composite — user confirmed" });
       } else if (answer === 0) {
         // Keep as atom — suppress audit's ambiguity finding for this file going forward.
         exceptionsToAdd.push({
@@ -396,6 +362,25 @@ export async function classifyCmd(opts: {
       } else {
         // "defer"/skip — leave the file untouched; audit will surface it again next run.
         info(`classify: ${atomRel} — skipped (will be flagged again on next audit)`);
+      }
+    }
+
+    if (ambiguityMoves.length > 0) {
+      const ctxAmb = await loadProject(cwd);
+      const ops: Operation[] = ambiguityMoves.map(p =>
+        moveTierFile(p.srcRel, p.destRel, { kind: "composite" }),
+      );
+      const report = await run(ctxAmb, ops, "apply");
+      const planBySrc = new Map(ambiguityMoves.map(p => [p.srcRel, p]));
+      for (const c of report.applied) {
+        if (c.kind !== "rename") continue;
+        const p = planBySrc.get(c.path);
+        if (!p) continue;
+        info(`classify: ${p.srcRel} → ${p.destRel} (${p.label})`);
+        movedCount++;
+      }
+      if (report.failed) {
+        err(`classify: ${report.failed.error}`);
       }
     }
 
