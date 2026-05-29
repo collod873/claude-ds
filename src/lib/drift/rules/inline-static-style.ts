@@ -1,0 +1,350 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+import type { Change } from "../../operation.js";
+
+import type {
+  DriftFinding,
+  DriftRule,
+  DriftRuleInput,
+  FixResult,
+  FixerOpts,
+} from "../rule.js";
+
+/**
+ * Match a JSX style={{ ... }} where every property value is a static literal.
+ * Uses a regex over the full pattern — matches only when ALL values are
+ * primitives (strings, numbers, booleans, null/undefined). Exempt when any
+ * value is a computed expression, variable, function call, spread, or
+ * template literal with interpolation.
+ */
+const STATIC_STYLE_RE = new RegExp(
+  "style\\s*=\\s*\\{\\{\\s*" +
+  "(?:" +
+    "[a-zA-Z_$][\\w$]*\\s*:\\s*" +
+    "(?:" +
+      "'(?:[^'\\\\]|\\\\.)*'" +     // single-quoted string
+      '|"(?:[^"\\\\]|\\\\.)*"' +    // double-quoted string
+      "|`[^`$]*`" +                  // template literal without expressions
+      "|-?\\d+(?:\\.\\d+)?" +        // number (including negative/decimal)
+      "|true|false|null|undefined" + // keyword literals
+    ")" +
+    "\\s*,?\\s*" +
+  ")+" +
+  "\\}\\}",
+);
+
+/** DRIFT-INLINE-STATIC-STYLE: inline style={{}} with all-literal values. */
+function detect(input: DriftRuleInput): DriftFinding | null {
+  const { file, locationTier, source } = input;
+  if (locationTier === null) return null;
+  if (source === undefined) return null;
+  if (!STATIC_STYLE_RE.test(source)) return null;
+  return {
+    ruleId: "DRIFT-INLINE-STATIC-STYLE",
+    file,
+    message:
+      "inline style={} with literal values — use design tokens instead",
+  };
+}
+
+interface TokenEntry {
+  className: string;
+  value: string;
+  group: string;
+}
+
+function flattenTokens(obj: unknown, prefix: string[] = []): TokenEntry[] {
+  const entries: TokenEntry[] = [];
+  if (obj === null || obj === undefined || typeof obj !== "object") return entries;
+  for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
+    const path = [...prefix, key];
+    if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+      entries.push(...flattenTokens(val, path));
+    } else {
+      entries.push({
+        className: path.join("-"),
+        value: String(val),
+        group: prefix[0] ?? key,
+      });
+    }
+  }
+  return entries;
+}
+
+const CSS_PROP_TOKEN_GROUP: Record<string, string> = {
+  color: "color",
+  backgroundColor: "color",
+  borderColor: "color",
+  outlineColor: "color",
+  fill: "color",
+  stroke: "color",
+  zIndex: "z",
+  boxShadow: "shadow",
+  transitionDuration: "motion",
+  animationDuration: "motion",
+  transitionTimingFunction: "motion",
+  padding: "spacing",
+  paddingTop: "spacing",
+  paddingBottom: "spacing",
+  paddingLeft: "spacing",
+  paddingRight: "spacing",
+  margin: "spacing",
+  marginTop: "spacing",
+  marginBottom: "spacing",
+  marginLeft: "spacing",
+  marginRight: "spacing",
+  gap: "spacing",
+  rowGap: "spacing",
+  columnGap: "spacing",
+};
+
+function normalizeTokenValue(value: string): string {
+  return value.toLowerCase().trim();
+}
+
+function valuesMatch(tokenValue: string, sourceValue: string): boolean {
+  if (tokenValue === sourceValue) return true;
+  const normToken = normalizeTokenValue(tokenValue);
+  const normSource = normalizeTokenValue(sourceValue);
+  if (normToken === normSource) return true;
+  // Strip units from source (e.g., "16px" → "16") and compare to token
+  const strippedSource = normSource.replace(/^(-?\d+(?:\.\d+)?)\s*(px|rem|em|%)$/, "$1");
+  if (normToken === strippedSource) return true;
+  // Token might have units, source might not
+  const strippedToken = normToken.replace(/^(-?\d+(?:\.\d+)?)\s*(px|rem|em|%)$/, "$1");
+  if (strippedToken === normSource) return true;
+  return false;
+}
+
+function lookupToken(
+  entries: TokenEntry[],
+  cssProp: string,
+  rawValue: string,
+): TokenEntry[] {
+  const group = CSS_PROP_TOKEN_GROUP[cssProp];
+  return entries.filter(e => {
+    if (!valuesMatch(e.value, rawValue)) return false;
+    if (group && e.group !== group) return false;
+    return true;
+  });
+}
+
+function extractNumeric(value: string): number | null {
+  const m = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*(?:px|rem|em|%)?$/);
+  return m ? parseFloat(m[1]) : null;
+}
+
+interface NearestTokenResult {
+  token: TokenEntry;
+  distance: number;
+  equidistantPeer: TokenEntry | null;
+}
+
+function findNearestNumericToken(
+  entries: TokenEntry[],
+  cssProp: string,
+  rawValue: string,
+): NearestTokenResult | null {
+  const sourceNum = extractNumeric(rawValue);
+  if (sourceNum === null) return null;
+
+  const group = CSS_PROP_TOKEN_GROUP[cssProp];
+  const candidates = entries.filter(e => {
+    if (group && e.group !== group) return false;
+    return extractNumeric(e.value) !== null;
+  });
+
+  if (candidates.length === 0) return null;
+
+  let best: TokenEntry | null = null;
+  let bestDist = Infinity;
+  let equidistant: TokenEntry | null = null;
+
+  for (const c of candidates) {
+    const d = Math.abs(extractNumeric(c.value)! - sourceNum);
+    if (d < bestDist) {
+      best = c;
+      bestDist = d;
+      equidistant = null;
+    } else if (d === bestDist && best !== null) {
+      equidistant = c;
+    }
+  }
+
+  if (!best) return null;
+
+  const threshold = Math.abs(sourceNum) * 2;
+  if (bestDist > threshold) return null;
+
+  return { token: best, distance: bestDist, equidistantPeer: equidistant };
+}
+
+const STYLE_PROP_RE = /([a-zA-Z_$][\w$]*)\s*:\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`[^`$]*`|-?\d+(?:\.\d+)?|true|false|null|undefined)/g;
+
+interface StyleProp {
+  name: string;
+  rawValue: string;
+  normalizedValue: string;
+}
+
+function parseStyleProps(innerBlock: string): StyleProp[] {
+  const props: StyleProp[] = [];
+  let m: RegExpExecArray | null;
+  STYLE_PROP_RE.lastIndex = 0;
+  while ((m = STYLE_PROP_RE.exec(innerBlock)) !== null) {
+    const rawValue = m[2];
+    let normalizedValue = rawValue;
+    if (
+      (rawValue.startsWith('"') && rawValue.endsWith('"')) ||
+      (rawValue.startsWith("'") && rawValue.endsWith("'")) ||
+      (rawValue.startsWith("`") && rawValue.endsWith("`"))
+    ) {
+      normalizedValue = rawValue.slice(1, -1);
+    }
+    props.push({ name: m[1], rawValue, normalizedValue });
+  }
+  return props;
+}
+
+const STATIC_STYLE_BLOCK_RE = new RegExp(
+  "(style\\s*=\\s*\\{\\{\\s*)" +
+  "(" +
+    "(?:" +
+      "[a-zA-Z_$][\\w$]*\\s*:\\s*" +
+      "(?:" +
+        "'(?:[^'\\\\]|\\\\.)*'" +
+        '|"(?:[^"\\\\]|\\\\.)*"' +
+        "|`[^`$]*`" +
+        "|-?\\d+(?:\\.\\d+)?" +
+        "|true|false|null|undefined" +
+      ")" +
+      "\\s*,?\\s*" +
+    ")+" +
+  ")" +
+  "(\\}\\})",
+  "g",
+);
+
+async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(cwd, finding.file);
+  let source: string;
+  try {
+    source = await readFile(absPath, "utf8");
+  } catch {
+    return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
+  }
+
+  let tokensRaw: string;
+  try {
+    tokensRaw = await readFile(join(cwd, "design-system/tokens.json"), "utf8");
+  } catch {
+    return { finding, fixed: false, message: "could not read design-system/tokens.json", changes: [] };
+  }
+
+  let tokens: unknown;
+  try {
+    tokens = JSON.parse(tokensRaw);
+  } catch {
+    return { finding, fixed: false, message: "could not parse design-system/tokens.json", changes: [] };
+  }
+
+  const tokenEntries = flattenTokens(tokens);
+  let anyFixed = false;
+  let result = source;
+
+  STATIC_STYLE_BLOCK_RE.lastIndex = 0;
+  const replacements: Array<{ original: string; replacement: string }> = [];
+
+  let match: RegExpExecArray | null;
+  while ((match = STATIC_STYLE_BLOCK_RE.exec(source)) !== null) {
+    const fullMatch = match[0];
+    const innerBlock = match[2];
+    const props = parseStyleProps(innerBlock);
+
+    const resolved: Array<{ prop: StyleProp; className: string }> = [];
+    const unresolved: StyleProp[] = [];
+
+    for (const prop of props) {
+      const matches = lookupToken(tokenEntries, prop.name, prop.normalizedValue);
+      if (matches.length === 1) {
+        resolved.push({ prop, className: matches[0].className });
+      } else if (matches.length > 1) {
+        resolved.push({ prop, className: matches[0].className });
+      } else {
+        const nearest = findNearestNumericToken(tokenEntries, prop.name, prop.normalizedValue);
+        if (!nearest) {
+          unresolved.push(prop);
+        } else if (nearest.equidistantPeer && opts?.prompt) {
+          const options = [
+            { label: nearest.token.className, description: `Use token class "${nearest.token.className}" (value: ${nearest.token.value})` },
+            { label: nearest.equidistantPeer.className, description: `Use token class "${nearest.equidistantPeer.className}" (value: ${nearest.equidistantPeer.value})` },
+          ];
+          const choice = await opts.prompt(
+            `${finding.file}: "${prop.name}: ${prop.normalizedValue}" is equidistant from two tokens`,
+            options,
+          );
+          if (choice === "defer") {
+            unresolved.push(prop);
+          } else {
+            resolved.push({ prop, className: options[choice].label });
+          }
+        } else if (nearest.equidistantPeer) {
+          unresolved.push(prop);
+        } else {
+          resolved.push({ prop, className: nearest.token.className });
+        }
+      }
+    }
+
+    if (resolved.length === 0) continue;
+
+    const classNames = resolved.map(r => r.className).join(" ");
+    let replacement: string;
+
+    if (unresolved.length === 0) {
+      replacement = `className="${classNames}"`;
+    } else {
+      const remaining = unresolved
+        .map(p => `${p.name}: ${p.rawValue}`)
+        .join(", ");
+      replacement = `className="${classNames}" style={{ ${remaining} }}`;
+    }
+
+    replacements.push({ original: fullMatch, replacement });
+  }
+
+  for (const { original, replacement } of replacements) {
+    const beforeReplace = result;
+    result = result.replace(original, replacement);
+    if (result !== beforeReplace) anyFixed = true;
+  }
+
+  if (!anyFixed) {
+    return { finding, fixed: false, message: `no token matches found for ${finding.file}`, changes: [] };
+  }
+
+  result = result.replace(
+    /className="([^"]*?)"\s+className="([^"]*?)"/g,
+    (_m, existing: string, added: string) => `className="${existing} ${added}"`,
+  );
+
+  const changes: Change[] = [{
+    kind: "write",
+    path: finding.file,
+    before: Buffer.from(source),
+    after: Buffer.from(result),
+  }];
+  return { finding, fixed: true, message: `replaced inline styles with token classes in ${finding.file}`, changes };
+}
+
+export const inlineStaticStyleRule: DriftRule = {
+  id: "DRIFT-INLINE-STATIC-STYLE",
+  severity: "error",
+  description: "File uses inline style={} with a literal value that should be a design token",
+  detect,
+  fixable: true,
+  fix,
+  priority: 2,
+  interactive: false,
+};

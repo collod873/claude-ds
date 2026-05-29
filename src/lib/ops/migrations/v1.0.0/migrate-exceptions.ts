@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change, Operation } from "../../../operation.js";
 import type { ProjectContext } from "../../../project.js";
-import { allRuleIds, type DriftRuleId } from "../../../drift-rules.js";
+import { allRuleIds, type DriftRuleId } from "../../../drift/index.js";
 
 const EXCEPTIONS_PATH = "design-system/exceptions.json";
 

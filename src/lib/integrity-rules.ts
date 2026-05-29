@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { Severity } from "./drift-rules.js";
+import type { Severity } from "./severity.js";
 
 export type IntegrityRuleId =
   | "INTEGRITY-UNPARSEABLE"

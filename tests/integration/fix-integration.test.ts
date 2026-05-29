@@ -4,8 +4,8 @@ import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { checkThreeSignals } from "../../src/lib/three-signal";
 import { runFixPass } from "../../src/lib/fix-pass";
-import type { DriftFinding } from "../../src/lib/drift-rules";
-import type { FixerPrompt, PromptOption } from "../../src/lib/drift-fixers";
+import type { DriftFinding } from "../../src/lib/drift/index.js";
+import type { FixerPrompt, PromptOption } from "../../src/lib/drift/index.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }

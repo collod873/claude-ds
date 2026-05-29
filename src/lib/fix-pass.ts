@@ -1,10 +1,10 @@
 import { mkdir, writeFile, rename, unlink } from "node:fs/promises";
 import { join, dirname, extname } from "node:path";
 import ts from "typescript";
-import type { DriftFinding } from "./drift-rules.js";
+import type { DriftFinding } from "./drift/index.js";
 import type { Change } from "./operation.js";
-import type { FixResult, FixerOpts } from "./drift-fixers.js";
-import { getFixer, getFixerPriority } from "./drift-fixers.js";
+import type { FixResult, FixerOpts } from "./drift/index.js";
+import { getFixer, getFixerPriority } from "./drift/index.js";
 import { regenIndexes } from "./finalizers/regen-indexes.js";
 import { info } from "./log.js";
 

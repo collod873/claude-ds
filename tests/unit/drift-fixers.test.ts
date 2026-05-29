@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { isFixable, getFixer, isInteractive, makeNoTtyPrompt, getFixerPriority, buildVariantOptions } from "../../src/lib/drift-fixers";
-import type { DriftFixer, FixResult, FixerOpts } from "../../src/lib/drift-fixers";
-import type { DriftRuleId } from "../../src/lib/drift-rules";
-import type { DriftFinding } from "../../src/lib/drift-rules";
-import { evaluateDrift, type DriftRuleInput } from "../../src/lib/drift-rules";
+import { isFixable, getFixer, isInteractive, makeNoTtyPrompt, getFixerPriority, buildVariantOptions } from "../../src/lib/drift/index.js";
+import type { DriftFixer, FixResult, FixerOpts } from "../../src/lib/drift/index.js";
+import type { DriftRuleId } from "../../src/lib/drift/index.js";
+import type { DriftFinding } from "../../src/lib/drift/index.js";
+import { evaluateDrift, type DriftRuleInput } from "../../src/lib/drift/index.js";
 import type { Change } from "../../src/lib/operation";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile, stat, rename, unlink } from "node:fs/promises";

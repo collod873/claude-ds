@@ -3,7 +3,7 @@ import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile, stat, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { runFixPass, sortFindingsByPriority } from "../../src/lib/fix-pass";
-import type { DriftFinding } from "../../src/lib/drift-rules";
+import type { DriftFinding } from "../../src/lib/drift/index.js";
 
 describe("fix-pass", () => {
   describe("sortFindingsByPriority", () => {

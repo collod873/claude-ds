@@ -3,7 +3,7 @@ import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { classifyCmd } from "../../src/commands/classify";
-import type { FixerPrompt } from "../../src/lib/drift-fixers";
+import type { FixerPrompt } from "../../src/lib/drift/index.js";
 
 const BASE_CFG = {
   packVersion: "v0.8.0",

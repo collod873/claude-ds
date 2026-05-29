@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseExceptions, type Exception } from "../exceptions.js";
-import type { DriftRuleId } from "../drift-rules.js";
+import type { DriftRuleId } from "../drift/index.js";
 import { info } from "../log.js";
 import type { Violation } from "./run-check-scripts.js";
 
