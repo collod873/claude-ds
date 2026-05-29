@@ -1,6 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { basename, join } from "node:path";
+import picomatch from "picomatch";
 import { info, err, confirm, printNextStep } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, countDsComponentImports, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
@@ -32,8 +33,41 @@ function inferDomainBucket(source: string, domainRoots: string[]): string | null
   return null;
 }
 
-/** Walk a directory and return .tsx/.ts files (relative to cwd), skipping companions. */
-async function walkComponentDir(cwd: string, srcRel: string): Promise<string[]> {
+/**
+ * Build the predicate that keeps classify's walk inside design-system scope
+ * (ADR-0005, issue #209). A cwd-relative path is excluded when it is:
+ *   - under design-system/ (already organized),
+ *   - under app_dir (routed pages/layouts — never a DS part),
+ *   - under a domain root (features/, lib/ — app code by definition), or
+ *   - matched by a lookalike_ignore glob the consumer declared out-of-scope.
+ * Excluding these dirs means classify can never relocate app code into
+ * design-system/ even when --src points at a broad tree.
+ */
+function makeExcluder(opts: {
+  appDir: string;
+  domainRoots: string[];
+  ignoreGlobs: string[];
+}): (rel: string) => boolean {
+  const matchIgnore = opts.ignoreGlobs.length > 0
+    ? picomatch(opts.ignoreGlobs, { dot: true })
+    : () => false;
+  const appDir = opts.appDir.replace(/\/$/, "");
+  return (rel: string): boolean => {
+    const segs = rel.split("/");
+    if (segs.includes("design-system")) return true;
+    if (segs.some(s => opts.domainRoots.includes(s))) return true;
+    if (rel === appDir || rel.startsWith(`${appDir}/`)) return true;
+    if (matchIgnore(rel)) return true;
+    return false;
+  };
+}
+
+/** Walk a directory and return .tsx/.ts files (relative to cwd), skipping companions and excluded paths. */
+async function walkComponentDir(
+  cwd: string,
+  srcRel: string,
+  exclude: (rel: string) => boolean,
+): Promise<string[]> {
   const abs = join(cwd, srcRel);
   let entries: Dirent[];
   try {
@@ -44,16 +78,15 @@ async function walkComponentDir(cwd: string, srcRel: string): Promise<string[]> 
   const results: string[] = [];
   for (const e of entries) {
     const childRel = `${srcRel}/${e.name}`;
+    if (exclude(childRel)) continue;
     if (e.isDirectory()) {
-      results.push(...await walkComponentDir(cwd, childRel));
+      results.push(...await walkComponentDir(cwd, childRel, exclude));
       continue;
     }
     if (!e.isFile()) continue;
     if (!SOURCE_EXTS.some(ext => e.name.endsWith(ext))) continue;
     if (COMPANION_SUFFIXES.some(s => e.name.endsWith(s))) continue;
     if (SKIP_PATTERNS.some(re => re.test(e.name))) continue;
-    // Skip files already in design-system/ — they're already organized
-    if (childRel.startsWith("design-system/")) continue;
     results.push(childRel);
   }
   return results;
@@ -70,7 +103,14 @@ interface MovePlan {
 }
 
 export async function classifyCmd(opts: {
-  src: string;
+  /**
+   * Opt-in brownfield source root to pull design-system parts from (e.g. a
+   * shadcn `src/components/ui`). When omitted, classify does NOT walk app code
+   * — it only reorganizes within design-system/ (extraction + ambiguity). The
+   * walk honors lookalike_ignore / app_dir / domain_roots so it never relocates
+   * app code into design-system/ (ADR-0005, issue #209).
+   */
+  src?: string;
   dryRun?: boolean;
   yes?: boolean;
   cwd?: string;
@@ -84,6 +124,7 @@ export async function classifyCmd(opts: {
   const dryRun = opts.dryRun ?? false;
   const yes = opts.yes ?? false;
   const srcRel = opts.src;
+  const hasSrc = typeof srcRel === "string" && srcRel.length > 0;
 
   // Require .claude-ds.json (post-adopt state)
   let ctx: ProjectContext;
@@ -104,168 +145,189 @@ export async function classifyCmd(opts: {
     dsAliases = await detectDsAliases(cwd, ctx.cfg.srcRoot ?? "src");
   }
 
-  // Check source dir exists
-  const srcAbs = join(cwd, srcRel);
-  try {
-    const s = await stat(srcAbs);
-    if (!s.isDirectory()) {
-      err(`--src ${srcRel} is not a directory`);
-      process.exit(2);
-    }
-  } catch {
-    err(`--src ${srcRel} not found`);
-    process.exit(2);
-  }
-
-  // Walk and classify each file
-  const files = await walkComponentDir(cwd, srcRel);
+  // Brownfield pull-in is opt-in via --src (ADR-0005, issue #209). With no
+  // --src, classify never walks app code — it only reorganizes within
+  // design-system/ (extraction + ambiguity, below). The excluder keeps even an
+  // explicit --src inside DS scope: app_dir, domain roots, design-system/, and
+  // any lookalike_ignore globs are skipped, so app code is never relocated.
+  const exclude = makeExcluder({
+    appDir: ctx.cfg.app_dir,
+    domainRoots,
+    ignoreGlobs: ctx.cfg.lookalike_ignore ?? [],
+  });
 
   const classified: ClassifiedFile[] = [];
-  for (const fileRel of files) {
-    let source: string;
-    try {
-      source = await readFile(join(cwd, fileRel), "utf8");
-    } catch {
-      continue;
+  if (hasSrc) {
+    // Refuse a blind walk of the entire source root (ADR-0005, issue #209).
+    // --src must point at a specific design-system source dir; scanning all of
+    // src/ is what dragged app code (db, emails, lib) into design-system/.
+    const srcRoot = (ctx.cfg.srcRoot ?? "src").replace(/\/$/, "");
+    const norm = (srcRel as string).replace(/^\.\//, "").replace(/\/$/, "");
+    if (norm === srcRoot || norm === "." || norm === "") {
+      err(
+        `refusing to walk the entire source root (${srcRoot}) — that pulls app code into design-system/. ` +
+        `Point --src at a specific design-system source dir (e.g. ${srcRoot}/components/ui), ` +
+        `or run \`claude-ds classify\` with no --src to reorganize within design-system/.`,
+      );
+      process.exit(2);
     }
-    const verdict = classifySource(source, domainRoots, undefined, dsAliases);
-    const tier = verdict.tier;
-    const domainBucket = tier === "feature" ? inferDomainBucket(source, domainRoots) : null;
-    classified.push({ srcRel: fileRel, tier, domainBucket });
+
+    // Check source dir exists
+    const srcAbs = join(cwd, srcRel as string);
+    try {
+      const s = await stat(srcAbs);
+      if (!s.isDirectory()) {
+        err(`--src ${srcRel} is not a directory`);
+        process.exit(2);
+      }
+    } catch {
+      err(`--src ${srcRel} not found`);
+      process.exit(2);
+    }
+
+    // Walk and classify each file
+    const files = await walkComponentDir(cwd, srcRel as string, exclude);
+    for (const fileRel of files) {
+      let source: string;
+      try {
+        source = await readFile(join(cwd, fileRel), "utf8");
+      } catch {
+        continue;
+      }
+      const verdict = classifySource(source, domainRoots, ctx.cfg.allowed_imports ?? [], dsAliases);
+      const tier = verdict.tier;
+      const domainBucket = tier === "feature" ? inferDomainBucket(source, domainRoots) : null;
+      classified.push({ srcRel: fileRel, tier, domainBucket });
+    }
   }
 
-  if (classified.length === 0) {
-    info(`classify: no classifiable files found in ${srcRel}`);
-    // Still run the ambiguity pass: audit may have routed the user here to resolve an
-    // already-placed atom, even though there are no new files to classify (issue #203).
-    if (!dryRun) {
-      const amb = await applyAmbiguityPass();
-      if (amb.moved > 0 || amb.kept > 0) {
-        info("classify: complete");
+  // Pull-in (relocating misplaced DS parts into design-system/) only happens
+  // when --src found candidates. The within-DS reorg below (extraction +
+  // ambiguity) always runs, so a bare `claude-ds classify` still does its job.
+  let moved = 0;
+  if (classified.length > 0) {
+    // Group by destination
+    const atoms = classified.filter(f => f.tier === "atom");
+    const composites = classified.filter(f => f.tier === "composite");
+    const features = classified.filter(f => f.tier === "feature");
+    const unknowns = classified.filter(f => f.tier === "pattern" || f.tier === "unknown");
+
+    // Group features by domain bucket — reused below for both the summary and the
+    // per-bucket apply confirmation.
+    const byBucket = new Map<string, ClassifiedFile[]>();
+    for (const f of features) {
+      const bucket = f.domainBucket ?? "features/unknown";
+      const group = byBucket.get(bucket) ?? [];
+      group.push(f);
+      byBucket.set(bucket, group);
+    }
+
+    // Print summary (grouped by tier)
+    if (atoms.length > 0) {
+      info(`atoms/ (${atoms.length} file${atoms.length === 1 ? "" : "s"} → design-system/atoms/):`);
+      for (const f of atoms) info(`  ${basename(f.srcRel)}`);
+    }
+    if (composites.length > 0) {
+      info(`composites/ (${composites.length} file${composites.length === 1 ? "" : "s"} → design-system/composites/):`);
+      for (const f of composites) info(`  ${basename(f.srcRel)}`);
+    }
+    for (const [bucket, group] of byBucket) {
+      info(`feature (${group.length} file${group.length === 1 ? "" : "s"} → ${bucket}/):`);
+      for (const f of group) info(`  ${basename(f.srcRel)}`);
+    }
+    if (unknowns.length > 0) {
+      info(`skipped/${unknowns.length} file${unknowns.length === 1 ? "" : "s"} (unknown tier — patterns or unresolved):`);
+      for (const f of unknowns) info(`  ${basename(f.srcRel)}`);
+    }
+
+    // Build planned moves for atoms + composites (always) and features (apply-time
+    // gated by per-bucket confirmation; included in dry-run for full preview).
+    const tierPlans: MovePlan[] = [];
+    for (const f of [...atoms, ...composites]) {
+      if (f.tier !== "atom" && f.tier !== "composite") continue;
+      const tier = f.tier;
+      const destDir = tierToDir(tier);
+      const destRel = `${destDir}/${basename(f.srcRel)}`;
+      tierPlans.push({ srcRel: f.srcRel, destRel, label: tier });
+    }
+
+    if (dryRun) {
+      const featurePlans: MovePlan[] = features.map(f => {
+        const bucket = f.domainBucket ?? "features/unknown";
+        const destRel = `${bucket}/${basename(f.srcRel)}`;
+        return { srcRel: f.srcRel, destRel, label: "feature" };
+      });
+      const allPlans = [...tierPlans, ...featurePlans];
+      if (allPlans.length > 0) {
+        const ops: Operation[] = allPlans.map(p =>
+          moveTierFile(
+            p.srcRel,
+            p.destRel,
+            p.label === "atom" || p.label === "composite" ? { kind: p.label } : undefined,
+          ),
+        );
+        await run(ctx, ops, "dry-run");
+      }
+      info(`[dry-run] ${classified.length} file(s) classified — run without --dry-run to apply`);
+      return;
+    }
+
+    // Determine which feature buckets to proceed with (prompt once per bucket)
+    const confirmedBuckets = new Set<string>();
+    for (const [bucket, group] of byBucket) {
+      if (yes) {
+        confirmedBuckets.add(bucket);
+      } else {
+        info(`\n${group.length} file${group.length === 1 ? "" : "s"} would move to ${bucket}/:`);
+        for (const f of group) info(`  ${basename(f.srcRel)}`);
+        const ok = await confirm(`Move these to ${bucket}/?`);
+        if (ok) confirmedBuckets.add(bucket);
       }
     }
-    printNextStep("classify", {});
-    return;
-  }
 
-  // Group by destination
-  const atoms = classified.filter(f => f.tier === "atom");
-  const composites = classified.filter(f => f.tier === "composite");
-  const features = classified.filter(f => f.tier === "feature");
-  const unknowns = classified.filter(f => f.tier === "pattern" || f.tier === "unknown");
-
-  // Group features by domain bucket — reused below for both the summary and the
-  // per-bucket apply confirmation.
-  const byBucket = new Map<string, ClassifiedFile[]>();
-  for (const f of features) {
-    const bucket = f.domainBucket ?? "features/unknown";
-    const group = byBucket.get(bucket) ?? [];
-    group.push(f);
-    byBucket.set(bucket, group);
-  }
-
-  // Print summary (grouped by tier)
-  if (atoms.length > 0) {
-    info(`atoms/ (${atoms.length} file${atoms.length === 1 ? "" : "s"} → design-system/atoms/):`);
-    for (const f of atoms) info(`  ${basename(f.srcRel)}`);
-  }
-  if (composites.length > 0) {
-    info(`composites/ (${composites.length} file${composites.length === 1 ? "" : "s"} → design-system/composites/):`);
-    for (const f of composites) info(`  ${basename(f.srcRel)}`);
-  }
-  for (const [bucket, group] of byBucket) {
-    info(`feature (${group.length} file${group.length === 1 ? "" : "s"} → ${bucket}/):`);
-    for (const f of group) info(`  ${basename(f.srcRel)}`);
-  }
-  if (unknowns.length > 0) {
-    info(`skipped/${unknowns.length} file${unknowns.length === 1 ? "" : "s"} (unknown tier — patterns or unresolved):`);
-    for (const f of unknowns) info(`  ${basename(f.srcRel)}`);
-  }
-
-  // Build planned moves for atoms + composites (always) and features (apply-time
-  // gated by per-bucket confirmation; included in dry-run for full preview).
-  const tierPlans: MovePlan[] = [];
-  for (const f of [...atoms, ...composites]) {
-    if (f.tier !== "atom" && f.tier !== "composite") continue;
-    const tier = f.tier;
-    const destDir = tierToDir(tier);
-    const destRel = `${destDir}/${basename(f.srcRel)}`;
-    tierPlans.push({ srcRel: f.srcRel, destRel, label: tier });
-  }
-
-  if (dryRun) {
-    const featurePlans: MovePlan[] = features.map(f => {
+    // Add confirmed feature moves to the plan
+    for (const f of features) {
       const bucket = f.domainBucket ?? "features/unknown";
+      if (!confirmedBuckets.has(bucket)) continue;
       const destRel = `${bucket}/${basename(f.srcRel)}`;
-      return { srcRel: f.srcRel, destRel, label: "feature" };
-    });
-    const allPlans = [...tierPlans, ...featurePlans];
-    if (allPlans.length > 0) {
-      const ops: Operation[] = allPlans.map(p =>
+      tierPlans.push({ srcRel: f.srcRel, destRel, label: "feature" });
+    }
+
+    // Apply all planned moves through the Runner
+    if (tierPlans.length > 0) {
+      const ops: Operation[] = tierPlans.map(p =>
         moveTierFile(
           p.srcRel,
           p.destRel,
           p.label === "atom" || p.label === "composite" ? { kind: p.label } : undefined,
         ),
       );
-      await run(ctx, ops, "dry-run");
+      const report = await run(ctx, ops, "apply");
+      const planBySrc = new Map(tierPlans.map(p => [p.srcRel, p]));
+      for (const c of report.applied) {
+        if (c.kind !== "rename") continue;
+        const p = planBySrc.get(c.path);
+        if (!p) continue;
+        info(`classify: ${p.srcRel} → ${p.destRel} (${p.label})`);
+        moved++;
+      }
+      if (report.failed) {
+        err(`classify: ${report.failed.error}`);
+      }
     }
-    info(`[dry-run] ${classified.length} file(s) classified — run without --dry-run to apply`);
+
+    if (moved > 0) {
+      info(`classify: ${moved} file(s) moved — running import rewrite pass`);
+
+      // Reload context (files have moved) and run rewriteImports Op to fix stale paths
+      const { rewriteImports } = await import("../lib/ops/rewrite-imports.js");
+      const ctx2 = await loadProject(cwd);
+      await run(ctx2, [rewriteImports], "apply");
+    }
+  } else if (dryRun) {
+    // Nothing to pull in; extraction/ambiguity never run under --dry-run.
+    info(`[dry-run] no design-system parts to pull in${hasSrc ? ` from ${srcRel}` : ""}`);
     return;
-  }
-
-  // Determine which feature buckets to proceed with (prompt once per bucket)
-  const confirmedBuckets = new Set<string>();
-  for (const [bucket, group] of byBucket) {
-    if (yes) {
-      confirmedBuckets.add(bucket);
-    } else {
-      info(`\n${group.length} file${group.length === 1 ? "" : "s"} would move to ${bucket}/:`);
-      for (const f of group) info(`  ${basename(f.srcRel)}`);
-      const ok = await confirm(`Move these to ${bucket}/?`);
-      if (ok) confirmedBuckets.add(bucket);
-    }
-  }
-
-  // Add confirmed feature moves to the plan
-  for (const f of features) {
-    const bucket = f.domainBucket ?? "features/unknown";
-    if (!confirmedBuckets.has(bucket)) continue;
-    const destRel = `${bucket}/${basename(f.srcRel)}`;
-    tierPlans.push({ srcRel: f.srcRel, destRel, label: "feature" });
-  }
-
-  // Apply all planned moves through the Runner
-  let moved = 0;
-  if (tierPlans.length > 0) {
-    const ops: Operation[] = tierPlans.map(p =>
-      moveTierFile(
-        p.srcRel,
-        p.destRel,
-        p.label === "atom" || p.label === "composite" ? { kind: p.label } : undefined,
-      ),
-    );
-    const report = await run(ctx, ops, "apply");
-    const planBySrc = new Map(tierPlans.map(p => [p.srcRel, p]));
-    for (const c of report.applied) {
-      if (c.kind !== "rename") continue;
-      const p = planBySrc.get(c.path);
-      if (!p) continue;
-      info(`classify: ${p.srcRel} → ${p.destRel} (${p.label})`);
-      moved++;
-    }
-    if (report.failed) {
-      err(`classify: ${report.failed.error}`);
-    }
-  }
-
-  if (moved > 0) {
-    info(`classify: ${moved} file(s) moved — running import rewrite pass`);
-
-    // Reload context (files have moved) and run rewriteImports Op to fix stale paths
-    const { rewriteImports } = await import("../lib/ops/rewrite-imports.js");
-    const ctx2 = await loadProject(cwd);
-    await run(ctx2, [rewriteImports], "apply");
   }
 
   // Extraction is structural and lives in classify (ADR-0015): lift any inline

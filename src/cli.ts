@@ -147,10 +147,10 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("classify")
-    .requiredOption("--src <dir>", "source directory to walk for components")
+    .option("--src <dir>", "opt-in: pull design-system parts from this source dir into design-system/ (omit to only reorganize within design-system/)")
     .option("--dry-run", "show classification plan without moving any files")
     .option("--yes", "skip per-domain-bucket prompts for feature relocations")
-    .action(async (opts: { src: string; dryRun?: boolean; yes?: boolean }) => {
+    .action(async (opts: { src?: string; dryRun?: boolean; yes?: boolean }) => {
       await classifyCmd({ src: opts.src, dryRun: opts.dryRun, yes: opts.yes, cwd: defaults.cwd });
     });
 

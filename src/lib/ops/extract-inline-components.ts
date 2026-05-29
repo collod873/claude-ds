@@ -178,8 +178,16 @@ function metaStub(): string {
   return `\nexport const meta = { kind: "atom" as const, examples: [{ name: "default", props: {} }] };\n`;
 }
 
-/** Plan all extractions for a single parsed file. */
-function planFile(source: string, parentRel: string, canonicalAlias: string): FilePlan {
+/**
+ * Plan all extractions for a single parsed file.
+ *
+ * `takenAtomPaths` is the running set of atom paths that are unavailable as
+ * extraction targets — existing atom files plus those already claimed by
+ * earlier extractions this run. planFile reserves the paths it uses, so a
+ * component whose kebab-name collides with an existing or already-claimed atom
+ * is left inline rather than clobbering an unrelated atom (issue #209).
+ */
+function planFile(source: string, parentRel: string, canonicalAlias: string, takenAtomPaths: Set<string>): FilePlan {
   const internal = findInternalComponents(source);
   if (internal.length === 0) return { extractions: [], changes: [] };
 
@@ -233,6 +241,24 @@ function planFile(source: string, parentRel: string, canonicalAlias: string): Fi
   const importLineFor = (name: string): string =>
     `import { ${name} } from "${canonicalAlias}/atoms/${toKebab(name)}";`;
 
+  // Only extract components whose target atom path is free (issue #209):
+  //   - not the parent file itself (the file's own primary component, which
+  //     `findInternalComponents` can flag when it's declared before its export),
+  //   - not an existing atom, and
+  //   - not already claimed by another extraction this run.
+  // Anything that collides stays inline — extracting it would overwrite an
+  // unrelated atom or have two extractions fight over one path. Done before
+  // assembling so the parent rewrite never imports/removes a skipped component.
+  const extractable: ComponentNode[] = [];
+  for (const comp of comps) {
+    const atomRel = atomRelFor(comp.name);
+    if (atomRel === parentRel) continue;
+    if (takenAtomPaths.has(atomRel)) continue;
+    takenAtomPaths.add(atomRel);
+    extractable.push(comp);
+  }
+  if (extractable.length === 0) return { extractions: [], changes: [] };
+
   // Track which local decls get *moved out* of the parent (used only by the
   // extracted set) vs *copied* (also used elsewhere in the parent).
   const movedLocalKeys = new Set<number>(); // index into `locals`
@@ -241,7 +267,7 @@ function planFile(source: string, parentRel: string, canonicalAlias: string): Fi
   const atomChanges: Change[] = [];
   const parentImportLines: string[] = [];
 
-  for (const comp of comps) {
+  for (const comp of extractable) {
     // Transitive closure of referenced names, seeded by the component body and
     // growing through any local decls it pulls in.
     const seedNodes: ts.Node[] = [comp.node];
@@ -276,8 +302,10 @@ function planFile(source: string, parentRel: string, canonicalAlias: string): Fi
     }
 
     // Other extracted components this one references → import them as atoms.
+    // Only components actually being extracted qualify; a referenced component
+    // left inline (collision-skipped) stays resolved by the parent.
     const crossAtomImports: string[] = [];
-    for (const other of comps) {
+    for (const other of extractable) {
       if (other.name !== comp.name && referenced.has(other.name)) {
         crossAtomImports.push(importLineFor(other.name));
       }
@@ -291,7 +319,7 @@ function planFile(source: string, parentRel: string, canonicalAlias: string): Fi
     // Decide move vs copy for each carried decl: is the name referenced
     // anywhere in the parent *outside* the extracted components + carried decls?
     const protectedRanges = [
-      ...comps.map(c => ({ start: c.start, end: c.end })),
+      ...extractable.map(c => ({ start: c.start, end: c.end })),
       ...carried.map(d => ({ start: d.start, end: d.end })),
     ];
     for (let i = 0; i < locals.length; i++) {
@@ -418,6 +446,9 @@ export function extractInlineComponents(canonicalAlias: string): Operation & { e
     extractions: [] as Extraction[],
     async plan(ctx: ProjectContext): Promise<Change[]> {
       const files = await collectTierFiles(ctx.cwd);
+      // Seed the claimed-paths set with every existing atom so extraction never
+      // overwrites one (issue #209). planFile reserves further paths as it goes.
+      const takenAtomPaths = new Set<string>(files.filter(f => f.startsWith(`${ATOM_DIR}/`)));
       const changes: Change[] = [];
       op.extractions = [];
       for (const rel of files) {
@@ -427,7 +458,7 @@ export function extractInlineComponents(canonicalAlias: string): Operation & { e
         } catch {
           continue;
         }
-        const plan = planFile(source, rel, canonicalAlias);
+        const plan = planFile(source, rel, canonicalAlias, takenAtomPaths);
         op.extractions.push(...plan.extractions);
         changes.push(...plan.changes);
       }
@@ -437,5 +468,9 @@ export function extractInlineComponents(canonicalAlias: string): Operation & { e
   return op;
 }
 
-// Exported for unit testing the pure planner.
-export const __test = { planFile };
+// Exported for unit testing the pure planner. `takenAtomPaths` defaults to an
+// empty set so single-file tests need not thread it.
+export const __test = {
+  planFile: (source: string, parentRel: string, canonicalAlias: string, takenAtomPaths: Set<string> = new Set()): FilePlan =>
+    planFile(source, parentRel, canonicalAlias, takenAtomPaths),
+};
