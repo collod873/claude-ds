@@ -1,11 +1,14 @@
-import { readFile, readdir, stat, rename } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { spawnSync } from "node:child_process";
-import { info, err } from "../log.js";
-import { fileImportsDsModule, rewriteImportPaths } from "../ops/rewrite-imports.js";
+import { info } from "../log.js";
+import { fileImportsDsModule } from "../ops/rewrite-imports.js";
+import type { Change, Operation } from "../operation.js";
+import type { ProjectContext } from "../project.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
+const SOURCE_EXTS = [".ts", ".tsx", ".js", ".jsx"];
+const WALK_SKIP_DIRS = new Set(["node_modules", ".git", "dist"]);
 
 export interface ClassificationFinding {
   file: string; // absolute path
@@ -25,7 +28,7 @@ export interface ClassificationFinding {
  *   atoms while their imports are being added.
  *
  * Pure reporting: no writes. The auto-move that resolves CLASS-001 lives in
- * `applyClassificationMoves` below.
+ * `classificationMovesOp` below.
  */
 export async function findMisclassified(
   cwd: string,
@@ -64,54 +67,99 @@ export async function findMisclassified(
   return findings;
 }
 
-/**
- * Apply CLASS-001 findings: move each file between atoms↔composites (via
- * `git mv` when in a repo) and rewrite import sites project-wide. Refuses to
- * proceed if the working tree is dirty — the import rewrites span the whole
- * project and must be reviewable as one diff.
- *
- * Calls `tsc --noEmit` after all moves; exits 1 if typecheck fails.
- */
-export async function applyClassificationMoves(
+function tierFolder(tier: "atom" | "composite"): "atoms" | "composites" {
+  return tier === "atom" ? "atoms" : "composites";
+}
+
+async function walkSources(
   cwd: string,
-  findings: ClassificationFinding[],
+  visit: (relPath: string, content: string) => void,
 ): Promise<void> {
-  const gitStatus = spawnSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
-  if ((gitStatus.stdout ?? "").trim() !== "") {
-    err("commit or stash first — auto-move rewrites import paths across the project.");
-    process.exit(1);
-  }
-
-  const isGitRepo = spawnSync("git", ["rev-parse", "--git-dir"], { cwd, encoding: "utf8" }).status === 0;
-
-  for (const f of findings) {
-    const componentName = basename(f.file, ".tsx");
-    const srcTier = f.currentTier === "atom" ? "atoms" : "composites";
-    const dstTier = f.shouldBe === "atom" ? "atoms" : "composites";
-    const destFile = join(cwd, "design-system", dstTier, basename(f.file));
-
-    if (isGitRepo) {
-      const mvResult = spawnSync("git", ["mv", f.file, destFile], { cwd, encoding: "utf8" });
-      if (mvResult.status !== 0) {
-        err(`git mv failed for ${f.file}: ${mvResult.stderr}`);
+  async function walk(absDir: string, relDir: string): Promise<void> {
+    let entries: string[];
+    try { entries = await readdir(absDir); } catch { return; }
+    for (const entry of entries) {
+      if (WALK_SKIP_DIRS.has(entry)) continue;
+      const absChild = join(absDir, entry);
+      const relChild = relDir ? `${relDir}/${entry}` : entry;
+      const s = await stat(absChild).catch(() => null);
+      if (!s) continue;
+      if (s.isDirectory()) {
+        await walk(absChild, relChild);
         continue;
       }
-    } else {
-      await rename(f.file, destFile);
+      if (!s.isFile()) continue;
+      if (!SOURCE_EXTS.some(ext => entry.endsWith(ext))) continue;
+      let content: string;
+      try { content = await readFile(absChild, "utf8"); } catch { continue; }
+      visit(relChild, content);
     }
-
-    // rewriteImportPaths contract: pass tier-relative segment only (e.g.
-    // "atoms/button"). The function prepends "@/design-system/" internally.
-    const fromImport = `${srcTier}/${componentName}`;
-    const toImport = `${dstTier}/${componentName}`;
-    const changed = await rewriteImportPaths(cwd, fromImport, toImport);
-    info(`moved ${f.currentTier}→${f.shouldBe}: ${basename(f.file)} (rewrote ${changed.length} import site(s))`);
   }
+  await walk(cwd, "");
+}
 
-  const tscResult = spawnSync("npx", ["tsc", "--noEmit"], { cwd, encoding: "utf8", timeout: 120_000 });
-  if (tscResult.status !== 0) {
-    err(`tsc --noEmit failed after classification moves:\n${tscResult.stdout}\n${tscResult.stderr}`);
-    process.exit(1);
-  }
-  info("tsc --noEmit passed after classification moves");
+/**
+ * Move misclassified atoms ↔ composites and rewrite import sites project-wide
+ * as Operations. The Runner's git-mv detection is reused — no inline
+ * `git rev-parse` probe here.
+ *
+ * Emits, per finding:
+ *  - one `rename` Change moving the .tsx between tier folders, and
+ *  - one `write` Change per consumer file whose `@/design-system/<srcTier>/<name>`
+ *    imports need to point at `<dstTier>/<name>`. The renamed file itself is
+ *    written at its destination path when its own content references another
+ *    misclassified component.
+ *
+ * The dirty-tree guard and `tsc --noEmit` post-check stay in the caller —
+ * those are verification, not bytes-on-disk, and the Runner doesn't model them.
+ */
+export function classificationMovesOp(findings: ClassificationFinding[]): Operation {
+  return {
+    name: "classification-moves",
+    async plan(ctx: ProjectContext): Promise<Change[]> {
+      if (findings.length === 0) return [];
+
+      const cwd = ctx.cwd;
+      const subs: Array<{ from: string; to: string }> = [];
+      const movedFiles = new Map<string, string>(); // srcRel → dstRel
+      const changes: Change[] = [];
+
+      for (const f of findings) {
+        const componentName = basename(f.file, ".tsx");
+        const srcTier = tierFolder(f.currentTier);
+        const dstTier = tierFolder(f.shouldBe);
+        const name = basename(f.file);
+        const srcRel = `design-system/${srcTier}/${name}`;
+        const dstRel = `design-system/${dstTier}/${name}`;
+        movedFiles.set(srcRel, dstRel);
+        subs.push({
+          from: `@/design-system/${srcTier}/${componentName}`,
+          to: `@/design-system/${dstTier}/${componentName}`,
+        });
+        changes.push({ kind: "rename", path: srcRel, after: dstRel });
+      }
+
+      await walkSources(cwd, (relPath, content) => {
+        let updated = content;
+        for (const { from, to } of subs) {
+          if (updated.includes(from)) {
+            updated = updated.split(from).join(to);
+          }
+        }
+        if (updated === content) return;
+        // If this file is being renamed, the write applies at its post-rename
+        // path so the rename + write sequence the Runner applies leaves the
+        // file at the new location with the rewritten imports.
+        const targetPath = movedFiles.get(relPath) ?? relPath;
+        changes.push({
+          kind: "write",
+          path: targetPath,
+          before: Buffer.from(content, "utf8"),
+          after: Buffer.from(updated, "utf8"),
+        });
+      });
+
+      return changes;
+    },
+  };
 }

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { info, err } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
 import { migrateClaudeMd } from "../lib/ops/migrate-claude-md.js";
@@ -8,8 +9,8 @@ import { backfillMeta as backfillMetaOp } from "../lib/ops/backfill-meta.js";
 import { rewriteImports } from "../lib/ops/rewrite-imports.js";
 import { run } from "../lib/runner.js";
 import { findMissingMeta } from "../lib/reports/meta-audit.js";
-import { findMisclassified, applyClassificationMoves } from "../lib/checks/classification.js";
-import { runGeneratedIntegrityCheck } from "../lib/checks/generated-integrity.js";
+import { findMisclassified, classificationMovesOp } from "../lib/checks/classification.js";
+import { planGeneratedIntegrityFixes } from "../lib/checks/generated-integrity.js";
 import { runCheckScripts } from "../lib/checks/run-check-scripts.js";
 import { reviewExceptions } from "../lib/checks/exception-review.js";
 import { emitStubWarning } from "../lib/reports/stub-warning.js";
@@ -82,10 +83,11 @@ export async function reconformCmd(opts: {
     }
   }
 
-  // Phase 4 — classification audit (gated on --backfill-meta). The audit is
-  // pure reporting; the auto-move (only with --fix) is bytes-on-disk but kept
-  // outside the Runner because it spans rename + project-wide import rewrite +
-  // tsc gate, none of which fit the Change shape cleanly.
+  // Phase 4 — classification audit (gated on --backfill-meta). Auto-move
+  // (only with --fix) routes through the Runner via `classificationMovesOp`.
+  // The dirty-tree guard (auto-move rewrites span the project and must be
+  // reviewable as one diff) and the `tsc --noEmit` verification stay here —
+  // both are command-shaped, not bytes-on-disk.
   let classificationCount = 0;
   if (backfillMetaFlag) {
     const findings = await findMisclassified(cwd, demoteComposites);
@@ -98,20 +100,68 @@ export async function reconformCmd(opts: {
         const relPath = f.file.startsWith(cwd + "/") ? f.file.slice(cwd.length + 1) : f.file;
         info(`  CLASS-001: ${relPath} — is ${f.currentTier}, should be ${f.shouldBe}`);
       }
-      if (fix) await applyClassificationMoves(cwd, findings);
+      if (fix) {
+        const gitStatus = spawnSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+        if ((gitStatus.stdout ?? "").trim() !== "") {
+          err("commit or stash first — auto-move rewrites import paths across the project.");
+          process.exit(1);
+        }
+        const movesReport = await run(ctx, [classificationMovesOp(findings)], mode);
+        if (movesReport.failed) {
+          err(`classification auto-move failed: ${movesReport.failed.error}`);
+          process.exit(1);
+        }
+        if (!dryRun) {
+          const movedDstPaths = new Set<string>();
+          for (const c of movesReport.applied) {
+            if (c.kind === "rename") movedDstPaths.add(c.after);
+          }
+          const importSites = movesReport.applied.filter(
+            c => c.kind === "write" && !movedDstPaths.has(c.path),
+          ).length;
+          for (const f of findings) {
+            const name = f.file.split("/").pop() ?? "";
+            info(`moved ${f.currentTier}→${f.shouldBe}: ${name}`);
+          }
+          if (importSites > 0) info(`rewrote ${importSites} import site(s)`);
+          const tscResult = spawnSync("npx", ["tsc", "--noEmit"], { cwd, encoding: "utf8", timeout: 120_000 });
+          if (tscResult.status !== 0) {
+            err(`tsc --noEmit failed after classification moves:\n${tscResult.stdout}\n${tscResult.stderr}`);
+            process.exit(1);
+          }
+          info("tsc --noEmit passed after classification moves");
+        }
+      }
     }
   }
 
   // Phase 5 — tier-relocation import cleanup. No-op in steady state.
   await run(ctx, [rewriteImports], mode);
 
-  // Phase 6 — generated-file integrity (GEN-001/GEN-002). Auto-repairs unless
-  // dry-run. Runs before check-scripts so STATE-001 sees fresh content (#51).
-  const genViolations = await runGeneratedIntegrityCheck(cwd, dryRun);
+  // Phase 6 — generated-file integrity (GEN-001/GEN-002). Auto-repairs in
+  // apply mode; in dry-run the Runner renders the diff and stderr surfaces
+  // each violation in the check-script protocol format (#51 / #89). Routed
+  // through `run()` so every regen byte goes through the chokepoint.
+  const genOp = planGeneratedIntegrityFixes();
+  await run(ctx, [genOp], mode);
+  const genViolations = genOp.violations;
+  for (const v of genViolations) info(`${v.ruleId}: ${v.message}`);
+  if (genViolations.length > 0) {
+    if (dryRun) {
+      for (const v of genViolations) {
+        process.stderr.write(`${v.file}:0: ${v.ruleId}: ${v.message}\n`);
+      }
+    } else {
+      for (const v of genViolations) info(`${v.ruleId} fixed: regenerated ${v.file}`);
+      info(`integrity check: ${genViolations.length} violation(s) detected and auto-repaired (run with --dry-run to preview without writing)`);
+    }
+  } else {
+    info("integrity check: all generated files are clean");
+  }
 
   // Phase 7 — project-local check scripts + interactive exception review.
   const allViolations = await runCheckScripts(cwd, dryRun);
-  await reviewExceptions(cwd, allViolations, dryRun);
+  await reviewExceptions(ctx, allViolations, dryRun);
 
   // Phase 8 — stub-file warning.
   await emitStubWarning(cwd);
