@@ -8,9 +8,8 @@ import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
 import picomatch from "picomatch";
 import { checkThreeSignals } from "../lib/three-signal.js";
-import { countDsComponentImports } from "../lib/classifier.js";
 import { parseExceptions, serializeExceptions, type Exception } from "../lib/exceptions.js";
-import { ruleSeverity, isExtractionNeededFinding, isAmbiguousTierFinding, AMBIGUOUS_TIER_MARKER, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
+import { ruleSeverity, isExtractionNeededFinding, type DriftFinding, type DriftRuleId } from "../lib/drift-rules.js";
 import { evaluateIntegrity, integrityRuleSeverity, type IntegrityRuleId, type IntegrityFinding } from "../lib/integrity-rules.js";
 import { detectDsAliases, detectTsconfigPaths } from "../lib/ds-aliases.js";
 import { makeNoTtyPrompt, makeTtyPrompt, isInteractive, type FixerPrompt } from "../lib/drift-fixers.js";
@@ -373,26 +372,9 @@ export async function auditCmd(opts: AuditOpts) {
       continue;
     }
 
-    const { signals, findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
+    const { findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
     allFindings.push(...findings);
     for (const f of findings) filesWithFindings.add(f.file);
-
-    // Ambiguity detection: atom files that compose many real DS components may be misclassified.
-    // Count only imports that resolve to a design-system tier file (atom/composite/pattern) —
-    // utility helpers (cn/cva), types, hooks, and external libs must not count (issue #200).
-    // audit no longer prompts here (ADR-0015): it emits an unfixed finding that points the
-    // consumer at `classify`, which owns the keep/move structural decision (issue #203).
-    if (signals.locationTier === "atom" && !findings.some(f => f.ruleId === "DRIFT-MISPLACED")) {
-      const componentRefs = countDsComponentImports(source, dsAliases);
-      if (componentRefs >= 3) {
-        allFindings.push({
-          ruleId: "DRIFT-MISPLACED" as DriftRuleId,
-          file: filePath,
-          message: `imports ${componentRefs} design-system components but is classified as an atom — ${AMBIGUOUS_TIER_MARKER}; run \`claude-ds classify\` to confirm whether it belongs in composites/`,
-        });
-        filesWithFindings.add(filePath);
-      }
-    }
   }
 
   // Log coverage summary
@@ -479,7 +461,7 @@ export async function auditCmd(opts: AuditOpts) {
     const prompt: FixerPrompt = isTTY ? makeTtyPrompt() : makeNoTtyPrompt();
     const driftFindings = activeFindings.filter(
       (f): f is DriftFinding =>
-        !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file) && !isAmbiguousTierFinding(f),
+        !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
     );
     const fixPassResult = await runFixPass(cwd, driftFindings, {
       domainRoots, allowedImports, dsAliases, prompt,
@@ -577,7 +559,7 @@ export async function auditCmd(opts: AuditOpts) {
         // Re-fix pass: auto-fix newly detected drift (e.g. stale imports introduced by prior fixers)
         const reFixFindings = activeFindings.filter(
           (f): f is DriftFinding =>
-            !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file) && !isAmbiguousTierFinding(f),
+            !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
         );
         if (reFixFindings.length > 0) {
           const reFixResult = await runFixPass(cwd, reFixFindings, {
@@ -686,8 +668,7 @@ export async function auditCmd(opts: AuditOpts) {
   if (activeFindings.length > 0) {
     info(`${activeFindings.length} error(s) require attention`);
     const extractionCount = activeFindings.filter(isExtractionNeededFinding).length;
-    const ambiguityCount = activeFindings.filter(isAmbiguousTierFinding).length;
-    printNextStep("audit", { hasFindings: true, extractionCount, ambiguityCount });
+    printNextStep("audit", { hasFindings: true, extractionCount });
     process.exit(1);
   } else if (fixedCount > 0) {
     info("No action required.");

@@ -50,21 +50,6 @@ export function isExtractionNeededFinding(f: { ruleId: string; message: string }
   return f.ruleId === "DRIFT-RAW-PRIMITIVE" && f.message.includes(EXTRACTION_NEEDED_MARKER);
 }
 
-/**
- * Stable marker embedded in a DRIFT-MISPLACED remediation message when audit's
- * ambiguity heuristic flags a file whose classifier verdict (atom) and import-count
- * heuristic (looks like a composite) disagree. Per ADR-0015 audit is surgical and
- * never asks structural questions — it emits this unfixed finding and routes the
- * user to `classify`, which owns the keep/move decision. Both the audit emitter and
- * the breadcrumb logic reference this single constant so the two never drift apart.
- */
-export const AMBIGUOUS_TIER_MARKER = "ambiguous tier";
-
-/** True when a finding is a DRIFT-MISPLACED that `audit` deferred to `classify` as ambiguous. */
-export function isAmbiguousTierFinding(f: { ruleId: string; message: string }): boolean {
-  return f.ruleId === "DRIFT-MISPLACED" && f.message.includes(AMBIGUOUS_TIER_MARKER);
-}
-
 export interface DriftRuleInput {
   /** Relative file path, e.g. "design-system/atoms/button.tsx" */
   file: string;

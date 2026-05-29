@@ -24,12 +24,6 @@ interface NextStepContext {
    * regardless of what other unfixed findings remain.
    */
   extractionCount?: number;
-  /**
-   * Count of unfixed DRIFT-MISPLACED findings audit flagged as ambiguous (ADR-0015,
-   * issue #203). When > 0, the audit breadcrumb routes to `classify`, which owns the
-   * keep/move structural decision audit refuses to make.
-   */
-  ambiguityCount?: number;
 }
 
 export function printNextStep(command: NextStepCommand, ctx: NextStepContext): void {
@@ -44,13 +38,9 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
       message = "run 'claude-ds audit' to check for drift";
       break;
     case "audit":
-      if ((ctx.extractionCount ?? 0) > 0 || (ctx.ambiguityCount ?? 0) > 0) {
+      if ((ctx.extractionCount ?? 0) > 0) {
         const ext = ctx.extractionCount ?? 0;
-        const amb = ctx.ambiguityCount ?? 0;
-        const clauses: string[] = [];
-        if (ext > 0) clauses.push(`extract ${ext} inline ${ext === 1 ? "component" : "components"}`);
-        if (amb > 0) clauses.push(`resolve ${amb} ambiguous ${amb === 1 ? "classification" : "classifications"}`);
-        message = `run 'claude-ds classify' to ${clauses.join(" and ")}, then re-run 'claude-ds audit'`;
+        message = `run 'claude-ds classify' to extract ${ext} inline ${ext === 1 ? "component" : "components"}, then re-run 'claude-ds audit'`;
       } else if (ctx.hasFindings) {
         message = "run 'claude-ds audit --fix' to auto-repair, or 'claude-ds audit --except' to register exceptions";
       } else {

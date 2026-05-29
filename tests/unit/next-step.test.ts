@@ -89,29 +89,6 @@ describe("printNextStep", () => {
     expect(logged.some(l => l.includes("claude-ds classify"))).toBe(false);
   });
 
-  it("routes audit breadcrumb to classify when ambiguous findings remain (issue #203)", () => {
-    printNextStep("audit", { hasFindings: true, ambiguityCount: 3 });
-    const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("claude-ds classify");
-    expect(line).toContain("3 ambiguous classifications");
-    expect(line).not.toContain("claude-ds audit --fix");
-  });
-
-  it("singularizes the ambiguity breadcrumb for a single finding", () => {
-    printNextStep("audit", { hasFindings: true, ambiguityCount: 1 });
-    const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("1 ambiguous classification");
-    expect(line).not.toContain("ambiguous classifications");
-  });
-
-  it("combines extraction and ambiguity clauses when both remain", () => {
-    printNextStep("audit", { hasFindings: true, extractionCount: 2, ambiguityCount: 1 });
-    const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("extract 2 inline components");
-    expect(line).toContain("resolve 1 ambiguous classification");
-    expect(line).toContain("claude-ds classify");
-  });
-
   it("prints audit-fix breadcrumb with build command", () => {
     printNextStep("audit-fix", { buildCmd: "npm run build" });
     expect(logged.some(l => l.includes("npm run build"))).toBe(true);
