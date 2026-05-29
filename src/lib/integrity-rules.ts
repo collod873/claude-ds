@@ -47,7 +47,7 @@ export function integrityRuleSeverity(id: IntegrityRuleId): Severity {
   return SEVERITY_MAP[id];
 }
 
-function evalUnparseable(file: string, source: string): IntegrityFinding | null {
+export function evalUnparseable(file: string, source: string): IntegrityFinding | null {
   if (source.trim() === "") return null;
 
   const sf = ts.createSourceFile(
@@ -70,7 +70,7 @@ function evalUnparseable(file: string, source: string): IntegrityFinding | null 
   return null;
 }
 
-function evalOrphanedFrom(file: string, source: string): IntegrityFinding | null {
+export function evalOrphanedFrom(file: string, source: string): IntegrityFinding | null {
   const lines = source.split("\n");
   const orphanedLines: number[] = [];
 
@@ -182,7 +182,7 @@ function extractImportPaths(source: string): string[] {
   return paths;
 }
 
-async function evalUnresolvableImport(
+export async function evalUnresolvableImport(
   file: string,
   source: string,
   ctx: IntegrityContext,
