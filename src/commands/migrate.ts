@@ -1,12 +1,15 @@
-import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
-import { basename, dirname, join, resolve, relative } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { basename, join, resolve, relative } from "node:path";
 import { classifySource } from "../lib/classifier.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
 import { parseExceptions } from "../lib/exceptions.js";
 import { info, err, confirm } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
 import { run } from "../lib/runner.js";
+import type { Change, Operation } from "../lib/operation.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
+import { moveTierFile } from "../lib/ops/move-tier-file.js";
+import { appendExceptions } from "../lib/ops/append-exceptions.js";
 
 export async function migrateCmd(opts: { source: string; tier?: "atom"|"composite"; rename?: string; reason: string; yes?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
@@ -50,16 +53,30 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
     tier = verdict.tier;
   }
   const destName = opts.rename ?? basename(abs);
-  const dest = join(cwd, "design-system", tier === "atom" ? "atoms" : "composites", destName);
+  const destRel = join("design-system", tier === "atom" ? "atoms" : "composites", destName);
+  const dest = join(cwd, destRel);
   if (await ctx.exists(dest)) { err(`destination exists: ${dest} (pass --rename to override)`); process.exit(2); }
   if (!opts.yes && !(await confirm(`Migrate ${opts.source} → ${dest}?`))) { info("aborted"); return; }
-  await mkdir(dirname(dest), { recursive: true });
-  await rename(abs, dest);
-  const showcase = dest.replace(/\.tsx$/, ".showcase.tsx");
-  await writeFile(showcase, `// auto-generated showcase stub for ${destName}\nexport default function Showcase(){ return null; }\n`, "utf8");
+
+  const showcaseRel = destRel.replace(/\.tsx$/, ".showcase.tsx");
+  const showcaseContent = `// auto-generated showcase stub for ${destName}\nexport default function Showcase(){ return null; }\n`;
+  const writeShowcaseStub: Operation = {
+    name: "migrate-showcase-stub",
+    async plan(): Promise<Change[]> {
+      return [{ kind: "write", path: showcaseRel, before: null, after: Buffer.from(showcaseContent, "utf8") }];
+    },
+  };
+
   const exPath = join(cwd, "design-system/exceptions.json");
   const cur = parseExceptions(await readFile(exPath, "utf8"));
-  cur.push({ rule: "DRIFT-MISPLACED", path: dest.replace(cwd + "/", ""), reason: opts.reason });
-  await writeFile(exPath, JSON.stringify({ exceptions: cur }, null, 2) + "\n", "utf8");
+  cur.push({ rule: "DRIFT-MISPLACED", path: destRel, reason: opts.reason });
+
+  const report = await run(
+    ctx,
+    [moveTierFile(rel, destRel), writeShowcaseStub, appendExceptions(cur)],
+    "apply",
+  );
+  if (report.failed) { err(`migrate failed: ${report.failed.error}`); process.exit(2); }
+
   info(`migrated → ${dest} (tier=${tier}), exception registered (add an issue link to satisfy lint)`);
 }
