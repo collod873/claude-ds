@@ -3,7 +3,8 @@ import { basename, join } from "node:path";
 import ts from "typescript";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
-import { findInternalComponents, toKebab } from "../drift-fixers.js";
+import { toKebab } from "../drift-fixers.js";
+import { findInternalComponents } from "../drift-rules.js";
 
 /**
  * classify owns extraction (ADR-0015). When a tier file defines an inline

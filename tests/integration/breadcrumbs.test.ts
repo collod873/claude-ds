@@ -46,6 +46,31 @@ describe("next-step breadcrumbs (#193)", () => {
     expect(r.stdout).toMatch(/→ Next:.*claude-ds audit --fix/);
   });
 
+  it("audit --fix leaving an inline-component raw primitive points at classify (#207)", async () => {
+    // A composite with a non-exported, ≥20-line inline component that renders a
+    // raw <button>. The fixer can't replace it in place (extraction is classify's
+    // job) and defers; the breadcrumb must route to classify, not audit --fix.
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    const inlineBody = Array.from({ length: 22 }, (_, i) => `    const v${i} = ${i};`).join("\n");
+    await writeFile(
+      join(dir, "design-system/composites/calendar-view.tsx"),
+      `import { Card } from "@/design-system/atoms/card";
+function DayCell() {
+${inlineBody}
+  return <button type="button">{v0}</button>;
+}
+export function CalendarView() {
+  return <Card><DayCell /></Card>;
+}
+`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react", "--fix"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds classify/);
+    expect(r.stdout).toMatch(/inline component/);
+    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds audit --fix/);
+  });
+
   it("audit breadcrumb detects package.json build script", async () => {
     await mkdir(join(dir, "design-system"), { recursive: true });
     await writeFile(join(dir, "design-system/contracts.md"), "# contracts");

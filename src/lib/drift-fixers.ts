@@ -2,7 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join, basename, dirname, extname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { DriftFinding, DriftRuleId } from "./drift-rules.js";
-import { parseCvaVariants, EXTRACTION_NEEDED_MARKER } from "./drift-rules.js";
+import { parseCvaVariants, EXTRACTION_NEEDED_MARKER, findInternalComponents } from "./drift-rules.js";
 import type { Tier } from "./classifier.js";
 import { classifySource, DEFAULT_DOMAIN_ROOTS } from "./classifier.js";
 import { locationTierFromPath, metaKindFromSource } from "./three-signal.js";
@@ -1582,64 +1582,7 @@ function addImportIfMissing(source: string, componentName: string, importPath: s
   return importLine + source;
 }
 
-const NAMED_COMPONENT_START_RE = /^function\s+([A-Z][A-Za-z0-9]+)\s*\(/gm;
-
 const LOCAL_DECL_RE = /^(?:type|interface|const|let|var|function)\s+([A-Za-z_$][\w$]*)/gm;
-
-export interface InternalComponent {
-  name: string;
-  startIndex: number;
-  endIndex: number;
-  body: string;
-}
-
-function extractFullFunction(source: string, start: number): string {
-  let parenDepth = 0;
-  let braceDepth = 0;
-  let foundOpenParen = false;
-  let pastParams = false;
-  let foundBodyOpen = false;
-  for (let i = start; i < source.length; i++) {
-    const c = source[i];
-    if (!pastParams) {
-      if (c === "(") { parenDepth++; foundOpenParen = true; }
-      if (c === ")" && foundOpenParen) {
-        parenDepth--;
-        if (parenDepth === 0) pastParams = true;
-      }
-      continue;
-    }
-    if (c === "{") { braceDepth++; foundBodyOpen = true; }
-    if (c === "}") {
-      braceDepth--;
-      if (foundBodyOpen && braceDepth === 0) return source.slice(start, i + 1);
-    }
-  }
-  return source.slice(start);
-}
-
-export function findInternalComponents(source: string): InternalComponent[] {
-  const components: InternalComponent[] = [];
-  NAMED_COMPONENT_START_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = NAMED_COMPONENT_START_RE.exec(source)) !== null) {
-    const lineStart = source.lastIndexOf("\n", m.index) + 1;
-    const beforeOnLine = source.slice(lineStart, m.index);
-    if (/export\s+/.test(beforeOnLine)) continue;
-
-    const funcBody = extractFullFunction(source, m.index);
-    const lineCount = funcBody.split("\n").length;
-    if (lineCount < 20) continue;
-
-    components.push({
-      name: m[1],
-      startIndex: m.index,
-      endIndex: m.index + funcBody.length,
-      body: funcBody,
-    });
-  }
-  return components;
-}
 
 function deriveAtomName(componentName: string, parentFileName: string): string {
   const parentPascal = kebabToPascal(parentFileName.replace(/\.\w+$/, ""));

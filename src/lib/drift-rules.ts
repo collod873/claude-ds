@@ -274,6 +274,69 @@ function evalInlineStaticStyle(input: DriftRuleInput): DriftFinding | null {
  */
 const RAW_PRIMITIVE_RE = /<(button|input)[\s>/]/g;
 
+const NAMED_COMPONENT_START_RE = /^function\s+([A-Z][A-Za-z0-9]+)\s*\(/gm;
+
+export interface InternalComponent {
+  name: string;
+  startIndex: number;
+  endIndex: number;
+  body: string;
+}
+
+function extractFullFunction(source: string, start: number): string {
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let foundOpenParen = false;
+  let pastParams = false;
+  let foundBodyOpen = false;
+  for (let i = start; i < source.length; i++) {
+    const c = source[i];
+    if (!pastParams) {
+      if (c === "(") { parenDepth++; foundOpenParen = true; }
+      if (c === ")" && foundOpenParen) {
+        parenDepth--;
+        if (parenDepth === 0) pastParams = true;
+      }
+      continue;
+    }
+    if (c === "{") { braceDepth++; foundBodyOpen = true; }
+    if (c === "}") {
+      braceDepth--;
+      if (foundBodyOpen && braceDepth === 0) return source.slice(start, i + 1);
+    }
+  }
+  return source.slice(start);
+}
+
+/**
+ * Find non-exported, ≥20-line `function PascalCase(...)` declarations — the
+ * inline components that `audit` can't replace in place and must defer to
+ * `classify` for extraction (ADR-0015). Lives on the rule layer so both the
+ * DRIFT-RAW-PRIMITIVE detector and the fixer route on one definition.
+ */
+export function findInternalComponents(source: string): InternalComponent[] {
+  const components: InternalComponent[] = [];
+  NAMED_COMPONENT_START_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = NAMED_COMPONENT_START_RE.exec(source)) !== null) {
+    const lineStart = source.lastIndexOf("\n", m.index) + 1;
+    const beforeOnLine = source.slice(lineStart, m.index);
+    if (/export\s+/.test(beforeOnLine)) continue;
+
+    const funcBody = extractFullFunction(source, m.index);
+    const lineCount = funcBody.split("\n").length;
+    if (lineCount < 20) continue;
+
+    components.push({
+      name: m[1],
+      startIndex: m.index,
+      endIndex: m.index + funcBody.length,
+      body: funcBody,
+    });
+  }
+  return components;
+}
+
 /** DRIFT-RAW-PRIMITIVE: composite/pattern using raw HTML primitive instead of atom. */
 function evalRawPrimitive(input: DriftRuleInput): DriftFinding | null {
   const { file, locationTier, source } = input;
@@ -291,10 +354,25 @@ function evalRawPrimitive(input: DriftRuleInput): DriftFinding | null {
   if (counts.size === 0) return null;
 
   const parts = [...counts.entries()].map(([el, n]) => `${n} <${el}>`);
+  const plural = counts.size > 1 || [...counts.values()][0] > 1;
+
+  // If the file defines an inline component, audit can't replace the primitive
+  // in place — extraction is a structural decision owned by `classify` (ADR-0015).
+  // Stamp the marker at detection time so it survives post-fix re-validation and
+  // the breadcrumb routes to `classify`, not `audit --fix` (issue #207). The fixer
+  // defers on the same `findInternalComponents` condition, keeping the two in sync.
+  if (findInternalComponents(source).length > 0) {
+    return {
+      ruleId: "DRIFT-RAW-PRIMITIVE",
+      file,
+      message: `raw HTML primitive${plural ? "s" : ""}: ${parts.join(", ")} — ${EXTRACTION_NEEDED_MARKER}, run \`claude-ds classify\` to extract the inline component into design-system/atoms/`,
+    };
+  }
+
   return {
     ruleId: "DRIFT-RAW-PRIMITIVE",
     file,
-    message: `raw HTML primitive${counts.size > 1 || [...counts.values()][0] > 1 ? "s" : ""}: ${parts.join(", ")} — use design-system atoms instead`,
+    message: `raw HTML primitive${plural ? "s" : ""}: ${parts.join(", ")} — use design-system atoms instead`,
   };
 }
 

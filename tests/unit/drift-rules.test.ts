@@ -538,6 +538,48 @@ export function SearchBar() {
     expect(findings.find(f => f.ruleId === "DRIFT-RAW-PRIMITIVE")).toBeDefined();
   });
 
+  it("carries the extraction marker when the raw primitive sits in an inline component (issue #207)", () => {
+    // A non-exported, ≥20-line PascalCase function is an inline component audit
+    // can't replace in place — the rule must mark it extraction-needed at
+    // detection time so the breadcrumb survives post-fix re-validation.
+    const inlineBody = Array.from({ length: 22 }, (_, i) => `  const v${i} = ${i};`).join("\n");
+    const input: DriftRuleInput = {
+      file: "design-system/composites/calendar-view.tsx",
+      locationTier: "composite",
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+      source: `function DayCell() {
+${inlineBody}
+  return <button type="button">{v0}</button>;
+}
+export function CalendarView() {
+  return <div><DayCell /></div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-RAW-PRIMITIVE");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain(EXTRACTION_NEEDED_MARKER);
+    expect(hit!.message).toContain("claude-ds classify");
+    expect(isExtractionNeededFinding(hit!)).toBe(true);
+  });
+
+  it("does NOT carry the extraction marker for a generic raw primitive (no inline component)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/search-bar.tsx",
+      locationTier: "composite",
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+      source: `import { Input } from "../atoms/input";
+export function SearchBar() {
+  return <div><Input /><button type="submit">Go</button></div>;
+}`,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-RAW-PRIMITIVE");
+    expect(hit).toBeDefined();
+    expect(hit!.message).not.toContain(EXTRACTION_NEEDED_MARKER);
+    expect(isExtractionNeededFinding(hit!)).toBe(false);
+  });
+
   it("does NOT fire on atom-tier files", () => {
     const input: DriftRuleInput = {
       file: "design-system/atoms/button.tsx",
