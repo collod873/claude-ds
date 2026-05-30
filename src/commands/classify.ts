@@ -442,7 +442,7 @@ export async function classifyCmd(opts: {
           permanent: true,
         });
         keptCount++;
-        info(`classify: ${atomRel} — kept as atom (suppressing future ambiguity finding)`);
+        info(`classify: ${atomRel} — kept as atom (suppressing future ambiguity findings)`);
       } else {
         // "defer"/skip — leave the file untouched; audit will surface it again next run.
         info(`classify: ${atomRel} — skipped (will be flagged again on next audit)`);

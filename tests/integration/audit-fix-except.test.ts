@@ -387,20 +387,17 @@ describe("audit --fix post-fix re-validation", () => {
       JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
     );
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-    // This component imports another DS atom → classifier says "composite".
-    // DRIFT-MISPLACED fires (atom folder, composite classifier) → fixer relocates to composites/.
-    // DRIFT-META-KIND-MISSING fixer can't read (file moved).
-    // Re-validation of composites/card.tsx finds META-KIND-MISSING at the new path.
+    // Three DS imports puts the classifier above the boundary-confidence
+    // threshold (PRD #241 / #244): the verdict is unambiguously composite, so
+    // DRIFT-MISPLACED fires and stays (report-only post-#242). META-KIND-MISSING
+    // is fixable in place and backfills `kind: "atom"` based on location, which
+    // re-validation then catches as DRIFT-MISCLASSIFIED-ATOM at the same path.
     await writeFile(
       join(dir, "design-system/atoms/card.tsx"),
-      // Three DS imports puts the classifier above the boundary-confidence
-      // threshold (PRD #241 / #244): the verdict is unambiguously composite,
-      // so DRIFT-MISPLACED fires (and stays — it's report-only post-#242).
-      // META-KIND-MISSING is fixable; the fix triggers re-validation.
       `import { Icon } from "design-system/atoms/icon";\nimport { Button } from "design-system/atoms/button";\nimport { Badge } from "design-system/atoms/badge";\nexport function Card() { return <div><Icon /><Button /><Badge /></div>; }\n`,
     );
     const r = await runCli(["audit", "--fix"], { cwd: dir });
-    // Re-validation should catch new findings at the relocated path
+    // Re-validation should catch new findings introduced by the in-place fix.
     expect(r.stdout).toMatch(/re-validation/);
     expect(r.code).toBe(1);
   });
@@ -432,12 +429,11 @@ describe("audit --fix post-fix re-validation", () => {
       JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
     );
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    // Same fixture as the test above — confident composite verdict + missing
+    // meta.kind triggers an in-place fix whose re-validation surfaces new
+    // findings (PRD #241 / #244).
     await writeFile(
       join(dir, "design-system/atoms/card.tsx"),
-      // Three DS imports puts the classifier above the boundary-confidence
-      // threshold (PRD #241 / #244): the verdict is unambiguously composite,
-      // so DRIFT-MISPLACED fires (and stays — it's report-only post-#242).
-      // META-KIND-MISSING is fixable; the fix triggers re-validation.
       `import { Icon } from "design-system/atoms/icon";\nimport { Button } from "design-system/atoms/button";\nimport { Badge } from "design-system/atoms/badge";\nexport function Card() { return <div><Icon /><Button /><Badge /></div>; }\n`,
     );
     const r = await runCli(["audit", "--fix"], { cwd: dir });
