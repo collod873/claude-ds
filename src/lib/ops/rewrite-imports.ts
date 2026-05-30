@@ -2,6 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
+import { detectDsAliases } from "../ds-aliases.js";
 
 /**
  * Match `from "...@/design-system/<tier>/..."` — but exclude `types/meta`. The
@@ -89,15 +90,38 @@ async function listTier(ctx: ProjectContext, tier: "atoms" | "composites"): Prom
 }
 
 /**
+ * Resolve the set of import-path prefixes that map to the consumer's
+ * `design-system/` directory. Always includes `@/design-system` (the implicit
+ * baseline assumed by ADR-0009). Adds anything in `cfg.ds_aliases`, falling
+ * back to `detectDsAliases` (tsconfig.json paths) when the config didn't pin
+ * them — same precedence classify uses for `classifySource`.
+ */
+async function resolveDsImportPrefixes(ctx: ProjectContext): Promise<string[]> {
+  const cfgAliases = ctx.cfg.ds_aliases ?? [];
+  const aliases = cfgAliases.length > 0
+    ? cfgAliases
+    : await detectDsAliases(ctx.cwd, ctx.cfg.srcRoot ?? "src");
+  const prefixes = new Set<string>(["@/design-system"]);
+  for (const a of aliases) prefixes.add(a);
+  return [...prefixes];
+}
+
+/**
  * Plan tier-relocation import rewrites across the project.
  *
- * Background: `reconform` (inline pending #83) may move a component between
- * `design-system/atoms/` and `design-system/composites/` based on classification
- * findings. When that move happens via `git mv` (or `rename`), the import sites
+ * Background: `classify` (the sole owner of tier moves — ADR-0015) may move a
+ * component between `design-system/atoms/` and `design-system/composites/`.
+ * When that move happens via `git mv` (or `rename`), the import sites
  * scattered across the project still reference the old tier. This Op closes
  * that gap by emitting `write` Changes for each consumer file whose imports
- * point at the wrong tier — i.e. `@/design-system/atoms/X` where `X.tsx` now
- * lives under `composites/` (and vice versa).
+ * point at the wrong tier — i.e. `<prefix>/atoms/X` where `X.tsx` now lives
+ * under `composites/` (and vice versa).
+ *
+ * Prefix coverage: every alias the consumer uses to reach `design-system/` is
+ * rewritten — the baseline `@/design-system` plus any tsconfig-detected or
+ * config-pinned aliases like `@ds`. Without this, app code under `src/` that
+ * uses `@ds/atoms/<name>` would be left dangling after a move (PRD #241, story
+ * 9 — sub-issue #243).
  *
  * Idempotent: in the steady state where every imported component still lives
  * in the tier it's referenced from, plan() returns `[]`.
@@ -112,8 +136,12 @@ export const rewriteImports: Operation = {
     const composites = await listTier(ctx, "composites");
     if (atoms.size === 0 && composites.size === 0) return [];
 
-    // Build substitution map: for each component, the wrong-tier import path
-    // we should rewrite *to* the right-tier path.
+    const prefixes = await resolveDsImportPrefixes(ctx);
+
+    // Build substitution map: for each component × prefix, the wrong-tier
+    // import path we should rewrite *to* the right-tier path under the same
+    // prefix. Per-alias so a project that mixes `@ds/*` and `@/design-system/*`
+    // gets both forms rewritten in one pass.
     const subs: Array<{ wrong: string; right: string }> = [];
     for (const { from, to } of TIER_PAIR) {
       const wrongTier = from;
@@ -125,10 +153,12 @@ export const rewriteImports: Operation = {
         // Skip ambiguous cases where the same basename exists in both tiers —
         // the rewrite would be unsafe and the user must resolve manually.
         if (wrongSet.has(name)) continue;
-        subs.push({
-          wrong: `@/design-system/${wrongTier}/${name}`,
-          right: `@/design-system/${rightTier}/${name}`,
-        });
+        for (const prefix of prefixes) {
+          subs.push({
+            wrong: `${prefix}/${wrongTier}/${name}`,
+            right: `${prefix}/${rightTier}/${name}`,
+          });
+        }
       }
     }
     if (subs.length === 0) return [];
