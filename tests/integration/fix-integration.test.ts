@@ -237,7 +237,10 @@ describe("integration: full --fix pass on fixture project", () => {
     expect(result.applied.length).toBeGreaterThan(0);
 
     const fixedCount = result.results.filter(r => r.fixed).length;
-    expect(fixedCount).toBeGreaterThanOrEqual(4);
+    // Three categories are still auto-fixable in place: RAW-PRIMITIVE (toolbar),
+    // INLINE-STATIC-STYLE (card), DS-IMPORTS-FEATURE (price-tag). DRIFT-MISPLACED
+    // is report-only per ADR-0015 — the badge move belongs to `claude-ds classify`.
+    expect(fixedCount).toBeGreaterThanOrEqual(3);
 
     // ── Assert: zero findings on re-audit ──
     const postFindings = await collectFindings(dir);
@@ -250,13 +253,14 @@ describe("integration: full --fix pass on fixture project", () => {
     expect(postRaw.every(f => f.file.includes("filter-bar"))).toBe(true);
     expect(postRuleIds.has("DRIFT-INLINE-STATIC-STYLE")).toBe(false);
 
-    // ── Assert: badge relocated from composites/ to atoms/ ──
-    expect(await exists(join(dir, "design-system/atoms/badge.tsx"))).toBe(true);
-    expect(await exists(join(dir, "design-system/composites/badge.tsx"))).toBe(false);
-
-    // ── Assert: companion file moved alongside ──
-    expect(await exists(join(dir, "design-system/atoms/badge.test.tsx"))).toBe(true);
-    expect(await exists(join(dir, "design-system/composites/badge.test.tsx"))).toBe(false);
+    // ── Assert: badge stayed in composites/ — audit is surgical (ADR-0015) ──
+    // The DRIFT-MISPLACED finding still surfaces, but the move belongs to
+    // `claude-ds classify` so importers stay resolvable.
+    expect(await exists(join(dir, "design-system/composites/badge.tsx"))).toBe(true);
+    expect(await exists(join(dir, "design-system/atoms/badge.tsx"))).toBe(false);
+    expect(await exists(join(dir, "design-system/composites/badge.test.tsx"))).toBe(true);
+    expect(await exists(join(dir, "design-system/atoms/badge.test.tsx"))).toBe(false);
+    expect(postRuleIds.has("DRIFT-MISPLACED")).toBe(true);
 
     // ── Assert: filter-bar deferred to classify (ADR-0015), not extracted ──
     // Audit never creates files, so no chip atom appears and the file is left untouched.
@@ -283,34 +287,30 @@ describe("integration: full --fix pass on fixture project", () => {
     expect(cardSource).toContain("spacing-2");
     expect(cardSource).not.toContain('style={{ padding: "8px" }}');
 
-    // ── Assert: domain import resolved for price-tag ──
-    // After DS-IMPORTS-FEATURE extracts the domain import, the file reclassifies as atom
-    // and DRIFT-MISCLASSIFIED-COMPOSITE relocates it to atoms/
-    const priceTagInAtoms = await exists(join(dir, "design-system/atoms/price-tag.tsx"));
-    const priceTagInComposites = await exists(join(dir, "design-system/composites/price-tag.tsx"));
-    expect(priceTagInAtoms || priceTagInComposites).toBe(true);
-    const priceTagPath = priceTagInAtoms
-      ? join(dir, "design-system/atoms/price-tag.tsx")
-      : join(dir, "design-system/composites/price-tag.tsx");
-    const priceTagSource = await readFile(priceTagPath, "utf8");
+    // ── Assert: domain import resolved for price-tag (stays in composites/) ──
+    // After DS-IMPORTS-FEATURE extracts the domain import, the file reclassifies as atom.
+    // DRIFT-MISCLASSIFIED-COMPOSITE now surfaces a finding instead of relocating —
+    // `classify` owns that move per ADR-0015. The file stays in composites/.
+    expect(await exists(join(dir, "design-system/composites/price-tag.tsx"))).toBe(true);
+    expect(await exists(join(dir, "design-system/atoms/price-tag.tsx"))).toBe(false);
+    const priceTagSource = await readFile(join(dir, "design-system/composites/price-tag.tsx"), "utf8");
     // Domain import should be replaced with DS utils import
     expect(priceTagSource).not.toContain("@/lib/utils/format");
     // The extracted utility should exist
     expect(await exists(join(dir, "design-system/utils/format.ts"))).toBe(true);
 
-    // ── Assert: app-level imports rewritten ──
+    // ── Assert: app-level imports unchanged (badge is still in composites/) ──
     const appSource = await readFile(join(dir, "src/app.tsx"), "utf8");
-    expect(appSource).toContain("@/design-system/atoms/badge");
-    expect(appSource).not.toContain("@/design-system/composites/badge");
+    expect(appSource).toContain("@/design-system/composites/badge");
 
-    // ── Assert: barrel indexes regenerated ──
+    // ── Assert: barrel indexes regenerated (badge still in composites/) ──
     const atomsBarrel = await readFile(join(dir, "design-system/atoms/index.ts"), "utf8");
-    expect(atomsBarrel).toContain("badge");
     expect(atomsBarrel).toContain("button");
     expect(atomsBarrel).toContain("input");
+    expect(atomsBarrel).not.toContain("badge");
 
     const compositesBarrel = await readFile(join(dir, "design-system/composites/index.ts"), "utf8");
-    expect(compositesBarrel).not.toContain("badge");
+    expect(compositesBarrel).toContain("badge");
     expect(compositesBarrel).toContain("card");
     expect(compositesBarrel).toContain("toolbar");
 

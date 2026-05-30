@@ -215,11 +215,10 @@ describe("audit --fix --except", () => {
     );
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
-    // Feature import → DRIFT-DS-IMPORTS-FEATURE (fixable) + DRIFT-META-KIND-MISSING (fixable)
-    // After feature import extraction, file reclassifies as atom → re-fix moves to atoms/
+    // Missing meta.kind only → DRIFT-META-KIND-MISSING (fixable in place).
     await writeFile(
-      join(dir, "design-system/composites/orphan.tsx"),
-      'import { api } from "@/features/billing/api";\nexport function Orphan() { return <span>{api()}</span>; }',
+      join(dir, "design-system/atoms/tag.tsx"),
+      'export function Tag() { return <span />; }\n',
     );
     // Pattern file with no slots → DRIFT-PATTERN-NO-SLOTS (unfixable)
     await mkdir(join(dir, "design-system/patterns"), { recursive: true });
@@ -229,9 +228,9 @@ describe("audit --fix --except", () => {
     );
     const r = await runCli(["audit", "--fix", "--except", "--reason", "pending move", "--issue", "#55"], { cwd: dir });
     expect(r.code).toBe(0);
-    // Verify orphan.tsx was fully fixed — relocated to atoms/ with meta.kind
-    const content = await readFile(join(dir, "design-system/atoms/orphan.tsx"), "utf8");
-    expect(content).toMatch(/export const meta.*kind/);
+    // Verify tag.tsx got its meta.kind appended in place.
+    const content = await readFile(join(dir, "design-system/atoms/tag.tsx"), "utf8");
+    expect(content).toMatch(/export const meta.*kind.*atom/);
     // Verify the unfixable DRIFT-PATTERN-NO-SLOTS was excepted
     const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
     const parsed = JSON.parse(raw);
