@@ -17,6 +17,11 @@ function detect(input: DriftRuleInput): DriftFinding | null {
   if (locationTier === null) return null;
   if (locationTier === classifierVerdict.tier) return null;
   if (classifierVerdict.tier === "pattern") return null;
+  // One classification boundary (PRD #241 / #244): defer to the consumer's
+  // current placement when the atom/composite call is ambiguous (1-2 DS
+  // imports). Classify's ambiguity prompt fires only at the confident
+  // composite threshold; audit must match.
+  if (classifierVerdict.ambiguous) return null;
   return {
     ruleId: "DRIFT-MISPLACED",
     file,

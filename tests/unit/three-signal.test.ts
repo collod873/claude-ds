@@ -50,10 +50,13 @@ export const meta = {
 
 describe("checkThreeSignals — DRIFT-MISPLACED", () => {
   it("fires DRIFT-MISPLACED when composite code lives in atoms/", () => {
+    // Three DS imports puts the verdict above the ambiguity threshold
+    // (PRD #241 / #244), so DRIFT-MISPLACED fires.
     const src = `
 import { Button } from "@/design-system/atoms/button";
 import { Input } from "@/design-system/atoms/input";
-export function SearchBar() { return <div><Input /><Button label="Go" /></div>; }
+import { Badge } from "@/design-system/atoms/badge";
+export function SearchBar() { return <div><Input /><Button label="Go" /><Badge /></div>; }
 export const meta = { kind: "composite" };`;
     const result = checkThreeSignals("design-system/atoms/search-bar.tsx", src);
     expect(result.signals.locationTier).toBe("atom");

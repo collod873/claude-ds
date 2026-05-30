@@ -13,6 +13,10 @@ function detect(input: DriftRuleInput): DriftFinding | null {
   if (metaKind !== "composite") return null;
   if (classifierVerdict.tier === "composite") return null;
   if (classifierVerdict.tier === "pattern") return null;
+  // One classification boundary (PRD #241 / #244): symmetric with
+  // DRIFT-MISCLASSIFIED-ATOM. An ambiguous verdict cannot contradict
+  // meta.kind=composite.
+  if (classifierVerdict.ambiguous) return null;
   return {
     ruleId: "DRIFT-MISCLASSIFIED-COMPOSITE",
     file,

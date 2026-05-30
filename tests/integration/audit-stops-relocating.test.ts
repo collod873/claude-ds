@@ -56,14 +56,16 @@ describe("audit --fix never relocates files (ADR-0015)", () => {
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-    // meta.kind=atom but composes 2 DS components → classifier says composite,
-    // so DRIFT-MISCLASSIFIED-ATOM fires.
+    // meta.kind=atom but composes 3 DS components → classifier is confidently
+    // composite (above the ambiguity threshold from PRD #241 / #244), so
+    // DRIFT-MISCLASSIFIED-ATOM fires.
     await writeFile(
       join(dir, "design-system/atoms/toolbar.tsx"),
       [
         `import { Button } from "@/design-system/atoms/button";`,
         `import { Input } from "@/design-system/atoms/input";`,
-        `export function Toolbar() { return <div><Button /><Input /></div>; }`,
+        `import { Badge } from "@/design-system/atoms/badge";`,
+        `export function Toolbar() { return <div><Button /><Input /><Badge /></div>; }`,
         `export const meta = { kind: "atom" as const, examples: [] };`,
         "",
       ].join("\n"),

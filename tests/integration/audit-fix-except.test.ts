@@ -393,7 +393,11 @@ describe("audit --fix post-fix re-validation", () => {
     // Re-validation of composites/card.tsx finds META-KIND-MISSING at the new path.
     await writeFile(
       join(dir, "design-system/atoms/card.tsx"),
-      `import { Icon } from "design-system/atoms/icon";\nexport function Card() { return <div><Icon /></div>; }\n`,
+      // Three DS imports puts the classifier above the boundary-confidence
+      // threshold (PRD #241 / #244): the verdict is unambiguously composite,
+      // so DRIFT-MISPLACED fires (and stays — it's report-only post-#242).
+      // META-KIND-MISSING is fixable; the fix triggers re-validation.
+      `import { Icon } from "design-system/atoms/icon";\nimport { Button } from "design-system/atoms/button";\nimport { Badge } from "design-system/atoms/badge";\nexport function Card() { return <div><Icon /><Button /><Badge /></div>; }\n`,
     );
     const r = await runCli(["audit", "--fix"], { cwd: dir });
     // Re-validation should catch new findings at the relocated path
@@ -430,7 +434,11 @@ describe("audit --fix post-fix re-validation", () => {
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await writeFile(
       join(dir, "design-system/atoms/card.tsx"),
-      `import { Icon } from "design-system/atoms/icon";\nexport function Card() { return <div><Icon /></div>; }\n`,
+      // Three DS imports puts the classifier above the boundary-confidence
+      // threshold (PRD #241 / #244): the verdict is unambiguously composite,
+      // so DRIFT-MISPLACED fires (and stays — it's report-only post-#242).
+      // META-KIND-MISSING is fixable; the fix triggers re-validation.
+      `import { Icon } from "design-system/atoms/icon";\nimport { Button } from "design-system/atoms/button";\nimport { Badge } from "design-system/atoms/badge";\nexport function Card() { return <div><Icon /><Button /><Badge /></div>; }\n`,
     );
     const r = await runCli(["audit", "--fix"], { cwd: dir });
     // Scorecard should show errors from re-validation

@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import picomatch from "picomatch";
 import { info, err, confirm, printNextStep } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
-import { classifySource, countDsComponentImports, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
+import { classifySource, countDsComponentImports, COMPOSITE_CONFIDENCE_THRESHOLD, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
 import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
 import { parseExceptions, type Exception } from "../lib/exceptions.js";
@@ -365,13 +365,16 @@ export async function classifyCmd(opts: {
   info("classify: complete");
   printNextStep("classify", {});
 
-  // Ambiguity pass (ADR-0015, issue #203): an atom that imports >= 3 design-system
-  // components may actually be a composite. The classifier can't decide, so classify asks
-  // the user — audit refuses to (it just emits a pointer-to-classify finding). Only runs
-  // interactively; in CI / --yes there's nobody to answer, so we leave the files for audit
-  // to keep flagging rather than silently moving or suppressing them. Hoisted so it can run
-  // even when --src has no new files to classify (the common re-run case: audit flagged an
-  // ambiguity, the user re-runs classify to resolve it, but src is already migrated).
+  // Ambiguity pass (ADR-0015, issue #203, PRD #241 / #244): an atom that
+  // imports at or above COMPOSITE_CONFIDENCE_THRESHOLD design-system components
+  // may actually be a composite. The same threshold gates audit's
+  // placement-related drift rules — one classification boundary, shared
+  // between classify (which prompts) and audit (which only fires above it).
+  // Only runs interactively; in CI / --yes there's nobody to answer, so we
+  // leave the files for audit to keep flagging rather than silently moving or
+  // suppressing them. Hoisted so it can run even when --src has no new files
+  // to classify (the common re-run case: audit flagged an ambiguity, the user
+  // re-runs classify to resolve it, but src is already migrated).
   async function applyAmbiguityPass(): Promise<{ moved: number; kept: number }> {
     const ambiguityPrompt: FixerPrompt | null =
       opts.prompt ?? (!yes && process.stdout.isTTY === true ? makeTtyPrompt() : null);
@@ -398,7 +401,7 @@ export async function classifyCmd(opts: {
       } catch {
         continue;
       }
-      if (countDsComponentImports(source, dsAliases) < 3) continue;
+      if (countDsComponentImports(source, dsAliases) < COMPOSITE_CONFIDENCE_THRESHOLD) continue;
 
       const fileName = e.name.replace(/\.tsx$/, "");
       const answer = await ambiguityPrompt(
@@ -413,11 +416,23 @@ export async function classifyCmd(opts: {
         const destRel = `design-system/composites/${e.name}`;
         ambiguityMoves.push({ srcRel: atomRel, destRel, label: "composite — user confirmed" });
       } else if (answer === 0) {
-        // Keep as atom — suppress audit's ambiguity finding for this file going forward.
+        // Keep as atom — suppress audit's ambiguity findings for this file
+        // going forward. Above COMPOSITE_CONFIDENCE_THRESHOLD the classifier
+        // verdict is "composite" (unambiguous), so both DRIFT-MISPLACED and
+        // DRIFT-MISCLASSIFIED-ATOM would fire on subsequent audits — the
+        // user's "keep" decision overrides both (PRD #241 / #244: one
+        // boundary, both rules use it).
+        const reason = "classify: user confirmed atom despite multiple component imports";
         exceptionsToAdd.push({
           rule: "DRIFT-MISPLACED",
           path: atomRel,
-          reason: "classify: user confirmed atom despite multiple component imports",
+          reason,
+          permanent: true,
+        });
+        exceptionsToAdd.push({
+          rule: "DRIFT-MISCLASSIFIED-ATOM",
+          path: atomRel,
+          reason,
           permanent: true,
         });
         keptCount++;

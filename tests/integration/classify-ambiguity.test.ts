@@ -72,11 +72,17 @@ describe("classify ambiguity pass (issue #203)", () => {
     await expect(access(join(dir, "design-system/composites/combo.tsx"))).rejects.toThrow();
     expect(await readFile(join(dir, "design-system/atoms/combo.tsx"), "utf8")).toBe(AMBIGUOUS_ATOM);
 
-    // Exception registered so audit stops re-flagging this file
+    // Exception registered so audit stops re-flagging this file. Above the
+    // boundary-confidence threshold (PRD #241 / #244) both DRIFT-MISPLACED and
+    // DRIFT-MISCLASSIFIED-ATOM would fire — the user's "keep" decision must
+    // suppress both.
     const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
     const parsed = JSON.parse(raw);
     expect(parsed.exceptions).toContainEqual(
       expect.objectContaining({ rule: "DRIFT-MISPLACED", path: "design-system/atoms/combo.tsx" }),
+    );
+    expect(parsed.exceptions).toContainEqual(
+      expect.objectContaining({ rule: "DRIFT-MISCLASSIFIED-ATOM", path: "design-system/atoms/combo.tsx" }),
     );
   });
 

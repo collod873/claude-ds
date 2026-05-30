@@ -13,6 +13,11 @@ function detect(input: DriftRuleInput): DriftFinding | null {
   if (metaKind !== "atom") return null;
   if (classifierVerdict.tier === "atom") return null;
   if (classifierVerdict.tier === "pattern") return null;
+  // One classification boundary (PRD #241 / #244): an ambiguous composite
+  // verdict (1-2 DS imports) does not contradict meta.kind=atom — both
+  // possibilities are live. Only fire on a confidently-composite verdict,
+  // which is where classify also prompts.
+  if (classifierVerdict.ambiguous) return null;
   return {
     ruleId: "DRIFT-MISCLASSIFIED-ATOM",
     file,
