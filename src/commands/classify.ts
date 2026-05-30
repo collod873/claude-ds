@@ -15,7 +15,13 @@ import type { Operation } from "../lib/operation.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
-const SOURCE_EXTS = [".tsx", ".ts"];
+// React components live in `.tsx` by convention. Narrowing the brownfield
+// walk to `.tsx` keeps zero-signal `.ts` server modules (route handlers, db
+// schema, lib utilities, test files) out of design-system/atoms/. This is the
+// remaining gap behind #209's "everything became an atom" reproduction —
+// classifier still defaults a no-signal source to `atom`, but the walker no
+// longer hands it non-React files to default on.
+const SOURCE_EXTS = [".tsx"];
 
 interface ClassifiedFile {
   srcRel: string; // relative to cwd, e.g. "src/components/button.tsx"
