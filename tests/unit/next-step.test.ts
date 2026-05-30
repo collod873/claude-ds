@@ -89,6 +89,41 @@ describe("printNextStep", () => {
     expect(logged.some(l => l.includes("claude-ds classify"))).toBe(false);
   });
 
+  it("routes audit breadcrumb to classify when remaining findings are not auto-fixable", () => {
+    printNextStep("audit", { hasFindings: true, unfixableCount: 3 });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds classify");
+    expect(line).not.toContain("claude-ds audit --fix");
+  });
+
+  it("prefers the extraction breadcrumb when both extraction and other unfixable findings remain", () => {
+    printNextStep("audit", { hasFindings: true, extractionCount: 2, unfixableCount: 3 });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds classify");
+    expect(line).toContain("2 inline components");
+    expect(line).not.toContain("claude-ds audit --fix");
+  });
+
+  it("keeps the default with-findings breadcrumb when unfixableCount is 0", () => {
+    printNextStep("audit", { hasFindings: true, unfixableCount: 0 });
+    expect(logged.some(l => l.includes("claude-ds audit --fix"))).toBe(true);
+    expect(logged.some(l => l.includes("claude-ds classify"))).toBe(false);
+  });
+
+  it("routes sync breadcrumb to classify on a brownfield tree", () => {
+    printNextStep("sync", { brownfield: true });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds classify");
+    expect(line).not.toMatch(/claude-ds audit\b/);
+  });
+
+  it("sync breadcrumb stays on audit when the tree is greenfield", () => {
+    printNextStep("sync", { brownfield: false });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds audit");
+    expect(line).not.toContain("claude-ds classify");
+  });
+
   it("prints audit-fix breadcrumb with build command", () => {
     printNextStep("audit-fix", { buildCmd: "npm run build" });
     expect(logged.some(l => l.includes("npm run build"))).toBe(true);

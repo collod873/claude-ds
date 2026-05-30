@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
@@ -117,5 +117,30 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
   }
 
   info(`sync complete → ${target}`);
-  printNextStep("sync", {});
+  printNextStep("sync", { brownfield: await hasConsumerTierFiles(cwd) });
+}
+
+const TIER_DIRS = ["design-system/atoms", "design-system/composites", "design-system/patterns"] as const;
+const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
+
+/**
+ * Brownfield = the consumer already has DS tier files for `classify` to
+ * organize (PRD #241 / sub-issue #245). Surfaced via the immediate children
+ * of design-system/{atoms,composites,patterns} — the same tier-dir scope the
+ * audit walker uses. Nested subfolders aren't checked: they aren't classify's
+ * unit of work either.
+ */
+async function hasConsumerTierFiles(cwd: string): Promise<boolean> {
+  for (const dir of TIER_DIRS) {
+    let entries;
+    try {
+      entries = await readdir(join(cwd, dir), { withFileTypes: true });
+    } catch { continue; }
+    for (const e of entries) {
+      if (!e.isFile() || !e.name.endsWith(".tsx")) continue;
+      if (COMPANION_SUFFIXES.some(s => e.name.endsWith(s))) continue;
+      return true;
+    }
+  }
+  return false;
 }

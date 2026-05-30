@@ -7,7 +7,8 @@ import { info, err, printNextStep, detectBuildCommand } from "../lib/log.js";
 import { detectAppDir } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
 import { parseExceptions, type Exception } from "../lib/exceptions.js";
-import { isExtractionNeededFinding } from "../lib/drift/index.js";
+import { isExtractionNeededFinding, isFixable, type DriftRuleId } from "../lib/drift/index.js";
+import { isIntegrityFixable, type IntegrityRuleId } from "../lib/integrity/index.js";
 import { detectDsAliases, detectTsconfigPaths } from "../lib/ds-aliases.js";
 import type { ProjectContext } from "../lib/project.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
@@ -184,7 +185,19 @@ export async function auditCmd(opts: AuditOpts) {
   if (activeFindings.length > 0) {
     info(`${activeFindings.length} error(s) require attention`);
     const extractionCount = activeFindings.filter(isExtractionNeededFinding).length;
-    printNextStep("audit", { hasFindings: true, extractionCount });
+    // ADR-0014 + PRD #241: route Next: to classify whenever any remaining
+    // finding is non-auto-fixable (report-only relocates, unresolvable-import,
+    // deferred extraction). Telling the consumer to run `audit --fix` when it
+    // can't address what's left is the breadcrumb-lies failure mode the PRD
+    // closes.
+    const unfixableCount = activeFindings.filter(f => {
+      if (isExtractionNeededFinding(f)) return true;
+      if (f.ruleId.startsWith("INTEGRITY-")) {
+        return !isIntegrityFixable(f.ruleId as IntegrityRuleId);
+      }
+      return !isFixable(f.ruleId as DriftRuleId);
+    }).length;
+    printNextStep("audit", { hasFindings: true, extractionCount, unfixableCount });
     process.exit(1);
   } else if (fixSummary.fixedCount > 0) {
     info("No action required.");
