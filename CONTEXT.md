@@ -121,6 +121,27 @@ Three-part gate for when the CLI may prompt the consumer (ADR-0014):
 and distinguishable, (3) the system's best guess would be wrong often enough
 to matter. If any test fails, automate instead of asking.
 
+### Convergence
+The brownfield acceptance property: `sync → classify → audit --fix → audit`
+on a real consumer reaches a clean, idempotent tree in one human-run
+sequence. A second `audit --fix` from the converged state makes 0 changes
+and produces 0 new errors. Convergence is structural, not iterative — once
+classify owns every tier move and audit cannot relocate files, the pipeline
+is a fixed point by design (not by retry loop). Failure to converge — a
+self-worsening `--fix`, dangling imports left behind, audit pointing at
+itself for findings it cannot fix — is the deepest possible violation of
+the north star. See ADR-0014, ADR-0015.
+
+### Intervention
+A manual correction or rescue the consumer had to make to reach a clean
+tree during a verification run — editing the consumer repo by hand, undoing
+a bad move, killing a divergent loop. Distinct from a genuine ambiguity
+prompt (atom-vs-composite, token nudge); answering those is *use*, not
+*intervention*. The interventions-required count is the binding acceptance
+metric for the brownfield journey, recorded in `pack/versions/<v>/verification.md`
+per release candidate. Zero interventions is the bar; one is a fail.
+See ADR-0014.
+
 ### Exception
 An entry in `design-system/exceptions.json` sanctioning a specific drift
 rule on a specific path with a `reason` and a linked upstream `issue`. By
