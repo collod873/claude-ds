@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import picomatch from "picomatch";
 import { info, err, confirm, printNextStep } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
-import { classifySource, countDsComponentImports, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
+import { classifySource, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
 import { detectDsAliases } from "../lib/ds-aliases.js";
 import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
 import { parseExceptions, type Exception } from "../lib/exceptions.js";
@@ -15,7 +15,13 @@ import type { Operation } from "../lib/operation.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
-const SOURCE_EXTS = [".tsx", ".ts"];
+// React components live in `.tsx` by convention. Narrowing the brownfield
+// walk to `.tsx` keeps zero-signal `.ts` server modules (route handlers, db
+// schema, lib utilities, test files) out of design-system/atoms/. This is the
+// remaining gap behind #209's "everything became an atom" reproduction —
+// classifier still defaults a no-signal source to `atom`, but the walker no
+// longer hands it non-React files to default on.
+const SOURCE_EXTS = [".tsx"];
 
 interface ClassifiedFile {
   srcRel: string; // relative to cwd, e.g. "src/components/button.tsx"
@@ -365,17 +371,27 @@ export async function classifyCmd(opts: {
   info("classify: complete");
   printNextStep("classify", {});
 
-  // Ambiguity pass (ADR-0015, issue #203): an atom that imports >= 3 design-system
-  // components may actually be a composite. The classifier can't decide, so classify asks
-  // the user — audit refuses to (it just emits a pointer-to-classify finding). Only runs
-  // interactively; in CI / --yes there's nobody to answer, so we leave the files for audit
-  // to keep flagging rather than silently moving or suppressing them. Hoisted so it can run
-  // even when --src has no new files to classify (the common re-run case: audit flagged an
-  // ambiguity, the user re-runs classify to resolve it, but src is already migrated).
+  // Ambiguity pass (ADR-0015, issue #203, PRD #241 / #244, issue #251):
+  // Walk design-system/atoms/ and re-classify each file using classifySource —
+  // the same function and arguments that audit's placement-drift rules use, so
+  // the two sides share one boundary.
+  //
+  // Two bands, two behaviours:
+  //   confident composite  (tier=composite, !ambiguous): auto-move unconditionally —
+  //     no prompt, no TTY gate.  This is what audit's DRIFT-MISPLACED and
+  //     DRIFT-MISCLASSIFIED-ATOM fire on; leaving them in atoms/ makes audit
+  //     diverge from classify.
+  //   ambiguous composite  (tier=composite, ambiguous=true, 1-2 DS imports):
+  //     prompt the user when interactive; skip silently when non-interactive
+  //     (audit also skips these, so no convergence gap).
+  //
+  // Hoisted so it runs even when --src has no new files to classify (the common
+  // re-run case: audit flagged a misplaced composite, user re-runs classify to
+  // resolve it, but src is already migrated).
   async function applyAmbiguityPass(): Promise<{ moved: number; kept: number }> {
+    // Ambiguous-band prompt — only available when interactive.
     const ambiguityPrompt: FixerPrompt | null =
       opts.prompt ?? (!yes && process.stdout.isTTY === true ? makeTtyPrompt() : null);
-    if (!ambiguityPrompt) return { moved: 0, kept: 0 };
 
     let movedCount = 0;
     let keptCount = 0;
@@ -398,7 +414,23 @@ export async function classifyCmd(opts: {
       } catch {
         continue;
       }
-      if (countDsComponentImports(source, dsAliases) < 3) continue;
+
+      // Use the same classifySource call (same args) that audit's three-signal
+      // checker uses so classify and audit share one classification boundary.
+      const verdict = classifySource(source, domainRoots, ctx.cfg.allowed_imports ?? [], dsAliases);
+      if (verdict.tier !== "composite") continue;
+
+      if (!verdict.ambiguous) {
+        // Confident composite: auto-move regardless of TTY / --yes.
+        // This is exactly the case audit's DRIFT-MISPLACED fires on; moving it
+        // unconditionally makes the flow converge without human input (issue #251).
+        const destRel = `design-system/composites/${e.name}`;
+        ambiguityMoves.push({ srcRel: atomRel, destRel, label: "composite — auto-relocated" });
+        continue;
+      }
+
+      // Genuinely ambiguous band (1-2 DS imports): only prompt when interactive.
+      if (!ambiguityPrompt) continue;
 
       const fileName = e.name.replace(/\.tsx$/, "");
       const answer = await ambiguityPrompt(
@@ -413,15 +445,27 @@ export async function classifyCmd(opts: {
         const destRel = `design-system/composites/${e.name}`;
         ambiguityMoves.push({ srcRel: atomRel, destRel, label: "composite — user confirmed" });
       } else if (answer === 0) {
-        // Keep as atom — suppress audit's ambiguity finding for this file going forward.
+        // Keep as atom — suppress audit's ambiguity findings for this file
+        // going forward. Above COMPOSITE_CONFIDENCE_THRESHOLD the classifier
+        // verdict is "composite" (unambiguous), so both DRIFT-MISPLACED and
+        // DRIFT-MISCLASSIFIED-ATOM would fire on subsequent audits — the
+        // user's "keep" decision overrides both (PRD #241 / #244: one
+        // boundary, both rules use it).
+        const reason = "classify: user confirmed atom despite multiple component imports";
         exceptionsToAdd.push({
           rule: "DRIFT-MISPLACED",
           path: atomRel,
-          reason: "classify: user confirmed atom despite multiple component imports",
+          reason,
+          permanent: true,
+        });
+        exceptionsToAdd.push({
+          rule: "DRIFT-MISCLASSIFIED-ATOM",
+          path: atomRel,
+          reason,
           permanent: true,
         });
         keptCount++;
-        info(`classify: ${atomRel} — kept as atom (suppressing future ambiguity finding)`);
+        info(`classify: ${atomRel} — kept as atom (suppressing future ambiguity findings)`);
       } else {
         // "defer"/skip — leave the file untouched; audit will surface it again next run.
         info(`classify: ${atomRel} — skipped (will be flagged again on next audit)`);

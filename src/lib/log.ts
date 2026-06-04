@@ -21,9 +21,25 @@ interface NextStepContext {
   /**
    * Count of unfixed DRIFT-RAW-PRIMITIVE findings that need extraction (ADR-0015).
    * When > 0, the audit breadcrumb routes to `classify` — the unblocking action —
-   * regardless of what other unfixed findings remain.
+   * with the specific "extract N inline components" wording. Takes priority over
+   * the generic unfixable-findings message below.
    */
   extractionCount?: number;
+  /**
+   * Count of remaining findings audit cannot auto-fix (PRD #241 / sub-issue #245):
+   * report-only relocate rules (DRIFT-MISPLACED, DRIFT-MISCLASSIFIED-*),
+   * INTEGRITY-UNRESOLVABLE-IMPORT, deferred extraction-needed RAW-PRIMITIVE.
+   * When > 0, the audit breadcrumb routes to `classify` instead of `audit --fix`
+   * so the tool never tells the consumer to run a command that won't help.
+   */
+  unfixableCount?: number;
+  /**
+   * True when the tree has consumer-authored DS tier files for classify to
+   * organize (PRD #241 / sub-issue #245). Routes sync's breadcrumb to
+   * `classify` instead of `audit`, matching the documented adopt → classify →
+   * audit flow.
+   */
+  brownfield?: boolean;
 }
 
 export function printNextStep(command: NextStepCommand, ctx: NextStepContext): void {
@@ -41,6 +57,8 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
       if ((ctx.extractionCount ?? 0) > 0) {
         const ext = ctx.extractionCount ?? 0;
         message = `run 'claude-ds classify' to extract ${ext} inline ${ext === 1 ? "component" : "components"}, then re-run 'claude-ds audit'`;
+      } else if ((ctx.unfixableCount ?? 0) > 0) {
+        message = "run 'claude-ds classify' to address findings audit can't auto-repair";
       } else if (ctx.hasFindings) {
         message = "run 'claude-ds audit --fix' to auto-repair, or 'claude-ds audit --except' to register exceptions";
       } else {
@@ -51,7 +69,9 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
       message = `run ${buildCmd} to verify no breakage was introduced`;
       break;
     case "sync":
-      message = "run 'claude-ds audit' to check for new drift after the upgrade";
+      message = ctx.brownfield
+        ? "run 'claude-ds classify' to organize existing design-system files"
+        : "run 'claude-ds audit' to check for new drift after the upgrade";
       break;
     case "reconcile":
       message = "run 'claude-ds audit' to check for drift";

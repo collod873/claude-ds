@@ -215,11 +215,10 @@ describe("audit --fix --except", () => {
     );
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
-    // Feature import → DRIFT-DS-IMPORTS-FEATURE (fixable) + DRIFT-META-KIND-MISSING (fixable)
-    // After feature import extraction, file reclassifies as atom → re-fix moves to atoms/
+    // Missing meta.kind only → DRIFT-META-KIND-MISSING (fixable in place).
     await writeFile(
-      join(dir, "design-system/composites/orphan.tsx"),
-      'import { api } from "@/features/billing/api";\nexport function Orphan() { return <span>{api()}</span>; }',
+      join(dir, "design-system/atoms/tag.tsx"),
+      'export function Tag() { return <span />; }\n',
     );
     // Pattern file with no slots → DRIFT-PATTERN-NO-SLOTS (unfixable)
     await mkdir(join(dir, "design-system/patterns"), { recursive: true });
@@ -229,9 +228,9 @@ describe("audit --fix --except", () => {
     );
     const r = await runCli(["audit", "--fix", "--except", "--reason", "pending move", "--issue", "#55"], { cwd: dir });
     expect(r.code).toBe(0);
-    // Verify orphan.tsx was fully fixed — relocated to atoms/ with meta.kind
-    const content = await readFile(join(dir, "design-system/atoms/orphan.tsx"), "utf8");
-    expect(content).toMatch(/export const meta.*kind/);
+    // Verify tag.tsx got its meta.kind appended in place.
+    const content = await readFile(join(dir, "design-system/atoms/tag.tsx"), "utf8");
+    expect(content).toMatch(/export const meta.*kind.*atom/);
     // Verify the unfixable DRIFT-PATTERN-NO-SLOTS was excepted
     const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
     const parsed = JSON.parse(raw);
@@ -388,16 +387,17 @@ describe("audit --fix post-fix re-validation", () => {
       JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
     );
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-    // This component imports another DS atom → classifier says "composite".
-    // DRIFT-MISPLACED fires (atom folder, composite classifier) → fixer relocates to composites/.
-    // DRIFT-META-KIND-MISSING fixer can't read (file moved).
-    // Re-validation of composites/card.tsx finds META-KIND-MISSING at the new path.
+    // Three DS imports puts the classifier above the boundary-confidence
+    // threshold (PRD #241 / #244): the verdict is unambiguously composite, so
+    // DRIFT-MISPLACED fires and stays (report-only post-#242). META-KIND-MISSING
+    // is fixable in place and backfills `kind: "atom"` based on location, which
+    // re-validation then catches as DRIFT-MISCLASSIFIED-ATOM at the same path.
     await writeFile(
       join(dir, "design-system/atoms/card.tsx"),
-      `import { Icon } from "design-system/atoms/icon";\nexport function Card() { return <div><Icon /></div>; }\n`,
+      `import { Icon } from "design-system/atoms/icon";\nimport { Button } from "design-system/atoms/button";\nimport { Badge } from "design-system/atoms/badge";\nexport function Card() { return <div><Icon /><Button /><Badge /></div>; }\n`,
     );
     const r = await runCli(["audit", "--fix"], { cwd: dir });
-    // Re-validation should catch new findings at the relocated path
+    // Re-validation should catch new findings introduced by the in-place fix.
     expect(r.stdout).toMatch(/re-validation/);
     expect(r.code).toBe(1);
   });
@@ -429,9 +429,12 @@ describe("audit --fix post-fix re-validation", () => {
       JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn", meta_kind_strict: true }),
     );
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    // Same fixture as the test above — confident composite verdict + missing
+    // meta.kind triggers an in-place fix whose re-validation surfaces new
+    // findings (PRD #241 / #244).
     await writeFile(
       join(dir, "design-system/atoms/card.tsx"),
-      `import { Icon } from "design-system/atoms/icon";\nexport function Card() { return <div><Icon /></div>; }\n`,
+      `import { Icon } from "design-system/atoms/icon";\nimport { Button } from "design-system/atoms/button";\nimport { Badge } from "design-system/atoms/badge";\nexport function Card() { return <div><Icon /><Button /><Badge /></div>; }\n`,
     );
     const r = await runCli(["audit", "--fix"], { cwd: dir });
     // Scorecard should show errors from re-validation

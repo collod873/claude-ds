@@ -69,6 +69,21 @@ Every command prints a "next step" line on completion:
 
 If audit detected a finding on a file, the file was readable at detection time. A fixer failing to read the same file is a bug in claude-ds, not a behavior category. Treat as an assertion failure.
 
+### Brownfield verification asserts the journey, not just the end state
+
+A release candidate is accepted on a brownfield consumer only when the full sequence (`sync → classify → audit --fix → audit`) reaches a clean, idempotent tree in **one human-run pass with zero interventions**. CI green is necessary but not sufficient: static and end-state checks cannot see a self-worsening `--fix`, a relocation that leaves dangling imports, or breadcrumbs that route the consumer in a circle. Those failure modes only surface while the journey is in flight.
+
+Concretely, the bar is:
+
+1. Final `audit` exits 0.
+2. `doctor --completeness` exits 0.
+3. A second `audit --fix` from the converged state makes 0 changes and 0 new errors (**idempotent**).
+4. `tsc --noEmit` shows 0 new unresolved-import errors attributable to the run.
+5. **Interventions = 0.** Genuine ambiguity prompts (atom vs. composite, token nudges) are allowed and counted; *corrections* (hand-edits to the consumer, undoing a bad move, stopping a divergent loop) are fails.
+6. Classify's scope is honored (`git status` after `classify` shows changes confined to `design-system/` and its manifest).
+
+The result — pass/fail plus the **interventions-required count** — is recorded in `pack/versions/<candidate>/verification.md` and gates the release. The HITL run is the binding acceptance; CI cannot replace it, and no amount of green test suites closes the question. See [ADR-0015](0015-classify-owns-extraction-audit-is-surgical.md) for the structural reason convergence is now achievable.
+
 ## Consequences
 
 - Brownfield adoption becomes fully self-service for non-coders: run commands in sequence, follow breadcrumbs, answer occasional plain-language questions.
@@ -77,3 +92,4 @@ If audit detected a finding on a file, the file was readable at detection time. 
 - The number of interactive prompts drops from ~17 to only genuine ambiguity questions (estimated 2-3 per audit run on a typical brownfield project).
 - Existing fixers and detection logic need retrofit. This is incremental per ADR-0013's rollout model.
 - `--dry-run` becomes the preview mechanism; confirmation prompts are removed.
+- Every release ships with a filled `verification.md` recording the brownfield journey on a real consumer (Crewops baseline today) — pass/fail against the 6-item bar and an explicit interventions-required count. A candidate with non-zero interventions does not ship.

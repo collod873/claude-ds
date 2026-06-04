@@ -3,7 +3,29 @@ export type Tier = "atom" | "composite" | "pattern" | "feature" | "unknown";
 export interface TierVerdict {
   tier: Tier;
   signals: string[];
+  /**
+   * True when the atom/composite call rests on a DS-import count below the
+   * confidence threshold (1-2 DS component imports). One classification
+   * boundary (PRD #241 / #244): audit's placement-related drift rules
+   * (DRIFT-MISPLACED, DRIFT-MISCLASSIFIED-ATOM, DRIFT-MISCLASSIFIED-COMPOSITE)
+   * skip ambiguous verdicts, so they only fire where classify's ambiguity
+   * prompt also fires (>= 3 DS imports). Below that, neither side acts —
+   * the file's location and meta.kind are taken as the consumer's intent.
+   */
+  ambiguous?: boolean;
 }
+
+/**
+ * DS-component-import count at or above which the classifier is confident
+ * the file is a composite. Below this, a file with at least one DS import
+ * lands in the ambiguous zone: the verdict still names a tier (defaulted to
+ * composite, preserving placement under --src), but `ambiguous: true` tells
+ * audit's placement rules to defer to the consumer's current location.
+ *
+ * The same threshold gates classify's ambiguity prompt (see classify.ts),
+ * so audit and classify agree on which files require human review.
+ */
+export const COMPOSITE_CONFIDENCE_THRESHOLD = 3;
 
 export const DEFAULT_DOMAIN_ROOTS = ["features", "lib"];
 
@@ -114,6 +136,9 @@ export function classifySource(source: string, domainRoots: string[] = DEFAULT_D
   if (dsCount > 0) {
     const noun = dsCount === 1 ? "component" : "components";
     signals.push(`composes ${dsCount} design-system ${noun}`);
+    if (dsCount < COMPOSITE_CONFIDENCE_THRESHOLD) {
+      return { tier: "composite", signals, ambiguous: true };
+    }
     return { tier: "composite", signals };
   }
 

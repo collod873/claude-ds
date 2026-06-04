@@ -7,23 +7,13 @@ import type { DriftFinding } from "../../src/lib/drift/index.js";
 
 describe("fix-pass", () => {
   describe("sortFindingsByPriority", () => {
-    it("sorts extract-to-atom (P0) before relocation (P1)", () => {
+    it("sorts extract-to-atom (P0) before source-rewrite (P2)", () => {
       const findings: DriftFinding[] = [
-        { ruleId: "DRIFT-MISPLACED", file: "design-system/composites/toolbar.tsx", message: "misplaced" },
+        { ruleId: "DRIFT-INLINE-STATIC-STYLE", file: "design-system/atoms/card.tsx", message: "inline style" },
         { ruleId: "DRIFT-RAW-PRIMITIVE", file: "design-system/composites/form.tsx", message: "raw primitive" },
       ];
       const sorted = sortFindingsByPriority(findings);
       expect(sorted[0].ruleId).toBe("DRIFT-RAW-PRIMITIVE");
-      expect(sorted[1].ruleId).toBe("DRIFT-MISPLACED");
-    });
-
-    it("sorts relocation (P1) before source-rewrite (P2)", () => {
-      const findings: DriftFinding[] = [
-        { ruleId: "DRIFT-INLINE-STATIC-STYLE", file: "design-system/atoms/card.tsx", message: "inline style" },
-        { ruleId: "DRIFT-MISPLACED", file: "design-system/composites/button.tsx", message: "misplaced" },
-      ];
-      const sorted = sortFindingsByPriority(findings);
-      expect(sorted[0].ruleId).toBe("DRIFT-MISPLACED");
       expect(sorted[1].ruleId).toBe("DRIFT-INLINE-STATIC-STYLE");
     });
 
@@ -40,7 +30,7 @@ describe("fix-pass", () => {
     it("stable-sorts by file path within same priority", () => {
       const findings: DriftFinding[] = [
         { ruleId: "DRIFT-META-KIND-MISSING", file: "design-system/atoms/chip.tsx", message: "missing meta" },
-        { ruleId: "DRIFT-MISCLASSIFIED-ATOM", file: "design-system/atoms/alert.tsx", message: "misclassified" },
+        { ruleId: "DRIFT-META-KIND-MISSING", file: "design-system/atoms/alert.tsx", message: "missing meta" },
         { ruleId: "DRIFT-META-KIND-MISSING", file: "design-system/atoms/button.tsx", message: "missing meta" },
       ];
       const sorted = sortFindingsByPriority(findings);
@@ -51,7 +41,9 @@ describe("fix-pass", () => {
       ]);
     });
 
-    it("sorts full priority chain: P0 → P1 → P2 → P3", () => {
+    it("sorts full priority chain: P0 → P2 → P3, with report-only rules at the end", () => {
+      // DRIFT-MISPLACED is report-only per ADR-0015 — it has no fixer, so its
+      // priority is Infinity and it sorts after every fixable rule.
       const findings: DriftFinding[] = [
         { ruleId: "DRIFT-META-KIND-MISSING", file: "design-system/atoms/a.tsx", message: "" },
         { ruleId: "DRIFT-MISPLACED", file: "design-system/atoms/b.tsx", message: "" },
@@ -61,9 +53,9 @@ describe("fix-pass", () => {
       const sorted = sortFindingsByPriority(findings);
       expect(sorted.map(f => f.ruleId)).toEqual([
         "DRIFT-RAW-PRIMITIVE",
-        "DRIFT-MISPLACED",
         "DRIFT-INLINE-STATIC-STYLE",
         "DRIFT-META-KIND-MISSING",
+        "DRIFT-MISPLACED",
       ]);
     });
   });
@@ -167,7 +159,7 @@ describe("fix-pass", () => {
       expect(result.applied).toHaveLength(0);
     });
 
-    it("raw-primitive fix runs before relocation in Change list", async () => {
+    it("DRIFT-MISPLACED is report-only — runFixPass never moves the file (ADR-0015)", async () => {
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
@@ -207,19 +199,21 @@ describe("fix-pass", () => {
 
       expect(result.aborted).toBe(false);
 
-      // Verify RAW-PRIMITIVE (P0) ran first: raw <input> replaced in place
+      // Verify RAW-PRIMITIVE (P0) ran: raw <input> replaced in place
       const searchBar = await readFile(join(dir, "design-system/composites/search-bar.tsx"), "utf8");
       expect(searchBar).toContain("<Input");
 
-      // Verify MISPLACED (P1) ran second: button moved to atoms/
-      const buttonExists = await stat(join(dir, "design-system/atoms/button.tsx")).catch(() => null);
-      expect(buttonExists).toBeTruthy();
+      // Verify DRIFT-MISPLACED did NOT move the file — it's report-only now,
+      // the move belongs to `claude-ds classify`.
+      const buttonStillInComposites = await stat(join(dir, "design-system/composites/button.tsx")).catch(() => null);
+      const buttonInAtoms = await stat(join(dir, "design-system/atoms/button.tsx")).catch(() => null);
+      expect(buttonStillInComposites).toBeTruthy();
+      expect(buttonInAtoms).toBeNull();
 
-      // DRIFT-RAW-PRIMITIVE results appear before DRIFT-MISPLACED in results
+      // The MISPLACED finding produces no FixResult (no fixer registered).
       const fixedResults = result.results.filter(r => r.fixed);
-      const rawPrimitiveIdx = fixedResults.findIndex(r => r.finding.ruleId === "DRIFT-RAW-PRIMITIVE");
-      const misplacedIdx = fixedResults.findIndex(r => r.finding.ruleId === "DRIFT-MISPLACED");
-      expect(rawPrimitiveIdx).toBeLessThan(misplacedIdx);
+      expect(fixedResults.some(r => r.finding.ruleId === "DRIFT-MISPLACED")).toBe(false);
+      expect(fixedResults.some(r => r.finding.ruleId === "DRIFT-RAW-PRIMITIVE")).toBe(true);
     });
 
     it("returns changes field on FixResult for each fixed finding", async () => {

@@ -3,6 +3,7 @@ import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { classifyCmd } from "../../src/commands/classify";
+import { classifySource } from "../../src/lib/classifier.js";
 import type { FixerPrompt } from "../../src/lib/drift/index.js";
 
 const BASE_CFG = {
@@ -13,14 +14,22 @@ const BASE_CFG = {
   ds_aliases: ["@/design-system"],
 };
 
-// An atom that imports >= 3 design-system components — the shape the ambiguity heuristic
-// (issue #200/#203) flags. Lives directly in design-system/atoms/, mirroring a brownfield
-// project that hand-placed it there before adopting claude-ds.
-const AMBIGUOUS_ATOM = [
+// A confident composite: imports >= 3 design-system components, so classifySource returns
+// tier=composite without ambiguous. Auto-moved by classify unconditionally (issue #251).
+const CONFIDENT_COMPOSITE_ATOM = [
   `import { Button } from "@/design-system/atoms/button";`,
   `import { Input } from "@/design-system/atoms/input";`,
   `import { Badge } from "@/design-system/atoms/badge";`,
   `export function Combo() { return <div><Button /><Input /><Badge /></div>; }`,
+  `export const meta = { kind: "atom" as const, examples: [] };`,
+].join("\n") + "\n";
+
+// A genuinely ambiguous atom: imports exactly 2 DS components, so classifySource returns
+// tier=composite with ambiguous=true. Only prompted when interactive.
+const AMBIGUOUS_ATOM = [
+  `import { Button } from "@/design-system/atoms/button";`,
+  `import { Input } from "@/design-system/atoms/input";`,
+  `export function TwoComponent() { return <div><Button /><Input /></div>; }`,
   `export const meta = { kind: "atom" as const, examples: [] };`,
 ].join("\n") + "\n";
 
@@ -35,7 +44,10 @@ describe("classify ambiguity pass (issue #203)", () => {
     // user to classify to resolve an already-placed atom, nothing new to classify).
     await mkdir(join(dir, "src/components"), { recursive: true });
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-    await writeFile(join(dir, "design-system/atoms/combo.tsx"), AMBIGUOUS_ATOM);
+    // Default fixture is the genuinely ambiguous atom (2 DS imports) — used for keep/skip
+    // tests where a prompt decision is meaningful. The confident composite fixture
+    // (3+ DS imports) is used directly in tests that need auto-move behaviour.
+    await writeFile(join(dir, "design-system/atoms/twocomp.tsx"), AMBIGUOUS_ATOM);
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   });
 
@@ -46,8 +58,11 @@ describe("classify ambiguity pass (issue #203)", () => {
 
   const output = () => logSpy.mock.calls.map(c => c.map(String).join(" ")).join("\n");
 
-  it("move: relocates the atom to composites/ and flips meta.kind", async () => {
-    const prompt: FixerPrompt = async () => 1; // "Move to composites"
+  it("auto-move (confident composite): relocates to composites/ and flips meta.kind without a prompt", async () => {
+    // Confident composite (3 DS imports) — auto-moved unconditionally regardless of TTY.
+    await writeFile(join(dir, "design-system/atoms/combo.tsx"), CONFIDENT_COMPOSITE_ATOM);
+    const asked: string[] = [];
+    const prompt: FixerPrompt = async (q) => { asked.push(q); return "defer"; };
     await classifyCmd({ src: "src/components", cwd: dir, prompt });
 
     // Moved out of atoms/, into composites/
@@ -59,35 +74,63 @@ describe("classify ambiguity pass (issue #203)", () => {
     expect(moved).toMatch(/kind:\s*["']composite["']/);
     expect(moved).not.toMatch(/kind:\s*["']atom["']/);
 
+    // No exceptions written for an auto-move
+    await expect(access(join(dir, "design-system/exceptions.json"))).rejects.toThrow();
+
+    // combo.tsx (the confident composite) was never surfaced via prompt — auto-moved silently.
+    // twocomp.tsx (the ambiguous fixture from beforeEach, 2 DS imports) may still be prompted.
+    expect(asked.some(q => q.includes("combo"))).toBe(false);
+  });
+
+  it("prompt-move (ambiguous): relocates the atom to composites/ when user picks 'Move'", async () => {
+    // Ambiguous atom (2 DS imports) — goes through the prompt path.
+    const prompt: FixerPrompt = async () => 1; // "Move to composites"
+    await classifyCmd({ src: "src/components", cwd: dir, prompt });
+
+    // Moved out of atoms/, into composites/
+    await expect(access(join(dir, "design-system/atoms/twocomp.tsx"))).rejects.toThrow();
+    await expect(access(join(dir, "design-system/composites/twocomp.tsx"))).resolves.toBeUndefined();
+
+    // meta.kind flipped atom -> composite
+    const moved = await readFile(join(dir, "design-system/composites/twocomp.tsx"), "utf8");
+    expect(moved).toMatch(/kind:\s*["']composite["']/);
+    expect(moved).not.toMatch(/kind:\s*["']atom["']/);
+
     // No exceptions written for a move
     await expect(access(join(dir, "design-system/exceptions.json"))).rejects.toThrow();
   });
 
-  it("keep: leaves the atom in place and suppresses the finding via an exception", async () => {
+  it("keep (ambiguous): leaves the atom in place and suppresses the finding via an exception", async () => {
+    // Uses the genuinely ambiguous fixture (2 DS imports) — prompt is reachable.
     const prompt: FixerPrompt = async () => 0; // "Keep as atom"
     await classifyCmd({ src: "src/components", cwd: dir, prompt });
 
     // File stays in atoms/, unmoved and unmodified
-    await expect(access(join(dir, "design-system/atoms/combo.tsx"))).resolves.toBeUndefined();
-    await expect(access(join(dir, "design-system/composites/combo.tsx"))).rejects.toThrow();
-    expect(await readFile(join(dir, "design-system/atoms/combo.tsx"), "utf8")).toBe(AMBIGUOUS_ATOM);
+    await expect(access(join(dir, "design-system/atoms/twocomp.tsx"))).resolves.toBeUndefined();
+    await expect(access(join(dir, "design-system/composites/twocomp.tsx"))).rejects.toThrow();
+    expect(await readFile(join(dir, "design-system/atoms/twocomp.tsx"), "utf8")).toBe(AMBIGUOUS_ATOM);
 
-    // Exception registered so audit stops re-flagging this file
+    // Exception registered so audit stops re-flagging this file. Both
+    // DRIFT-MISPLACED and DRIFT-MISCLASSIFIED-ATOM must be suppressed (PRD #241 / #244).
     const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
     const parsed = JSON.parse(raw);
     expect(parsed.exceptions).toContainEqual(
-      expect.objectContaining({ rule: "DRIFT-MISPLACED", path: "design-system/atoms/combo.tsx" }),
+      expect.objectContaining({ rule: "DRIFT-MISPLACED", path: "design-system/atoms/twocomp.tsx" }),
+    );
+    expect(parsed.exceptions).toContainEqual(
+      expect.objectContaining({ rule: "DRIFT-MISCLASSIFIED-ATOM", path: "design-system/atoms/twocomp.tsx" }),
     );
   });
 
-  it("skip: leaves the atom untouched, writes no exception, records no phantom confirmation", async () => {
+  it("skip (ambiguous): leaves the atom untouched, writes no exception, records no phantom confirmation", async () => {
+    // Uses the genuinely ambiguous fixture (2 DS imports) — prompt is reachable and returns defer.
     const prompt: FixerPrompt = async () => "defer"; // "[s] Skip/defer"
     await classifyCmd({ src: "src/components", cwd: dir, prompt });
 
     // Untouched
-    await expect(access(join(dir, "design-system/atoms/combo.tsx"))).resolves.toBeUndefined();
-    await expect(access(join(dir, "design-system/composites/combo.tsx"))).rejects.toThrow();
-    expect(await readFile(join(dir, "design-system/atoms/combo.tsx"), "utf8")).toBe(AMBIGUOUS_ATOM);
+    await expect(access(join(dir, "design-system/atoms/twocomp.tsx"))).resolves.toBeUndefined();
+    await expect(access(join(dir, "design-system/composites/twocomp.tsx"))).rejects.toThrow();
+    expect(await readFile(join(dir, "design-system/atoms/twocomp.tsx"), "utf8")).toBe(AMBIGUOUS_ATOM);
 
     // No suppression on skip — the user deferred, didn't decide
     await expect(access(join(dir, "design-system/exceptions.json"))).rejects.toThrow();
@@ -96,26 +139,132 @@ describe("classify ambiguity pass (issue #203)", () => {
     expect(output()).not.toMatch(/User confirmed/);
   });
 
-  it("only prompts on atoms with >= 3 design-system component imports", async () => {
+  it("only prompts on genuinely ambiguous atoms (1-2 DS imports); plain atoms and confident composites never prompt", async () => {
     // A plain atom (no DS imports) must never trigger the prompt.
     await writeFile(
       join(dir, "design-system/atoms/plain.tsx"),
       `export function Plain() { return <span />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
     );
+    // A confident composite (3 DS imports) must be auto-moved without a prompt.
+    await writeFile(join(dir, "design-system/atoms/combo.tsx"), CONFIDENT_COMPOSITE_ATOM);
     const asked: string[] = [];
     const prompt: FixerPrompt = async (q) => { asked.push(q); return "defer"; };
     await classifyCmd({ src: "src/components", cwd: dir, prompt });
 
-    expect(asked.some(q => q.includes("combo"))).toBe(true);
+    // The genuinely ambiguous fixture (twocomp, 2 DS imports) must have been prompted.
+    expect(asked.some(q => q.includes("twocomp"))).toBe(true);
+    // Plain atoms (no DS imports) must never prompt.
     expect(asked.some(q => q.includes("plain"))).toBe(false);
+    // Confident composites (>= 3 DS imports) are auto-moved — no prompt needed.
+    expect(asked.some(q => q.includes("combo"))).toBe(false);
+    // Confident composite was auto-moved without prompt.
+    await expect(access(join(dir, "design-system/atoms/combo.tsx"))).rejects.toThrow();
+    await expect(access(join(dir, "design-system/composites/combo.tsx"))).resolves.toBeUndefined();
   });
 
-  it("non-interactive (no injected prompt, no TTY): never prompts or mutates", async () => {
-    // process.stdout.isTTY is false under the test runner, so classify must skip the pass.
-    await classifyCmd({ src: "src/components", cwd: dir, yes: true });
+  it("non-interactive (no injected prompt, no TTY): auto-moves confident composites, never prompts about them", async () => {
+    // process.stdout.isTTY is false under the test runner. The fix (issue #251) means
+    // confident composites (classifySource tier=composite, !ambiguous) are auto-moved
+    // WITHOUT a prompt. The ambiguous band (1-2 DS imports) is the only thing that stays
+    // TTY-gated, because audit also skips those — no convergence gap.
+    await writeFile(join(dir, "design-system/atoms/combo.tsx"), CONFIDENT_COMPOSITE_ATOM);
+    const asked: string[] = [];
+    const noopPrompt: FixerPrompt = async (q) => { asked.push(q); return "defer"; };
+    // Inject a prompt spy — it must NOT be called for the confident composite (combo.tsx).
+    // twocomp.tsx (2 DS imports, ambiguous) may still be prompted since a prompt is provided.
+    await classifyCmd({ src: "src/components", cwd: dir, prompt: noopPrompt });
 
-    await expect(access(join(dir, "design-system/atoms/combo.tsx"))).resolves.toBeUndefined();
-    await expect(access(join(dir, "design-system/composites/combo.tsx"))).rejects.toThrow();
+    // Confident composite (3 DS imports) must be auto-relocated, no prompt involved.
+    await expect(access(join(dir, "design-system/atoms/combo.tsx"))).rejects.toThrow();
+    await expect(access(join(dir, "design-system/composites/combo.tsx"))).resolves.toBeUndefined();
+    // combo.tsx must never have been asked about.
+    expect(asked.some(q => q.includes("combo"))).toBe(false);
+    // No exception written for the auto-moved composite.
     await expect(access(join(dir, "design-system/exceptions.json"))).rejects.toThrow();
+  });
+});
+
+// Issue #251: brownfield flow convergence — classify must converge without a TTY so
+// a subsequent audit finds zero DRIFT-MISPLACED / DRIFT-MISCLASSIFIED-ATOM on files
+// that classify was already confident about.
+describe("classify brownfield convergence (issue #251)", () => {
+  let dir: string;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  const DS_ALIASES = ["@/design-system"];
+
+  beforeEach(async () => {
+    dir = await freshTmpDir();
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      packVersion: "v0.8.0",
+      pack: "next-react",
+      mode: "warn",
+      domain_roots: ["features", "lib"],
+      ds_aliases: DS_ALIASES,
+    }));
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    logSpy.mockRestore();
+    await cleanup(dir);
+  });
+
+  it("convergence: after classify with no TTY, no confident composites remain in atoms/", async () => {
+    // Simulate a brownfield project that placed multiple confident composites in atoms/.
+    // classify must relocate all of them without any human interaction (issue #251).
+    await writeFile(join(dir, "design-system/atoms/card.tsx"), CONFIDENT_COMPOSITE_ATOM);
+    await writeFile(join(dir, "design-system/atoms/dialog.tsx"), [
+      `import { Button } from "@/design-system/atoms/button";`,
+      `import { Input } from "@/design-system/atoms/input";`,
+      `import { Badge } from "@/design-system/atoms/badge";`,
+      `import { Spinner } from "@/design-system/atoms/spinner";`,
+      `export function Dialog() { return <div><Button /><Input /><Badge /><Spinner /></div>; }`,
+      `export const meta = { kind: "atom" as const, examples: [] };`,
+    ].join("\n") + "\n");
+
+    // No TTY (test runner), no injected prompt — must still converge.
+    await classifyCmd({ src: "src/components", cwd: dir });
+
+    // Both confident composites must be gone from atoms/.
+    await expect(access(join(dir, "design-system/atoms/card.tsx"))).rejects.toThrow();
+    await expect(access(join(dir, "design-system/atoms/dialog.tsx"))).rejects.toThrow();
+
+    // Both must be in composites/.
+    await expect(access(join(dir, "design-system/composites/card.tsx"))).resolves.toBeUndefined();
+    await expect(access(join(dir, "design-system/composites/dialog.tsx"))).resolves.toBeUndefined();
+
+    // Verify via classifySource that there are now zero confident composites left in atoms/
+    // (this is the audit boundary: DRIFT-MISPLACED fires on tier=composite && !ambiguous).
+    const { readdir: readdirSync } = await import("node:fs/promises");
+    const atomEntries = await readdirSync(join(dir, "design-system/atoms"), { withFileTypes: true });
+    for (const e of atomEntries) {
+      if (!e.isFile() || !e.name.endsWith(".tsx")) continue;
+      const src = await readFile(join(dir, "design-system/atoms", e.name), "utf8");
+      const verdict = classifySource(src, ["features", "lib"], [], DS_ALIASES);
+      const isConfidentComposite = verdict.tier === "composite" && !verdict.ambiguous;
+      expect(isConfidentComposite, `${e.name} is still a confident composite in atoms/`).toBe(false);
+    }
+  });
+
+  it("no-prompt-when-confident: a >= 3-DS-import atom in atoms/ is auto-moved with 0 prompt calls", async () => {
+    // This is the inverse of the old broken behavior: the old code prompted on every file
+    // that hit countDsComponentImports >= COMPOSITE_CONFIDENCE_THRESHOLD (i.e., the
+    // confident band). The fix auto-moves those and reserves prompts for ambiguous files only.
+    await writeFile(join(dir, "design-system/atoms/form.tsx"), CONFIDENT_COMPOSITE_ATOM);
+
+    const promptCalls: string[] = [];
+    const promptSpy: FixerPrompt = async (q) => { promptCalls.push(q); return "defer"; };
+
+    await classifyCmd({ src: "src/components", cwd: dir, prompt: promptSpy });
+
+    // Exactly 0 prompt calls — confident composite was auto-moved, never prompted.
+    expect(promptCalls).toHaveLength(0);
+
+    // File was moved without human input.
+    await expect(access(join(dir, "design-system/atoms/form.tsx"))).rejects.toThrow();
+    await expect(access(join(dir, "design-system/composites/form.tsx"))).resolves.toBeUndefined();
   });
 });

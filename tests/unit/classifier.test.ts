@@ -152,6 +152,60 @@ export function SubmitButton() {
   });
 });
 
+// ── Ambiguity flag (PRD #241 / #244) ─────────────────────────────────────────
+// The atom/composite boundary is one decision shared between classify and
+// audit. Below the confidence threshold (1-2 DS imports), the verdict is
+// marked ambiguous so audit's placement-related rules skip — neither side
+// acts on a count that classify wouldn't even prompt on.
+
+describe("classifySource — atom/composite ambiguity", () => {
+  it("0 DS imports → atom, not ambiguous", () => {
+    const src = `export function Plain() { return <span />; }`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("atom");
+    expect(v.ambiguous).toBeFalsy();
+  });
+
+  it("1 DS import → composite, ambiguous", () => {
+    const src = `
+import { Button } from "@/design-system/atoms/button";
+export function SubmitButton() { return <Button />; }`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("composite");
+    expect(v.ambiguous).toBe(true);
+  });
+
+  it("2 DS imports → composite, ambiguous", () => {
+    const src = `
+import { Button } from "@/design-system/atoms/button";
+import { Input } from "@/design-system/atoms/input";
+export function SearchBar() { return <div><Input /><Button /></div>; }`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("composite");
+    expect(v.ambiguous).toBe(true);
+  });
+
+  it("3 DS imports → composite, NOT ambiguous (boundary-confident)", () => {
+    const src = `
+import { Avatar } from "@/design-system/atoms/avatar";
+import { Badge } from "@/design-system/atoms/badge";
+import { Button } from "@/design-system/atoms/button";
+export function UserCard() { return <div><Avatar /><Badge /><Button /></div>; }`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("composite");
+    expect(v.ambiguous).toBeFalsy();
+  });
+
+  it("feature verdict is never ambiguous (different signal)", () => {
+    const src = `
+import { useInvoice } from "@/features/invoicing/use-invoice";
+export function InvoiceAmount() { return <span />; }`;
+    const v = classifySource(src);
+    expect(v.tier).toBe("feature");
+    expect(v.ambiguous).toBeFalsy();
+  });
+});
+
 // ── Configurable domain roots ─────────────────────────────────────────────────
 
 describe("classifySource — configurable domain roots", () => {

@@ -71,6 +71,23 @@ describe("DRIFT-MISPLACED rule", () => {
     expect(findings.filter(f => f.ruleId === "DRIFT-MISPLACED")).toHaveLength(0);
   });
 
+  it("does not fire when classifier verdict is ambiguous (PRD #241 / #244)", () => {
+    // Ambiguous boundary (1-2 DS imports). Both audit and classify defer to
+    // the consumer's current placement — audit must skip, classify must not
+    // prompt. The shared boundary is what makes the brownfield flow converge.
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/icon-button.tsx",
+      locationTier: "atom",
+      classifierVerdict: {
+        tier: "composite",
+        signals: ["composes 1 design-system component"],
+        ambiguous: true,
+      },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISPLACED")).toHaveLength(0);
+  });
+
   it("includes classifier signals in the finding message", () => {
     const input: DriftRuleInput = {
       file: "design-system/atoms/combobox.tsx",
@@ -700,6 +717,24 @@ describe("DRIFT-MISCLASSIFIED-ATOM rule", () => {
     expect(hit).toBeDefined();
     expect(hit!.message).toContain("composes 3 design-system components");
   });
+
+  it("does not fire when classifier verdict is ambiguous (PRD #241 / #244)", () => {
+    // Below the boundary-confidence threshold the verdict is "composite"
+    // by default but flagged ambiguous. Classify won't prompt; audit must
+    // not flag — one boundary shared between the two.
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/icon-button.tsx",
+      locationTier: "atom",
+      metaKind: "atom",
+      classifierVerdict: {
+        tier: "composite",
+        signals: ["composes 1 design-system component"],
+        ambiguous: true,
+      },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISCLASSIFIED-ATOM")).toHaveLength(0);
+  });
 });
 
 describe("DRIFT-MISCLASSIFIED-COMPOSITE rule", () => {
@@ -745,6 +780,24 @@ describe("DRIFT-MISCLASSIFIED-COMPOSITE rule", () => {
       locationTier: "composite",
       metaKind: "composite",
       classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-MISCLASSIFIED-COMPOSITE")).toHaveLength(0);
+  });
+
+  it("does not fire when classifier verdict is ambiguous (PRD #241 / #244)", () => {
+    // Symmetric with DRIFT-MISCLASSIFIED-ATOM: a legitimate composite that
+    // only imports a couple of atoms must not be flagged as misclassified
+    // just because the count is below the confidence threshold.
+    const input: DriftRuleInput = {
+      file: "design-system/composites/search-bar.tsx",
+      locationTier: "composite",
+      metaKind: "composite",
+      classifierVerdict: {
+        tier: "composite",
+        signals: ["composes 2 design-system components"],
+        ambiguous: true,
+      },
     };
     const findings = evaluateDrift(input);
     expect(findings.filter(f => f.ruleId === "DRIFT-MISCLASSIFIED-COMPOSITE")).toHaveLength(0);

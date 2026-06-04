@@ -35,15 +35,22 @@ describe("next-step breadcrumbs (#193)", () => {
     expect(r.stdout).toMatch(/→ Next:.*build/);
   });
 
-  it("audit (with findings) prints → Next: with audit --fix", async () => {
-    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+  it("audit (with auto-fixable findings) prints → Next: with audit --fix", async () => {
+    // A correctly-placed atom with the retired meta.states field (ADR-0007)
+    // produces DRIFT-STALE-META-STATES — an auto-fixable rule. Breadcrumb
+    // should still point at `audit --fix`, not classify (#245).
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await writeFile(
-      join(dir, "design-system/composites/solo-label.tsx"),
-      "export function SoloLabel() { return <span />; }",
+      join(dir, "design-system/atoms/solo-label.tsx"),
+      `export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function SoloLabel() { return <span />; }
+`,
     );
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/DRIFT-STALE-META-STATES/);
     expect(r.stdout).toMatch(/→ Next:.*claude-ds audit --fix/);
+    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds classify/);
   });
 
   it("audit --fix leaving an inline-component raw primitive points at classify (#207)", async () => {
@@ -69,6 +76,52 @@ export function CalendarView() {
     expect(r.stdout).toMatch(/→ Next:.*claude-ds classify/);
     expect(r.stdout).toMatch(/inline component/);
     expect(r.stdout).not.toMatch(/→ Next:.*claude-ds audit --fix/);
+  });
+
+  it("audit (MISPLACED finding) points → Next: at classify, not audit --fix (#245)", async () => {
+    // A composite-shaped file (≥3 DS-component imports) living under atoms/
+    // produces DRIFT-MISPLACED. That finding is report-only — `audit --fix`
+    // can't repair it, only `classify` can. Breadcrumb must reflect that.
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    for (const name of ["card", "button", "input"]) {
+      await writeFile(
+        join(dir, `design-system/atoms/${name}.tsx`),
+        `export function ${name[0].toUpperCase()}${name.slice(1)}() { return <div />; }\n`,
+      );
+    }
+    await writeFile(
+      join(dir, "design-system/atoms/sidebar.tsx"),
+      `import { Card } from "@/design-system/atoms/card";
+import { Button } from "@/design-system/atoms/button";
+import { Input } from "@/design-system/atoms/input";
+export function Sidebar() { return <Card><Button /><Input /></Card>; }
+`,
+    );
+    const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/DRIFT-MISPLACED/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds classify/);
+    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds audit --fix/);
+  });
+
+  it("sync on a brownfield tree points → Next: at classify (#245)", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }),
+    );
+    // Pre-existing consumer tier file makes this tree brownfield: there is
+    // something for classify to look at. Sync's Next: must route there, not
+    // skip ahead to audit.
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/legacy-button.tsx"),
+      "export function LegacyButton() { return <button />; }\n",
+    );
+    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds classify/);
+    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds audit\b/);
   });
 
   it("audit breadcrumb detects package.json build script", async () => {
