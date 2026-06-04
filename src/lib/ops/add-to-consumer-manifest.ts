@@ -3,11 +3,13 @@ import { join } from "node:path";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 
-const CONSUMER_MANIFEST_PATH = "design-system/manifest.json";
+export const CONSUMER_MANIFEST_PATH = ".claude-ds/tracking-manifest.json";
 
 /**
- * Adds `paths` as `seeded` entries to the consumer's `design-system/manifest.json`.
- * If the consumer manifest is absent, the pack manifest (`ctx.packDir/manifest.json`)
+ * Adds `paths` as `seeded` entries to the claude-ds tracking manifest at
+ * `.claude-ds/tracking-manifest.json`. Separated from `design-system/manifest.json`
+ * (showcase-only) to avoid TS2352 type collision and non-idempotent --fix (#256).
+ * If the tracking manifest is absent, the pack manifest (`ctx.packDir/manifest.json`)
  * is used as the seed. Entries already present are skipped — emits no Change when
  * every path is already tracked.
  */

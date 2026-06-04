@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { addToConsumerManifest } from "../../../src/lib/ops/add-to-consumer-manifest";
+import { addToConsumerManifest, CONSUMER_MANIFEST_PATH } from "../../../src/lib/ops/add-to-consumer-manifest";
 import type { ProjectContext } from "../../../src/lib/project";
 import type { Manifest } from "../../../src/lib/manifest";
 import type { Config } from "../../../src/lib/config";
 import type { Change } from "../../../src/lib/operation";
 import { cleanup, freshTmpDir } from "../../helpers/tmpdir";
+
+const TRACKING_PATH = ".claude-ds/tracking-manifest.json";
 
 let cwd: string;
 let packDir: string;
@@ -52,10 +54,14 @@ function makeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
 }
 
 describe("addToConsumerManifest op", () => {
-  it("appends new seeded entry to existing consumer manifest", async () => {
-    await mkdir(join(cwd, "design-system"), { recursive: true });
+  it("CONSUMER_MANIFEST_PATH is the claude-ds namespaced tracking path (#256)", () => {
+    expect(CONSUMER_MANIFEST_PATH).toBe(TRACKING_PATH);
+  });
+
+  it("appends new seeded entry to existing tracking manifest", async () => {
+    await mkdir(join(cwd, ".claude-ds"), { recursive: true });
     await writeFile(
-      join(cwd, "design-system/manifest.json"),
+      join(cwd, TRACKING_PATH),
       JSON.stringify({ files: [{ path: "design-system/contracts.md", category: "managed" }] }, null, 2) + "\n",
     );
     const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
@@ -63,13 +69,13 @@ describe("addToConsumerManifest op", () => {
     expect(changes).toHaveLength(1);
     const c = changes[0] as Extract<Change, { kind: "write" }>;
     expect(c.kind).toBe("write");
-    expect(c.path).toBe("design-system/manifest.json");
+    expect(c.path).toBe(TRACKING_PATH);
     const parsed = JSON.parse(c.after.toString("utf8"));
     expect(parsed.files).toHaveLength(2);
     expect(parsed.files[1]).toEqual({ path: "design-system/atoms/my-button.tsx", category: "seeded" });
   });
 
-  it("falls back to pack manifest when consumer manifest is missing", async () => {
+  it("falls back to pack manifest when tracking manifest is missing", async () => {
     await writeFile(
       join(packDir, "manifest.json"),
       JSON.stringify({ files: [{ path: "design-system/contracts.md", category: "managed" }] }, null, 2) + "\n",
@@ -85,9 +91,9 @@ describe("addToConsumerManifest op", () => {
   });
 
   it("does not duplicate an entry that is already present", async () => {
-    await mkdir(join(cwd, "design-system"), { recursive: true });
+    await mkdir(join(cwd, ".claude-ds"), { recursive: true });
     await writeFile(
-      join(cwd, "design-system/manifest.json"),
+      join(cwd, TRACKING_PATH),
       JSON.stringify({ files: [{ path: "design-system/atoms/my-button.tsx", category: "seeded" }] }, null, 2) + "\n",
     );
     const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
@@ -103,25 +109,25 @@ describe("addToConsumerManifest op", () => {
   });
 
   it("preserves before bytes for accurate dry-run diff", async () => {
-    await mkdir(join(cwd, "design-system"), { recursive: true });
+    await mkdir(join(cwd, ".claude-ds"), { recursive: true });
     const beforeRaw = JSON.stringify({ files: [{ path: "design-system/contracts.md", category: "managed" }] }, null, 2) + "\n";
-    await writeFile(join(cwd, "design-system/manifest.json"), beforeRaw);
+    await writeFile(join(cwd, TRACKING_PATH), beforeRaw);
     const op = addToConsumerManifest(["design-system/atoms/new.tsx"]);
     const changes = await op.plan(makeCtx());
     const c = changes[0] as Extract<Change, { kind: "write" }>;
     expect(c.before?.toString("utf8")).toBe(beforeRaw);
   });
 
-  it("applied via run() actually writes to disk", async () => {
-    await mkdir(join(cwd, "design-system"), { recursive: true });
+  it("applied via run() actually writes to disk at the tracking path", async () => {
+    await mkdir(join(cwd, ".claude-ds"), { recursive: true });
     await writeFile(
-      join(cwd, "design-system/manifest.json"),
+      join(cwd, TRACKING_PATH),
       JSON.stringify({ files: [] }, null, 2) + "\n",
     );
     const { run } = await import("../../../src/lib/runner");
     const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
     await run(makeCtx(), [op], "apply");
-    const raw = await readFile(join(cwd, "design-system/manifest.json"), "utf8");
+    const raw = await readFile(join(cwd, TRACKING_PATH), "utf8");
     const parsed = JSON.parse(raw);
     expect(parsed.files).toHaveLength(1);
     expect(parsed.files[0]).toEqual({ path: "design-system/atoms/my-button.tsx", category: "seeded" });

@@ -9,6 +9,7 @@ import { widenTokensMigration } from "./ops/migrations/v0.9.0/widen-tokens.js";
 import { managePortalScope } from "./ops/migrations/v0.9.0/manage-portal-scope.js";
 import { rewritePortalStyles } from "./ops/migrations/v0.9.0/rewrite-portal-styles.js";
 import { migrateExceptions } from "./ops/migrations/v1.0.0/migrate-exceptions.js";
+import { liftTrackingManifest } from "./ops/migrations/v1.0.0/lift-tracking-manifest.js";
 
 /**
  * All known pack migration sets, keyed by release version.
@@ -18,5 +19,5 @@ import { migrateExceptions } from "./ops/migrations/v1.0.0/migrate-exceptions.js
 export const MIGRATION_REGISTRY: MigrationVersion[] = [
   { version: "v0.8.0", ops: [manageForceState, retireStates] },
   { version: "v0.9.0", ops: [metaKindHardMigration, dsFolderAlias, rewriteDsImports, manageManifestMigration, widenTokensMigration, managePortalScope, rewritePortalStyles] },
-  { version: "v1.0.0", ops: [migrateExceptions] },
+  { version: "v1.0.0", ops: [migrateExceptions, liftTrackingManifest] },
 ];

@@ -480,8 +480,8 @@ describe("audit — unexpected-file enrichment (#174)", () => {
 
     const r = await runCli(["audit", "--fix"], { cwd: dir });
     expect(r.code).toBe(0);
-    // Verify file tracked in consumer manifest
-    const consumerManifest = JSON.parse(await readFile(join(dir, "design-system/manifest.json"), "utf8"));
+    // Verify file tracked in the claude-ds tracking manifest (#256: separate from showcase manifest)
+    const consumerManifest = JSON.parse(await readFile(join(dir, ".claude-ds/tracking-manifest.json"), "utf8"));
     const tracked = consumerManifest.files.some((f: { path: string }) => f.path === "design-system/atoms/my-button.tsx");
     expect(tracked).toBe(true);
   });

@@ -89,12 +89,14 @@ export async function auditCmd(opts: AuditOpts) {
   const configIgnore: string[] = cfg?.lookalike_ignore ?? [];
   const unexpectedIgnoreGlobs = [...manifest.lookalike_ignore, ...configIgnore];
   const manifestFilePaths = new Set(manifest.files.map(f => f.path));
-  // Also read consumer manifest for user-tracked extensions
-  const consumerManifestPath = join(cwd, "design-system/manifest.json");
+  // Also read the claude-ds tracking manifest for user-tracked extensions (#256:
+  // tracking file is now .claude-ds/tracking-manifest.json, separate from the
+  // showcase-owned design-system/manifest.json).
+  const consumerManifestPath = join(cwd, ".claude-ds/tracking-manifest.json");
   try {
     const consumerManifest = parseManifest(await readFile(consumerManifestPath, "utf8"));
     for (const f of consumerManifest.files) manifestFilePaths.add(f.path);
-  } catch { /* no consumer manifest or parse error — use pack manifest only */ }
+  } catch { /* no tracking manifest or parse error — use pack manifest only */ }
   const orphanPaths = new Set(manifest.deprecated_paths.map(d => d.path));
   const unexpected = await scanUnexpectedFiles({
     cwd,
