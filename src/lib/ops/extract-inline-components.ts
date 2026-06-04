@@ -297,6 +297,17 @@ function planFile(source: string, parentRel: string, canonicalAlias: string, tak
       });
     }
 
+    // Guard: if the closure references an exported runtime decl that cannot be
+    // carried (duplicating it would give it two runtime identities, and importing
+    // it from the parent would be an atom→composite layering violation), the
+    // extracted atom would have a dangling reference → TS2304. Leave the
+    // component inline instead.
+    if (locals.some(d => d.exported && !d.typeOnly && d.names.some(nm => referenced.has(nm)))) {
+      // Release the reserved atom path so other components can use it.
+      takenAtomPaths.delete(atomRelFor(comp.name));
+      continue;
+    }
+
     // Imports the closure needs.
     const selfKebab = toKebab(comp.name);
     const neededImports: string[] = [];

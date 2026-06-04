@@ -395,6 +395,67 @@ export function PageHeader(props: { actions: PageHeaderAction[] }) {
     expect(tsc.status).toBe(0);
   }, 90_000);
 
+  it("leaves inline a component that references an exported runtime decl (no dangling TS2304)", async () => {
+    // Regression for issue #250: classify produced atoms that referenced e.g.
+    // `comboboxTriggerVariants` — an `export const … = cva(…)` in the parent —
+    // without declaring or importing it, causing TS2304 on every consumer.
+    // The fix: if the transitive closure of a to-be-extracted component touches
+    // an exported runtime local, skip extraction entirely (option 1).
+    await scaffold();
+    await writeFile(
+      join(dir, "src/components/combobox.tsx"),
+      `import { Button } from "@/design-system/atoms/button";
+
+// Exported runtime value — must stay in the parent; cannot be carried or
+// imported without a tier-layering violation.
+export const comboboxTriggerVariants = { default: "btn", open: "btn-open" };
+
+function ComboboxTrigger(props: { open: boolean }) {
+  // Inline component referencing the exported runtime const above.
+  // Padded out to clear the >=20 line extraction threshold so classify
+  // sees it as an extractable inline component and tries to extract it.
+  const cls = props.open
+    ? comboboxTriggerVariants.open
+    : comboboxTriggerVariants.default;
+  const label = props.open ? "close" : "open";
+  const rows = [cls, label];
+  const extra = "extra";
+  return (
+    <button className={cls}>
+      {rows.map((r, i) => (
+        <span key={i}>{r}</span>
+      ))}
+      <span>{extra}</span>
+    </button>
+  );
+}
+
+export function Combobox() {
+  return (
+    <div>
+      <Button />
+      <ComboboxTrigger open={false} />
+    </div>
+  );
+}
+`,
+    );
+
+    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // Option 1 fix: the component stays inline — no atom is written.
+    // Access should reject (file does not exist).
+    await expect(
+      access(join(dir, "design-system/atoms/combobox-trigger.tsx")),
+    ).rejects.toThrow();
+
+    // Whether extracted or not, tsc must be clean — no TS2304 dangling refs.
+    const tsc = runTsc(dir);
+    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+
   it("does not extract from a file with no inline components (relocation only)", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
     await mkdir(join(dir, "src/components"), { recursive: true });
