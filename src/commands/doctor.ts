@@ -68,6 +68,15 @@ async function findOrphanFiles(
     isGenerated = picomatch(generatedPatterns, { dot: true });
   }
 
+  // Derive the set of skill subdirectory names the pack actually ships.
+  // A file under .claude/skills/<name>/ is only DS-owned if <name> is one of these.
+  const packSkillDirs = new Set(
+    [...manifestPaths]
+      .filter(p => p.startsWith(".claude/skills/"))
+      .map(p => p.split("/")[2])
+      .filter(Boolean),
+  );
+
   const orphans: string[] = [];
   for (const { root, strict } of roots) {
     if (!strict) continue;
@@ -76,6 +85,12 @@ async function findOrphanFiles(
       if (openPrefixes.some(prefix => f.startsWith(prefix))) continue;
       if (isManifestOrKeepfile(f, manifestPaths)) continue;
       if (isGenerated && isGenerated(f)) continue;
+      // .claude/skills/ is a shared namespace: only treat files under pack-shipped
+      // skill subdirectories as DS-owned. Consumer skill dirs are not orphans (#257).
+      if (f.startsWith(".claude/skills/")) {
+        const skillDir = f.split("/")[2];
+        if (!packSkillDirs.has(skillDir)) continue;
+      }
       orphans.push(f);
     }
   }
