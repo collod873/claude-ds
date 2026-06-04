@@ -456,6 +456,480 @@ export function Combobox() {
     expect(tsc.status).toBe(0);
   }, 90_000);
 
+  it("keeps a shared type alias in the parent when a guard-skipped sibling still references it (no TS2304)", async () => {
+    // Regression for issue #250 (second facet): a non-exported type alias used by
+    // BOTH the inline component being extracted AND a sibling component that is
+    // ultimately skipped by the exported-runtime guard must not be removed from the
+    // parent. Before the fix, `protectedRanges` included the (unconfirmed) sibling's
+    // body, so `referencedOutside` wrongly returned false → the type was moved out,
+    // leaving the parent with a dangling TS2304 on the type name.
+    await scaffold();
+    await writeFile(
+      join(dir, "src/components/form-field.tsx"),
+      `import { Button } from "@/design-system/atoms/button";
+
+// Exported runtime value — causes the sibling FormFieldPanel to be skipped.
+export const formFieldVariants = { base: "field", error: "field-error" };
+
+// Non-exported type used by BOTH FormFieldRoot (inline, to be extracted) AND
+// FormFieldPanel (skipped because it references the exported runtime above).
+// After extraction, FormFieldPanel stays inline and still needs this type.
+type Requirement = { label: string; required: boolean };
+
+function FormFieldRoot(props: { req: Requirement }) {
+  // Inline component referencing Requirement in its props.
+  // Padded out to clear the >=20 line extraction threshold so classify
+  // recognises it as an extractable inline component.
+  const { req } = props;
+  const label = req.label;
+  const cls = req.required ? "required" : "optional";
+  const parts = [label, cls];
+  const extra1 = "pad1";
+  const extra2 = "pad2";
+  const extra3 = "pad3";
+  return (
+    <div className={cls}>
+      <label>{label}</label>
+      <ul>
+        {parts.map((p, i) => (
+          <li key={i}>{p}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function FormFieldPanel(props: { req: Requirement }) {
+  // Sibling inline component that also uses Requirement AND the exported
+  // runtime above — so the guard fires and it is left inline.
+  // Padded out to clear the >=20 line extraction threshold.
+  const variant = formFieldVariants.base;
+  const { req } = props;
+  const label = req.label;
+  const cls = req.required ? variant : formFieldVariants.error;
+  const parts = [label, cls];
+  const extra1 = "pad1";
+  const extra2 = "pad2";
+  const extra3 = "pad3";
+  return (
+    <fieldset className={cls}>
+      <legend>{label}</legend>
+      <ul>
+        {parts.map((p, i) => (
+          <span key={i}>{p}</span>
+        ))}
+      </ul>
+    </fieldset>
+  );
+}
+
+export function FormField() {
+  const req: Requirement = { label: "email", required: true };
+  return (
+    <div>
+      <Button />
+      <FormFieldRoot req={req} />
+      <FormFieldPanel req={req} />
+    </div>
+  );
+}
+`,
+    );
+
+    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // FormFieldRoot is extracted; FormFieldPanel is not (guard fires on exportedRuntime).
+    const atomPath = join(dir, "design-system/atoms/form-field-root.tsx");
+    await expect(access(atomPath)).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, "design-system/atoms/form-field-panel.tsx")),
+    ).rejects.toThrow();
+
+    // The parent must still declare `Requirement` — FormFieldPanel still uses it.
+    const parent = await readFile(
+      join(dir, "design-system/composites/form-field.tsx"),
+      "utf8",
+    );
+    expect(parent).toMatch(/type Requirement =/);
+
+    // And the whole project must typecheck — no TS2304 from either file.
+    const tsc = runTsc(dir);
+    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+
+  it("keeps a shared runtime decl in the parent when a guard-skipped sibling still references it (no TS2552)", async () => {
+    // Regression for issue #250 (second facet): a non-exported runtime decl (here
+    // a hook function `useComboboxCtx`) used by BOTH the inline component being
+    // extracted AND a guard-skipped sibling must not be removed from the parent.
+    // Before the fix, `protectedRanges` included the unconfirmed sibling's range,
+    // so `referencedOutside` wrongly returned false → the function was moved out,
+    // leaving the parent with a dangling TS2552 for `useComboboxCtx`.
+    await scaffold();
+    await writeFile(
+      join(dir, "src/components/combobox.tsx"),
+      `import { Button } from "@/design-system/atoms/button";
+
+// Exported runtime const — causes Combobox (the sibling) to be skipped.
+export const comboboxVariants = { default: "btn", open: "btn-open" };
+
+// Non-exported runtime function used by BOTH ComboboxItem (extracted) AND
+// Combobox (skipped). After extraction Combobox still calls it in the parent.
+function useComboboxCtx() {
+  return { open: false };
+}
+
+function ComboboxItem(props: { label: string }) {
+  // Inline component that uses useComboboxCtx.
+  // Padded out to clear the >=20 line extraction threshold.
+  const ctx = useComboboxCtx();
+  const label = props.label;
+  const open = ctx.open;
+  const parts = [label];
+  const a = "a";
+  const b = "b";
+  const c = "c";
+  const d = "d";
+  return (
+    <div>
+      <span>{label}</span>
+      <ul>
+        {parts.map((p, i) => (
+          <li key={i}>{p}</li>
+        ))}
+      </ul>
+      <em>{open ? "open" : "closed"}</em>
+    </div>
+  );
+}
+
+function Combobox() {
+  // Sibling that uses BOTH useComboboxCtx AND comboboxVariants (exported).
+  // The exported-runtime guard fires, leaving Combobox inline.
+  // Padded out to clear the >=20 line extraction threshold.
+  const v = comboboxVariants.default;
+  const ctx = useComboboxCtx();
+  const open = ctx.open;
+  const cls = open ? v : comboboxVariants.open;
+  const parts = [cls];
+  const a = "a";
+  const b = "b";
+  const c = "c";
+  return (
+    <div>
+      <Button />
+      <ComboboxItem label="test" />
+      <span className={cls}>
+        {parts.map((p, i) => (
+          <em key={i}>{p}</em>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+export { Combobox };
+`,
+    );
+
+    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // ComboboxItem is extracted; Combobox is not (guard fires on exportedRuntime).
+    await expect(
+      access(join(dir, "design-system/atoms/combobox-item.tsx")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, "design-system/atoms/combobox.tsx")),
+    ).rejects.toThrow();
+
+    // The parent must still declare `useComboboxCtx` — Combobox still calls it.
+    const parent = await readFile(
+      join(dir, "design-system/composites/combobox.tsx"),
+      "utf8",
+    );
+    expect(parent).toMatch(/function useComboboxCtx\b/);
+
+    // And the whole project must typecheck — no TS2552 / TS2304 from either file.
+    const tsc = runTsc(dir);
+    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+
+  it("keeps a non-exported type alias in the parent when it is used ONLY in type position inside an exported type (no TS2304)", async () => {
+    // Regression for issue #250 (type-position facet): the extracted component
+    // references an exported type alias (FormFieldProps) that in turn references a
+    // non-exported type (Requirement). Requirement appears ONLY in type position —
+    // inside the body of FormFieldProps, nowhere at runtime. Before the fix,
+    // protectedRanges included FormFieldProps's range (even though it is exported and
+    // stays in the parent), so Requirement's occurrence inside FormFieldProps was
+    // treated as "inside a protected range" → referencedOutside returned false →
+    // Requirement was MOVED into the atom and removed from the parent → parent
+    // TS2304: "Cannot find name 'Requirement'".
+    // Fix: exported decls are excluded from protectedRanges so their body's
+    // references remain visible as live parent references.
+    await scaffold();
+    await writeFile(
+      join(dir, "src/components/form-field.tsx"),
+      `import { Button } from "@/design-system/atoms/button";
+
+// Non-exported type used ONLY in type position inside an exported type.
+// The extracted component references FormFieldProps which transitively refs Requirement.
+type Requirement = "required" | "optional";
+
+export type FormFieldProps = {
+  requirement?: Requirement;
+  label: string;
+};
+
+function FormFieldRoot(props: FormFieldProps) {
+  // Inline component to be extracted. It references FormFieldProps (exported)
+  // which transitively pulls Requirement into the closure. Padded to clear
+  // the >=20 line extraction threshold.
+  const { requirement, label } = props;
+  const cls = requirement === "required" ? "req" : "opt";
+  const parts = [label, cls];
+  const a = "a";
+  const b = "b";
+  const c = "c";
+  const d = "d";
+  return (
+    <div className={cls}>
+      <label>{label}</label>
+      <ul>
+        {parts.map((p, i) => (
+          <li key={i}>{p}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function FormField(props: FormFieldProps) {
+  return (
+    <div>
+      <Button />
+      <FormFieldRoot {...props} />
+    </div>
+  );
+}
+`,
+    );
+
+    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // FormFieldRoot is extracted into its own atom.
+    const atomPath = join(dir, "design-system/atoms/form-field-root.tsx");
+    await expect(access(atomPath)).resolves.toBeUndefined();
+
+    // The atom carries both the exported type and the non-exported dep.
+    const atom = await readDsAtom(dir, "form-field-root");
+    expect(atom).toMatch(/export function FormFieldRoot\b/);
+    expect(atom).toMatch(/type FormFieldProps =/);
+    expect(atom).toMatch(/type Requirement =/);
+
+    // The parent keeps Requirement: FormFieldProps is exported (stays) and still
+    // references Requirement, so Requirement must NOT be moved out.
+    const parent = await readFile(
+      join(dir, "design-system/composites/form-field.tsx"),
+      "utf8",
+    );
+    expect(parent).toMatch(/type Requirement =/);
+    expect(parent).toMatch(/export type FormFieldProps =/);
+    expect(parent).not.toMatch(/function FormFieldRoot\b/);
+
+    // No TS2304 in either file — the critical assertion.
+    const tsc = runTsc(dir);
+    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+
+  it("keeps a non-exported type in the parent when it is exported via a separate export statement (Failure A — no TS2304)", async () => {
+    // Regression for issue #250 (Failure A): `FormFieldProps` is declared WITHOUT
+    // an inline `export` keyword — so `isExported` returns false and prior code
+    // added its range to `protectedRanges`. Its body references a non-exported
+    // `type Requirement`. Because the occurrence of `Requirement` was inside
+    // `FormFieldProps`'s (wrongly) protected range, `referencedOutside` returned
+    // false → `Requirement` was MOVED out and removed from the parent → parent
+    // TS2304: "Cannot find name 'Requirement'".
+    //
+    // Shape: non-exported `type FormFieldProps = { req?: Requirement }` declared
+    // on its own line, then exported via a separate `export type { FormFieldProps }`
+    // statement later in the file. The inline-export test above uses
+    // `export type FormFieldProps = ...` which has a different `isExported` result
+    // and does NOT reproduce this bug.
+    await scaffold();
+    await writeFile(
+      join(dir, "src/components/form-field.tsx"),
+      `import { Button } from "@/design-system/atoms/button";
+
+// Non-exported type — no inline \`export\` keyword here.
+type Requirement = "required" | "optional";
+
+// Also non-exported inline, but exported via the separate statement below.
+type FormFieldProps = {
+  requirement?: Requirement;
+  label: string;
+};
+
+// Separate re-export: FormFieldProps gets exported here, NOT at the declaration.
+export type { FormFieldProps };
+
+function FormFieldRoot(props: FormFieldProps) {
+  // Inline component to be extracted. References FormFieldProps (re-exported
+  // separately) which transitively refs Requirement. Padded to clear the
+  // >=20 line extraction threshold.
+  const { requirement, label } = props;
+  const cls = requirement === "required" ? "req" : "opt";
+  const parts = [label, cls];
+  const a = "a";
+  const b = "b";
+  const c = "c";
+  const d = "d";
+  return (
+    <div className={cls}>
+      <label>{label}</label>
+      <ul>
+        {parts.map((p, i) => (
+          <li key={i}>{p}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function FormField(props: FormFieldProps) {
+  return (
+    <div>
+      <Button />
+      <FormFieldRoot {...props} />
+    </div>
+  );
+}
+`,
+    );
+
+    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // FormFieldRoot is extracted into its own atom.
+    const atomPath = join(dir, "design-system/atoms/form-field-root.tsx");
+    await expect(access(atomPath)).resolves.toBeUndefined();
+
+    // The atom carries both types.
+    const atom = await readDsAtom(dir, "form-field-root");
+    expect(atom).toMatch(/export function FormFieldRoot\b/);
+    expect(atom).toMatch(/type FormFieldProps =/);
+    expect(atom).toMatch(/type Requirement =/);
+
+    // The parent must keep Requirement: FormFieldProps stays (re-exported) and
+    // still references Requirement, so Requirement must NOT be moved out.
+    const parent = await readFile(
+      join(dir, "design-system/composites/form-field.tsx"),
+      "utf8",
+    );
+    expect(parent).toMatch(/type Requirement =/);
+    expect(parent).toMatch(/type FormFieldProps =/);
+    expect(parent).not.toMatch(/function FormFieldRoot\b/);
+
+    // No TS2304 in either file — the critical assertion.
+    const tsc = runTsc(dir);
+    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+
+  it("transitively keeps a type dep when the type that references it is retained in the parent (Failure B — no TS2304)", async () => {
+    // Regression for issue #250 (Failure B): `SortState` is kept in the parent
+    // because it is referenced by exported code outside `confirmedRanges`, but its
+    // body references `SortDirection`. In prior code `SortState`'s range was in
+    // `protectedRanges`, hiding the `SortDirection` reference → `referencedOutside`
+    // returned false → `SortDirection` was MOVED out → parent TS2304:
+    // "Cannot find name 'SortDirection'".
+    //
+    // Fix: the move-vs-copy decision now uses a transitive-closure computation:
+    // keeping `SortState` in the parent automatically keeps everything `SortState`
+    // references, including `SortDirection`.
+    await scaffold();
+    await writeFile(
+      join(dir, "src/components/data-table.tsx"),
+      `import { Button } from "@/design-system/atoms/button";
+
+// Two non-exported types: SortDirection is only referenced inside SortState.
+// SortState is referenced by the exported DataTableProps → it must stay in the
+// parent → SortDirection must also stay (transitive closure).
+type SortDirection = "asc" | "desc";
+type SortState = { key: string; direction: SortDirection };
+
+export type DataTableProps = {
+  sort?: SortState | null;
+  label: string;
+};
+
+function SortIndicator(props: { state: SortState }) {
+  // Inline component to be extracted. References SortState which transitively
+  // refs SortDirection. Padded to clear the >=20 line extraction threshold.
+  const { state } = props;
+  const dir = state.direction;
+  const key = state.key;
+  const parts = [dir, key];
+  const a = "a";
+  const b = "b";
+  const c = "c";
+  const d = "d";
+  return (
+    <span className={dir}>
+      <strong>{key}</strong>
+      <ul>
+        {parts.map((p, i) => (
+          <li key={i}>{p}</li>
+        ))}
+      </ul>
+    </span>
+  );
+}
+
+export function DataTable(props: DataTableProps) {
+  return (
+    <div>
+      <Button />
+      <SortIndicator state={props.sort ?? { key: "id", direction: "asc" }} />
+    </div>
+  );
+}
+`,
+    );
+
+    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // SortIndicator is extracted into its own atom.
+    const atomPath = join(dir, "design-system/atoms/sort-indicator.tsx");
+    await expect(access(atomPath)).resolves.toBeUndefined();
+
+    // The atom carries both SortState and SortDirection.
+    const atom = await readDsAtom(dir, "sort-indicator");
+    expect(atom).toMatch(/export function SortIndicator\b/);
+    expect(atom).toMatch(/type SortState =/);
+    expect(atom).toMatch(/type SortDirection =/);
+
+    // The parent must keep BOTH SortDirection and SortState: DataTableProps
+    // (exported) references SortState, and SortState references SortDirection.
+    const parent = await readFile(
+      join(dir, "design-system/composites/data-table.tsx"),
+      "utf8",
+    );
+    expect(parent).toMatch(/type SortDirection =/);
+    expect(parent).toMatch(/type SortState =/);
+    expect(parent).not.toMatch(/function SortIndicator\b/);
+
+    // No TS2304 in either file — the critical assertion.
+    const tsc = runTsc(dir);
+    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+
   it("does not extract from a file with no inline components (relocation only)", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
     await mkdir(join(dir, "src/components"), { recursive: true });

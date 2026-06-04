@@ -262,13 +262,22 @@ function planFile(source: string, parentRel: string, canonicalAlias: string, tak
   }
   if (extractable.length === 0) return { extractions: [], changes: [] };
 
-  // Track which local decls get *moved out* of the parent (used only by the
-  // extracted set) vs *copied* (also used elsewhere in the parent).
-  const movedLocalKeys = new Set<number>(); // index into `locals`
-  const removeRanges: { start: number; end: number }[] = [];
-  const extractions: Extraction[] = [];
-  const atomChanges: Change[] = [];
-  const parentImportLines: string[] = [];
+  // ── Phase 1: guard pass ──────────────────────────────────────────────────────
+  // Compute the transitive closure and apply all skip-extraction guards for
+  // every candidate. We must know the *confirmed* extraction set before deciding
+  // which local decls can be moved vs copied, because the move-vs-copy check
+  // needs to ask "does the parent's remaining code reference this decl?" — and
+  // "remaining" means outside the confirmed-extracted component bodies, not
+  // outside the originally-candidate set. If a candidate later gets skipped by a
+  // guard, its body stays in the parent; any decl reference inside it is a live
+  // parent reference, not a moved-away one.
+
+  interface ConfirmedComp {
+    comp: ComponentNode;
+    referenced: Set<string>;
+    includedLocalIdx: Set<number>;
+  }
+  const confirmed: ConfirmedComp[] = [];
 
   for (const comp of extractable) {
     // Transitive closure of referenced names, seeded by the component body and
@@ -308,6 +317,32 @@ function planFile(source: string, parentRel: string, canonicalAlias: string, tak
       continue;
     }
 
+    confirmed.push({ comp, referenced, includedLocalIdx });
+  }
+
+  // ── Phase 2: move-vs-copy and assembly ───────────────────────────────────────
+  // Now that we know the confirmed set, we can safely decide which local decls
+  // the parent can give up. A decl may only be removed from the parent if the
+  // parent's *remaining* code (everything outside the confirmed-extracted
+  // component bodies) has zero references to it.
+  //
+  // Key invariant enforced here (issue #250, second facet): the `referencedOutside`
+  // check uses only `confirmedRanges` — not the original `extractable` candidate
+  // ranges. Before this two-phase approach, guard-skipped components were included
+  // in `protectedRanges`, so any decl referenced only inside a guard-skipped body
+  // was wrongly deemed "not used elsewhere" and moved out of the parent, leaving the
+  // still-inline skipped component with a dangling reference (TS2304 / TS2552).
+
+  // Ranges of confirmed components only — these are the bodies leaving the parent.
+  const confirmedRanges = confirmed.map(({ comp: c }) => ({ start: c.start, end: c.end }));
+
+  const movedLocalKeys = new Set<number>(); // index into `locals`
+  const removeRanges: { start: number; end: number }[] = [];
+  const extractions: Extraction[] = [];
+  const atomChanges: Change[] = [];
+  const parentImportLines: string[] = [];
+
+  for (const { comp, referenced, includedLocalIdx } of confirmed) {
     // Imports the closure needs.
     const selfKebab = toKebab(comp.name);
     const neededImports: string[] = [];
@@ -322,11 +357,11 @@ function planFile(source: string, parentRel: string, canonicalAlias: string, tak
       if (trimmed) neededImports.push(trimmed);
     }
 
-    // Other extracted components this one references → import them as atoms.
-    // Only components actually being extracted qualify; a referenced component
-    // left inline (collision-skipped) stays resolved by the parent.
+    // Other confirmed-extracted components this one references → import as atoms.
+    // A component left inline (guard-skipped or collision-skipped) stays resolved
+    // by the parent and does not need a cross-atom import.
     const crossAtomImports: string[] = [];
-    for (const other of extractable) {
+    for (const { comp: other } of confirmed) {
       if (other.name !== comp.name && referenced.has(other.name)) {
         crossAtomImports.push(importLineFor(other.name));
       }
@@ -337,21 +372,94 @@ function planFile(source: string, parentRel: string, canonicalAlias: string, tak
       .filter((_, i) => includedLocalIdx.has(i))
       .sort((a, b) => a.start - b.start);
 
-    // Decide move vs copy for each carried decl: is the name referenced
-    // anywhere in the parent *outside* the extracted components + carried decls?
-    const protectedRanges = [
-      ...extractable.map(c => ({ start: c.start, end: c.end })),
-      ...carried.map(d => ({ start: d.start, end: d.end })),
-    ];
+    // Decide move vs copy for each carried decl.
+    //
+    // Governing principle (issue #250): the set of decls that must remain in the
+    // parent is the TRANSITIVE CLOSURE — over both value and type references — of
+    // every name referenced by all parent code that is NOT being moved out.
+    //
+    // `protectedRanges` contains ONLY the spans actually being REMOVED from the
+    // parent: the confirmed-extracted component bodies. It must NOT include any
+    // carried decl's own range, because those decls may stay in the parent (their
+    // internal references are live parent references) and hiding them would cause
+    // `referencedOutside` to return false for their transitive deps, wrongly moving
+    // those deps out of the parent.
+    //
+    // Two concrete failures this fixes (both Failure A and Failure B of issue #250):
+    //
+    // Failure A — non-exported type exported via a separate `export type { X }`
+    // statement: `FormFieldProps` has no inline `export` keyword so `isExported`
+    // returns false; in prior code its range was added to `protectedRanges`, hiding
+    // the `Requirement` reference inside its body → `Requirement` was MOVED out →
+    // parent TS2304. Fix: don't include ANY carried decl range in protectedRanges.
+    //
+    // Failure B — transitive type dependency: `SortState` stays in parent (it is
+    // referenced by exported code outside confirmedRanges) but `SortDirection` is
+    // only referenced inside `SortState`'s body. In prior code `SortState`'s range
+    // was in protectedRanges, hiding the `SortDirection` reference → `SortDirection`
+    // MOVED → parent TS2304. Fix: transitive closure ensures keeping `SortState`
+    // also keeps everything `SortState` references.
+    //
+    // Algorithm:
+    //  1. Seed `mustStayInParent` with every non-exported carried decl whose name
+    //     is referenced anywhere outside `confirmedRanges` (the only spans truly
+    //     leaving the parent).
+    //  2. Transitively expand: for each decl in mustStay, collect the names its
+    //     AST nodes reference → any other carried decl bound to one of those names
+    //     is also pulled into mustStay. Repeat until fixpoint.
+    //  3. A non-exported carried decl is moved (deleted from parent) only if it
+    //     is NOT in mustStay. Exported decls are always copied, never moved.
+
+    // Step 1: initial mustStay — decls referenced outside confirmed-extracted bodies.
+    const mustStayIdx = new Set<number>();
     for (let i = 0; i < locals.length; i++) {
       if (!includedLocalIdx.has(i)) continue;
       const d = locals[i];
-      // An exported decl is always copied, never moved: external files import it
-      // by name, and `referencedOutside` only sees this file — so a "not used
-      // elsewhere" verdict would be a false positive that breaks those importers.
+      if (d.exported) continue; // exported decls always stay (copied); handled below
+      if (d.names.some(nm => referencedOutside(sf, nm, confirmedRanges))) {
+        mustStayIdx.add(i);
+      }
+    }
+
+    // Step 2: transitive closure — a decl that stays in the parent keeps all its
+    // own deps that are also carried into the atom (and therefore candidates to move).
+    // Build a name→localIndex lookup for fast lookup.
+    const nameToLocalIdx = new Map<string, number>();
+    for (let i = 0; i < locals.length; i++) {
+      for (const nm of locals[i].names) nameToLocalIdx.set(nm, i);
+    }
+
+    const worklist = [...mustStayIdx];
+    while (worklist.length > 0) {
+      const idx = worklist.shift()!;
+      const d = locals[idx];
+      // Collect all names referenced inside this decl's AST node(s).
+      const stmtNodes = findStatementByRange(sf, d.start, d.end);
+      for (const node of stmtNodes) {
+        for (const refName of collectReferencedNames(node)) {
+          const depIdx = nameToLocalIdx.get(refName);
+          if (depIdx === undefined) continue;
+          if (!includedLocalIdx.has(depIdx)) continue;
+          if (mustStayIdx.has(depIdx)) continue;
+          const depDecl = locals[depIdx];
+          if (depDecl.exported) continue; // already always-stays
+          mustStayIdx.add(depIdx);
+          worklist.push(depIdx);
+        }
+      }
+    }
+
+    // Step 3: move any non-exported carried decl not in mustStay.
+    for (let i = 0; i < locals.length; i++) {
+      if (!includedLocalIdx.has(i)) continue;
+      const d = locals[i];
+      // Exported decl: always copied, never moved (external importers keep it).
       if (d.exported) continue;
-      const usedElsewhere = d.names.some(nm => referencedOutside(sf, nm, protectedRanges));
-      if (!usedElsewhere && !movedLocalKeys.has(i)) {
+      // mustStay decl: referenced (directly or transitively) by parent code that
+      // remains after extraction → copy into atom but keep in parent.
+      if (mustStayIdx.has(i)) continue;
+      // Move: nothing retained in the parent transitively needs this decl.
+      if (!movedLocalKeys.has(i)) {
         movedLocalKeys.add(i);
         removeRanges.push({ start: d.start, end: d.end });
       }
