@@ -1,7 +1,10 @@
 {
   "generated_patterns": [
     "design-system/references/*.showcase.tsx",
-    "design-system/manifest.generated.ts"
+    "design-system/manifest.generated.ts",
+    "design-system/atoms/index.ts",
+    "design-system/composites/index.ts",
+    "design-system/patterns/index.ts"
   ],
   "managed_roots": [
     {
