@@ -946,3 +946,305 @@ export function DataTable(props: DataTableProps) {
     await expect(access(join(dir, "design-system/atoms/badge.tsx"))).resolves.toBeUndefined();
   });
 });
+
+// ── Backfill-helper-closure tests (issue #261) ────────────────────────────────
+//
+// These tests cover the NEW `backfillAtomHelpers` pass that runs as part of
+// `classify`. It repairs pre-existing atoms that were extracted without their
+// parent-local helper closure, leaving TS2304-dangling references that
+// `audit --fix` correctly refuses to heal (code-motion is classify's job,
+// per ADR-0015).
+//
+// Setup shared across all cases in this suite:
+//   - A composite that declares a private helper used by an already-extracted atom.
+//   - The atom exists in design-system/atoms/ but its source does NOT declare
+//     or import the helper → analyzeResolution reports it as unresolved.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("classify — backfill helper closure into pre-existing atoms (issue #261)", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await freshTmpDir();
+  });
+  afterEach(async () => {
+    await cleanup(dir);
+  });
+
+  async function scaffoldBase(): Promise<void> {
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+    await writeFile(join(dir, "tsconfig.json"), TSCONFIG);
+    await writeFile(join(dir, "jsx.d.ts"), JSX_SHIM);
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+  }
+
+  it("backfills a parent-local non-exported helper into a dangling atom", async () => {
+    // Mirrors the Crewops month-grid / calendar-view case:
+    //   - atom `month-grid.tsx` references `startOfMonthGrid` which is not declared/imported
+    //   - composite `calendar-view.tsx` declares private `startOfMonthGrid`
+    // After classify, the atom must contain `startOfMonthGrid` and tsc must pass.
+    await scaffoldBase();
+
+    await writeFile(
+      join(dir, "design-system/atoms/month-grid.tsx"),
+      `export function MonthGrid({ anchor }: { anchor: Date }) {
+  const start = startOfMonthGrid(anchor);
+  return <div>{start.toISOString()}</div>;
+}
+export const meta = { kind: "atom" as const, examples: [] };
+`,
+    );
+
+    await writeFile(
+      join(dir, "design-system/composites/calendar-view.tsx"),
+      `import { MonthGrid } from "@/design-system/atoms/month-grid";
+
+function startOfMonthGrid(d: Date): Date {
+  const x = new Date(d);
+  x.setDate(1);
+  return x;
+}
+
+export function CalendarView({ anchor }: { anchor: Date }) {
+  return <MonthGrid anchor={anchor} />;
+}
+export const meta = { kind: "composite" as const, examples: [] };
+`,
+    );
+
+    const r = await runCli(["classify", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // The atom now contains the carried helper
+    const atom = await readFile(join(dir, "design-system/atoms/month-grid.tsx"), "utf8");
+    expect(atom).toMatch(/function startOfMonthGrid/);
+    expect(atom).toMatch(/export function MonthGrid/);
+    // No dangling marker
+    expect(atom).not.toMatch(/EXTRACTION_NEEDED/);
+
+    // tsc must be clean
+    const tsc = runTsc(dir);
+    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+
+  it("backfills a transitive helper chain (helper depends on another helper)", async () => {
+    // atom references `buildMonthGrid`, which itself calls `addDays` and `startOfMonthGrid`.
+    // All three are private in the composite. All three must be carried.
+    await scaffoldBase();
+
+    await writeFile(
+      join(dir, "design-system/atoms/month-grid.tsx"),
+      `export function MonthGrid({ anchor }: { anchor: Date }) {
+  const days = buildMonthGrid(anchor);
+  return <div>{days.length}</div>;
+}
+export const meta = { kind: "atom" as const, examples: [] };
+`,
+    );
+
+    await writeFile(
+      join(dir, "design-system/composites/calendar-view.tsx"),
+      `import { MonthGrid } from "@/design-system/atoms/month-grid";
+
+function startOfMonthGrid(d: Date): Date {
+  const x = new Date(d);
+  x.setDate(1);
+  return x;
+}
+
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+
+function buildMonthGrid(anchor: Date): Date[] {
+  const start = startOfMonthGrid(anchor);
+  const days: Date[] = [];
+  for (let i = 0; i < 42; i++) days.push(addDays(start, i));
+  return days;
+}
+
+export function CalendarView({ anchor }: { anchor: Date }) {
+  return <MonthGrid anchor={anchor} />;
+}
+export const meta = { kind: "composite" as const, examples: [] };
+`,
+    );
+
+    const r = await runCli(["classify", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const atom = await readFile(join(dir, "design-system/atoms/month-grid.tsx"), "utf8");
+    // All three helpers must be in the atom
+    expect(atom).toMatch(/function buildMonthGrid/);
+    expect(atom).toMatch(/function startOfMonthGrid/);
+    expect(atom).toMatch(/function addDays/);
+    expect(atom).not.toMatch(/EXTRACTION_NEEDED/);
+
+    const tsc = runTsc(dir);
+    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+
+  it("EXTRACTION_NEEDED fallback: leaves a marker when a helper is exported (cannot be safely carried)", async () => {
+    // The atom references `clampValue` which IS in the composite, but it is
+    // exported there (exported runtime value — duplicating it would give it two
+    // runtime identities; importing from the composite would be atom→composite
+    // layering violation). classify must NOT carry it. It must add the marker.
+    await scaffoldBase();
+
+    await writeFile(
+      join(dir, "design-system/atoms/clamp-box.tsx"),
+      `export function ClampBox({ value }: { value: number }) {
+  const clamped = clampValue(value);
+  return <div>{clamped}</div>;
+}
+export const meta = { kind: "atom" as const, examples: [] };
+`,
+    );
+
+    await writeFile(
+      join(dir, "design-system/composites/clamp-view.tsx"),
+      `import { ClampBox } from "@/design-system/atoms/clamp-box";
+
+// Exported runtime value — cannot be safely carried into atom.
+export function clampValue(v: number): number {
+  return Math.max(0, Math.min(100, v));
+}
+
+export function ClampView({ value }: { value: number }) {
+  return <ClampBox value={value} />;
+}
+export const meta = { kind: "composite" as const, examples: [] };
+`,
+    );
+
+    const r = await runCli(["classify", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const atom = await readFile(join(dir, "design-system/atoms/clamp-box.tsx"), "utf8");
+    // Marker must be present — closure hit an exported decl
+    expect(atom).toMatch(/EXTRACTION_NEEDED/);
+    // clampValue must NOT have been invented or carried into the atom
+    expect(atom).not.toMatch(/function clampValue/);
+  });
+
+  it("no EXTRACTION_NEEDED marker when helper simply is not in any composite (left for audit --fix)", async () => {
+    // The atom references `mysteryHelper` which exists in no composite.
+    // That means it's a missing IMPORT (not a parent-local symbol), which
+    // audit --fix handles. backfillAtomHelpers must leave the atom unchanged.
+    await scaffoldBase();
+
+    const originalAtom = `export function MysteryGrid({ anchor }: { anchor: Date }) {
+  const result = mysteryHelper(anchor);
+  return <div>{result}</div>;
+}
+export const meta = { kind: "atom" as const, examples: [] };
+`;
+    await writeFile(join(dir, "design-system/atoms/mystery-grid.tsx"), originalAtom);
+
+    await writeFile(
+      join(dir, "design-system/composites/some-view.tsx"),
+      `import { MysteryGrid } from "@/design-system/atoms/mystery-grid";
+
+export function SomeView({ anchor }: { anchor: Date }) {
+  return <MysteryGrid anchor={anchor} />;
+}
+export const meta = { kind: "composite" as const, examples: [] };
+`,
+    );
+
+    const r = await runCli(["classify", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const atom = await readFile(join(dir, "design-system/atoms/mystery-grid.tsx"), "utf8");
+    // No EXTRACTION_NEEDED marker — this is a missing import, not a parent-local symbol
+    expect(atom).not.toMatch(/EXTRACTION_NEEDED/);
+    // Atom content unchanged (backfill didn't touch it)
+    expect(atom).toBe(originalAtom);
+  });
+
+  it("control: an atom with no unresolved symbols is left unchanged", async () => {
+    // The atom is already self-contained. classify must not modify it.
+    await scaffoldBase();
+
+    const originalAtom = `export function CleanAtom({ label }: { label: string }) {
+  return <span>{label}</span>;
+}
+export const meta = { kind: "atom" as const, examples: [] };
+`;
+    await writeFile(join(dir, "design-system/atoms/clean-atom.tsx"), originalAtom);
+
+    await writeFile(
+      join(dir, "design-system/composites/clean-view.tsx"),
+      `import { CleanAtom } from "@/design-system/atoms/clean-atom";
+
+export function CleanView() {
+  return <CleanAtom label="hello" />;
+}
+export const meta = { kind: "composite" as const, examples: [] };
+`,
+    );
+
+    const r = await runCli(["classify", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    // Atom content must be unchanged (no spurious helper motion)
+    const atom = await readFile(join(dir, "design-system/atoms/clean-atom.tsx"), "utf8");
+    expect(atom).toBe(originalAtom);
+  });
+
+  it("helper is COPIED (not moved) when the composite also uses it in its own code", async () => {
+    // The composite defines `formatDate` (private), used by BOTH the atom AND the composite.
+    // After classify: atom gets `formatDate`, composite KEEPS `formatDate`.
+    await scaffoldBase();
+
+    await writeFile(
+      join(dir, "design-system/atoms/event-chip.tsx"),
+      `export function EventChip({ date }: { date: Date }) {
+  const label = formatDate(date);
+  return <span>{label}</span>;
+}
+export const meta = { kind: "atom" as const, examples: [] };
+`,
+    );
+
+    await writeFile(
+      join(dir, "design-system/composites/calendar-view.tsx"),
+      `import { EventChip } from "@/design-system/atoms/event-chip";
+
+function formatDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+export function CalendarView({ date }: { date: Date }) {
+  const label = formatDate(date);
+  return (
+    <div>
+      <span>{label}</span>
+      <EventChip date={date} />
+    </div>
+  );
+}
+export const meta = { kind: "composite" as const, examples: [] };
+`,
+    );
+
+    const r = await runCli(["classify", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const atom = await readFile(join(dir, "design-system/atoms/event-chip.tsx"), "utf8");
+    expect(atom).toMatch(/function formatDate/);
+
+    // Composite must still declare `formatDate` (its own code uses it)
+    const composite = await readFile(join(dir, "design-system/composites/calendar-view.tsx"), "utf8");
+    expect(composite).toMatch(/function formatDate/);
+
+    const tsc = runTsc(dir);
+    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+    expect(tsc.status).toBe(0);
+  }, 90_000);
+});

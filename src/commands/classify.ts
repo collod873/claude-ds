@@ -355,6 +355,26 @@ export async function classifyCmd(opts: {
     }
   }
 
+  // Backfill helper closure into pre-existing atoms that were extracted without
+  // their parent-local helper dependencies (ADR-0015, issue #261). This repairs
+  // atoms produced by the pre-#195-era extraction that left helpers behind in
+  // composites, resulting in TS2304 / INTEGRITY-UNRESOLVED-SYMBOL findings that
+  // `audit --fix` correctly cannot heal (code-motion is classify's responsibility).
+  const { backfillAtomHelpers } = await import("../lib/ops/backfill-atom-helpers.js");
+  const backfillOp = backfillAtomHelpers();
+  const ctx4 = await loadProject(cwd);
+  await run(ctx4, [backfillOp], "apply");
+
+  if (backfillOp.results.length > 0) {
+    for (const r of backfillOp.results) {
+      if (r.kind === "healed") {
+        info(`classify: backfilled helper(s) [${r.carriedSymbols?.join(", ")}] into ${r.atomRel}`);
+      } else if (r.kind === "marker-added") {
+        info(`classify: EXTRACTION_NEEDED — ${r.atomRel} has unresolvable symbols [${r.unresolvedSymbols?.join(", ")}]`);
+      }
+    }
+  }
+
   const { moved: ambiguityMoved, kept: ambiguityKept } = await applyAmbiguityPass();
 
   if (
