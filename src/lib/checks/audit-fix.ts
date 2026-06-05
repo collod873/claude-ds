@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { info, err } from "../log.js";
-import { run } from "../runner.js";
+import { run, rollbackChanges, type Change } from "../runner.js";
 import type { ProjectContext } from "../project.js";
 import type { Manifest } from "../manifest.js";
 import { type Exception } from "../exceptions.js";
@@ -171,11 +171,40 @@ export async function runAuditFix(
         f.ruleId.startsWith("INTEGRITY-") && isIntegrityFixable(f.ruleId as IntegrityRuleId),
     );
 
-    const integrityOps = integrityToFix.map(integrityFixerAsOperation);
-    const integrityReport = await run(ctx, integrityOps, "apply", { rollbackOnFailure: true });
-    if (integrityReport.failed) {
-      err(`Integrity-fix pass failed — all changes rolled back. ${integrityReport.failed.error}`);
-      process.exit(1);
+    // Order same-file fixers structural-first (dedup before symbol-resolution)
+    // so the import rewrite operates on the deduped declaration set. End state is
+    // order-independent because each fixer re-reads the file, but this keeps the
+    // diffs deterministic.
+    const integrityFixerOrder: Partial<Record<IntegrityRuleId, number>> = {
+      "INTEGRITY-DUPLICATE-DECL": 0,
+      "INTEGRITY-UNRESOLVED-SYMBOL": 1,
+    };
+    const orderedToFix = [...integrityToFix].sort(
+      (a, b) =>
+        (integrityFixerOrder[a.ruleId as IntegrityRuleId] ?? 0) -
+        (integrityFixerOrder[b.ruleId as IntegrityRuleId] ?? 0),
+    );
+    const integrityOps = orderedToFix.map(integrityFixerAsOperation);
+
+    // Apply integrity ops one at a time rather than as a single
+    // plan-all-then-apply batch. Multiple fixers can target the SAME file (a file
+    // with both a duplicate decl and an unresolved symbol gets two ops); a single
+    // batch plans every op against the original on-disk bytes, so the second write
+    // clobbers the first (last-write-wins) and the file needs two passes to
+    // converge — breaking acceptance #2. Running each op in its own `run()` lets
+    // the next op's `plan()` re-read the prior op's written bytes, so same-file
+    // fixers compose and the pass reaches a fixed point. Ops on different files are
+    // independent, so per-op application is equivalent for them. Transactional
+    // across the whole set: any failure unwinds every applied change.
+    const integrityApplied: Change[] = [];
+    for (const op of integrityOps) {
+      const rep = await run(ctx, [op], "apply");
+      integrityApplied.push(...rep.applied);
+      if (rep.failed) {
+        await rollbackChanges(ctx, integrityApplied);
+        err(`Integrity-fix pass failed — all changes rolled back. ${rep.failed.error}`);
+        process.exit(1);
+      }
     }
 
     const integrityResults: Array<{ finding: IntegrityFinding; fixed: boolean; message: string }> = [];

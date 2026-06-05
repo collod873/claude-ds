@@ -167,4 +167,56 @@ describe("brownfield flow converges (PRD #241 / sub-issue #247)", () => {
     expect(audit.stdout).not.toMatch(/INTEGRITY-UNRESOLVABLE-IMPORT/);
     expect(audit.code).toBe(0);
   }, 15000);
+
+  it("a file with BOTH a duplicate decl and an unresolved symbol heals in ONE pass (#260)", async () => {
+    // The convergence bug this guards: a file carrying both integrity findings
+    // (INTEGRITY-DUPLICATE-DECL + INTEGRITY-UNRESOLVED-SYMBOL) produced two ops in
+    // one plan-all-then-apply batch. Both planned against the same on-disk bytes,
+    // so the second write clobbered the first — the file needed two `audit --fix`
+    // passes and pass 2 was not a fixed point (failed acceptance #2). The fixers
+    // must now compose in a single pass: dedup AND the re-derived import both land.
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+    // tsconfig `paths` is what the sibling-DS resolver reads to mint a canonical
+    // import specifier for a DS-defined symbol.
+    await writeFile(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { paths: { "@ds/*": ["./design-system/*"] } } }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+
+    // A sibling atom that DEFINES `Helper` — tier-1 resolvable.
+    await writeFile(
+      join(dir, "design-system/atoms/helper.tsx"),
+      `export function Helper() { return <span/>; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+    );
+
+    // The corrupt atom: references `Helper` with no import (UNRESOLVED-SYMBOL,
+    // provable) AND declares `Dup` twice, verbatim (DUPLICATE-DECL, mergeable).
+    await writeFile(
+      join(dir, "design-system/atoms/broken.tsx"),
+      [
+        `export function Broken() { return <div><Helper/><Dup/></div>; }`,
+        `function Dup() { return <span/>; }`,
+        `function Dup() { return <span/>; }`,
+        `export const meta = { kind: "atom" as const, examples: [] };`,
+        "",
+      ].join("\n"),
+    );
+
+    // ── One `audit --fix` pass must fully heal the file. ──
+    await runCli(["audit", "--fix"], { cwd: dir });
+    const healed = await readFile(join(dir, "design-system/atoms/broken.tsx"), "utf8");
+
+    // Both fixes landed in the SAME pass: the import was re-derived AND the
+    // duplicate decl was merged to a single implementation.
+    expect(healed).toMatch(/import\s+\{\s*Helper\s*\}\s+from\s+["']@ds\/atoms\/helper["']/);
+    expect(healed.match(/function Dup\b/g) ?? []).toHaveLength(1);
+    expect(healed).not.toMatch(/INTEGRITY/);
+
+    // ── Pass 2 is a fixed point: zero bytes change. ──
+    const treeBefore = await snapshotTree(dir);
+    await runCli(["audit", "--fix"], { cwd: dir });
+    const treeAfter = await snapshotTree(dir);
+    expect(diffTrees(treeBefore, treeAfter)).toEqual([]);
+  }, 15000);
 });

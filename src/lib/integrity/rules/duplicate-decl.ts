@@ -1,5 +1,9 @@
-import type { IntegrityFinding, IntegrityRule } from "../rule.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { Change } from "../../operation.js";
+import type { IntegrityFinding, IntegrityFixResult, IntegrityRule } from "../rule.js";
 import { analyzeResolution } from "../resolve-symbols.js";
+import { dedupeDuplicateFns } from "../dedupe-decls.js";
 
 /**
  * Fires when a file declares the same top-level function twice with a body —
@@ -24,11 +28,48 @@ function detect(file: string, source: string): IntegrityFinding[] {
   ];
 }
 
+/**
+ * Drop redundant top-level function implementations, keeping one — but only
+ * when the duplicates are textually identical. Differing implementations are
+ * left flagged (choosing a winner would be a guess). The Crewops corruption is
+ * a component body duplicated verbatim, which this heals; anything ambiguous
+ * stays a finding (#260).
+ */
+async function fix(finding: IntegrityFinding, cwd: string): Promise<IntegrityFixResult> {
+  let source: string;
+  try {
+    source = await readFile(join(cwd, finding.file), "utf8");
+  } catch {
+    return { finding, fixed: false, message: `Could not read ${finding.file}`, changes: [] };
+  }
+
+  const { source: deduped, deduped: didDedupe, remaining } = dedupeDuplicateFns(source, finding.file);
+
+  if (!didDedupe) {
+    return {
+      finding,
+      fixed: false,
+      message: `Duplicate implementations of ${remaining.join(", ")} differ — left flagged, not auto-merged`,
+      changes: [],
+    };
+  }
+
+  const changes: Change[] = [
+    { kind: "write", path: finding.file, before: Buffer.from(source), after: Buffer.from(deduped) },
+  ];
+  const message =
+    remaining.length > 0
+      ? `Deduped identical functions in ${finding.file}; ${remaining.length} differing duplicate(s) left flagged: ${remaining.join(", ")}`
+      : `Deduped redundant function declaration(s) in ${finding.file}`;
+  return { finding, fixed: true, message, changes };
+}
+
 export const duplicateDeclRule: IntegrityRule = {
   id: "INTEGRITY-DUPLICATE-DECL",
   severity: "error",
   description:
     "File declares the same top-level function implementation twice — cannot compile (TS2393)",
   detect,
-  fixable: false,
+  fixable: true,
+  fix,
 };

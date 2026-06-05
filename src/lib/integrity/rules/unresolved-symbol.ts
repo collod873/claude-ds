@@ -1,5 +1,10 @@
-import type { IntegrityFinding, IntegrityRule } from "../rule.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { Change } from "../../operation.js";
+import type { IntegrityFinding, IntegrityFixResult, IntegrityRule } from "../rule.js";
 import { analyzeResolution } from "../resolve-symbols.js";
+import { repairUnresolvedSymbols } from "../repair-symbols.js";
+import { buildRepairEnv } from "../repair-env.js";
 
 /**
  * Fires when a tier file references value-position identifiers it never binds —
@@ -27,11 +32,53 @@ function detect(file: string, source: string): IntegrityFinding[] {
   ];
 }
 
+/**
+ * Re-derive the missing import closure, adding an import only for each unbound
+ * symbol whose origin is *proven* (a specifier already in use across the
+ * consumer's import graph). Symbols with no provable — or an ambiguous — source
+ * are left untouched so the finding persists: honest partial repair, never a
+ * guess that could compile-then-break a consumer (#260).
+ */
+async function fix(finding: IntegrityFinding, cwd: string): Promise<IntegrityFixResult> {
+  let source: string;
+  try {
+    source = await readFile(join(cwd, finding.file), "utf8");
+  } catch {
+    return { finding, fixed: false, message: `Could not read ${finding.file}`, changes: [] };
+  }
+
+  const env = await buildRepairEnv({ cwd, fileName: finding.file });
+  const { source: repaired, repaired: didRepair, remaining } = repairUnresolvedSymbols(
+    source,
+    finding.file,
+    env,
+  );
+
+  if (!didRepair) {
+    return {
+      finding,
+      fixed: false,
+      message: `No provable import source for ${remaining.join(", ")} — left flagged, not guessed`,
+      changes: [],
+    };
+  }
+
+  const changes: Change[] = [
+    { kind: "write", path: finding.file, before: Buffer.from(source), after: Buffer.from(repaired) },
+  ];
+  const message =
+    remaining.length > 0
+      ? `Re-derived imports for ${finding.file}; ${remaining.length} symbol(s) still unprovable: ${remaining.join(", ")}`
+      : `Re-derived missing import closure for ${finding.file}`;
+  return { finding, fixed: true, message, changes };
+}
+
 export const unresolvedSymbolRule: IntegrityRule = {
   id: "INTEGRITY-UNRESOLVED-SYMBOL",
   severity: "error",
   description:
     "File references value identifiers it never imports or declares — cannot compile (TS2304/TS2686)",
   detect,
-  fixable: false,
+  fixable: true,
+  fix,
 };
