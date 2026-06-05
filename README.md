@@ -6,10 +6,10 @@ Shared design-system governance and scaffold CLI. Installs a consistent `design-
 
 ```sh
 # Greenfield — bootstrap a new project with the full scaffold
-npx github:collod873/claude-ds#v1.0.0 init --pack next-react
+npx github:collod873/claude-ds#v1.1.0 init --pack next-react
 
 # Brownfield — adopt into an existing project
-npx github:collod873/claude-ds#v1.0.0 adopt --pack next-react
+npx github:collod873/claude-ds#v1.1.0 adopt --pack next-react
 ```
 
 Pin every invocation to a release tag. The CLI never auto-updates.
