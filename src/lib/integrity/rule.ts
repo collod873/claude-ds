@@ -9,7 +9,9 @@ import type { Severity } from "../severity.js";
 export type IntegrityRuleId =
   | "INTEGRITY-UNPARSEABLE"
   | "INTEGRITY-ORPHANED-FROM"
-  | "INTEGRITY-UNRESOLVABLE-IMPORT";
+  | "INTEGRITY-UNRESOLVABLE-IMPORT"
+  | "INTEGRITY-UNRESOLVED-SYMBOL"
+  | "INTEGRITY-DUPLICATE-DECL";
 
 export interface IntegrityFinding {
   ruleId: IntegrityRuleId;

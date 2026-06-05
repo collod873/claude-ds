@@ -4,6 +4,7 @@ import ts from "typescript";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 import { toKebab, findInternalComponents } from "../drift/index.js";
+import { analyzeResolution } from "../integrity/resolve-symbols.js";
 
 /**
  * classify owns extraction (ADR-0015). When a tier file defines an inline
@@ -190,6 +191,15 @@ function metaStub(): string {
  * is left inline rather than clobbering an unrelated atom (issue #209).
  */
 function planFile(source: string, parentRel: string, canonicalAlias: string, takenAtomPaths: Set<string>): FilePlan {
+  // Guard (#259): never extract a child out of a parent that does not resolve
+  // its own symbols or already duplicates a top-level function. The carry-imports
+  // logic below can only reconstruct an atom's import closure from imports the
+  // parent actually has — when the parent is corrupt (import block stripped), it
+  // would mint a fresh broken atom (Crewops `file-uploader-row.tsx`). Refuse and
+  // leave the corruption for INTEGRITY-UNRESOLVED-SYMBOL / -DUPLICATE-DECL to flag.
+  const { unresolved, duplicateFns } = analyzeResolution(source, parentRel);
+  if (unresolved.length > 0 || duplicateFns.length > 0) return { extractions: [], changes: [] };
+
   const internal = findInternalComponents(source);
   if (internal.length === 0) return { extractions: [], changes: [] };
 

@@ -22,7 +22,7 @@ These problems make brownfield adoption fragile and erode trust in the tool.
 
 Audit gains a new rule category: `INTEGRITY-*` rules that check structural file health in DS files. These fire **before** convention rules (`DRIFT-*`). If a file fails integrity, convention fixers skip it.
 
-Examples: `INTEGRITY-UNPARSEABLE` (file doesn't parse as TS/JSX), `INTEGRITY-ORPHANED-FROM` (`} from` without preceding `import {`), `INTEGRITY-UNRESOLVABLE-IMPORT` (import path doesn't resolve).
+Examples: `INTEGRITY-UNPARSEABLE` (file doesn't parse as TS/JSX), `INTEGRITY-ORPHANED-FROM` (`} from` without preceding `import {`), `INTEGRITY-UNRESOLVABLE-IMPORT` (import path doesn't resolve), `INTEGRITY-UNRESOLVED-SYMBOL` (references a value name it never imports or declares — TS2304/TS2686), `INTEGRITY-DUPLICATE-DECL` (same top-level function implemented twice — TS2393).
 
 Integrity rules follow the same ADR-0013 contract: auto-fix where possible (e.g. restore from git if audit caused the damage), don't flag what you can't help with.
 
@@ -93,3 +93,17 @@ The result — pass/fail plus the **interventions-required count** — is record
 - Existing fixers and detection logic need retrofit. This is incremental per ADR-0013's rollout model.
 - `--dry-run` becomes the preview mechanism; confirmation prompts are removed.
 - Every release ships with a filled `verification.md` recording the brownfield journey on a real consumer (Crewops baseline today) — pass/fail against the 6-item bar and an explicit interventions-required count. A candidate with non-zero interventions does not ship.
+
+## Amendment (2026-06-05, #259): the compile gate is audit-enforced, not human-run
+
+The original decision placed a `tsc --noEmit` check in the brownfield acceptance bar (item #4) and as a completion breadcrumb ("Next: run your build"). Both are *human-run* — they live outside the tool. #259 showed why that is insufficient: a full heal of Crewops `72c6dde` reached an all-green state (`audit --fix` → fixed point, `doctor --completeness` OK) on a tree that did not compile — 8 atoms with stripped imports and duplicated function bodies. The breadcrumb gate "the HITL never ran," so the false green reached a developer's terminal. The original integrity rules (`UNPARSEABLE`, `ORPHANED-FROM`, `UNRESOLVABLE-IMPORT`) all missed it: the files parse, and they have *zero* imports, so there is no unresolvable import to flag.
+
+The gap is structural: audit's `clean` verdict was backed by **rule-coverage**, not by **resolution**. Any corruption class nobody wrote a rule for scores clean.
+
+The amendment moves the resolve check inside audit:
+
+1. **`INTEGRITY-UNRESOLVED-SYMBOL`** and **`INTEGRITY-DUPLICATE-DECL`** — blocking integrity rules driven by a single-file resolution pass (`src/lib/integrity/resolve-symbols.ts`). A tier file that references a value identifier it never imports or declares, or that implements the same top-level function twice, is now a finding. Because the rules are blocking and (today) non-fixable, audit cannot report a clean fixed point on a tree that will not typecheck.
+2. **Scoped resolution, not full `tsc`.** The pass is a value-position free-variable analysis over the single file — no type program, no consumer toolchain. This is deliberate: a real `tsc --noEmit` conflates the consumer's own pre-existing `src/` errors with design-system errors, while the resolution pass stays scoped to `design-system/` and is compiler-*grounded* (resolution, not a regex heuristic) without being noisy. It catches the whole "references a name that isn't there" class, not just the observed signature. It does **not** catch type-level errors; that remains the human `tsc` bar item, now a backstop rather than the only gate.
+3. **Extraction refuses a non-resolving parent.** `extract-inline-components` runs the same resolution pass on the parent before lifting a child; a corrupt parent (no imports to carry) would otherwise mint a fresh broken atom (the 8th file, `file-uploader-row.tsx`). Ties the extract guard to the same check as #1.
+
+Re-deriving the missing import closure to *auto-repair* the broken atoms is intentionally out of scope here — guessing a symbol's source module risks writing imports that break a consumer, which violates the north star. Detection + gate kills the false green; repair is a separate, evidence-gated follow-up. The headline defect — audit reporting clean on a non-compiling tree — is closed by detection alone.

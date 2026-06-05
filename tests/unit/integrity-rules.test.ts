@@ -260,3 +260,62 @@ export const Card = () => <div />;
     expect(findings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT")).toHaveLength(0);
   });
 });
+
+describe("INTEGRITY-UNRESOLVED-SYMBOL rule (#259)", () => {
+  it("is a registered, blocking, non-fixable error rule", () => {
+    expect(allIntegrityRuleIds()).toContain("INTEGRITY-UNRESOLVED-SYMBOL");
+    expect(integrityRuleSeverity("INTEGRITY-UNRESOLVED-SYMBOL")).toBe("error");
+  });
+
+  it("fires for an atom whose import block was stripped", () => {
+    const source = `
+export function WeekGrid() {
+  return <Button className={cn("grid")}>{startOfDay(new Date()).tostring()}</Button>;
+}
+`;
+    const findings = evaluateIntegrity("design-system/atoms/week-grid.tsx", source);
+    const hit = findings.find(f => f.ruleId === "INTEGRITY-UNRESOLVED-SYMBOL");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toMatch(/Button/);
+    expect(hit!.message).toMatch(/cn/);
+  });
+
+  it("does not fire for a healthy atom (regression guard #4 — sync overload)", () => {
+    const source = `
+import { cn } from "@/lib/utils";
+import { Button } from "@ds/atoms/button";
+export const Card = () => <Button className={cn("p")}>hi</Button>;
+`;
+    const findings = evaluateIntegrity("design-system/atoms/card.tsx", source);
+    expect(findings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVED-SYMBOL")).toHaveLength(0);
+  });
+});
+
+describe("INTEGRITY-DUPLICATE-DECL rule (#259)", () => {
+  it("is a registered, blocking, non-fixable error rule", () => {
+    expect(allIntegrityRuleIds()).toContain("INTEGRITY-DUPLICATE-DECL");
+    expect(integrityRuleSeverity("INTEGRITY-DUPLICATE-DECL")).toBe("error");
+  });
+
+  it("fires when a top-level function is defined twice with a body", () => {
+    const source = `
+import { Button } from "@ds/atoms/button";
+export function WeekGrid() { return <Button>a</Button>; }
+function WeekGrid() { return <Button>b</Button>; }
+`;
+    const findings = evaluateIntegrity("design-system/atoms/week-grid.tsx", source);
+    const hit = findings.find(f => f.ruleId === "INTEGRITY-DUPLICATE-DECL");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toMatch(/WeekGrid/);
+  });
+
+  it("does not fire for overload signatures", () => {
+    const source = `
+export function fmt(x: number): string;
+export function fmt(x: string): string;
+export function fmt(x: unknown): string { return String(x); }
+`;
+    const findings = evaluateIntegrity("design-system/atoms/fmt.tsx", source);
+    expect(findings.filter(f => f.ruleId === "INTEGRITY-DUPLICATE-DECL")).toHaveLength(0);
+  });
+});

@@ -1,7 +1,9 @@
 import type { IntegrityRule, IntegrityRuleId } from "./rule.js";
+import { duplicateDeclRule } from "./rules/duplicate-decl.js";
 import { orphanedFromRule } from "./rules/orphaned-from.js";
 import { unparseableRule } from "./rules/unparseable.js";
 import { unresolvableImportRule } from "./rules/unresolvable-import.js";
+import { unresolvedSymbolRule } from "./rules/unresolved-symbol.js";
 
 /**
  * The integrity-rule registry indexed by id. Declared as
@@ -17,6 +19,8 @@ export const INTEGRITY_RULES_BY_ID: Record<IntegrityRuleId, IntegrityRule> = {
   "INTEGRITY-UNPARSEABLE": unparseableRule,
   "INTEGRITY-ORPHANED-FROM": orphanedFromRule,
   "INTEGRITY-UNRESOLVABLE-IMPORT": unresolvableImportRule,
+  "INTEGRITY-UNRESOLVED-SYMBOL": unresolvedSymbolRule,
+  "INTEGRITY-DUPLICATE-DECL": duplicateDeclRule,
 };
 
 /**

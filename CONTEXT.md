@@ -89,7 +89,11 @@ _Contrast_: integrity rule.
 A named audit check for structural file health. Prefix: `INTEGRITY-`. Fires
 **before** drift rules — if a file fails integrity, convention fixers skip it.
 Examples: `INTEGRITY-UNPARSEABLE`, `INTEGRITY-ORPHANED-FROM`,
-`INTEGRITY-UNRESOLVABLE-IMPORT`. Subject to the same ADR-0013 actionability
+`INTEGRITY-UNRESOLVABLE-IMPORT`, `INTEGRITY-UNRESOLVED-SYMBOL` (references a
+value name it never imports/declares — TS2304/TS2686), `INTEGRITY-DUPLICATE-DECL`
+(same top-level function implemented twice — TS2393). The last two back audit's
+clean verdict with a real resolution pass so a non-compiling tree can no longer
+score `clean` (#259). Subject to the same ADR-0013 actionability
 contract as drift rules. Shape is parallel to `DriftRule` — discriminated
 union (`fixable: true | false`), totality-checked registry, one file per rule
 under `src/lib/integrity/rules/`. Reader who learned the drift shape knows
