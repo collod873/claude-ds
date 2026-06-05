@@ -222,6 +222,48 @@ describe("analyzeResolution — type-position references (#262)", () => {
     `;
     expect(analyzeResolution(src).unresolved).toContain("NavSection");
   });
+
+  it("flags a type used INSIDE a separate `type X = {...}` declaration body (nav-row.tsx pattern)", () => {
+    // Real nav-row.tsx: LucideIcon appears only inside a type alias body, not in
+    // an inline function-param type. The TypeLiteral's PropertySignature children
+    // are not TypeNodes — they must be traversed explicitly.
+    const src = `
+      type NavItem = {
+        href: string;
+        icon: LucideIcon;
+        label: string;
+      };
+      export function NavRow({ item }: { item: NavItem }) {
+        return <span>{item.label}</span>;
+      }
+    `;
+    expect(analyzeResolution(src).unresolved).toContain("LucideIcon");
+  });
+
+  it("marks a type-alias-body symbol as typeOnlySymbols (not in value position)", () => {
+    // LucideIcon in a type alias body: type-only symbol.
+    const src = `
+      type NavItem = { icon: LucideIcon; };
+      export function NavRow({ item }: { item: NavItem }) {
+        return <span />;
+      }
+    `;
+    const result = analyzeResolution(src);
+    expect(result.unresolved).toContain("LucideIcon");
+    expect(result.typeOnlySymbols.has("LucideIcon")).toBe(true);
+  });
+
+  it("does NOT put a value-and-type symbol in typeOnlySymbols", () => {
+    // cn used both as a value (function call) and potentially in type position.
+    const src = `
+      export function Row() {
+        return <div className={cn("a", "b")} />;
+      }
+    `;
+    const result = analyzeResolution(src);
+    expect(result.unresolved).toContain("cn");
+    expect(result.typeOnlySymbols.has("cn")).toBe(false);
+  });
 });
 
 describe("analyzeResolution — duplicate top-level functions", () => {

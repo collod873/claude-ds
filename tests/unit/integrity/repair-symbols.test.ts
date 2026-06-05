@@ -69,4 +69,68 @@ describe("repairUnresolvedSymbols", () => {
       expect(result.remaining).toEqual([]);
     });
   });
+
+  describe("type-only symbol repair (#262 / #260)", () => {
+    it("emits `import type { X }` for a symbol that appears ONLY in type position", () => {
+      // LucideIcon is used only as a type annotation — never as a value.
+      const source = [
+        `type NavItem = { icon: LucideIcon; label: string; };`,
+        `export function NavRow({ item }: { item: NavItem }) {`,
+        `  return <span>{item.label}</span>;`,
+        `}`,
+      ].join("\n") + "\n";
+      const env = envFrom({ LucideIcon: { specifier: "lucide-react" } });
+
+      const result = repairUnresolvedSymbols(source, "design-system/atoms/nav-row.tsx", env);
+
+      expect(result.repaired).toBe(true);
+      expect(result.remaining).toEqual([]);
+      // Must use `import type` — a value import would fail isolatedModules or tsc for type-only exports.
+      expect(result.source).toContain(`import type { LucideIcon } from "lucide-react";`);
+      // Must NOT emit a plain value import for this symbol.
+      expect(result.source).not.toContain(`import { LucideIcon } from "lucide-react";`);
+      // The repaired source has no remaining unresolved symbols.
+      expect(analyzeResolution(result.source, "design-system/atoms/nav-row.tsx").unresolved).toEqual([]);
+    });
+
+    it("emits `import { X }` (value import) for a symbol used in value position, even if also used in type position", () => {
+      // CalendarEvent used both as a type annotation and as a runtime value (e.g. array element type
+      // derived from a value-position expression) — when in doubt, value import is safer.
+      const source = [
+        `type Props = { events: CalendarEvent[] };`,
+        `export function DayList({ events }: Props) {`,
+        `  return <ul>{events.map((e: CalendarEvent) => <li key={e.id}>{e.title}</li>)}</ul>;`,
+        `}`,
+      ].join("\n") + "\n";
+      const env = envFrom({ CalendarEvent: { specifier: "@/types/calendar" } });
+
+      const result = repairUnresolvedSymbols(source, "design-system/atoms/day-list.tsx", env);
+
+      // CalendarEvent appears in type-annotation position (Props type, param annotation)
+      // but e.id and e.title are value-position accesses on an expression — value import is appropriate.
+      expect(result.repaired).toBe(true);
+      // The import may be either value or type; what must NOT happen is leaving it unresolved.
+      expect(result.remaining).toEqual([]);
+      expect(analyzeResolution(result.source, "design-system/atoms/day-list.tsx").unresolved).toEqual([]);
+    });
+
+    it("CONTROL: a type-only symbol with NO provable source stays flagged, not silently resolved (#259 invariant)", () => {
+      // LucideIcon is type-only but nothing in the env proves where it comes from.
+      const source = [
+        `type NavItem = { icon: LucideIcon; label: string; };`,
+        `export function NavRow({ item }: { item: NavItem }) {`,
+        `  return <span>{item.label}</span>;`,
+        `}`,
+      ].join("\n") + "\n";
+
+      const result = repairUnresolvedSymbols(source, "design-system/atoms/nav-row.tsx", NEVER);
+
+      expect(result.repaired).toBe(false);
+      expect(result.remaining).toContain("LucideIcon");
+      expect(result.source).toBe(source);
+      // The finding must still fire on the untouched source.
+      const findings = analyzeResolution(source, "design-system/atoms/nav-row.tsx");
+      expect(findings.unresolved).toContain("LucideIcon");
+    });
+  });
 });

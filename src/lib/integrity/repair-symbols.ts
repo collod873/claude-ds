@@ -52,10 +52,11 @@ export function repairUnresolvedSymbols(
   fileName: string,
   env: RepairEnv,
 ): RepairResult {
-  const { unresolved } = analyzeResolution(source, fileName);
+  const { unresolved, typeOnlySymbols } = analyzeResolution(source, fileName);
 
   const remaining: string[] = [];
-  const named = new Map<string, Set<string>>(); // specifier → named symbols
+  const named = new Map<string, Set<string>>(); // specifier → named value symbols
+  const namedTypeOnly = new Map<string, Set<string>>(); // specifier → type-only symbols
   const defaults: Array<{ symbol: string; specifier: string }> = [];
 
   for (const symbol of unresolved) {
@@ -66,6 +67,13 @@ export function repairUnresolvedSymbols(
     }
     if (found.kind === "default") {
       defaults.push({ symbol, specifier: found.specifier });
+    } else if (typeOnlySymbols.has(symbol)) {
+      // Symbol appears only in type position: emit `import type { X }` so the
+      // import is safe for consumers with `isolatedModules` / `verbatimModuleSyntax`
+      // and for packages that export the symbol as a type-only export.
+      const set = namedTypeOnly.get(found.specifier) ?? new Set<string>();
+      set.add(symbol);
+      namedTypeOnly.set(found.specifier, set);
     } else {
       const set = named.get(found.specifier) ?? new Set<string>();
       set.add(symbol);
@@ -73,7 +81,7 @@ export function repairUnresolvedSymbols(
     }
   }
 
-  if (named.size === 0 && defaults.length === 0) {
+  if (named.size === 0 && namedTypeOnly.size === 0 && defaults.length === 0) {
     return { source, repaired: false, remaining };
   }
 
@@ -84,6 +92,10 @@ export function repairUnresolvedSymbols(
   for (const [specifier, symbols] of [...named.entries()].sort()) {
     const names = [...symbols].sort().join(", ");
     lines.push(`import { ${names} } from "${specifier}";`);
+  }
+  for (const [specifier, symbols] of [...namedTypeOnly.entries()].sort()) {
+    const names = [...symbols].sort().join(", ");
+    lines.push(`import type { ${names} } from "${specifier}";`);
   }
 
   return { source: insertImports(source, lines), repaired: true, remaining };

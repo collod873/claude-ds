@@ -8,6 +8,13 @@ import ts from "typescript";
  * declaration, no parameter) and are not a known runtime global or built-in
  * type. Covers `TS2304 Cannot find name` for both value and type references.
  *
+ * `typeOnlySymbols` — subset of `unresolved` whose names appear ONLY in
+ * type position (type annotations, type alias bodies, interface members,
+ * `as`-cast targets, generic arguments) and NOT in value position. The
+ * repair path uses this to emit `import type { X }` rather than
+ * `import { X }`, which is required when the symbol is a pure type export
+ * (e.g. `LucideIcon` from lucide-react) or when `isolatedModules` is on.
+ *
  * `duplicateFns` — names declared by two or more *top-level* function
  * declarations that each carry a body (`TS2393 Duplicate function
  * implementation`). Overload signatures (multiple declarations, one body) are
@@ -15,6 +22,8 @@ import ts from "typescript";
  */
 export interface ResolutionResult {
   unresolved: string[];
+  /** Unresolved names that appear ONLY in type position — need `import type`. */
+  typeOnlySymbols: Set<string>;
   duplicateFns: string[];
 }
 
@@ -351,6 +360,46 @@ function collectTypeRefs(sf: ts.SourceFile): Set<string> {
       }
       return;
     }
+    // TypeElement nodes (PropertySignature, MethodSignature, IndexSignatureDeclaration,
+    // CallSignatureDeclaration, ConstructSignatureDeclaration) appear as direct children
+    // of TypeLiteralNode — they are NOT TypeNode themselves but their type-annotation
+    // children are. Recurse into their type positions so that `type T = { icon: LucideIcon }`
+    // collects `LucideIcon` the same way an inline `{ icon: LucideIcon }` function param does.
+    if (ts.isPropertySignature(n) || ts.isPropertyDeclaration(n)) {
+      if (n.type) visitTypeNode(n.type, typeParams);
+      return;
+    }
+    if (ts.isMethodSignature(n)) {
+      const inner = new Set([...typeParams, ...gatherTypeParamNames(n.typeParameters)]);
+      for (const tp of n.typeParameters ?? []) visitTypeNode(tp, typeParams);
+      for (const p of n.parameters) {
+        if (p.type) visitTypeNode(p.type, inner);
+      }
+      if (n.type) visitTypeNode(n.type, inner);
+      return;
+    }
+    if (ts.isIndexSignatureDeclaration(n)) {
+      for (const p of n.parameters) {
+        if (p.type) visitTypeNode(p.type, typeParams);
+      }
+      visitTypeNode(n.type, typeParams);
+      return;
+    }
+    if (ts.isCallSignatureDeclaration(n) || ts.isConstructSignatureDeclaration(n)) {
+      const inner = new Set([...typeParams, ...gatherTypeParamNames(n.typeParameters)]);
+      for (const tp of n.typeParameters ?? []) visitTypeNode(tp, typeParams);
+      for (const p of n.parameters) {
+        if (p.type) visitTypeNode(p.type, inner);
+      }
+      if (n.type) visitTypeNode(n.type, inner);
+      return;
+    }
+    // Parameter nodes appear as children of function-like type nodes
+    // (e.g. FunctionTypeNode `(icon: LucideIcon) => void`).
+    if (ts.isParameter(n)) {
+      if (n.type) visitTypeNode(n.type, typeParams);
+      return;
+    }
     // All other type nodes: recurse.
     if (ts.isTypeNode(n)) {
       ts.forEachChild(n, c => visitTypeNode(c, typeParams));
@@ -549,6 +598,13 @@ export function analyzeResolution(source: string, fileName = "file.tsx"): Resolu
   const unresolvedSet = new Set([...unresolvedValues, ...unresolvedTypes]);
   const unresolved = [...unresolvedSet].sort();
 
+  // Compute type-only symbols: names that appear ONLY in type position (i.e. in
+  // typeRefs but NOT in valueRefs). These need `import type { X }` not `import { X }`.
+  const valueRefSet = new Set(unresolvedValues);
+  const typeOnlySymbols = new Set(
+    [...unresolvedTypes].filter(name => !valueRefSet.has(name)),
+  );
+
   const duplicateFns = collectDuplicateFns(sf).sort();
-  return { unresolved, duplicateFns };
+  return { unresolved, typeOnlySymbols, duplicateFns };
 }
