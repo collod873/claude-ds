@@ -329,6 +329,15 @@ export async function classifyCmd(opts: {
       const { rewriteImports } = await import("../lib/ops/rewrite-imports.js");
       const ctx2 = await loadProject(cwd);
       await run(ctx2, [rewriteImports], "apply");
+
+      // Regenerate barrel indexes so stale tier-barrel exports don't cause TS2307.
+      const { regenIndexes } = await import("../lib/finalizers/regen-indexes.js");
+      const ctx2b = await loadProject(cwd);
+      const indexChanges = await regenIndexes(ctx2b.cwd);
+      if (indexChanges.length > 0) {
+        const regenOp = { name: "classify-regen-indexes", plan: async () => indexChanges };
+        await run(ctx2b, [regenOp], "apply");
+      }
     }
   } else if (dryRun) {
     // Nothing to pull in; extraction/ambiguity never run under --dry-run.
@@ -529,6 +538,21 @@ export async function classifyCmd(opts: {
       const { rewriteImports } = await import("../lib/ops/rewrite-imports.js");
       const ctx4 = await loadProject(cwd);
       await run(ctx4, [rewriteImports], "apply");
+
+      // Regenerate barrel index files (atoms/index.ts, composites/index.ts, etc.)
+      // so that a file moved from atoms/ to composites/ is no longer re-exported
+      // from the old tier barrel — a stale barrel export would cause TS2307 on the
+      // next tsc run even though audit reports 0 findings (ADR-0015, #264).
+      const { regenIndexes } = await import("../lib/finalizers/regen-indexes.js");
+      const ctx5 = await loadProject(cwd);
+      const indexChanges = await regenIndexes(ctx5.cwd);
+      if (indexChanges.length > 0) {
+        const regenOp = {
+          name: "classify-regen-indexes",
+          plan: async () => indexChanges,
+        };
+        await run(ctx5, [regenOp], "apply");
+      }
     }
 
     return { moved: movedCount, kept: keptCount };

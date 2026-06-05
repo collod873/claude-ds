@@ -107,3 +107,22 @@ The amendment moves the resolve check inside audit:
 3. **Extraction refuses a non-resolving parent.** `extract-inline-components` runs the same resolution pass on the parent before lifting a child; a corrupt parent (no imports to carry) would otherwise mint a fresh broken atom (the 8th file, `file-uploader-row.tsx`). Ties the extract guard to the same check as #1.
 
 Re-deriving the missing import closure to *auto-repair* the broken atoms is intentionally out of scope here — guessing a symbol's source module risks writing imports that break a consumer, which violates the north star. Detection + gate kills the false green; repair is a separate, evidence-gated follow-up. The headline defect — audit reporting clean on a non-compiling tree — is closed by detection alone.
+
+## Amendment (2026-06-05, #260/#263/#264): canonical heal sequence requires a second classify pass
+
+After `audit --fix` re-derives the import closure for corrupt atoms, some of those atoms may now compose enough DS components to be correctly classified as composites. Because `classify` ran before `audit --fix` restored the imports (at which point the atom had 0 imports and scored as atom), a second `classify` pass is required for the classification verdict to be correct.
+
+**Canonical brownfield heal sequence (Crewops `72c6dde` and any similar baseline):**
+
+```
+claude-ds sync
+claude-ds upgrade
+claude-ds classify
+claude-ds audit --fix
+claude-ds classify          ← second pass: relocates atoms that became composites after import restoration
+claude-ds audit --fix       ← second fix pass: should be no-op or clean up any remaining findings
+```
+
+The first `audit --fix` breadcrumb already routes to `claude-ds classify` when DRIFT-MISPLACED / DRIFT-MISCLASSIFIED-ATOM findings remain — the UX drives the consumer correctly. The second `audit --fix` should be a fixed point (0 changes, 0 errors).
+
+This is not a new prompt or intervention — `classify` auto-relocates confident composites unconditionally (the ambiguity pass in `applyAmbiguityPass`). The consumer follows the breadcrumbs with no judgment required.

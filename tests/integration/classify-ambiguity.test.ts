@@ -267,4 +267,50 @@ describe("classify brownfield convergence (issue #251)", () => {
     await expect(access(join(dir, "design-system/atoms/form.tsx"))).rejects.toThrow();
     await expect(access(join(dir, "design-system/composites/form.tsx"))).resolves.toBeUndefined();
   });
+
+  // C3 — #264: file misclassified-as-atom-at-classify-time because imports were absent
+  // becomes correctly composite after a second classify pass (post-audit --fix import restoration).
+  it("C3: a file that scored atom at first classify (0 imports) is correctly relocated to composites/ on a second classify pass after imports are restored", async () => {
+    // Simulate the Crewops sidebar-content.tsx scenario:
+    // 1. Classify ran first: file had 0 imports (corrupt baseline) → scored as atom → placed in atoms/
+    // 2. audit --fix restored 3+ DS imports (simulated here by direct file write)
+    // 3. Second classify pass: now correctly scored as confident composite → auto-relocated
+    //
+    // The file as placed by the first classify: 0 DS imports → atom tier, meta.kind=atom.
+    const atomSrc = [
+      `// was corrupt at first classify-time — 0 imports, scored as atom`,
+      `export function SidebarContent({ collapsed }: { collapsed: boolean }) {`,
+      `  return <div>{collapsed ? "collapsed" : "expanded"}</div>;`,
+      `}`,
+      `export const meta = { kind: "atom" as const, examples: [] };`,
+    ].join("\n") + "\n";
+    await writeFile(join(dir, "design-system/atoms/sidebar-content.tsx"), atomSrc);
+
+    // First classify pass: file has 0 DS imports, placed (or stays) in atoms/ as atom.
+    await classifyCmd({ cwd: dir });
+    // File should still be in atoms/ (0 imports → atom)
+    await expect(access(join(dir, "design-system/atoms/sidebar-content.tsx"))).resolves.toBeUndefined();
+
+    // Simulate audit --fix restoring the import closure (3 DS imports → confident composite).
+    const afterAuditFix = [
+      `import { Button } from "@/design-system/atoms/button";`,
+      `import { Avatar } from "@/design-system/atoms/avatar";`,
+      `import { NavRow } from "@/design-system/atoms/nav-row";`,
+      `export function SidebarContent({ collapsed }: { collapsed: boolean }) {`,
+      `  return <div><Button /><Avatar /><NavRow /></div>;`,
+      `}`,
+      `export const meta = { kind: "atom" as const, examples: [] };`,
+    ].join("\n") + "\n";
+    await writeFile(join(dir, "design-system/atoms/sidebar-content.tsx"), afterAuditFix);
+
+    // Second classify pass: 3 DS imports → confident composite → auto-relocated.
+    await classifyCmd({ cwd: dir });
+
+    // Must be relocated to composites/ with meta.kind updated.
+    await expect(access(join(dir, "design-system/atoms/sidebar-content.tsx"))).rejects.toThrow();
+    await expect(access(join(dir, "design-system/composites/sidebar-content.tsx"))).resolves.toBeUndefined();
+
+    const result = await readFile(join(dir, "design-system/composites/sidebar-content.tsx"), "utf8");
+    expect(result).toMatch(/kind:\s*["']composite["']/);
+  });
 });
