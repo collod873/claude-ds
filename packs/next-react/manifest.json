@@ -197,6 +197,14 @@
       "category": "seeded"
     },
     {
+      "path": "vitest.config.ts",
+      "category": "seeded"
+    },
+    {
+      "path": "vitest.setup.ts",
+      "category": "seeded"
+    },
+    {
       "path": "CLAUDE.md",
       "category": "hybrid",
       "format": "markdown"

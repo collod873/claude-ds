@@ -36,7 +36,11 @@ export function showcaseStub(displayName: string, fileBase: string): string {
 }
 
 export function testStub(displayName: string, fileBase: string): string {
+  // First line: per-file vitest environment docblock. Without it, render() in a
+  // fleshed-out stub has no `document` (#293). Per-file rather than global so
+  // node-side tests in other parts of the consumer tree keep `environment: "node"`.
   return [
+    `// @vitest-environment jsdom`,
     `// TODO(claude-ds): reconform stub — replace with real assertions`,
     `import { describe, it, expect } from "vitest";`,
     `import * as Mod from "./${fileBase}";`,

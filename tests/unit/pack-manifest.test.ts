@@ -26,4 +26,15 @@ describe("next-react manifest", () => {
     expect(m.files.find((f) => f.path === ".claude/settings.json")!.format).toBe("json");
     expect(m.files.find((f) => f.path === "design-system/contracts.md")!.category).toBe("seeded");
   });
+
+  // #293: DOM test runtime — vitest config + setup land as seeded so a fresh adopt
+  // can collect+run `design-system/**/*.test.tsx` stubs without consumer wiring.
+  it("seeds vitest.config.ts and vitest.setup.ts for the DOM test runtime", async () => {
+    const raw = await readFile("packs/next-react/manifest.json", "utf8");
+    const m = parseManifest(raw);
+    const config = m.files.find((f) => f.path === "vitest.config.ts");
+    const setup = m.files.find((f) => f.path === "vitest.setup.ts");
+    expect(config?.category).toBe("seeded");
+    expect(setup?.category).toBe("seeded");
+  });
 });

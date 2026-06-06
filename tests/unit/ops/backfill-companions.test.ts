@@ -122,4 +122,21 @@ describe("backfillCompanions op", () => {
     const t = await readFile(join(cwd, "design-system", "atoms", "badge.test.tsx"), "utf8");
     expect(t).toBe("pre-existing");
   });
+
+  // #293: test stubs must seed a DOM test runtime — per-file vitest-environment
+  // jsdom docblock so consumer-fleshed render() calls have a `document` available
+  // without flipping the global vitest environment (which would break node-side tests).
+  // Built from substrings so vitest doesn't see a real docblock in *this* file.
+  it("test stub carries the per-file jsdom environment docblock", async () => {
+    await scaffold();
+    await writeFile(join(cwd, "design-system", "atoms", "button.tsx"), `export const x = 1;\n`);
+    const changes = await backfillCompanions.plan(fakeCtx());
+    const test = changes.find(c => c.kind === "write" && c.path.endsWith(".test.tsx"));
+    expect(test?.kind).toBe("write");
+    if (test?.kind === "write") {
+      const bytes = test.after.toString("utf8");
+      const expected = "// @" + "vitest-environment jsdom";
+      expect(bytes.split("\n")[0]).toBe(expected);
+    }
+  });
 });
