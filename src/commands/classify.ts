@@ -13,6 +13,7 @@ import { appendExceptions } from "../lib/ops/append-exceptions.js";
 import type { Operation } from "../lib/operation.js";
 import type { ExtractInlineOutcome } from "../lib/ops/extract-inline-components.js";
 import type { BackfillAtomHelpersOutcome } from "../lib/ops/backfill-atom-helpers.js";
+import type { ProposeMetaRoleOutcome } from "../lib/ops/propose-meta-role.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
@@ -387,11 +388,44 @@ export async function classifyCmd(opts: {
 
   const { moved: ambiguityMoved, kept: ambiguityKept } = await applyAmbiguityPass();
 
+  // Role proposal pass (PRD #301 / #312, ADR-0016). After tier moves /
+  // extraction / ambiguity have settled the files, walk atoms/composites and
+  // propose a `meta.role` for each smart part that doesn't declare one — the
+  // load-bearing step that makes `DRIFT-SMART-PART-NO-ROLE` self-converging
+  // under `heal`. Two outcomes:
+  //   - matched a shipped contract anchor → role injected via the Op;
+  //   - smart but no shipped role fits → flagged as candidate feature
+  //     (ADR-0005 hand-off: presentational, features/, or tracked exception).
+  // Files already carrying `meta.role` are skipped: classify proposes; it
+  // does not silently rewrite an existing declaration.
+  const { proposeMetaRole } = await import("../lib/ops/propose-meta-role.js");
+  const ctx5 = await loadProject(cwd);
+  const roleReport = await run(ctx5, [proposeMetaRole()], "apply");
+  const roleOutcome = roleReport.ops[0]?.outcome as ProposeMetaRoleOutcome | undefined;
+  const roleProposals = roleOutcome?.proposals ?? [];
+  for (const p of roleProposals) {
+    if (p.proposal.kind === "candidate-feature") {
+      info(
+        `classify: ${p.file} — no shipped role contract matches (smart, non-ARIA). ` +
+          `Candidate feature: relocate to features/, mark presentational, or register a tracked exception (ADR-0005).`,
+      );
+      continue;
+    }
+    if (p.proposal.written) {
+      info(`classify: ${p.file} — proposed meta.role: "${p.proposal.role}"`);
+    } else {
+      info(
+        `classify: ${p.file} — proposes meta.role: "${p.proposal.role}" but meta literal not found; hand-edit and re-run`,
+      );
+    }
+  }
+
   if (
     moved === 0 &&
     extractions.length === 0 &&
     ambiguityMoved === 0 &&
-    ambiguityKept === 0
+    ambiguityKept === 0 &&
+    roleProposals.length === 0
   ) {
     info("classify: no files moved");
     printNextStep("classify", {});
