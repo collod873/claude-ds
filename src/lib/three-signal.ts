@@ -23,7 +23,33 @@ const TIER_FOLDERS: Record<string, Tier> = {
 };
 
 const META_KIND_RE = /\bmeta\s*=\s*\{[^}]*\bkind\s*:\s*["'](\w+)["']/s;
+const META_ROLE_RE = /\bmeta\s*=\s*\{[^}]*\brole\s*:\s*["']([\w-]+)["']/s;
 const VALID_TIERS = new Set<string>(["atom", "composite", "pattern", "feature"]);
+
+/**
+ * The "smart part" predicate (ADR-0016): a DS atom/composite whose body uses
+ * React state, effect, or context. Matched by the imported hook names from
+ * React — anything in this list flips the file into "needs a role when
+ * `role_contracts_strict` is on" territory. A presentational part (pure render
+ * of props) carries no role and is fully covered by the showcase mirror.
+ *
+ * The list is intentionally narrow: only the three concerns the role-contract
+ * system polices (state, effect, context). `useMemo` / `useCallback` don't
+ * change behavior, so they're not smart-part triggers; `useRef` is also
+ * excluded — a ref alone is presentational glue, not behavior.
+ */
+const SMART_HOOK_NAMES = [
+  "useState",
+  "useReducer",
+  "useEffect",
+  "useLayoutEffect",
+  "useContext",
+  "useSyncExternalStore",
+];
+
+const SMART_HOOK_RE = new RegExp(
+  `\\b(?:${SMART_HOOK_NAMES.join("|")})\\b`,
+);
 
 /** Extract location tier from a relative file path. */
 export function locationTierFromPath(filePath: string): Tier | null {
@@ -43,6 +69,33 @@ export function metaKindFromSource(source: string): Tier | null {
 }
 
 /**
+ * Extract `meta.role` from source text — the string literal a component
+ * declares against its shipped role contract (ADR-0016). Returns `null` when
+ * the meta block is absent or carries no `role` field.
+ *
+ * Returned as `string` (not the typed `Role` union) because the CLI runs
+ * across pack versions: a consumer could declare a role the current pack
+ * doesn't ship a contract for, and `DRIFT-ROLE-NO-CONTRACT` is the rule that
+ * surfaces that — not a parse error here.
+ */
+export function metaRoleFromSource(source: string): string | null {
+  const m = META_ROLE_RE.exec(source);
+  return m ? m[1] : null;
+}
+
+/**
+ * The smart-part predicate (ADR-0016) — does the file's body reference
+ * `useState`, `useReducer`, `useEffect`, `useLayoutEffect`, `useContext`, or
+ * `useSyncExternalStore`? A naive substring scan is enough for audit's
+ * purpose: false positives are tolerable (the strict flag is opt-in and the
+ * presentational triage path absorbs them); a missed smart part is the
+ * failure mode this rule exists to prevent.
+ */
+export function isSmartPartFromSource(source: string): boolean {
+  return SMART_HOOK_RE.test(source);
+}
+
+/**
  * Run the three-signal check for a single file.
  *
  * Pure: no I/O. Reads `ctx.auditConfig` for the four cfg-with-detected-fallback
@@ -55,14 +108,27 @@ export function checkThreeSignals(
   source: string,
   ctx: ProjectContext,
 ): ThreeSignalResult {
-  const { domainRoots, metaKindStrict, allowedImports, dsAliases } = ctx.auditConfig;
+  const { domainRoots, metaKindStrict, roleContractsStrict, allowedImports, dsAliases } = ctx.auditConfig;
   const locationTier = locationTierFromPath(filePath);
   const metaKind = metaKindFromSource(source);
+  const metaRole = metaRoleFromSource(source);
+  const isSmartPart = isSmartPartFromSource(source);
   const classifierVerdict = classifySource(source, domainRoots, allowedImports, dsAliases);
 
   const signals: ThreeSignals = { locationTier, metaKind, classifierVerdict };
 
-  const findings = evaluateDrift({ file: filePath, classifierVerdict, locationTier, source, metaKind, metaKindStrict, dsAliases });
+  const findings = evaluateDrift({
+    file: filePath,
+    classifierVerdict,
+    locationTier,
+    source,
+    metaKind,
+    metaKindStrict,
+    dsAliases,
+    metaRole,
+    isSmartPart,
+    roleContractsStrict,
+  });
 
   return { signals, findings };
 }

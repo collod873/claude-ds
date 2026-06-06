@@ -29,6 +29,7 @@ function makeCfg(overrides: Partial<Config> = {}): Config {
     claude_md_target: "CLAUDE.md",
     domain_roots: ["features", "lib"],
     meta_kind_strict: false,
+    role_contracts_strict: false,
     srcRoot: "src",
     allowed_imports: [],
     ds_aliases: [],
@@ -49,6 +50,11 @@ describe("resolveAuditConfig — defaults (cfg = null, pre-adopt path)", () => {
   it("metaKindStrict defaults to false", async () => {
     const resolved = await resolveAuditConfig(dir, null);
     expect(resolved.metaKindStrict).toBe(false);
+  });
+
+  it("roleContractsStrict defaults to false (PRD #301 / #311)", async () => {
+    const resolved = await resolveAuditConfig(dir, null);
+    expect(resolved.roleContractsStrict).toBe(false);
   });
 
   it("allowedImports defaults to []", async () => {
@@ -120,6 +126,12 @@ describe("resolveAuditConfig — cfg-provided values (adopted path)", () => {
     const cfg = makeCfg({ meta_kind_strict: true });
     const resolved = await resolveAuditConfig(dir, cfg);
     expect(resolved.metaKindStrict).toBe(true);
+  });
+
+  it("uses cfg.role_contracts_strict when set", async () => {
+    const cfg = makeCfg({ role_contracts_strict: true });
+    const resolved = await resolveAuditConfig(dir, cfg);
+    expect(resolved.roleContractsStrict).toBe(true);
   });
 
   it("uses cfg.allowed_imports when set", async () => {

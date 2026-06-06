@@ -18,6 +18,9 @@ export type DriftRuleId =
   | "DRIFT-MISCLASSIFIED-COMPOSITE"
   // Meta declaration rule (requires meta_kind_strict in config)
   | "DRIFT-META-KIND-MISSING"
+  // Role / behavior-contract rules (PRD #301 / #311)
+  | "DRIFT-SMART-PART-NO-ROLE"
+  | "DRIFT-ROLE-NO-CONTRACT"
   // Feature-boundary rule
   | "DRIFT-DS-IMPORTS-FEATURE"
   // Patterns-tier rules
@@ -53,6 +56,16 @@ export interface DriftRuleInput {
   metaKindStrict?: boolean;
   /** Detected DS path aliases (e.g. ["@ds"]). */
   dsAliases?: string[];
+  /** The `meta.role` value parsed from source, or `null` if absent. Populated for
+   *  atom/composite files; null for pattern/reference. PRD #301 / #311. */
+  metaRole?: string | null;
+  /** True when the file's body uses React state/effect/context — the predicate
+   *  that triggers DRIFT-SMART-PART-NO-ROLE when `roleContractsStrict` is on. */
+  isSmartPart?: boolean;
+  /** When true, DRIFT-SMART-PART-NO-ROLE fires on smart parts that declare no role.
+   *  Mirrors `metaKindStrict` — default false on fresh adoption, flipped after
+   *  classify backfill (PRD #301 / #311). */
+  roleContractsStrict?: boolean;
 }
 
 export interface FixResult {

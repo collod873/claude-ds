@@ -20,6 +20,7 @@ function mockCtx(cwd: string): ProjectContext {
       claude_md_target: "CLAUDE.md",
       domain_roots: ["features", "lib"],
       meta_kind_strict: false,
+      role_contracts_strict: false,
       srcRoot: "src",
       allowed_imports: [],
       ds_aliases: [],

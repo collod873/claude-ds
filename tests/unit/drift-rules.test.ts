@@ -1120,3 +1120,180 @@ describe("isExtractionNeededFinding", () => {
     expect(isExtractionNeededFinding(f)).toBe(false);
   });
 });
+
+// --- PRD #301 / #311: role-contract drift rules ---
+
+describe("DRIFT-SMART-PART-NO-ROLE rule (PRD #301 / #311)", () => {
+  it("registry exposes DRIFT-SMART-PART-NO-ROLE", () => {
+    expect(allRuleIds()).toContain("DRIFT-SMART-PART-NO-ROLE");
+  });
+
+  it("fires on a state-using atom with no role when role_contracts_strict is true", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/dropdown.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: "atom",
+      metaRole: null,
+      isSmartPart: true,
+      roleContractsStrict: true,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-SMART-PART-NO-ROLE");
+    expect(hit).toBeDefined();
+    expect(hit!.file).toBe("design-system/atoms/dropdown.tsx");
+    expect(hit!.message).toMatch(/role/);
+    expect(hit!.message).toMatch(/classify/);
+  });
+
+  it("does not fire when role_contracts_strict is false (silent path)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/dropdown.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: "atom",
+      metaRole: null,
+      isSmartPart: true,
+      roleContractsStrict: false,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-SMART-PART-NO-ROLE")).toHaveLength(0);
+  });
+
+  it("does not fire on a presentational (non-smart) atom even under strict mode", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/button.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: "atom",
+      metaRole: null,
+      isSmartPart: false,
+      roleContractsStrict: true,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-SMART-PART-NO-ROLE")).toHaveLength(0);
+  });
+
+  it("does not fire when the smart part already declares a role", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/combobox.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: "atom",
+      metaRole: "combobox",
+      isSmartPart: true,
+      roleContractsStrict: true,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-SMART-PART-NO-ROLE")).toHaveLength(0);
+  });
+
+  it("fires on a smart composite with no role under strict mode", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/composites/search-bar.tsx",
+      locationTier: "composite",
+      classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
+      metaKind: "composite",
+      metaRole: null,
+      isSmartPart: true,
+      roleContractsStrict: true,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.find(f => f.ruleId === "DRIFT-SMART-PART-NO-ROLE")).toBeDefined();
+  });
+
+  it("does not fire on a pattern-tier file (roles are reserved for atom/composite)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/patterns/app-shell.tsx",
+      locationTier: "pattern",
+      classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
+      metaKind: "pattern",
+      metaRole: null,
+      isSmartPart: true,
+      roleContractsStrict: true,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-SMART-PART-NO-ROLE")).toHaveLength(0);
+  });
+
+  it("does not fire on files outside the DS tier dirs (locationTier null)", () => {
+    const input: DriftRuleInput = {
+      file: "features/search/search-bar.tsx",
+      locationTier: null,
+      classifierVerdict: { tier: "feature", signals: ["imports from features/"] },
+      metaKind: null,
+      metaRole: null,
+      isSmartPart: true,
+      roleContractsStrict: true,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-SMART-PART-NO-ROLE")).toHaveLength(0);
+  });
+});
+
+describe("DRIFT-ROLE-NO-CONTRACT rule (PRD #301 / #311)", () => {
+  it("registry exposes DRIFT-ROLE-NO-CONTRACT", () => {
+    expect(allRuleIds()).toContain("DRIFT-ROLE-NO-CONTRACT");
+  });
+
+  it("fires when a role is declared with no shipped contract — gateless (informational)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/tabs.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: "atom",
+      metaRole: "tabs",
+      isSmartPart: true,
+      // Note: `roleContractsStrict` is irrelevant — DRIFT-ROLE-NO-CONTRACT is
+      // informational and always evaluated.
+      roleContractsStrict: false,
+    };
+    const findings = evaluateDrift(input);
+    const hit = findings.find(f => f.ruleId === "DRIFT-ROLE-NO-CONTRACT");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toMatch(/tabs/);
+    expect(hit!.message).toMatch(/exceptions\.json/);
+  });
+
+  it("does not fire when the declared role has a shipped contract (combobox)", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/combobox.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: "atom",
+      metaRole: "combobox",
+      isSmartPart: true,
+      roleContractsStrict: true,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-ROLE-NO-CONTRACT")).toHaveLength(0);
+  });
+
+  it("does not fire when no role is declared", () => {
+    const input: DriftRuleInput = {
+      file: "design-system/atoms/button.tsx",
+      locationTier: "atom",
+      classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
+      metaKind: "atom",
+      metaRole: null,
+      isSmartPart: false,
+      roleContractsStrict: true,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-ROLE-NO-CONTRACT")).toHaveLength(0);
+  });
+
+  it("does not fire on a non-DS file even if a role string smuggles in", () => {
+    const input: DriftRuleInput = {
+      file: "src/components/widget.tsx",
+      locationTier: null,
+      classifierVerdict: { tier: "feature", signals: ["imports from features/"] },
+      metaKind: null,
+      metaRole: "tabs",
+      isSmartPart: true,
+      roleContractsStrict: true,
+    };
+    const findings = evaluateDrift(input);
+    expect(findings.filter(f => f.ruleId === "DRIFT-ROLE-NO-CONTRACT")).toHaveLength(0);
+  });
+});

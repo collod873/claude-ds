@@ -114,4 +114,20 @@ describe("parseConfig", () => {
     expect(() => parseConfig(`{"version":"v1.0.0","pack":"x","mode":"warn","ds_aliases":[""]}`))
       .toThrow(ConfigError);
   });
+
+  // role_contracts_strict (PRD #301 / #311) — mirrors meta_kind_strict
+  it("defaults role_contracts_strict to false when absent", () => {
+    const c = parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"warn"}`);
+    expect(c.role_contracts_strict).toBe(false);
+  });
+
+  it("accepts role_contracts_strict: true", () => {
+    const c = parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"warn","role_contracts_strict":true}`);
+    expect(c.role_contracts_strict).toBe(true);
+  });
+
+  it("accepts role_contracts_strict: false explicitly", () => {
+    const c = parseConfig(`{"version":"v1.0.0","pack":"next-react","mode":"warn","role_contracts_strict":false}`);
+    expect(c.role_contracts_strict).toBe(false);
+  });
 });

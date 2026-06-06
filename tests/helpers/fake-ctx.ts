@@ -25,6 +25,7 @@ export function makeFakeCtx(
   const auditConfig: ResolvedAuditConfig = {
     domainRoots: DEFAULT_DOMAIN_ROOTS,
     metaKindStrict: false,
+    roleContractsStrict: false,
     allowedImports: [],
     dsAliases: [],
     tsconfigPaths: {},
