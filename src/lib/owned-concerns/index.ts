@@ -13,6 +13,11 @@ export type {
   OwnedConcernInput,
   SupersedingRuleId,
 } from "./rule.js";
+export {
+  scanOwnedConcerns,
+  type OwnedConcernScannerFinding,
+  type ScanOwnedConcernsOptions,
+} from "./scanner.js";
 
 /**
  * Evaluate all registered Owned concerns against a single file's content.
