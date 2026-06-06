@@ -6,7 +6,14 @@ import type { ProjectContext } from "../project.js";
 /** Tier directories scanned for atom/composite components missing companion files. */
 const TIER_DIRS = ["design-system/atoms", "design-system/composites"];
 
-/** Suffixes used to recognise companions so we don't treat them as components. */
+/**
+ * Suffixes used to recognise companions so we don't treat them as components.
+ *
+ * `.test.tsx`, `.stories.tsx`, `.snapshot.*` stay in the *exclusion* list even
+ * though they are no longer minted: pre-existing files of these shapes in a
+ * consumer tree (e.g. retired stubs not yet cleaned up) must still be skipped
+ * by the scanner. Sub-issue #313 / ADR-0016 retired the *mint* list only.
+ */
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 
 /** Filenames that are never component sources (flat layout). */
@@ -35,34 +42,22 @@ export function showcaseStub(displayName: string, fileBase: string): string {
   ].join("\n");
 }
 
-export function testStub(displayName: string, fileBase: string): string {
-  // First line: per-file vitest environment docblock. Without it, render() in a
-  // fleshed-out stub has no `document` (#293). Per-file rather than global so
-  // node-side tests in other parts of the consumer tree keep `environment: "node"`.
-  return [
-    `// @vitest-environment jsdom`,
-    `// TODO(claude-ds): reconform stub — replace with real assertions`,
-    `import { describe, it, expect } from "vitest";`,
-    `import * as Mod from "./${fileBase}";`,
-    ``,
-    `describe("${displayName}", () => {`,
-    `  it("module loads", () => {`,
-    `    expect(Mod).toBeDefined();`,
-    `  });`,
-    `});`,
-    ``,
-  ].join("\n");
-}
-
 /**
  * Plan companion-file backfill for atoms/composites in flat-layout. For every
  * component `<name>.tsx` under `design-system/{atoms,composites}/`, ensure a
- * sibling `<name>.showcase.tsx` and `<name>.test.tsx` exists. Missing siblings
- * are emitted as `write` Changes carrying the canonical stub bytes.
+ * sibling `<name>.showcase.tsx` exists. Missing showcases are emitted as `write`
+ * Changes carrying the canonical stub bytes.
  *
- * Idempotent: after apply, all expected companions exist → re-plan returns `[]`.
- * `.snapshot.png` is intentionally skipped (the post-write hook in the consumer
- * pack produces it on demand).
+ * Idempotent: after apply, the expected companion exists → re-plan returns `[]`.
+ *
+ * The per-component `.test.tsx` slot was retired by ADR-0016 (PRD #301 /
+ * sub-issue #313): behavior is the fourth scaffold concern and is verified by
+ * shared role contracts shipped in the pack, not by hand-authored test stubs
+ * minted next to each component. `.stories.tsx` and `.snapshot.*` were
+ * reserved for a Storybook / snapshot system that never existed; they are
+ * not minted either. The scanner-exclusion list above still recognises these
+ * suffixes so any pre-existing files of those shapes are skipped, not
+ * mistaken for component sources.
  *
  * v1 trade-off: the pack-generator lookup that existed inline in reconform.ts is
  * dropped here — the next-react pack does not ship a per-component companion
@@ -100,7 +95,6 @@ export const backfillCompanions: Operation = {
 
         const companions: Array<{ relPath: string; bytes: string }> = [
           { relPath: join(tierRel, `${componentName}.showcase.tsx`), bytes: showcaseStub(displayName, componentName) },
-          { relPath: join(tierRel, `${componentName}.test.tsx`),     bytes: testStub(displayName, componentName) },
         ];
 
         for (const c of companions) {

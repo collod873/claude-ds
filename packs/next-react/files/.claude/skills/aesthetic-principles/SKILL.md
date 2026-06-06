@@ -35,8 +35,10 @@ Hooks > contracts > principles > skills. This skill is advisory; hooks are enfor
 Every component ships exactly:
 - `<Name>.tsx` — source
 - `<Name>.showcase.tsx` — browsable in `app/design/`
-- `<Name>.states.json` — drives `check-states-coverage.ts`
-- `<Name>.test.tsx` — Jest/Vitest unit test
+
+Behavior is verified by shared role contracts in
+`design-system/contracts/roles/` (ADR-0016), not by a per-component
+`<Name>.test.tsx`. Declare `meta.role` to opt in.
 
 ## Drift Guard
 
