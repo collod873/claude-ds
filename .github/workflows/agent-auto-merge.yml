@@ -27,11 +27,57 @@ jobs:
 
     steps:
       - name: Merge PR
+        id: merge
         run: |
-          gh pr merge "$PR_NUMBER" --squash --delete-branch
+          set -uo pipefail
+          # Mirror the lander's decision tree: merge only a genuinely clean PR,
+          # hand stale/conflicting ones to the rebase robot (which re-arms
+          # ready-to-merge on success, so we retry automatically — no cron
+          # needed), and briefly retry while GitHub is still computing
+          # mergeability (UNKNOWN right after a push).
+          merged=false
+          rebase=false
+          for attempt in 1 2 3 4 5 6; do
+            data=$(gh pr view "$PR_NUMBER" --json state,mergeable,mergeStateStatus)
+            st=$(echo "$data" | jq -r '.state')
+            m=$(echo "$data" | jq -r '.mergeable')
+            s=$(echo "$data" | jq -r '.mergeStateStatus')
+            if [ "$st" != "OPEN" ]; then
+              echo "PR #$PR_NUMBER is $st — nothing to merge."
+              merged=skip; break
+            fi
+            if [ "$m" = "MERGEABLE" ] && [ "$s" = "CLEAN" ]; then
+              if gh pr merge "$PR_NUMBER" --squash --delete-branch; then merged=true; fi
+              break
+            fi
+            if [ "$m" = "CONFLICTING" ] || [ "$s" = "DIRTY" ] || [ "$s" = "BEHIND" ]; then
+              echo "PR #$PR_NUMBER is stale/conflicting (mergeable=$m state=$s)."
+              rebase=true; break
+            fi
+            echo "Mergeability still computing (mergeable=$m state=$s); retry $attempt..."
+            sleep 5
+          done
+          echo "merged=$merged" >> "$GITHUB_OUTPUT"
+          if [ "$merged" = "true" ] || [ "$merged" = "skip" ]; then
+            exit 0
+          fi
+          # Either a real conflict, or mergeability never settled. Hand to the
+          # rebase robot; on success it re-fires ready-to-merge and we land it
+          # on the next auto-merge pass. Use AGENT_PAT so the labeled event
+          # actually triggers agent-update-branch.
+          if [ "$rebase" = "false" ]; then
+            echo "Mergeability never settled — handing to rebase robot to recompute."
+          fi
+          if [ -n "${AGENT_PAT:-}" ]; then
+            GH_TOKEN="$AGENT_PAT" gh pr edit "$PR_NUMBER" --add-label "agent:update-branch" \
+              || gh pr edit "$PR_NUMBER" --add-label "agent:update-branch"
+          else
+            gh pr edit "$PR_NUMBER" --add-label "agent:update-branch"
+          fi
+          gh pr comment "$PR_NUMBER" --body "Auto-merge couldn't fast-forward (a sibling PR likely landed first) — handed to \`agent:update-branch\` to rebase and retry automatically."
 
       - name: Close linked issues and promote dependents
-        if: success()
+        if: steps.merge.outputs.merged == 'true'
         run: |
           set -euo pipefail
           owner="${GH_REPO%/*}"

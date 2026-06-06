@@ -23,36 +23,45 @@ agent renders a **verdict** (`.sandcastle/agent-workflows/review/`):
 Fail-safe by construction: the verdict parser treats anything other than an explicit
 `approve` as `request_changes` (see `parseVerdict` in `shared/review-output.ts`).
 
-### 2. The merge train (`agent-land.yml`)
+### 2. Collisions self-heal on the event chain (`agent-auto-merge.yml` + `agent-update-branch.yml`)
 
-When several approved PRs exist and one lands, the others go stale. The lander is a
-cron conductor that drains the queue:
+When several approved PRs exist and one lands, the others go stale. Rather than poll
+for them on a cron, the **existing event chain absorbs the collision** — one more hop
+each side of the rebase robot, consistent with the rest of the pipeline:
 
-- Merges PRs that are approved (`ready-to-merge`) **and** clean.
-- Throws `agent:update-branch` (the rebase robot) at approved-but-stale/conflicting
-  ones, then merges them on a later tick once clean.
-- Skips `agent:in-progress` (another workflow owns it) and `agent:blocked` (needs you).
-- Only ever touches `agent/*` head branches — never human PRs.
+- **`agent-auto-merge.yml`** no longer dies when a PR can't fast-forward. It checks
+  mergeability (briefly retrying while GitHub recomputes after a sibling landed). If
+  clean → squash-merge. If stale/conflicting → it adds `agent:update-branch` (via
+  `AGENT_PAT`) to hand the PR to the rebase robot. It only closes issues / promotes
+  dependents when a merge *actually* happened.
+- **`agent-update-branch.yml`** (the rebase robot) rebases the stale PR onto current
+  `main`, then — the missing link — **re-arms the merge**: if the PR still carries
+  `ready-to-merge` (review already approved it), it removes+re-adds the label to emit a
+  fresh `labeled` event, which re-triggers `agent-auto-merge`. A force-push is not a
+  `labeled` event, so without this the rebased-and-clean PR would sit stranded.
 
-It loops until the backlog is empty and escalates only true deadlocks (`agent:blocked`).
+The result is a self-converging loop with no poller: collide → rebase → re-arm →
+retry → merge. Each cycle makes progress (the PR rebases onto a newer `main`); a PR
+the rebase robot genuinely can't fix lands on `agent:blocked` for a human. Guard rails:
+the re-arm only fires when `ready-to-merge` is present (an unapproved PR is never
+auto-merged), and only `agent/*` head branches are ever touched.
 
-## Safety: dormant by default
+### The lander (`agent-land.yml`) — manual backstop only
 
-`agent-land.yml` ships **inert**. It will not merge anything until armed:
+`agent-land.yml` is the same level-triggered conductor, kept **as hand-pushed
+insurance, not the mechanism**. The event chain above is the primary path. Reach for
+the lander only when you suspect the chain dropped a PR (a workflow bug, or a PR stuck
+`ready-to-merge` + clean but un-merged) and want to drain the whole queue in one pass.
 
-- **Scheduled runs** (every 15 min) act only when repo variable `LANDER_LIVE == 'true'`.
-- **Manual runs** (`workflow_dispatch`) honor the `dry_run` input, which defaults to
-  `true` (report-only — prints the plan to the run summary, mutates nothing).
+It is `workflow_dispatch` only — **no cron** — and honors `dry_run` (default `true`,
+report-only):
 
 ```sh
-# See what it WOULD do, change nothing:
+# See what it WOULD merge/rebase, change nothing:
 gh workflow run agent-land.yml --repo collod873/claude-ds -f dry_run=true
 
-# Arm the cron (turn it loose):
-gh variable set LANDER_LIVE --repo collod873/claude-ds --body true
-
-# Disarm:
-gh variable delete LANDER_LIVE --repo collod873/claude-ds
+# Actually drain the queue:
+gh workflow run agent-land.yml --repo collod873/claude-ds -f dry_run=false
 ```
 
 ## The end-to-end flow
@@ -61,15 +70,20 @@ gh variable delete LANDER_LIVE --repo collod873/claude-ds
 /go (or label issues agent:implement)
   → agent-implement.yml      (parallel, one PR each, off main)
   → agent-review.yml         (votes: approve → ready-to-merge | reject → agent:blocked)
-  → agent-auto-merge.yml     (lands clean approved PRs on the ready-to-merge event)
-  → agent-land.yml (cron)    (merges the rest; rebases stale ones; loops till drained)
+  → agent-auto-merge.yml     (clean → merge; stale → hand to update-branch)
+  → agent-update-branch.yml  (rebase onto main, then re-arm ready-to-merge)
+  ↑__________________________(loops: re-armed PR retries auto-merge until it lands)
+
+  agent-land.yml             (manual `gh workflow run`: drains the queue if the chain dropped one)
 ```
 
 ## Operational caveats
 
-- `agent-auto-merge.yml` runs on a **self-hosted runner** — its instant merges only
-  fire when that runner is online. The lander runs on `ubuntu-latest` and merges
-  independently, so it still drains the queue when the self-hosted runner is down.
-- Downstream triggering (auto-merge firing, dependent `agent:queued` promotion, the
-  rebase robot starting) depends on `AGENT_PAT` being set. Without it, labels land but
-  do not fire the next workflow — see the fallback notes in each workflow.
+- `agent-auto-merge.yml` runs on a **self-hosted runner** — the whole event chain only
+  advances when that runner is online (everything else, including the rebase robot, is
+  `ubuntu-latest`). If it's down, approved PRs queue up until it returns; the manual
+  lander (cloud) can drain them in the meantime.
+- Downstream triggering (auto-merge firing, the rebase robot starting, dependent
+  `agent:queued` promotion, the re-arm hop) depends on `AGENT_PAT` being set. Without
+  it, labels land but do not fire the next workflow — see the fallback notes in each
+  workflow.

@@ -1,19 +1,24 @@
 name: Agent Land
 
-# The merge-train conductor. Drains the queue of review-approved PRs without a
-# human: merges the clean ones, throws `agent:update-branch` (the rebase robot)
-# at the stale/conflicting ones, and re-checks on the next tick until empty.
+# The merge-train conductor — a MANUAL, level-triggered backstop. Drains the
+# queue of review-approved PRs: merges the clean ones, throws `agent:update-branch`
+# (the rebase robot) at the stale/conflicting ones, and re-checks until empty.
+#
+# This is NOT the primary landing mechanism. The happy path is fully event-driven:
+# review votes `ready-to-merge` -> agent-auto-merge merges, or (on a sibling-PR
+# collision) hands the PR to agent-update-branch, which re-arms `ready-to-merge`
+# on success so auto-merge retries. That chain needs no cron.
+#
+# Keep this around only as insurance you push by hand when you suspect the event
+# chain dropped a PR (e.g. a workflow bug, a PR stuck `ready-to-merge` + clean but
+# un-merged). Hence: workflow_dispatch only, no schedule.
 #
 # Only ever acts on PRs that:
 #   - have the `ready-to-merge` label (i.e. the review robot voted approve), AND
 #   - come from an `agent/` head branch (never touches human PRs), AND
 #   - are not `agent:in-progress` (another workflow is mutating it) or `agent:blocked`.
 #
-# SAFETY — dormant by default:
-#   - Scheduled runs only act when repo variable LANDER_LIVE == 'true'.
-#     Arm with:  gh variable set LANDER_LIVE --repo collod873/claude-ds --body true
-#     Disarm with: gh variable delete LANDER_LIVE --repo collod873/claude-ds
-#   - Manual runs honor the `dry_run` input (default true → report only).
+# SAFETY: manual runs honor the `dry_run` input (default true -> report only).
 # In dry-run it prints the plan and mutates nothing.
 
 on:
@@ -23,9 +28,6 @@ on:
         description: "Report only, do not merge or label (true/false)"
         type: boolean
         default: true
-  schedule:
-    # Every 15 minutes. Inert unless LANDER_LIVE == 'true'.
-    - cron: "*/15 * * * *"
 
 concurrency:
   group: agent-land
@@ -50,16 +52,10 @@ jobs:
       - name: Decide live vs dry-run
         id: mode
         env:
-          EVENT: ${{ github.event_name }}
           DISPATCH_DRY: ${{ inputs.dry_run }}
-          LANDER_LIVE: ${{ vars.LANDER_LIVE }}
         run: |
           set -euo pipefail
-          if [ "$EVENT" = "schedule" ]; then
-            if [ "${LANDER_LIVE:-}" = "true" ]; then live="true"; else live="false"; fi
-          else
-            if [ "${DISPATCH_DRY:-true}" = "false" ]; then live="true"; else live="false"; fi
-          fi
+          if [ "${DISPATCH_DRY:-true}" = "false" ]; then live="true"; else live="false"; fi
           echo "live=$live" >> "$GITHUB_OUTPUT"
           if [ "$live" = "true" ]; then
             echo "Mode: LIVE — will merge/label." >> "$GITHUB_STEP_SUMMARY"

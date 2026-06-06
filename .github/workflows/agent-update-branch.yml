@@ -127,3 +127,30 @@ jobs:
       - name: Always remove in-progress label
         if: always()
         run: gh pr edit "$PR_NUMBER" --remove-label "agent:in-progress" || true
+
+      - name: Re-arm auto-merge if the PR was already approved
+        if: success()
+        env:
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+        run: |
+          set -uo pipefail
+          # The rebase robot is the only thing that mends a PR auto-merge gave up
+          # on (sibling landed first). After a clean rebase the PR is mergeable
+          # again, but a force-push is not a `labeled` event, so nothing re-fires
+          # the merge. If the PR still carries ready-to-merge (i.e. review already
+          # approved it), remove+re-add it to emit a fresh `labeled` event that
+          # re-triggers agent-auto-merge. Guard on the label so an unapproved PR
+          # is never auto-merged.
+          has_rtm=$(gh pr view "$PR_NUMBER" --json labels --jq '[.labels[].name] | index("ready-to-merge") != null')
+          if [ "$has_rtm" != "true" ]; then
+            echo "PR #$PR_NUMBER is not ready-to-merge — leaving it for the normal review flow."
+            exit 0
+          fi
+          gh pr edit "$PR_NUMBER" --remove-label "ready-to-merge" || true
+          if [ -n "${AGENT_PAT:-}" ]; then
+            GH_TOKEN="$AGENT_PAT" gh pr edit "$PR_NUMBER" --add-label "ready-to-merge" \
+              || gh pr edit "$PR_NUMBER" --add-label "ready-to-merge"
+          else
+            gh pr edit "$PR_NUMBER" --add-label "ready-to-merge"
+          fi
+          echo "Re-armed ready-to-merge on #$PR_NUMBER — auto-merge will retry the merge."
