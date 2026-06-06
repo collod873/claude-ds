@@ -234,10 +234,6 @@
       "category": "managed"
     },
     {
-      "path": "scripts/check-states-coverage.ts",
-      "category": "seeded"
-    },
-    {
       "path": "scripts/check-tier-imports.ts",
       "category": "seeded"
     },
@@ -470,6 +466,11 @@
       "path": "design-system/drift-audit.md",
       "since_version": "v1.0.0",
       "reason": "Pre-adopt planning doc superseded by claude-ds audit; safe to remove (issue #129)"
+    },
+    {
+      "path": "scripts/check-states-coverage.ts",
+      "since_version": "v1.2.0",
+      "reason": "STATE-001 enforcement script for the retired .states.json contract; ADR-0007 retired the contract but this script policed it (issue #321)"
     }
   ],
   "canonical_paths": [
