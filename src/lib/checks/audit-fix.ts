@@ -272,7 +272,7 @@ export async function runAuditFix(
       (f): f is DriftFinding =>
         !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
     );
-    const fixPassResult = await runFixPass(cwd, driftFindings, {
+    const fixPassResult = await runFixPass(ctx, driftFindings, {
       domainRoots, allowedImports, dsAliases, prompt,
     });
 
@@ -364,7 +364,7 @@ export async function runAuditFix(
             !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
         );
         if (reFixFindings.length > 0) {
-          const reFixResult = await runFixPass(cwd, reFixFindings, {
+          const reFixResult = await runFixPass(ctx, reFixFindings, {
             domainRoots, allowedImports, dsAliases, prompt,
           });
           if (!reFixResult.aborted) {

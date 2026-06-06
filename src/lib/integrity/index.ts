@@ -125,7 +125,7 @@ export function integrityFixerAsOperation(
         };
         return [];
       }
-      const r = await rule.fix(finding, ctx.cwd);
+      const r = await rule.fix(finding, ctx);
 
       if (r.fixed && r.changes.length > 0) {
         for (const ch of r.changes) {

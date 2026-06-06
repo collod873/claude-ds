@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change } from "../operation.js";
+import type { ProjectContext } from "../project.js";
 import type { IntegrityFinding, IntegrityFixResult } from "./rule.js";
 import { evaluateIntegrity } from "./index.js";
 
@@ -36,8 +37,9 @@ function headPassesIntegrity(filePath: string, headContent: string): boolean {
  */
 export async function restoreFromHead(
   finding: IntegrityFinding,
-  cwd: string,
+  ctx: ProjectContext,
 ): Promise<IntegrityFixResult> {
+  const cwd = ctx.cwd;
   const headContent = getHeadContent(cwd, finding.file);
 
   if (headContent === null) {

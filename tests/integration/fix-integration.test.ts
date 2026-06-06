@@ -6,6 +6,7 @@ import { checkThreeSignals } from "../../src/lib/three-signal";
 import { runFixPass } from "../../src/lib/fix-pass";
 import type { DriftFinding } from "../../src/lib/drift/index.js";
 import type { FixerPrompt, PromptOption } from "../../src/lib/drift/index.js";
+import { makeFakeCtx } from "../helpers/fake-ctx";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -231,7 +232,7 @@ describe("integration: full --fix pass on fixture project", () => {
     };
 
     // ── Run fix pass ──
-    const result = await runFixPass(dir, initialFindings, { prompt: mockPrompt });
+    const result = await runFixPass(makeFakeCtx(dir), initialFindings, { prompt: mockPrompt });
 
     expect(result.aborted).toBe(false);
     expect(result.applied.length).toBeGreaterThan(0);
@@ -399,7 +400,7 @@ describe("integration: full --fix pass on fixture project", () => {
       return 0;
     };
 
-    const result = await runFixPass(dir, findings, { prompt: mockPrompt });
+    const result = await runFixPass(makeFakeCtx(dir), findings, { prompt: mockPrompt });
     expect(result.aborted).toBe(false);
 
     const toolbar = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
@@ -445,7 +446,7 @@ describe("integration: full --fix pass on fixture project", () => {
 
     // Non-TTY prompt: picks first option (safe default)
     const noTtyPrompt: FixerPrompt = async () => 0;
-    const result = await runFixPass(dir, findings, { prompt: noTtyPrompt });
+    const result = await runFixPass(makeFakeCtx(dir), findings, { prompt: noTtyPrompt });
 
     expect(result.aborted).toBe(false);
     // First option is picked — raw primitive should be fixed

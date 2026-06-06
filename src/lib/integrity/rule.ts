@@ -1,4 +1,5 @@
 import type { Change } from "../operation.js";
+import type { ProjectContext } from "../project.js";
 import type { Severity } from "../severity.js";
 
 /**
@@ -77,5 +78,5 @@ export type IntegrityRule =
         ctx?: IntegrityContext,
       ) => IntegrityFinding[] | Promise<IntegrityFinding[]>;
       fixable: true;
-      fix: (finding: IntegrityFinding, cwd: string) => Promise<IntegrityFixResult>;
+      fix: (finding: IntegrityFinding, ctx: ProjectContext) => Promise<IntegrityFixResult>;
     };

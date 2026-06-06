@@ -333,7 +333,7 @@ export async function classifyCmd(opts: {
       // Regenerate barrel indexes so stale tier-barrel exports don't cause TS2307.
       const { regenIndexes } = await import("../lib/finalizers/regen-indexes.js");
       const ctx2b = await loadProject(cwd);
-      const indexChanges = await regenIndexes(ctx2b.cwd);
+      const indexChanges = await regenIndexes(ctx2b);
       if (indexChanges.length > 0) {
         const regenOp = { name: "classify-regen-indexes", plan: async () => indexChanges };
         await run(ctx2b, [regenOp], "apply");
@@ -545,7 +545,7 @@ export async function classifyCmd(opts: {
       // next tsc run even though audit reports 0 findings (ADR-0015, #264).
       const { regenIndexes } = await import("../lib/finalizers/regen-indexes.js");
       const ctx5 = await loadProject(cwd);
-      const indexChanges = await regenIndexes(ctx5.cwd);
+      const indexChanges = await regenIndexes(ctx5);
       if (indexChanges.length > 0) {
         const regenOp = {
           name: "classify-regen-indexes",

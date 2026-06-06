@@ -15,6 +15,7 @@ vi.mock("../../src/lib/drift/index.js", async (importOriginal) => {
 import { runFixPass } from "../../src/lib/fix-pass";
 import { getFixer } from "../../src/lib/drift/index.js";
 import type { DriftFinding } from "../../src/lib/drift/index.js";
+import { makeFakeCtx } from "../helpers/fake-ctx";
 
 const mockedGetFixer = vi.mocked(getFixer);
 
@@ -81,7 +82,7 @@ describe("fix-pass: fixerAsOperation wrapper (#224)", () => {
         },
       ];
 
-      const result = await runFixPass(dir, findings, {});
+      const result = await runFixPass(makeFakeCtx(dir), findings, {});
 
       expect(result.aborted).toBe(false);
 

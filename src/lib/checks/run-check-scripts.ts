@@ -2,6 +2,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { info } from "../log.js";
+import type { ProjectContext } from "../project.js";
 
 export interface Violation {
   ruleId: string;
@@ -29,7 +30,8 @@ function parseViolations(stderr: string): Violation[] {
  * Side-effect orchestration helper, not an Operation: spawns subprocesses,
  * reports violations as info logs, never writes to disk.
  */
-export async function runCheckScripts(cwd: string, dryRun: boolean): Promise<Violation[]> {
+export async function runCheckScripts(ctx: ProjectContext, dryRun: boolean): Promise<Violation[]> {
+  const cwd = ctx.cwd;
   const projectScriptsDir = join(cwd, "scripts");
   let scriptNames: string[] = [];
   try {

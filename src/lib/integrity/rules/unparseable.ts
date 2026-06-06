@@ -32,5 +32,5 @@ export const unparseableRule: IntegrityRule = {
     "File cannot be parsed as TypeScript/JSX — may have broken syntax from a fixer bug or manual edit",
   detect,
   fixable: true,
-  fix: (finding, cwd) => restoreFromHead(finding, cwd),
+  fix: (finding, ctx) => restoreFromHead(finding, ctx),
 };

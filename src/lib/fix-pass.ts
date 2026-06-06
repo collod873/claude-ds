@@ -139,14 +139,10 @@ export function fixerAsOperation(
   return op;
 }
 
-function minimalCtx(cwd: string): ProjectContext {
-  return { cwd } as unknown as ProjectContext;
-}
-
 const REGEN_INDEXES_OP: Operation = {
   name: "regenIndexes",
   async plan(ctx: ProjectContext): Promise<Change[]> {
-    return regenIndexes(ctx.cwd);
+    return regenIndexes(ctx);
   },
 };
 
@@ -173,11 +169,10 @@ const REGEN_INDEXES_OP: Operation = {
  * migration is invisible to callers.
  */
 export async function runFixPass(
-  cwd: string,
+  ctx: ProjectContext,
   findings: DriftFinding[],
   opts: FixPassOpts,
 ): Promise<FixPassResult> {
-  const ctx = minimalCtx(cwd);
   const ops = sortFindingsByPriority(findings).map(f => fixerAsOperation(f, opts));
 
   const collectResults = (): FixResult[] =>

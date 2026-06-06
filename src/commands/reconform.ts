@@ -90,7 +90,7 @@ export async function reconformCmd(opts: {
   // both are command-shaped, not bytes-on-disk.
   let classificationCount = 0;
   if (backfillMetaFlag) {
-    const findings = await findMisclassified(cwd, demoteComposites);
+    const findings = await findMisclassified(ctx, demoteComposites);
     classificationCount = findings.length;
     if (findings.length === 0) {
       info("classification audit: no misclassified files found");
@@ -160,7 +160,7 @@ export async function reconformCmd(opts: {
   }
 
   // Phase 7 — project-local check scripts + interactive exception review.
-  const allViolations = await runCheckScripts(cwd, dryRun);
+  const allViolations = await runCheckScripts(ctx, dryRun);
   await reviewExceptions(ctx, allViolations, dryRun);
 
   // Phase 8 — stub-file warning.
