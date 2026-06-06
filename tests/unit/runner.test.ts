@@ -315,6 +315,70 @@ describe("runner — Change.mode executable", () => {
 });
 
 /**
+ * PRD #258: the Runner threads typed Op outcomes through `RunReport.ops[i].outcome`.
+ *
+ * Before #258, Ops that produced non-byte facts (fixer pass/fail+message,
+ * extracted-component lists, per-file sync verdicts) leaked them back to the
+ * caller via mutable fields on the Op handle — five distinct sub-interfaces
+ * (`FixerOperation.result`, `IntegrityFixerOperation.result`,
+ * `GenIntegrityOperation.violations`, `extractInlineComponents`'s
+ * `Operation & { extractions }`, `SyncPackFilesOp.decisions`) all using the
+ * same anti-pattern. This test pins the replacement: the outcome is the typed
+ * return value of `plan()`, the Runner reports it in `RunReport.ops[i].outcome`,
+ * and it survives both modes plus a plan-time throw.
+ */
+describe("runner — typed outcome threads through RunReport (PRD #258)", () => {
+  it("dry-run: outcome surfaces on report.ops[i].outcome", async () => {
+    const ctx = makeCtx(dir);
+    const op: Operation<{ marker: string }> = {
+      name: "marker-op",
+      async plan() {
+        return { changes: [], outcome: { marker: "x" } };
+      },
+    };
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const report = await run(ctx, [op], "dry-run");
+    spy.mockRestore();
+    const outcome = report.ops[0].outcome as { marker: string };
+    expect(outcome.marker).toBe("x");
+  });
+
+  it("apply: outcome surfaces on report.ops[i].outcome", async () => {
+    const ctx = makeCtx(dir);
+    const op: Operation<{ marker: string }> = {
+      name: "marker-op",
+      async plan() {
+        return { changes: [], outcome: { marker: "x" } };
+      },
+    };
+    const report = await run(ctx, [op], "apply");
+    const outcome = report.ops[0].outcome as { marker: string };
+    expect(outcome.marker).toBe("x");
+  });
+
+  it("plan-time throw records the error without populating outcome", async () => {
+    const ctx = makeCtx(dir);
+    const op: Operation<{ marker: string }> = {
+      name: "marker-op",
+      async plan() { throw new Error("boom"); },
+    };
+    const report = await run(ctx, [op], "apply");
+    expect(report.ops[0].name).toBe("marker-op");
+    expect(report.ops[0].error).toBe("boom");
+    expect(report.ops[0].outcome).toBeUndefined();
+  });
+
+  it("byte-only Op (Operation<void>) leaves outcome unset", async () => {
+    const ctx = makeCtx(dir);
+    const op = writeOp("byte-only", [
+      { kind: "write", path: "x.txt", before: null, after: Buffer.from("hi") },
+    ]);
+    const report = await run(ctx, [op], "apply");
+    expect(report.ops[0].outcome).toBeUndefined();
+  });
+});
+
+/**
  * PRD #266 capstone: `plan(ctx)` is a pure function of ctx.
  *
  * This is the literal statement the whole effort exists to enable. After

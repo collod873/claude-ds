@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import ts from "typescript";
-import type { Change, Operation } from "../operation.js";
+import type { Change, Operation, PlanResult } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 import { analyzeResolution } from "../integrity/resolve-symbols.js";
 
@@ -351,12 +351,16 @@ async function collectDirFiles(cwd: string, dir: string): Promise<string[]> {
  * `Button`, `cn`) are left for `audit --fix` to handle — this operation only
  * moves code, never guesses imports.
  */
-export function backfillAtomHelpers(): Operation & { results: BackfillResult[] } {
-  const op = {
+/** Outcome reported on `RunReport.ops[i].outcome` — the per-atom backfill verdicts. */
+export interface BackfillAtomHelpersOutcome {
+  results: BackfillResult[];
+}
+
+export function backfillAtomHelpers(): Operation<BackfillAtomHelpersOutcome> {
+  return {
     name: "backfill-atom-helpers",
-    results: [] as BackfillResult[],
-    async plan(ctx: ProjectContext): Promise<Change[]> {
-      op.results = [];
+    async plan(ctx: ProjectContext): Promise<PlanResult<BackfillAtomHelpersOutcome>> {
+      const results: BackfillResult[] = [];
       const changes: Change[] = [];
 
       const atomFiles = await collectDirFiles(ctx.cwd, ATOM_DIR);
@@ -431,7 +435,7 @@ export function backfillAtomHelpers(): Operation & { results: BackfillResult[] }
 
         // Skip atoms that already have the marker (already processed or manually marked)
         if (atomSource.includes(BACKFILL_EXTRACTION_NEEDED_MARKER)) {
-          op.results.push({ atomRel, kind: "skipped" });
+          results.push({ atomRel, kind: "skipped" });
           continue;
         }
 
@@ -468,9 +472,9 @@ export function backfillAtomHelpers(): Operation & { results: BackfillResult[] }
               before: Buffer.from(atomSource),
               after: Buffer.from(marked),
             });
-            op.results.push({ atomRel, kind: "marker-added", unresolvedSymbols: [...parentLocalExported] });
+            results.push({ atomRel, kind: "marker-added", unresolvedSymbols: [...parentLocalExported] });
           } else {
-            op.results.push({ atomRel, kind: "skipped" });
+            results.push({ atomRel, kind: "skipped" });
           }
           continue;
         }
@@ -501,9 +505,9 @@ export function backfillAtomHelpers(): Operation & { results: BackfillResult[] }
               before: Buffer.from(atomSource),
               after: Buffer.from(marked),
             });
-            op.results.push({ atomRel, kind: "marker-added", unresolvedSymbols: [...parentLocalPrivate] });
+            results.push({ atomRel, kind: "marker-added", unresolvedSymbols: [...parentLocalPrivate] });
           } else {
-            op.results.push({ atomRel, kind: "skipped" });
+            results.push({ atomRel, kind: "skipped" });
           }
           continue;
         }
@@ -523,9 +527,9 @@ export function backfillAtomHelpers(): Operation & { results: BackfillResult[] }
               before: Buffer.from(atomSource),
               after: Buffer.from(marked),
             });
-            op.results.push({ atomRel, kind: "marker-added", unresolvedSymbols: [...parentLocalPrivate] });
+            results.push({ atomRel, kind: "marker-added", unresolvedSymbols: [...parentLocalPrivate] });
           } else {
-            op.results.push({ atomRel, kind: "skipped" });
+            results.push({ atomRel, kind: "skipped" });
           }
           continue;
         }
@@ -604,9 +608,9 @@ export function backfillAtomHelpers(): Operation & { results: BackfillResult[] }
               before: Buffer.from(atomSource),
               after: Buffer.from(marked),
             });
-            op.results.push({ atomRel, kind: "marker-added", unresolvedSymbols: stillMissingParentLocal });
+            results.push({ atomRel, kind: "marker-added", unresolvedSymbols: stillMissingParentLocal });
           } else {
-            op.results.push({ atomRel, kind: "skipped" });
+            results.push({ atomRel, kind: "skipped" });
           }
           continue;
         }
@@ -648,17 +652,16 @@ export function backfillAtomHelpers(): Operation & { results: BackfillResult[] }
           });
         }
 
-        op.results.push({
+        results.push({
           atomRel,
           kind: "healed",
           carriedSymbols: [...parentLocalPrivate],
         });
       }
 
-      return changes;
+      return { changes, outcome: { results } };
     },
   };
-  return op;
 }
 
 function findImportNode(sf: ts.SourceFile, start: number): ts.ImportDeclaration | null {

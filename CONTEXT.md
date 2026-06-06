@@ -221,12 +221,26 @@ Landed across issues:
 
 
 ### Operation
-A planned mutation phase. Interface: `{ name, plan(ctx): Promise<Change[]> }`.
-Operations do not write to disk; they describe what would change. Examples:
-`migrateClaudeMd`, `backfillCompanions`, `backfillMeta`, `rewriteImports`,
-`syncPackFiles`. `plan(ctx)` is a pure function of `ctx` — running the same
-Op twice over a frozen ctx yields equal `Change[]`. Pinned by the capstone
-test in `tests/unit/runner.test.ts` (PRD #266).
+A planned mutation phase.
+Interface: `{ name, plan(ctx): Promise<PlanReturn<TOutcome>> }`, where
+`PlanResult = { changes: Change[]; outcome: TOutcome }` and byte-only Ops
+(the default `Operation<void>`) return `Change[]` directly. Operations do
+not write to disk; they describe what would change. Examples: `migrateClaudeMd`,
+`backfillCompanions`, `backfillMeta`, `rewriteImports`, `syncPackFiles`.
+`plan(ctx)` is a pure function of `ctx` — running the same Op twice over a
+frozen ctx yields equal Changes. Pinned by the capstone test in
+`tests/unit/runner.test.ts` (PRD #266). Outcome-bearing Ops (e.g. the fixer
+wrappers, `syncPackFiles`, `extractInlineComponents`) report their non-byte
+facts via `RunReport.ops[i].outcome` — never via mutable handles on the Op
+itself (PRD #258).
+
+### Outcome
+The non-byte facts an Operation produces during `plan()` — fixer
+pass/fail+message, structural-decision summaries (extracted components,
+per-file sync verdicts), violation lists. Surfaced as the typed `outcome`
+arm of `PlanResult` and reported to consumers via `RunReport.ops[i].outcome`,
+never via mutable handles on the Op itself. Ops with no non-byte outcome use
+`Operation<void>` and return `Change[]` directly.
 
 ### Change
 The unit of work an Operation emits. Bytes-on-disk only:

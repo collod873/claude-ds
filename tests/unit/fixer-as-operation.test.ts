@@ -131,7 +131,7 @@ describe("fix-pass: fixerAsOperation wrapper (#224)", () => {
         file: "design-system/atoms/chip.tsx",
         message: "missing meta.kind",
       };
-      const op = fixerAsOperation(finding, {});
+      const op = fixerAsOperation(finding);
       const ctx = makeFakeCtx(dir, { kind: "adopted" });
       await op.plan(ctx);
 
@@ -168,9 +168,9 @@ describe("fix-pass: fixerAsOperation wrapper (#224)", () => {
         file: "design-system/atoms/chip.tsx",
         message: "missing meta.kind",
       };
-      const op = fixerAsOperation(finding, {});
+      const op = fixerAsOperation(finding);
       const ctx = { cwd: dir } as any;
-      const changes: Change[] = await op.plan(ctx);
+      const { changes }: { changes: Change[] } = await op.plan(ctx);
       expect(changes).toHaveLength(1);
       expect(changes[0].kind).toBe("abort");
       if (changes[0].kind === "abort") {

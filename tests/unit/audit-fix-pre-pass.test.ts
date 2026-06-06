@@ -208,8 +208,8 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
           message: "missing meta.kind",
         };
         const ctx = makeFakeCtx(cwd);
-        const a = await fixerAsOperation(finding).plan(ctx);
-        const b = await fixerAsOperation(finding).plan(ctx);
+        const a = (await fixerAsOperation(finding).plan(ctx)).changes;
+        const b = (await fixerAsOperation(finding).plan(ctx)).changes;
         expect(a.map(c => ({ ...c, before: undefined, after: undefined }))).toEqual(
           b.map(c => ({ ...c, before: undefined, after: undefined })),
         );
@@ -255,8 +255,8 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
           },
         });
 
-        const a = await fixerAsOperation(finding).plan(ctx);
-        const b = await fixerAsOperation(finding).plan(ctx);
+        const a = (await fixerAsOperation(finding).plan(ctx)).changes;
+        const b = (await fixerAsOperation(finding).plan(ctx)).changes;
 
         const aWrite = a.find(c => c.kind === "write");
         const bWrite = b.find(c => c.kind === "write");

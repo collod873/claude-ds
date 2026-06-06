@@ -32,9 +32,9 @@ describe("INTEGRITY-DUPLICATE-DECL fix", () => {
     await write(dir, "design-system/atoms/widget.tsx", broken);
 
     const op = integrityFixerAsOperation(finding("design-system/atoms/widget.tsx"));
-    const changes = await op.plan({ cwd: dir } as unknown as ProjectContext);
+    const { changes, outcome } = await op.plan({ cwd: dir } as unknown as ProjectContext);
 
-    expect(op.result!.fixed).toBe(true);
+    expect(outcome.fixed).toBe(true);
     expect(changes).toHaveLength(1);
     const after = changes[0].kind === "write" ? changes[0].after.toString("utf8") : "";
     // Exactly one implementation remains — no duplicate-decl finding left.
@@ -53,9 +53,9 @@ describe("INTEGRITY-DUPLICATE-DECL fix", () => {
     await write(dir, "design-system/atoms/stepper-button.tsx", broken);
 
     const op = integrityFixerAsOperation(finding("design-system/atoms/stepper-button.tsx"));
-    const changes = await op.plan({ cwd: dir } as unknown as ProjectContext);
+    const { changes, outcome } = await op.plan({ cwd: dir } as unknown as ProjectContext);
 
-    expect(op.result!.fixed).toBe(true);
+    expect(outcome.fixed).toBe(true);
     expect(changes).toHaveLength(1);
     const after = changes[0].kind === "write" ? changes[0].after.toString("utf8") : "";
     // Exactly one implementation remains — and it is the exported one.
@@ -73,9 +73,9 @@ describe("INTEGRITY-DUPLICATE-DECL fix", () => {
     await write(dir, "design-system/atoms/widget.tsx", broken);
 
     const op = integrityFixerAsOperation(finding("design-system/atoms/widget.tsx"));
-    const changes = await op.plan({ cwd: dir } as unknown as ProjectContext);
+    const { changes, outcome } = await op.plan({ cwd: dir } as unknown as ProjectContext);
 
-    expect(op.result!.fixed).toBe(false);
+    expect(outcome.fixed).toBe(false);
     expect(changes).toHaveLength(0);
     const onDisk = await readFile(join(dir, "design-system/atoms/widget.tsx"), "utf8");
     expect(onDisk).toBe(broken);

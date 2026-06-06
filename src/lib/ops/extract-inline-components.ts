@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import ts from "typescript";
-import type { Change, Operation } from "../operation.js";
+import type { Change, Operation, PlanResult } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 import { toKebab, findInternalComponents } from "../drift/index.js";
 import { analyzeResolution } from "../integrity/resolve-symbols.js";
@@ -578,22 +578,26 @@ async function collectTierFiles(cwd: string): Promise<string[]> {
   return out;
 }
 
+/** Outcome reported on `RunReport.ops[i].outcome` — the planned extractions. */
+export interface ExtractInlineOutcome {
+  extractions: Extraction[];
+}
+
 /**
  * Build an Operation that extracts inline components from the design-system
- * tier files into their own atoms. The returned object also exposes the
- * planned `extractions` after `plan()` runs, so the caller can print a summary.
+ * tier files into their own atoms. The Op's typed outcome carries the planned
+ * `extractions` so the caller can print a summary via `RunReport.ops[i].outcome`.
  */
-export function extractInlineComponents(canonicalAlias: string): Operation & { extractions: Extraction[] } {
-  const op = {
+export function extractInlineComponents(canonicalAlias: string): Operation<ExtractInlineOutcome> {
+  return {
     name: "extract-inline-components",
-    extractions: [] as Extraction[],
-    async plan(ctx: ProjectContext): Promise<Change[]> {
+    async plan(ctx: ProjectContext): Promise<PlanResult<ExtractInlineOutcome>> {
       const files = await collectTierFiles(ctx.cwd);
       // Seed the claimed-paths set with every existing atom so extraction never
       // overwrites one (issue #209). planFile reserves further paths as it goes.
       const takenAtomPaths = new Set<string>(files.filter(f => f.startsWith(`${ATOM_DIR}/`)));
       const changes: Change[] = [];
-      op.extractions = [];
+      const extractions: Extraction[] = [];
       for (const rel of files) {
         let source: string;
         try {
@@ -602,13 +606,12 @@ export function extractInlineComponents(canonicalAlias: string): Operation & { e
           continue;
         }
         const plan = planFile(source, rel, canonicalAlias, takenAtomPaths);
-        op.extractions.push(...plan.extractions);
+        extractions.push(...plan.extractions);
         changes.push(...plan.changes);
       }
-      return changes;
+      return { changes, outcome: { extractions } };
     },
   };
-  return op;
 }
 
 // Exported for unit testing the pure planner. `takenAtomPaths` defaults to an

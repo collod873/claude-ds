@@ -1,5 +1,5 @@
 import type { DriftFinding } from "./drift/index.js";
-import type { Change, Operation } from "./operation.js";
+import type { Change, Operation, PlanResult } from "./operation.js";
 import type { ProjectContext } from "./project.js";
 import type { FixResult } from "./drift/index.js";
 import { getFixer, getFixerPriority } from "./drift/index.js";
@@ -85,36 +85,35 @@ export function sortFindingsByPriority(findings: DriftFinding[]): DriftFinding[]
 }
 
 /**
+ * Outcome the fixer wrapper threads through `RunReport.ops[i].outcome`:
+ *   - `"no-fixer"` when the rule has no registered fixer (the orchestrator
+ *     emits no FixResult for these, matching pre-#224 behavior)
+ *   - `FixResult` otherwise; `fixed:false` for validation aborts and
+ *     fixer-self-deferrals, `fixed:true` when changes are emitted
+ */
+export type FixerOutcome = FixResult | "no-fixer";
+
+/**
  * The wrapper that makes fix-pass go through the Runner. An Operation whose
  * `plan()` invokes the fixer, runs `validateFixerOutput` on each returned
  * Change, and either returns the valid `write`/`delete`/`rename` Changes or —
  * if validation fails — a single `abort` Change carrying the reason.
  *
- * Side-channels its own outcome on `result`:
- *   - `null` until `plan()` runs
- *   - `"no-fixer"` when the rule has no registered fixer (the orchestrator
- *     emits no FixResult for these, matching pre-#224 behavior)
- *   - `FixResult` otherwise; `fixed:false` for validation aborts and
- *     fixer-self-deferrals, `fixed:true` when changes are emitted
- *
- * Exported so callers can plan once and inspect what the wrapper produced
- * without re-invoking the fixer.
+ * The outcome is the `FixerOutcome` reported on `RunReport.ops[i].outcome` —
+ * no mutable side-channel on the op handle.
  */
-export interface FixerOperation extends Operation {
+export interface FixerOperation extends Operation<FixerOutcome> {
   finding: DriftFinding;
-  result: FixResult | "no-fixer" | null;
 }
 
 export function fixerAsOperation(finding: DriftFinding): FixerOperation {
-  const op: FixerOperation = {
+  return {
     name: finding.ruleId,
     finding,
-    result: null,
-    async plan(ctx: ProjectContext): Promise<Change[]> {
+    async plan(ctx: ProjectContext): Promise<PlanResult<FixerOutcome>> {
       const fixer = getFixer(finding.ruleId);
       if (!fixer) {
-        op.result = "no-fixer";
-        return [];
+        return { changes: [], outcome: "no-fixer" };
       }
       const r = await fixer(finding, ctx);
 
@@ -123,17 +122,17 @@ export function fixerAsOperation(finding: DriftFinding): FixerOperation {
           const gate = validateFixerOutput(ch, finding.ruleId);
           if (gate) {
             info(gate.message);
-            op.result = { finding, fixed: false, message: gate.message, changes: [] };
-            return [{ kind: "abort", path: finding.file, reason: gate.message }];
+            return {
+              changes: [{ kind: "abort", path: finding.file, reason: gate.message }],
+              outcome: { finding, fixed: false, message: gate.message, changes: [] },
+            };
           }
         }
       }
 
-      op.result = r;
-      return r.fixed ? r.changes : [];
+      return { changes: r.fixed ? r.changes : [], outcome: r };
     },
   };
-  return op;
 }
 
 const REGEN_INDEXES_OP: Operation = {
@@ -172,14 +171,14 @@ export async function runFixPass(
 ): Promise<FixPassResult> {
   const ops = sortFindingsByPriority(findings).map(f => fixerAsOperation(f));
 
-  const collectResults = (): FixResult[] =>
-    ops
-      .map(op => op.result)
-      .filter((r): r is FixResult => r !== null && r !== "no-fixer");
+  const results: FixResult[] = [];
+  const collectResults = (): FixResult[] => results;
 
   const allApplied: Change[] = [];
   for (const op of ops) {
     const report = await run(ctx, [op], "apply", { rollbackOnFailure: true });
+    const outcome = report.ops[0]?.outcome as FixerOutcome | undefined;
+    if (outcome && outcome !== "no-fixer") results.push(outcome);
     if (report.failed) {
       await rollbackChanges(ctx, allApplied);
       return { results: collectResults(), applied: [], aborted: true };

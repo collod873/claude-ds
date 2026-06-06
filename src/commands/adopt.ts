@@ -10,7 +10,7 @@ import { detectPackageManager, runCmd } from "../lib/package-manager.js";
 import { detectAppDir, detectClaudeMdCandidates, DEFAULT_CLAUDE_MD_TARGET } from "../lib/paths.js";
 import { loadProject } from "../lib/project.js";
 import { run } from "../lib/runner.js";
-import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
+import { makeSyncPackFiles, type SyncPackFilesOutcome } from "../lib/ops/sync-pack-files.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { makeSeedClaudeMdMarkers } from "../lib/ops/seed-claude-md-markers.js";
 import { patchTsconfigPathAlias } from "../lib/ops/patch-tsconfig-path-alias.js";
@@ -225,6 +225,11 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     process.exit(2);
   }
 
+  // Sync's per-file decisions land in its OpReport entry (the second op the
+  // Runner reported on). Used by the overwrite-reporting block below.
+  const syncOutcome = report.ops[1]?.outcome as SyncPackFilesOutcome | undefined;
+  const syncDecisions = syncOutcome?.decisions ?? [];
+
   // ---- Post-write housekeeping ------------------------------------------
   // #15: hook and script files must be executable. Runner writes bytes only; chmod is
   // a post-write concern that stays at the command boundary (mirrors sync.ts).
@@ -235,12 +240,13 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     }
   }
 
-  // Overwrite reporting — reconstruct from op.decisions + applied Changes so the
-  // existing user-facing "Overwrote N managed file(s)" preview format is preserved.
-  // A write that had a non-null `before` is an overwrite of pre-existing user content.
+  // Overwrite reporting — reconstruct from sync's outcome decisions + applied
+  // Changes so the existing user-facing "Overwrote N managed file(s)" preview
+  // format is preserved. A write that had a non-null `before` is an overwrite
+  // of pre-existing user content.
   interface OverwriteRecord { path: string; prevSize: number; newSize: number; category: "managed" | "hybrid"; }
   const overwrites: OverwriteRecord[] = [];
-  const decisionByWritePath = new Map(op.decisions.map(d => [d.writePath, d]));
+  const decisionByWritePath = new Map(syncDecisions.map(d => [d.writePath, d]));
   for (const c of report.applied) {
     if (c.kind !== "write" || c.before === null) continue;
     if (c.before.equals(c.after)) continue; // no-op write (defensive; diffFile would have skipped)
