@@ -120,11 +120,11 @@ jobs:
           GITHUB_TOKEN_FALLBACK: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
-          verdict="request_changes"
+          verdict=""
           if [ -f "$VERDICT_FILE" ]; then
             verdict=$(tr -d '[:space:]' < "$VERDICT_FILE")
           fi
-          echo "Review verdict: $verdict"
+          echo "Review verdict: '${verdict:-<none>}'"
           if [ "$verdict" = "approve" ]; then
             if [ -n "$AGENT_PAT" ]; then
               GH_TOKEN="$AGENT_PAT" gh pr edit "$PR_NUMBER" --add-label "ready-to-merge"
@@ -133,9 +133,14 @@ jobs:
               echo "AGENT_PAT label add failed (status $status); falling back to GITHUB_TOKEN — auto-merge will NOT auto-fire; re-add ready-to-merge manually."
             fi
             GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh pr edit "$PR_NUMBER" --add-label "ready-to-merge"
-          else
+          elif [ "$verdict" = "request_changes" ]; then
             gh pr edit "$PR_NUMBER" --add-label "agent:blocked" || true
             gh pr comment "$PR_NUMBER" --body "Automated review verdict: **request changes** — holding merge. See the review comments above. Re-add \`agent:review\` after addressing, or merge manually if you disagree."
+          else
+            # No machine-readable verdict (e.g. a PR branch cut before the verdict
+            # change shipped, so it runs the old review.ts). Do NOT auto-block —
+            # fall back to the prior behavior: leave the PR for a manual merge gate.
+            echo "No machine verdict emitted — leaving PR in the manual merge gate (no label change)."
           fi
 
       - name: Post thread replies
