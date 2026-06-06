@@ -413,6 +413,96 @@ describe("doctor --completeness", () => {
     expect(r.stdout).toContain("OWNED-TOKEN-LINT");
   });
 
+  // #320: permanent OWNED-TOKEN-LINT exception suppresses the finding ("not actually DS")
+  it("permanent OWNED-TOKEN-LINT exception suppresses the Owned-concern finding (#320)", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    // Drop a shadow lint-tokens.ts file that the detector flags.
+    const lintTokensSrc = [
+      "/**",
+      " * lint-tokens.ts — flags raw color and spacing values in component files.",
+      " * Lines with the `design-system-ignore:` pragma are skipped.",
+      " */",
+      "const RAW_HEX_COLOR_RE = /#[0-9a-fA-F]{3,8}\\b/g;",
+      "const RAW_SPACING_RE = /\\b\\d+(?:px|rem)\\b/g;",
+      "export function lintFile(path: string): string[] {",
+      "  const violations: string[] = [];",
+      "  // design-system-ignore: handled below",
+      "  if (RAW_HEX_COLOR_RE.test('')) violations.push('hit');",
+      "  if (RAW_SPACING_RE.test('')) violations.push('hit');",
+      "  return violations;",
+      "}",
+    ].join("\n");
+    await mkdir(join(dir, "scripts"), { recursive: true });
+    await writeFile(join(dir, "scripts/lint-tokens.ts"), lintTokensSrc);
+
+    // Dismiss it as a permanent exception — detector over-match.
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [
+        { rule: "OWNED-TOKEN-LINT", path: "scripts/lint-tokens.ts", permanent: true, reason: "not actually DS — keep" },
+      ],
+    }, null, 2));
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("OK");
+    expect(r.stdout).not.toMatch(/Shadow DS infrastructure \(\d+ found/);
+    expect(r.stdout).not.toContain("no issue link");
+    // Coverage footer must still print on the clean path.
+    expect(r.stdout).toMatch(/Owned concerns checked/i);
+    expect(r.stdout).toContain("OWNED-TOKEN-LINT");
+  });
+
+  // #320: issue-linked OWNED-TOKEN-LINT exception suppresses the finding
+  it("issue-linked OWNED-TOKEN-LINT exception suppresses the Owned-concern finding (#320)", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    const lintTokensSrc = [
+      "/**",
+      " * lint-tokens.ts — flags raw color and spacing values in component files.",
+      " */",
+      "const RAW_HEX_COLOR_RE = /#[0-9a-fA-F]{3,8}\\b/g;",
+      "const RAW_SPACING_RE = /\\b\\d+(?:px|rem)\\b/g;",
+      "// design-system-ignore: handled",
+      "export const x = RAW_HEX_COLOR_RE || RAW_SPACING_RE;",
+    ].join("\n");
+    await mkdir(join(dir, "scripts"), { recursive: true });
+    await writeFile(join(dir, "scripts/lint-tokens.ts"), lintTokensSrc);
+
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [
+        // #999999999 doesn't resolve → gh errors → checker returns "unknown" → no warning.
+        // The closed-issue lint branch is covered at the unit level.
+        { rule: "OWNED-TOKEN-LINT", path: "scripts/lint-tokens.ts", issue: "#999999999", reason: "tracked shadow infra pending upstream removal" },
+      ],
+    }, null, 2));
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("OK");
+    expect(r.stdout).not.toMatch(/Shadow DS infrastructure \(\d+ found/);
+    expect(r.stdout).toMatch(/Owned concerns checked/i);
+  });
+
+  // #320: an OWNED-* exception missing an issue link still warns via lintExceptions
+  it("OWNED-TOKEN-LINT exception without issue link warns and exits 1 (#320)", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({
+      exceptions: [
+        { rule: "OWNED-TOKEN-LINT", path: "scripts/lint-tokens.ts", reason: "no issue yet" },
+      ],
+    }, null, 2));
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain("no issue link");
+    expect(r.stdout).toContain("OWNED-TOKEN-LINT");
+  });
+
   // #319: Crewops-shaped fixture — a shadow token-linter living under scripts/
   // (outside any managed_root). The Owned-concern scan must catch it where the
   // location-scoped orphan check does not. Footer still lists token-lint.

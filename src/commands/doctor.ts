@@ -170,9 +170,10 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
   const exceptionsPath = join(cwd, "design-system/exceptions.json");
   let exceptionWarnings: ExceptionLint[] = [];
   let permanentExceptions: Exception[] = [];
+  let exceptions: Exception[] = [];
   if (await exists(exceptionsPath)) {
     try {
-      const exceptions = parseExceptions(await readFile(exceptionsPath, "utf8"));
+      exceptions = parseExceptions(await readFile(exceptionsPath, "utf8"));
       exceptionWarnings = await lintExceptions(exceptions, makeGhIssueChecker());
       permanentExceptions = exceptions.filter(e => e.permanent);
     } catch {
@@ -185,11 +186,19 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
   // Owned-concern scan (ADR-0017): repo-wide, signature-as-identity. Catches
   // DS infrastructure hand-rolled in unowned dirs (scripts/, src/) that the
   // location-scoped orphan check above is blind to.
-  const ownedFindings: OwnedConcernScannerFinding[] = await scanOwnedConcerns({
+  const rawOwnedFindings: OwnedConcernScannerFinding[] = await scanOwnedConcerns({
     cwd,
     manifestPaths,
     generatedPatterns: manifest.generated_patterns,
   });
+  // Suppress Owned-concern findings whose (rule, path) matches an exception
+  // — same shape audit uses for drift/integrity (#316/#320). `permanent: true`
+  // covers detector over-match; an issue-linked entry covers a tracked gap
+  // pending upstream removal (ADR-0003).
+  const suppressedSet = new Set(exceptions.map(e => `${e.rule}:${e.path}`));
+  const ownedFindings = rawOwnedFindings.filter(
+    f => !suppressedSet.has(`${f.concernId}:${f.file}`),
+  );
   const ownedConcernsChecked = allOwnedConcernIds();
 
   const lines: string[] = ["## claude-ds doctor --completeness\n"];
