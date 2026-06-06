@@ -61,7 +61,7 @@ describe("parseManifest — deprecated_paths", () => {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "packs", "next-react");
     const raw = await readFile(resolve(root, "manifest.json"), "utf8");
     const m = parseManifest(raw);
-    expect(m.deprecated_paths).toHaveLength(20);
+    expect(m.deprecated_paths).toHaveLength(21);
     const paths = m.deprecated_paths.map(d => d.path);
     expect(paths).toContain("contracts.md");
     expect(paths).toContain("exceptions.json");
@@ -82,5 +82,6 @@ describe("parseManifest — deprecated_paths", () => {
     expect(paths).toContain(".claude/hooks/pre-write-ds-states.sh");
     expect(paths).toContain(".claude/hooks/pre-write-ds-states.sh.verify-fixture.json");
     expect(paths).toContain(".claude/skills/scaffold-component/SKILL.md");
+    expect(paths).toContain("scripts/check-states-coverage.ts");
   });
 });

@@ -272,7 +272,6 @@ SUPERSEDED_SCRIPTS=(
   "scripts/build-manifest.ts:pack-managed manifest"
   "scripts/check-design-system.sh:claude-ds doctor"
   "scripts/check-hook-contract.sh:claude-ds doctor --verify-hooks"
-  "scripts/check-states-coverage.ts:retire-states migration"
   "scripts/check-tier-imports.ts:claude-ds audit DRIFT-MISPLACED"
 )
 
