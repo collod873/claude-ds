@@ -122,6 +122,15 @@ export async function healCmd(opts: HealOpts): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 
+  // Guard against bad --max-iterations input (NaN from `--max-iterations abc`,
+  // 0, negatives). Without this, the loop body never runs and heal prints
+  // "did not converge after NaN iterations" — a confusing failure for a
+  // user-input error.
+  if (!Number.isInteger(maxIterations) || maxIterations < 1) {
+    err(`heal: --max-iterations must be a positive integer (got ${opts.maxIterations})`);
+    process.exit(2);
+  }
+
   try {
     await stat(join(cwd, ".claude-ds.json"));
   } catch {

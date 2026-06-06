@@ -131,6 +131,20 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
     expect(r.stderr).toMatch(/did not converge/);
   }, 30000);
 
+  it("rejects non-positive-integer --max-iterations with an actionable error", async () => {
+    // `parseInt("abc")` is NaN; `--max-iterations 0` and negatives are
+    // similarly degenerate. Without input validation the loop body never
+    // runs and heal prints "did not converge after NaN iterations" — a
+    // confusing failure for a user-input error. Exit 2 (user error) per
+    // the convention sync/upgrade/classify already follow.
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+    for (const bad of ["abc", "0", "-1"]) {
+      const r = await runCli(["heal", "--max-iterations", bad], { cwd: dir });
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/--max-iterations must be a positive integer/);
+    }
+  });
+
   it("reports `converged` and exits 0 on an already-clean tree", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
