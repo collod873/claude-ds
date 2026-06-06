@@ -12,7 +12,7 @@ import { moveTierFile } from "../lib/ops/move-tier-file.js";
 import { appendExceptions } from "../lib/ops/append-exceptions.js";
 import type { Operation } from "../lib/operation.js";
 import type { ExtractInlineOutcome } from "../lib/ops/extract-inline-components.js";
-import type { BackfillResult } from "../lib/ops/backfill-atom-helpers.js";
+import type { BackfillAtomHelpersOutcome } from "../lib/ops/backfill-atom-helpers.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
@@ -372,7 +372,7 @@ export async function classifyCmd(opts: {
   const backfillOp = backfillAtomHelpers();
   const ctx4 = await loadProject(cwd);
   const backfillReport = await run(ctx4, [backfillOp], "apply");
-  const backfillOutcome = backfillReport.ops[0]?.outcome as { results: BackfillResult[] } | undefined;
+  const backfillOutcome = backfillReport.ops[0]?.outcome as BackfillAtomHelpersOutcome | undefined;
   const backfillResults = backfillOutcome?.results ?? [];
 
   if (backfillResults.length > 0) {

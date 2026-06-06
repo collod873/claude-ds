@@ -225,9 +225,12 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     process.exit(2);
   }
 
-  // Sync's per-file decisions land in its OpReport entry (the second op the
-  // Runner reported on). Used by the overwrite-reporting block below.
-  const syncOutcome = report.ops[1]?.outcome as SyncPackFilesOutcome | undefined;
+  // Sync's per-file decisions land in its OpReport entry. Looked up by name
+  // rather than index so the overwrite-reporting block below stays correct if
+  // the seed/sync op pair is later reordered or extended.
+  const syncOutcome = report.ops.find(o => o.name === "sync-pack-files")?.outcome as
+    | SyncPackFilesOutcome
+    | undefined;
   const syncDecisions = syncOutcome?.decisions ?? [];
 
   // ---- Post-write housekeeping ------------------------------------------
