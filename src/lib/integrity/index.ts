@@ -85,7 +85,7 @@ export function evaluateIntegrity(
 /**
  * Adapter that exposes an integrity rule's `fix` as a Runner Operation.
  * `plan()` looks up the rule from the registry and invokes `rule.fix(finding,
- * ctx.cwd)` (read-only — fixers return Changes without touching disk),
+ * ctx)` (read-only — fixers return Changes without touching disk),
  * runs the ADR-0014 `validateFixerOutput` gate on every emitted Change so
  * integrity fixers carry the same parse-before-write guarantee as drift
  * fixers (PRD #234), stashes the `IntegrityFixResult` on `op.result` so
