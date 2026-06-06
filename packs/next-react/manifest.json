@@ -314,6 +314,14 @@
       "category": "managed"
     },
     {
+      "path": "design-system/contracts/runner.ts",
+      "category": "managed"
+    },
+    {
+      "path": "design-system/contracts/role-contracts.test.tsx",
+      "category": "managed"
+    },
+    {
       "path": ".claude/skills/aesthetic-principles/SKILL.md",
       "category": "seeded"
     },
