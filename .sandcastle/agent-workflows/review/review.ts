@@ -73,9 +73,12 @@ try {
   });
   writeJson("replies.json", validReplies);
   writeText("summary.md", result.output.summary);
-  writeText("verdict.txt", result.commits.length > 0 ? "improved" : "clean");
+  // Machine-readable merge gate for agent-review.yml: "approve" → ready-to-merge,
+  // anything else → blocked. Fail safe: only an explicit approve unlocks merging.
+  writeText("verdict.txt", result.output.verdict === "approve" ? "approve" : "request_changes");
 
   console.log("Review complete.");
+  console.log(`Verdict: ${result.output.verdict}.`);
   console.log(`Commits: ${result.commits.length}.`);
   console.log(`Inline comments: ${validInlineComments.length}.`);
   console.log(`Replies: ${validReplies.length}.`);

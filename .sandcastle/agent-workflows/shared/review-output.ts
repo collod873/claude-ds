@@ -17,11 +17,18 @@ export interface ThreadReply {
   readonly body: string;
 }
 
+export type ReviewVerdict = "approve" | "request_changes";
+
 export interface ReviewOutput {
   readonly summary: string;
+  readonly verdict: ReviewVerdict;
   readonly inlineComments: InlineComment[];
   readonly replies: ThreadReply[];
 }
+
+// Fail safe: anything other than an explicit "approve" gates the merge.
+const parseVerdict = (value: unknown): ReviewVerdict =>
+  value === "approve" ? "approve" : "request_changes";
 
 export interface ImplementPrOutput {
   readonly threadReplies: ThreadReply[];
@@ -64,6 +71,7 @@ export const reviewOutputSchema = standardSchema<ReviewOutput>((value) => {
   const record = asRecord(value, "review output");
   return {
     summary: asString(record.summary, "summary"),
+    verdict: parseVerdict(record.verdict),
     inlineComments: asArray(record.inlineComments ?? [], "inlineComments").map(
       parseInlineComment,
     ),

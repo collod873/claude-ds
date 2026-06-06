@@ -1,0 +1,136 @@
+name: Agent Land
+
+# The merge-train conductor. Drains the queue of review-approved PRs without a
+# human: merges the clean ones, throws `agent:update-branch` (the rebase robot)
+# at the stale/conflicting ones, and re-checks on the next tick until empty.
+#
+# Only ever acts on PRs that:
+#   - have the `ready-to-merge` label (i.e. the review robot voted approve), AND
+#   - come from an `agent/` head branch (never touches human PRs), AND
+#   - are not `agent:in-progress` (another workflow is mutating it) or `agent:blocked`.
+#
+# SAFETY — dormant by default:
+#   - Scheduled runs only act when repo variable LANDER_LIVE == 'true'.
+#     Arm with:  gh variable set LANDER_LIVE --repo collod873/claude-ds --body true
+#     Disarm with: gh variable delete LANDER_LIVE --repo collod873/claude-ds
+#   - Manual runs honor the `dry_run` input (default true → report only).
+# In dry-run it prints the plan and mutates nothing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report only, do not merge or label (true/false)"
+        type: boolean
+        default: true
+  schedule:
+    # Every 15 minutes. Inert unless LANDER_LIVE == 'true'.
+    - cron: "*/15 * * * *"
+
+concurrency:
+  group: agent-land
+  cancel-in-progress: false
+
+jobs:
+  land:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      # Merge + label with AGENT_PAT so closing an issue fires promote-queued.yml
+      # for dependents and so `agent:update-branch` adds trigger the rebase robot.
+      # Falls back to GITHUB_TOKEN (dependent promotion / rebase trigger won't auto-fire).
+      GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Decide live vs dry-run
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          DISPATCH_DRY: ${{ inputs.dry_run }}
+          LANDER_LIVE: ${{ vars.LANDER_LIVE }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "schedule" ]; then
+            if [ "${LANDER_LIVE:-}" = "true" ]; then live="true"; else live="false"; fi
+          else
+            if [ "${DISPATCH_DRY:-true}" = "false" ]; then live="true"; else live="false"; fi
+          fi
+          echo "live=$live" >> "$GITHUB_OUTPUT"
+          if [ "$live" = "true" ]; then
+            echo "Mode: LIVE — will merge/label." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Mode: DRY-RUN — reporting only, no mutations." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Run the merge train
+        env:
+          LIVE: ${{ steps.mode.outputs.live }}
+        run: |
+          set -euo pipefail
+
+          # Candidate PRs: open, labeled ready-to-merge.
+          prs=$(gh pr list --repo "$GH_REPO" --state open --label "ready-to-merge" \
+            --json number,headRefName,labels,mergeable,mergeStateStatus,isDraft \
+            --jq '[.[] | select(.headRefName | startswith("agent/"))]')
+
+          count=$(echo "$prs" | jq 'length')
+          echo "Found $count approved agent PR(s) labeled ready-to-merge."
+          echo "## Merge train — $count candidate PR(s)" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$count" -eq 0 ]; then
+            echo "Nothing to land." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          act() {
+            # act <description> <command...>; honors LIVE. Tolerates per-PR
+            # failure so one stuck PR never aborts the rest of the train.
+            local desc="$1"; shift
+            if [ "$LIVE" = "true" ]; then
+              echo "DO: $desc"
+              "$@" || echo "FAILED (will retry next tick): $desc"
+            else
+              echo "WOULD: $desc"
+            fi
+          }
+
+          echo "$prs" | jq -c '.[]' | while read -r pr; do
+            num=$(echo "$pr" | jq -r '.number')
+            mergeable=$(echo "$pr" | jq -r '.mergeable')
+            state=$(echo "$pr" | jq -r '.mergeStateStatus')
+            draft=$(echo "$pr" | jq -r '.isDraft')
+            labels=$(echo "$pr" | jq -r '[.labels[].name] | join(",")')
+
+            line="#$num — mergeable=$mergeable state=$state draft=$draft"
+            echo "::group::$line"
+
+            # Hands off: another workflow owns it, or a human flagged it.
+            if echo ",$labels," | grep -q ",agent:in-progress,"; then
+              echo "Skip: agent:in-progress."; echo "- #$num — skip (in-progress)" >> "$GITHUB_STEP_SUMMARY"; echo "::endgroup::"; continue
+            fi
+            if echo ",$labels," | grep -q ",agent:blocked,"; then
+              echo "Skip: agent:blocked — needs human."; echo "- #$num — **blocked**, needs you" >> "$GITHUB_STEP_SUMMARY"; echo "::endgroup::"; continue
+            fi
+            if [ "$draft" = "true" ]; then
+              echo "Skip: still draft."; echo "- #$num — skip (draft)" >> "$GITHUB_STEP_SUMMARY"; echo "::endgroup::"; continue
+            fi
+
+            if [ "$mergeable" = "CONFLICTING" ] || [ "$state" = "DIRTY" ] || [ "$state" = "BEHIND" ]; then
+              act "rebase #$num via agent:update-branch" gh pr edit "$num" --repo "$GH_REPO" --add-label "agent:update-branch"
+              echo "- #$num — rebasing (stale/conflicting)" >> "$GITHUB_STEP_SUMMARY"
+            elif [ "$mergeable" = "MERGEABLE" ] && [ "$state" = "CLEAN" ]; then
+              act "merge #$num (squash, delete branch)" gh pr merge "$num" --repo "$GH_REPO" --squash --delete-branch
+              echo "- #$num — **merged**" >> "$GITHUB_STEP_SUMMARY"
+            elif [ "$mergeable" = "UNKNOWN" ] || [ "$state" = "UNKNOWN" ]; then
+              echo "Wait: GitHub still computing mergeability."; echo "- #$num — wait (computing)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              # e.g. BLOCKED on required checks/review.
+              echo "Skip: state=$state (blocked on checks/review)."; echo "- #$num — skip ($state)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "::endgroup::"
+          done

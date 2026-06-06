@@ -108,6 +108,36 @@ jobs:
         if: success()
         run: gh pr ready "$PR_NUMBER" || true
 
+      - name: Apply merge verdict
+        if: success()
+        env:
+          VERDICT_FILE: ${{ runner.temp }}/verdict.txt
+          # Prefer AGENT_PAT so an `approve` -> `ready-to-merge` label add triggers
+          # agent-auto-merge.yml (GITHUB_TOKEN-driven label adds do not fire
+          # downstream workflows). Falls back to GITHUB_TOKEN; in that path the
+          # label lands but a human must re-add it to start the merge.
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+          GITHUB_TOKEN_FALLBACK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          verdict="request_changes"
+          if [ -f "$VERDICT_FILE" ]; then
+            verdict=$(tr -d '[:space:]' < "$VERDICT_FILE")
+          fi
+          echo "Review verdict: $verdict"
+          if [ "$verdict" = "approve" ]; then
+            if [ -n "$AGENT_PAT" ]; then
+              GH_TOKEN="$AGENT_PAT" gh pr edit "$PR_NUMBER" --add-label "ready-to-merge"
+              status=$?
+              if [ "$status" -eq 0 ]; then exit 0; fi
+              echo "AGENT_PAT label add failed (status $status); falling back to GITHUB_TOKEN — auto-merge will NOT auto-fire; re-add ready-to-merge manually."
+            fi
+            GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh pr edit "$PR_NUMBER" --add-label "ready-to-merge"
+          else
+            gh pr edit "$PR_NUMBER" --add-label "agent:blocked" || true
+            gh pr comment "$PR_NUMBER" --body "Automated review verdict: **request changes** — holding merge. See the review comments above. Re-add \`agent:review\` after addressing, or merge manually if you disagree."
+          fi
+
       - name: Post thread replies
         if: success()
         env:

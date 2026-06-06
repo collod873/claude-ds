@@ -41,6 +41,15 @@ Run `npm run typecheck` before committing. Run focused tests where relevant.
 If you make changes, commit them as a single conventional commit.
 If the code is already clean and there is nothing to answer, make no commit.
 
+# VERDICT
+
+After reviewing (and applying any fixes), render a merge verdict. This gates automatic merge to `main` — be conservative.
+
+- `approve`: the branch — as it stands after your commit, if any — correctly satisfies the linked issue, preserves behavior, and has no remaining blocking problems. Safe to merge with no further human input.
+- `request_changes`: there is a blocking correctness, safety, scope, or test-coverage problem that you could not (or should not) fix automatically. A human or another implement pass is needed.
+
+When in doubt, choose `request_changes`. Unresolved blocking inline comments imply `request_changes`. Never `approve` to be polite.
+
 Do not push.
 Do not edit labels.
 Do not mark review threads resolved.

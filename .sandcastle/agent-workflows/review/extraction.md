@@ -8,6 +8,7 @@ Do not include text outside the `<output>` block.
 <output>
 {
   "summary": "1-3 paragraphs explaining your review, including what you changed or why it was already clean.",
+  "verdict": "approve | request_changes — conservative merge gate; choose request_changes when in doubt.",
   "inlineComments": [
     { "path": "relative/file.ts", "line": 123, "body": "Markdown comment" }
   ],
