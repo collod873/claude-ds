@@ -20,6 +20,7 @@ Pin every invocation to a release tag. The CLI never auto-updates.
 |---|---|
 | `init` | Greenfield bootstrap — full scaffold, hooks in BLOCK mode |
 | `adopt` | Brownfield install — scaffold + hooks in WARN mode |
+| `heal` | Self-converging brownfield loop — `sync → upgrade → classify → audit --fix` to a fixed point |
 | `audit` | Read-only conformance report. `--fix` auto-remediates deterministic issues |
 | `classify` | Categorize existing files into DS tiers |
 | `migrate <path>` | Move one component into the scaffold and register exceptions |
@@ -46,7 +47,7 @@ The CLI never deletes user content or edits outside its declared ownership.
 ## Adoption path
 
 ```
-audit → adopt → classify → audit --fix
+audit → adopt → heal
 ```
 
-`audit` shows the gap. `adopt` installs the scaffold. `classify` sorts existing files into tiers. `audit --fix` auto-remediates what it can. See CHANGELOG.md for version-specific migration notes.
+`audit` shows the gap. `adopt` installs the scaffold. `heal` is the self-converging brownfield loop: it runs `sync → upgrade → classify → audit --fix` until the tree reaches a fixed point (0 file changes, 0 audit findings) or fails loudly at the iteration ceiling (default 3). The classify ↔ `audit --fix` two-pass dance (#265 — corrupt-baseline atoms whose imports re-derive into composites after `audit --fix` runs) is automated; you don't think about it. See CHANGELOG.md for version-specific migration notes.

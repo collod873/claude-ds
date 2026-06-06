@@ -16,6 +16,7 @@ import { reconformCmd } from "./commands/reconform.js";
 import { reconcileCmd } from "./commands/reconcile.js";
 import { upgradeCmd } from "./commands/upgrade.js";
 import { classifyCmd } from "./commands/classify.js";
+import { healCmd } from "./commands/heal.js";
 
 export interface ProgramDefaults {
   cwd?: string;
@@ -152,6 +153,14 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--yes", "skip per-domain-bucket prompts for feature relocations")
     .action(async (opts: { src?: string; dryRun?: boolean; yes?: boolean }) => {
       await classifyCmd({ src: opts.src, dryRun: opts.dryRun, yes: opts.yes, cwd: defaults.cwd });
+    });
+
+  program
+    .command("heal")
+    .description("loop sync → upgrade → classify → audit --fix until convergence (max 3 iterations)")
+    .option("--max-iterations <n>", "override iteration ceiling (default 3)", (v) => parseInt(v, 10))
+    .action(async (opts: { maxIterations?: number }) => {
+      await healCmd({ maxIterations: opts.maxIterations, cwd: defaults.cwd });
     });
 
   return program;

@@ -4,7 +4,7 @@ CLI that installs and syncs a shared design-system governance scaffold (hooks, c
 
 **North star:** every change must be safe to drop into any consumer repo without breaking it. The CLI never deletes user content or edits outside its declared ownership.
 
-**Completeness principle (ADR-0003):** anything a consumer project hand-rolls for design-system concerns is a claude-ds defect. End state for any consumer is *zero local DS infrastructure* outside the pack-installed scaffold. Workarounds are tracked defects with removal triggers, never undocumented patches. The `adopt → classify → audit` flow gets any project — active or new — from 0 to hero with no thinking about fixes.
+**Completeness principle (ADR-0003):** anything a consumer project hand-rolls for design-system concerns is a claude-ds defect. End state for any consumer is *zero local DS infrastructure* outside the pack-installed scaffold. Workarounds are tracked defects with removal triggers, never undocumented patches. The `adopt → heal` flow gets any project — active or new — from 0 to hero with no thinking about fixes: `heal` loops `sync → upgrade → classify → audit --fix` to a fixed point (max 3 iterations, fails loudly otherwise — see #265).
 
 ## Working style
 

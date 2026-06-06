@@ -61,32 +61,34 @@ rule:
 Per ADR-0003, every exception must reference a live upstream issue — the
 exception is a tracked workaround with a removal trigger.
 
-## Brownfield three-phase flow
+## Brownfield two-phase flow
 
-Adoption into an existing project follows three named phases, each its own
-command:
+Adoption into an existing project follows two named phases:
 
 1. **`claude-ds adopt`** *(existing)* — installs the rails (folders, hooks,
    skills, CLAUDE.md sections, showcase generator, audit script, CI
    workflow). Stubs empty tokens + atoms/composites/patterns folders. Does
    not touch existing component code.
 
-2. **`claude-ds classify`** *(new)* — walks every existing `*.tsx` under
-   the project's component directories. For each file, computes classifier
-   truth and proposes: tier + destination path. Renders a dry-run summary
-   ("12 atoms, 18 composites, 3 patterns, 14 features"). On approval, runs
-   the moves through the Runner — `git mv` detection, import rewrites,
-   `meta.kind` backfill. Domain-bound files are proposed for relocation to
-   `features/<domain>/` (inferred from import paths), asked once per domain
-   bucket. Re-runnable; typically a one-shot per project.
+2. **`claude-ds heal`** *(self-converging loop, #265)* — runs
+   `sync → upgrade → classify → audit --fix` to a fixed point. `classify`
+   walks every existing `*.tsx` under the project's component directories,
+   computes classifier truth, moves files to their correct tier (via the
+   Runner with `git mv` detection + import rewrites + `meta.kind`
+   backfill). `audit --fix` then runs the drift rules against the
+   classified tree and auto-repairs everything it can — including
+   re-deriving stripped import closures (#260). A corrupt baseline whose
+   atoms compose 3+ DS components but ship with no imports re-classifies
+   from `atom` → `composite` after audit re-derives those imports, so a
+   second classify pass is needed; `heal` repeats the loop (max 3
+   iterations, fails loudly otherwise) so the consumer never sequences
+   the two-pass dance by hand. Anything `audit --fix` still can't repair
+   — missing `meta.examples`, `DRIFT-CVA-VARIANT-UNRENDERED`,
+   author-intent issues — surfaces as a remaining finding for the
+   consumer to address by hand.
 
-3. **`claude-ds audit`** *(graduates the Crewops script)* — runs the drift
-   rules against the now-classified tree. Reports remaining issues that need
-   code refactoring (missing `meta.examples`, `DRIFT-RAW-PRIMITIVE`,
-   `DRIFT-CVA-VARIANT-UNRENDERED`, etc.). Iterate until clean.
-
-Greenfield variant: `adopt` is identical, `classify` is a no-op, `audit`
-passes trivially. Hooks take over from day one.
+Greenfield variant: `adopt` is identical, `heal` is a no-op (converges in
+1 iteration with 0 changes). Hooks take over from day one.
 
 ## Classify scope: kind only
 
