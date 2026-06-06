@@ -126,3 +126,20 @@ claude-ds audit --fix       ← second fix pass: should be no-op or clean up any
 The first `audit --fix` breadcrumb already routes to `claude-ds classify` when DRIFT-MISPLACED / DRIFT-MISCLASSIFIED-ATOM findings remain — the UX drives the consumer correctly. The second `audit --fix` should be a fixed point (0 changes, 0 errors).
 
 This is not a new prompt or intervention — `classify` auto-relocates confident composites unconditionally (the ambiguity pass in `applyAmbiguityPass`). The consumer follows the breadcrumbs with no judgment required.
+
+## Amendment (2026-06-06, PRD #266): interactive fixer decisions lift out of `plan()`
+
+The original zero-prompt-default rule above said "every ambiguity that currently blocks on a prompt gets a safe automated default." Two fixers (`ds-imports-feature` and `inline-static-style`) didn't actually meet that bar — they still called `opts.prompt(...)` from inside `fix()`, which runs inside `fixerAsOperation.plan()`. Three consequences:
+
+1. A future dry-run path would have *prompted* the user (the opposite of dry-run).
+2. The non-TTY shim (`makeNoTtyPrompt`) silently answered option 0 on the user's behalf — a "zero prompts" claim that hid an arbitrary choice rather than recording a deferral.
+3. `audit-fix.ts` carried a ~25-line post-hoc cleanup block that existed only because the deferral decision ran inside `plan()` instead of before it.
+
+PRD #266 Phase C closes the gap structurally:
+
+- Every `fixable:true, interactive:true` `DriftRule` exposes a `describeDecisions(finding, source, opts): FixerDecisionPoint[]` hook — a *pure* enumeration of the rule's decision points (no I/O beyond what `detect` already read; no prompting). Forgetting the hook on a new interactive rule is a compile error.
+- A command-level pre-pass in `audit-fix.ts` enumerates decision points, asks them via `makeTtyPrompt` (TTY) or records `"defer"` (non-TTY) into `ctx.decisions.fixerChoices`, and routes deferrals to `exceptions.json` — all *before* planning. Non-TTY auto-deferral is explicit (`reason: "auto-deferred: no TTY"`), not silently option 0.
+- Fixers read `ctx.decisions.fixerChoices` instead of calling `opts.prompt`. `FixerOpts.prompt`, `makeNoTtyPrompt`, and the post-hoc cleanup block are deleted.
+- `tests/unit/no-prompt-inside-rules.test.ts` fails CI on any future `opts.prompt` / `FixerPrompt` import inside `src/lib/drift/rules/`.
+
+The "Simple question test" three-part gate above still binds — it now governs what `describeDecisions` may surface, and the questions are still asked at the command level when a TTY is present. What changed is that planning no longer prompts: `plan(ctx)` is now provably a pure function of `ctx`, the literal statement the `tests/unit/runner.test.ts` capstone pins.
