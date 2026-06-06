@@ -66,8 +66,12 @@ main slot) is the canonical example.
 Required self-declaration export on every file under `design-system/`.
 Value is one of `'atom' | 'composite' | 'pattern'`. One of the three signals
 the audit checks; mismatch with location or classifier-truth is drift
-(ADR-0006). `meta.kind` is hard-required as of v0.8.0; soft-fallback
-inference from dirname is removed.
+(ADR-0006). v0.8.0 removed the soft-fallback that inferred kind from the
+dirname, so a missing declaration no longer resolves silently. Hard
+enforcement (flagging a *missing* `meta.kind` as `DRIFT-META-KIND-MISSING`)
+is gated by the `meta_kind_strict` flag in `.claude-ds.json` — default
+`false` for fresh projects, flipped to `true` by the v0.9.0 `meta-kind-hard`
+migration once `classify` has guaranteed every component carries one.
 
 ### Feature
 A domain-bound component that imports from `features/` or `lib/` (or
