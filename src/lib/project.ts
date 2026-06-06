@@ -11,9 +11,17 @@ import { loadConfig } from "./paths.js";
  * probe (cwd-relative), and a `decisions` bag the calling command pre-fills with
  * anything it resolved interactively (renames, claude-md target).
  *
+ * `kind` discriminates the two boot paths: `"adopted"` is the post-adopt
+ * `loadProject` path with a full parsed `Config`; `"pre-adopt"` is the
+ * `loadPreAdoptProject` path (`audit --pack`, `migrate-layout` without
+ * `.claude-ds.json`) whose `cfg` is a partial carrying only `pack`. Below-
+ * command-line code that needs the full cfg gates on `ctx.kind === "adopted"`
+ * (PRD #266 Phase A — replaces the synthetic-ctx fabrications + their casts).
+ *
  * Frozen on return so Operations / commands cannot mutate the context after load.
  */
 export interface ProjectContext {
+  kind: "adopted" | "pre-adopt";
   cwd: string;
   cfg: Config;
   packDir: string;
@@ -33,7 +41,8 @@ async function existsAt(p: string): Promise<boolean> {
  *
  * One seam replaces the 6-line ritual previously duplicated across every command.
  * Pre-adopt commands (init, the pre-config branches of audit/doctor/migrate-layout)
- * cannot use this — they have no config to load.
+ * cannot use this — they have no config to load. Pre-config audit / migrate-layout
+ * use `loadPreAdoptProject` instead so they still receive a real frozen ctx.
  *
  * #84: migration of pre-v0.6 configs is now a deliberate `migrateConfig` Op the
  * command opts into via the Runner — no longer a hidden side effect of boot.
@@ -49,10 +58,40 @@ export async function loadProject(
   const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
 
   const ctx: ProjectContext = {
+    kind: "adopted",
     cwd,
     cfg,
     packDir,
     manifest,
+    exists: (p: string) => existsAt(isAbsolute(p) ? p : join(cwd, p)),
+    decisions,
+  };
+  return Object.freeze(ctx);
+}
+
+/**
+ * Boot a pre-adopt command: `audit --pack <name>` and `migrate-layout` may run
+ * before `.claude-ds.json` exists, but every below-command-line API now takes
+ * `ProjectContext`. This factory mints a real frozen ctx for those callers
+ * given the pack name plus the already-resolved packDir + manifest.
+ *
+ * The returned ctx carries `kind: "pre-adopt"` and a partial `cfg` containing
+ * only `pack` — callers that read beyond `pack` must gate on `ctx.kind ===
+ * "adopted"` first. The `Config` cast is the one place this narrowing is
+ * acknowledged in the type system; everywhere else, `ProjectContext` is the
+ * single thing functions read from.
+ */
+export async function loadPreAdoptProject(
+  cwd: string,
+  args: { pack: string; packDir: string; manifest: Manifest },
+  decisions: ProjectContext["decisions"] = {},
+): Promise<ProjectContext> {
+  const ctx: ProjectContext = {
+    kind: "pre-adopt",
+    cwd,
+    cfg: { pack: args.pack } as Config,
+    packDir: args.packDir,
+    manifest: args.manifest,
     exists: (p: string) => existsAt(isAbsolute(p) ? p : join(cwd, p)),
     decisions,
   };

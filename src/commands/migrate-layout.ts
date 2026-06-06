@@ -1,15 +1,14 @@
 import { readFile, stat } from "node:fs/promises";
-import { join, dirname, resolve, isAbsolute } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { parseManifest, type Manifest } from "../lib/manifest.js";
-import { loadProject, type ProjectContext } from "../lib/project.js";
+import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { detectLookalikes } from "../lib/lookalike.js";
 import { info, err, confirm } from "../lib/log.js";
 import { run } from "../lib/runner.js";
 import type { Change, Operation } from "../lib/operation.js";
-import type { Config } from "../lib/config.js";
 
 const execFile = promisify(execFileCb);
 
@@ -42,23 +41,26 @@ export async function migrateLayoutCmd(opts: {
 
   // Resolve pack + manifest. Prefer loadProject when there's a config (no
   // migration side effect now — #84 — so the clean-tree precondition holds).
-  // Fall back to --pack with a hand-rolled manifest load when adopt hasn't run.
+  // Fall back to --pack with `loadPreAdoptProject` when adopt hasn't run, so
+  // the Runner always sees a real frozen ctx (no fabricated cast).
   let pack: string;
   let packDir: string;
   let manifest: Manifest;
-  let baseCtx: ProjectContext | null = null;
+  let ctx: ProjectContext;
   const cfgPath = join(cwd, ".claude-ds.json");
   if (await exists(cfgPath)) {
-    baseCtx = await loadProject(cwd);
+    const baseCtx = await loadProject(cwd);
     pack = opts.pack ?? baseCtx.cfg.pack;
     if (pack === baseCtx.cfg.pack) {
       packDir = baseCtx.packDir;
       manifest = baseCtx.manifest;
+      ctx = baseCtx;
     } else {
       const here = dirname(fileURLToPath(import.meta.url));
       const repoRoot = resolve(here, "..", "..");
       packDir = join(repoRoot, "packs", pack);
       manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+      ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
     }
   } else {
     if (!opts.pack) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
@@ -67,6 +69,7 @@ export async function migrateLayoutCmd(opts: {
     const repoRoot = resolve(here, "..", "..");
     packDir = join(repoRoot, "packs", pack);
     manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+    ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
   }
 
   const flagGlobs = opts.ignore
@@ -109,18 +112,6 @@ export async function migrateLayoutCmd(opts: {
     info("aborted");
     return;
   }
-
-  // Pre-adopt invocations have no `.claude-ds.json` so no ProjectContext exists.
-  // For our rename Changes the Runner only needs `ctx.cwd`; fabricate the rest so
-  // the byte-mutation still flows through the chokepoint (#221).
-  const ctx: ProjectContext = baseCtx ?? ({
-    cwd,
-    cfg: { pack } as Config,
-    packDir,
-    manifest,
-    exists: async (p: string) => exists(isAbsolute(p) ? p : join(cwd, p)),
-    decisions: {},
-  } as ProjectContext);
 
   const renamesOp: Operation = {
     name: "migrate-layout-renames",

@@ -40,8 +40,6 @@ async function exists(p: string): Promise<boolean> {
 
 export interface AuditFixParams {
   cwd: string;
-  /** Only present when audit was invoked against a project with `.claude-ds.json`. */
-  projectCtx: ProjectContext | null;
   manifest: Manifest;
   unexpected: UnexpectedScanReport;
   driftTierDirs: readonly string[];
@@ -89,7 +87,7 @@ export async function runAuditFix(
   params: AuditFixParams,
 ): Promise<AuditFixSummary> {
   const {
-    cwd, projectCtx, manifest, unexpected, driftTierDirs,
+    cwd, manifest, unexpected, driftTierDirs,
     fix, except, reason, issue, permanent,
     domainRoots, metaKindStrict, allowedImports, dsAliases,
   } = params;
@@ -101,12 +99,15 @@ export async function runAuditFix(
   let warningCount = 0;
   let fixedCount = 0;
 
-  // #171: when --fix is active and we have a project context, run reconcile as
-  // a pre-step. This auto-deletes deprecated orphans, prunes dangling hooks,
-  // and handles collisions. In read-only mode (or when --pack is overriding
-  // config), we just warn about orphans without touching them.
-  if (fix && projectCtx) {
-    const reconcileResult = await runReconcileActions(projectCtx, { force: true });
+  // #171: when --fix is active and we have an adopted project (real
+  // `.claude-ds.json` was loaded), run reconcile as a pre-step. This
+  // auto-deletes deprecated orphans, prunes dangling hooks, and handles
+  // collisions. In read-only mode (or when `--pack` is overriding config —
+  // `ctx.kind === "pre-adopt"`), we just warn about orphans without touching
+  // them: `runReconcileActions` reads `ctx.cfg.claude_md_target` which only
+  // a parsed config carries.
+  if (fix && ctx.kind === "adopted") {
+    const reconcileResult = await runReconcileActions(ctx, { force: true });
     reconciledCount = reconcileResult.deleted + reconcileResult.pruned;
     if (reconciledCount > 0) {
       const parts: string[] = [];
