@@ -4,15 +4,13 @@ import { basename, dirname, join, resolve } from "node:path";
 import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
 
-import type { FixerDecisionPoint } from "../decisions.js";
+import { findingKey, type FixerDecisionPoint } from "../decisions.js";
 import { extractUntilStatement } from "../extract.js";
-import type { PromptOption } from "../prompt.js";
 import type {
   DriftFinding,
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 /** DRIFT-DS-IMPORTS-FEATURE: DS file whose classifier verdict is feature. */
@@ -208,7 +206,7 @@ async function collectProjectImportRewriteChanges(
   return changes;
 }
 
-async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts): Promise<FixResult> {
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
   const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
@@ -222,6 +220,10 @@ async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts)
   if (domainImports.length === 0) {
     return { finding, fixed: false, message: `no domain imports found in ${finding.file}`, changes: [] };
   }
+
+  // Per-finding decisions answered by the command-level pre-pass (PRD #266
+  // Phase C step 2). Missing entry → "defer".
+  const choices = ctx.decisions.fixerChoices?.[findingKey(finding)] ?? {};
 
   let anyFixed = false;
   let currentSource = source;
@@ -252,21 +254,10 @@ async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts)
       let selectedOption: string;
       if (canExtract) {
         selectedOption = `Extract "${symbolName}" to design-system/utils/`;
-      } else if (canConvertToProp || opts?.prompt) {
-        const options: PromptOption[] = [];
-        if (canConvertToProp) options.push({ label: `Convert "${symbolName}" to prop injection`, description: "Pass this value as a prop instead of importing it" });
-        options.push({ label: "Defer (add exception)", description: "Skip for now and add an exception entry" });
-
-        if (options.length === 1 || !opts?.prompt) {
-          continue;
-        }
-
-        const choice = await opts.prompt(
-          `"${symbolName}" comes from a domain module that can't be moved to design-system (it has its own domain dependencies). What should we do?`,
-          options,
-        );
-        if (choice === "defer") continue;
-        selectedOption = options[choice].label;
+      } else if (canConvertToProp) {
+        const answer = choices[`convert:${imp.importPath}:${symbolName}`] ?? "defer";
+        if (answer === "defer") continue;
+        selectedOption = `Convert "${symbolName}" to prop injection`;
       } else {
         continue;
       }

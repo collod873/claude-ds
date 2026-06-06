@@ -4,13 +4,12 @@ import { join } from "node:path";
 import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
 
-import type { FixerDecisionPoint } from "../decisions.js";
+import { findingKey, type FixerDecisionPoint } from "../decisions.js";
 import type {
   DriftFinding,
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 /**
@@ -228,7 +227,7 @@ const STATIC_STYLE_BLOCK_RE = new RegExp(
   "g",
 );
 
-async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts): Promise<FixResult> {
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
   const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
@@ -252,6 +251,9 @@ async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts)
   }
 
   const tokenEntries = flattenTokens(tokens);
+  // Per-finding decisions answered by the command-level pre-pass (PRD #266
+  // Phase C step 2). Missing entry → "defer".
+  const choices = ctx.decisions.fixerChoices?.[findingKey(finding)] ?? {};
   let anyFixed = false;
   let result = source;
 
@@ -277,22 +279,15 @@ async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts)
         const nearest = findNearestNumericToken(tokenEntries, prop.name, prop.normalizedValue);
         if (!nearest) {
           unresolved.push(prop);
-        } else if (nearest.equidistantPeer && opts?.prompt) {
-          const options = [
-            { label: nearest.token.className, description: `Use token class "${nearest.token.className}" (value: ${nearest.token.value})` },
-            { label: nearest.equidistantPeer.className, description: `Use token class "${nearest.equidistantPeer.className}" (value: ${nearest.equidistantPeer.value})` },
-          ];
-          const choice = await opts.prompt(
-            `${finding.file}: "${prop.name}: ${prop.normalizedValue}" is equidistant from two tokens`,
-            options,
-          );
-          if (choice === "defer") {
+        } else if (nearest.equidistantPeer) {
+          const answer = choices[`token-tie:${prop.name}:${prop.normalizedValue}`] ?? "defer";
+          if (answer === "defer") {
             unresolved.push(prop);
           } else {
-            resolved.push({ prop, className: options[choice].label });
+            const options = [nearest.token, nearest.equidistantPeer];
+            const pick = options[answer] ?? nearest.token;
+            resolved.push({ prop, className: pick.className });
           }
-        } else if (nearest.equidistantPeer) {
-          unresolved.push(prop);
         } else {
           resolved.push({ prop, className: nearest.token.className });
         }

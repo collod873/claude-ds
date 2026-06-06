@@ -5,11 +5,14 @@ import { run, rollbackChanges, type Change } from "../runner.js";
 import type { ProjectContext } from "../project.js";
 import { type Exception } from "../exceptions.js";
 import {
+  findingKey,
+  getDescribeDecisions,
   isInteractive,
-  makeNoTtyPrompt,
   makeTtyPrompt,
+  type DecisionAnswer,
+  type DecisionKey,
   type DriftFinding,
-  type FixerPrompt,
+  type FindingKey,
 } from "../drift/index.js";
 import {
   evaluateIntegrity,
@@ -260,12 +263,90 @@ export async function runAuditFix(
 
     // Phase 2: drift fixers — skip files that still fail integrity.
     const isTTY = process.stdout.isTTY === true;
-    const prompt: FixerPrompt = isTTY ? makeTtyPrompt() : makeNoTtyPrompt();
-    const driftFindings = activeFindings.filter(
+    let driftFindings = activeFindings.filter(
       (f): f is DriftFinding =>
         !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
     );
-    const fixPassResult = await runFixPass(ctx, driftFindings, { prompt });
+
+    // PRD #266 Phase C step 2: interactive-finding pre-pass.
+    //
+    // For every interactive drift finding (`isInteractive(ruleId)`), enumerate
+    // its decision points via the rule's pure `describeDecisions` hook, then
+    // record an answer per decision into `ctx.decisions.fixerChoices`:
+    //
+    //   - TTY: ask via `makeTtyPrompt()` (the user sees the same question text
+    //     + labels + [s] skip key as before).
+    //   - Non-TTY: record `"defer"` without prompting.
+    //
+    // The fixer's `fix()` body reads `ctx.decisions.fixerChoices[key]` instead
+    // of calling `opts.prompt` — so `plan(ctx)` is now a pure function of ctx.
+    //
+    // A finding whose every decision point landed on `"defer"` is routed
+    // straight to `exceptions.json` here (`reason: "auto-deferred: no TTY"`)
+    // and dropped from the active set BEFORE drift-fix Ops are built — that
+    // replaces the post-hoc cleanup block that used to walk fix results
+    // looking for the same "deferred interactive in non-TTY" pattern.
+    // `--except` overrides this so the explicit reason/issue flow at the
+    // bottom handles every remaining finding.
+    const fixerChoices: Record<FindingKey, Record<DecisionKey, DecisionAnswer>> =
+      ctx.decisions.fixerChoices ?? {};
+    ctx.decisions.fixerChoices = fixerChoices;
+    const ttyPrompt = isTTY ? makeTtyPrompt() : null;
+    const fullyDeferredKeys = new Set<string>();
+
+    for (const finding of driftFindings) {
+      if (!isInteractive(finding.ruleId)) continue;
+      const describe = getDescribeDecisions(finding.ruleId);
+      if (!describe) continue;
+      let source: string;
+      try { source = await readFile(join(cwd, finding.file), "utf8"); } catch { continue; }
+      const points = describe(finding, source, { ctx });
+      if (points.length === 0) continue;
+
+      const key = findingKey(finding);
+      const answers: Record<DecisionKey, DecisionAnswer> = fixerChoices[key] ?? {};
+      let anyAnswered = false;
+      for (const p of points) {
+        if (p.key in answers) {
+          if (answers[p.key] !== "defer") anyAnswered = true;
+          continue;
+        }
+        if (ttyPrompt) {
+          const a = await ttyPrompt(p.question, p.options);
+          answers[p.key] = a;
+          if (a !== "defer") anyAnswered = true;
+        } else {
+          answers[p.key] = "defer";
+        }
+      }
+      fixerChoices[key] = answers;
+      if (!anyAnswered) fullyDeferredKeys.add(suppressedKey(finding.ruleId, finding.file));
+    }
+
+    if (!isTTY && !except && fullyDeferredKeys.size > 0) {
+      const autoDeferred: Exception[] = [];
+      const stillActive: AuditFinding[] = [];
+      for (const f of activeFindings) {
+        if (fullyDeferredKeys.has(suppressedKey(f.ruleId, f.file))) {
+          autoDeferred.push({ rule: f.ruleId, path: f.file, reason: "auto-deferred: no TTY" });
+        } else {
+          stillActive.push(f);
+        }
+      }
+      if (autoDeferred.length > 0) {
+        const merged = [...exceptions, ...autoDeferred];
+        await run(ctx, [appendExceptions(merged)], "apply");
+        info(`${autoDeferred.length} finding(s) auto-deferred to exceptions.json (non-TTY mode)`);
+        exceptions = merged;
+        for (const ex of autoDeferred) suppressedSet.add(suppressedKey(ex.rule, ex.path));
+      }
+      activeFindings = stillActive;
+      driftFindings = driftFindings.filter(
+        f => !fullyDeferredKeys.has(suppressedKey(f.ruleId, f.file)),
+      );
+    }
+
+    const fixPassResult = await runFixPass(ctx, driftFindings, {});
 
     if (fixPassResult.aborted) {
       err("Fix pass failed — all changes rolled back. Re-run to retry.");
@@ -353,7 +434,7 @@ export async function runAuditFix(
             !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
         );
         if (reFixFindings.length > 0) {
-          const reFixResult = await runFixPass(ctx, reFixFindings, { prompt });
+          const reFixResult = await runFixPass(ctx, reFixFindings, {});
           if (!reFixResult.aborted) {
             const reFixedCount = reFixResult.results.filter(r => r.fixed).length;
             if (reFixedCount > 0) {
@@ -373,34 +454,8 @@ export async function runAuditFix(
       }
     }
 
-    // Non-TTY CI mode: auto-defer interactive findings to exceptions.json so
-    // CI runs of `audit --fix` don't hang on a prompt. `--except` overrides
-    // this — that flag handles all remaining findings explicitly below.
-    if (!isTTY && !except && activeFindings.length > 0) {
-      const deferredByPrompt = new Set(
-        fixPassResult.results
-          .filter(r => !r.fixed && isInteractive(r.finding.ruleId))
-          .map(r => suppressedKey(r.finding.ruleId, r.finding.file)),
-      );
-
-      const autoDeferred: Exception[] = [];
-      const stillActive: AuditFinding[] = [];
-      for (const f of activeFindings) {
-        if (deferredByPrompt.has(suppressedKey(f.ruleId, f.file))) {
-          autoDeferred.push({ rule: f.ruleId, path: f.file, reason: "auto-deferred: no TTY" });
-        } else {
-          stillActive.push(f);
-        }
-      }
-
-      if (autoDeferred.length > 0) {
-        const merged = [...exceptions, ...autoDeferred];
-        await run(ctx, [appendExceptions(merged)], "apply");
-        info(`${autoDeferred.length} finding(s) auto-deferred to exceptions.json (non-TTY mode)`);
-      }
-
-      activeFindings = stillActive;
-    }
+    // Non-TTY auto-deferral now happens in the pre-pass above, before any Op
+    // is built — no post-hoc cleanup needed (PRD #266 Phase C step 2).
   }
 
   // --except: write exception entries for all remaining active findings.

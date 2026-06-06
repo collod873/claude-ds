@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { checkThreeSignals } from "../../src/lib/three-signal";
 import { runFixPass } from "../../src/lib/fix-pass";
 import type { DriftFinding } from "../../src/lib/drift/index.js";
-import type { FixerPrompt, PromptOption } from "../../src/lib/drift/index.js";
 import { makeFakeCtx } from "../helpers/fake-ctx";
 
 async function exists(p: string): Promise<boolean> {
@@ -225,15 +224,13 @@ describe("integration: full --fix pass on fixture project", () => {
     expect(ruleIds.has("DRIFT-DS-IMPORTS-FEATURE")).toBe(true);
     expect(ruleIds.has("DRIFT-MISPLACED")).toBe(true);
 
-    // ── Mock prompt: always pick first option ──
-    const promptLog: string[] = [];
-    const mockPrompt: FixerPrompt = async (question, options) => {
-      promptLog.push(`${question} → [0] ${options[0].label}`);
-      return 0;
-    };
-
     // ── Run fix pass ──
-    const result = await runFixPass(makeFakeCtx(dir), initialFindings, { prompt: mockPrompt });
+    // PRD #266 Phase C step 2: the prompt-in-plan seam is gone — the pre-pass
+    // in audit-fix now populates `ctx.decisions.fixerChoices` before runFixPass
+    // ever sees a finding. This direct runFixPass call exercises the auto-fix
+    // paths (RAW-PRIMITIVE auto-infer, DS-IMPORTS-FEATURE auto-extract, single-
+    // match INLINE-STATIC-STYLE), all of which never needed a decision.
+    const result = await runFixPass(makeFakeCtx(dir), initialFindings, {});
 
     expect(result.aborted).toBe(false);
     expect(result.applied.length).toBeGreaterThan(0);
@@ -325,9 +322,6 @@ describe("integration: full --fix pass on fixture project", () => {
 
     // Stale exception cleanup is handled by auditCmd (not runFixPass),
     // and is already tested in audit-fix-except.test.ts
-
-    // ��─ Assert: no prompts needed — all fixes were deterministic (Gap 1) ──
-    expect(promptLog).toHaveLength(0);
   }, 15000);
 
   it("handles Button atom with compound variants and pseudo-states (Crewops fixture)", async () => {
@@ -395,13 +389,7 @@ describe("integration: full --fix pass on fixture project", () => {
     const rawPrimitiveFinding = findings.find(f => f.ruleId === "DRIFT-RAW-PRIMITIVE");
     expect(rawPrimitiveFinding).toBeDefined();
 
-    const promptLog: string[] = [];
-    const mockPrompt: FixerPrompt = async (question, options) => {
-      promptLog.push(`${question} → opts: ${options.length}`);
-      return 0;
-    };
-
-    const result = await runFixPass(makeFakeCtx(dir), findings, { prompt: mockPrompt });
+    const result = await runFixPass(makeFakeCtx(dir), findings, {});
     expect(result.aborted).toBe(false);
 
     const toolbar = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
@@ -409,9 +397,6 @@ describe("integration: full --fix pass on fixture project", () => {
     expect(toolbar).not.toContain("<button");
     // Auto-inferred variant from className "ghost-action" → variant="ghost"
     expect(toolbar).toContain('variant="ghost"');
-    // Should NOT have prompted — variant was auto-inferred from className
-    // (pseudo-states filtered out, so only variant+size remain, exactly one match)
-    expect(promptLog.filter(p => p.includes("raw <button>"))).toHaveLength(0);
   });
 
   it("defers all interactive findings in non-TTY mode", async () => {
@@ -445,12 +430,12 @@ describe("integration: full --fix pass on fixture project", () => {
     const findings = await collectFindings(dir);
     expect(findings.some(f => f.ruleId === "DRIFT-RAW-PRIMITIVE")).toBe(true);
 
-    // Non-TTY prompt: picks first option (safe default)
-    const noTtyPrompt: FixerPrompt = async () => 0;
-    const result = await runFixPass(makeFakeCtx(dir), findings, { prompt: noTtyPrompt });
+    // runFixPass no longer takes a prompt — interactive findings are decided
+    // by the pre-pass in audit-fix before they reach the fixer. raw-primitive
+    // is non-interactive, so it auto-fixes deterministically here.
+    const result = await runFixPass(makeFakeCtx(dir), findings, {});
 
     expect(result.aborted).toBe(false);
-    // First option is picked — raw primitive should be fixed
     const fixed = result.results.filter(r => r.fixed);
     expect(fixed.some(r => r.finding.ruleId === "DRIFT-RAW-PRIMITIVE")).toBe(true);
 

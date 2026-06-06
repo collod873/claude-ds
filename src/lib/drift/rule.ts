@@ -3,7 +3,6 @@ import type { Change } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 import type { Severity } from "../severity.js";
 import type { FixerDecisionPoint } from "./decisions.js";
-import type { FixerPrompt } from "./prompt.js";
 
 /**
  * Stable public vocabulary for drift rule IDs (ADR-0006).
@@ -64,17 +63,16 @@ export interface FixResult {
 }
 
 /**
- * Per-call options threaded into a drift fixer. Phase B of PRD #266 collapsed
- * the audit-config fields here (`domainRoots`, `allowedImports`, `dsAliases`)
- * onto `ctx.auditConfig` — fixers now read those directly off ctx and `FixerOpts`
- * carries only the prompt. Phase C will remove `prompt` from this seam too;
- * `FixerOpts` disappears entirely once that lands.
+ * Drift fixer signature: a pure function of `(finding, ctx)`. PRD #266 Phase C
+ * step 2 finalizes the surface — Phase A removed the bare `cwd` rationale,
+ * Phase B folded `domainRoots`/`allowedImports`/`dsAliases` onto `ctx.auditConfig`,
+ * and this step lifts the prompt to a command-level pre-pass that writes per-
+ * finding answers into `ctx.decisions.fixerChoices`. The fixer reads those
+ * answers via `ctx.decisions.fixerChoices?.[findingKey(finding)]?.[decisionKey]`
+ * (missing entry → `"defer"`), so `plan(ctx)` is now provably deterministic
+ * given its ctx. `FixerOpts` is deleted; nothing threads through alongside ctx.
  */
-export interface FixerOpts {
-  prompt?: FixerPrompt;
-}
-
-export type DriftFixer = (finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts) => Promise<FixResult>;
+export type DriftFixer = (finding: DriftFinding, ctx: ProjectContext) => Promise<FixResult>;
 
 /**
  * Pure enumerator of the questions a fixer might ask the consumer for a given

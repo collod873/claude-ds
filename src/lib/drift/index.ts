@@ -14,7 +14,6 @@ export type {
   DriftRuleId,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "./rule.js";
 export type {
   DecisionAnswer,
@@ -27,7 +26,7 @@ export type { Severity } from "../severity.js";
 export type { FixerPrompt, PromptOption } from "./prompt.js";
 export type { InternalComponent } from "./rules/raw-primitive.js";
 
-export { makeNoTtyPrompt, makeTtyPrompt } from "./prompt.js";
+export { makeTtyPrompt } from "./prompt.js";
 export { parseCvaVariants } from "./cva.js";
 export {
   EXTRACTION_NEEDED_MARKER,

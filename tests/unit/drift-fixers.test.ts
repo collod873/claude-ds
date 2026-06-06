@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { isFixable, getFixer, isInteractive, makeNoTtyPrompt, getFixerPriority, buildVariantOptions } from "../../src/lib/drift/index.js";
-import type { DriftFixer, FixResult, FixerOpts } from "../../src/lib/drift/index.js";
+import { isFixable, getFixer, isInteractive, getFixerPriority, buildVariantOptions, findingKey } from "../../src/lib/drift/index.js";
+import type { DriftFixer, FixResult } from "../../src/lib/drift/index.js";
 import type { DriftRuleId } from "../../src/lib/drift/index.js";
 import type { DriftFinding } from "../../src/lib/drift/index.js";
 import { evaluateDrift, type DriftRuleInput } from "../../src/lib/drift/index.js";
 import type { Change } from "../../src/lib/operation";
+import type { ProjectContext } from "../../src/lib/project.js";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { makeFakeCtx } from "../helpers/fake-ctx";
 import { mkdir, writeFile, readFile, stat, rename, unlink } from "node:fs/promises";
@@ -24,8 +25,20 @@ async function applyChanges(cwd: string, changes: Change[]): Promise<void> {
   }
 }
 
-async function fixAndApply(fn: DriftFixer, finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
-  const result = await fn(finding, makeFakeCtx(cwd), opts);
+/**
+ * `decisions` lets a test seed `ctx.decisions.fixerChoices` for the finding
+ * under test — the same shape the audit-fix command-level pre-pass writes
+ * before any drift `plan()` runs (PRD #266 Phase C). Tests that exercise an
+ * interactive choice (convert-vs-defer, equidistant-token pick) set this
+ * instead of mocking `opts.prompt`.
+ */
+async function fixAndApply(
+  fn: DriftFixer,
+  finding: DriftFinding,
+  cwd: string,
+  decisions: ProjectContext["decisions"] = {},
+): Promise<FixResult> {
+  const result = await fn(finding, makeFakeCtx(cwd, { decisions }));
   await applyChanges(cwd, result.changes);
   return result;
 }
@@ -139,116 +152,14 @@ describe("drift-fixers", () => {
     });
   });
 
-  describe("makeNoTtyPrompt", () => {
-    it("always picks the first option (safe default)", async () => {
-      const prompt = makeNoTtyPrompt();
-      const result = await prompt("Which variant?", [
-        { label: "default", description: "Default variant" },
-        { label: "ghost", description: "Ghost variant" },
-        { label: "outline", description: "Outline variant" },
-      ]);
-      expect(result).toBe(0);
-    });
-
-    it("returns 0 regardless of question or options", async () => {
-      const prompt = makeNoTtyPrompt();
-      expect(await prompt("Pick one", [{ label: "a", description: "Option A" }])).toBe(0);
-      expect(await prompt("Another?", [
-        { label: "x", description: "Option X" },
-        { label: "y", description: "Option Y" },
-        { label: "z", description: "Option Z" },
-      ])).toBe(0);
-    });
-  });
-
-  describe("structured prompt options", () => {
-    it("prompt receives options with label and description fields (equidistant tokens)", async () => {
-      const dir = await freshTmpDir();
-      try {
-        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-
-        const tokensJson = { spacing: { 2: "8", 4: "16" } };
-        await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify(tokensJson));
-
-        const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
-        await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
-
-        const received: Array<Array<{ label: string; description: string }>> = [];
-        const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
-          received.push(opts);
-          for (const opt of opts) {
-            expect(opt).toHaveProperty("label");
-            expect(opt).toHaveProperty("description");
-            expect(typeof opt.label).toBe("string");
-            expect(typeof opt.description).toBe("string");
-          }
-          return 0 as number | "defer";
-        };
-
-        const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
-        const finding: DriftFinding = {
-          ruleId: "DRIFT-INLINE-STATIC-STYLE",
-          file: "design-system/atoms/card.tsx",
-          message: "inline static style",
-        };
-        await fixer(finding, makeFakeCtx(dir), { prompt: mockPrompt });
-
-        expect(received.length).toBeGreaterThan(0);
-      } finally {
-        await cleanup(dir);
-      }
-    });
-
-    it("non-TTY prompt picks safe default (first option) for ambiguous token match", async () => {
-      const dir = await freshTmpDir();
-      try {
-        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-
-        const tokensJson = { color: { primary: "#ff0000", danger: "#ff0000" } };
-        await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify(tokensJson));
-
-        const source = `export function Alert() {\n  return <div style={{ color: "#ff0000" }}>warn</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
-        await writeFile(join(dir, "design-system/atoms/alert.tsx"), source);
-
-        const prompt = makeNoTtyPrompt();
-        const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
-        const finding: DriftFinding = {
-          ruleId: "DRIFT-INLINE-STATIC-STYLE",
-          file: "design-system/atoms/alert.tsx",
-          message: "inline static style",
-        };
-        const result = await fixer(finding, makeFakeCtx(dir), { prompt });
-
-        expect(result.fixed).toBe(true);
-        expect(result.changes.length).toBeGreaterThan(0);
-      } finally {
-        await cleanup(dir);
-      }
-    });
-  });
-
-  describe("FixerOpts.prompt", () => {
-    it("existing DRIFT-META-KIND-MISSING fixer works with prompt in opts", async () => {
-      const dir = await freshTmpDir();
-      try {
-        await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-        await writeFile(join(dir, "design-system/atoms/chip.tsx"), "export function Chip() { return <span />; }\n");
-        const fixer = getFixer("DRIFT-META-KIND-MISSING")!;
-        const finding: DriftFinding = {
-          ruleId: "DRIFT-META-KIND-MISSING",
-          file: "design-system/atoms/chip.tsx",
-          message: "missing meta.kind",
-        };
-        const mockPrompt = async () => 0 as number | "defer";
-        const result = await fixAndApply(fixer,finding, dir, { prompt: mockPrompt });
-        expect(result.fixed).toBe(true);
-        const content = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
-        expect(content).toMatch(/meta/);
-      } finally {
-        await cleanup(dir);
-      }
-    });
-  });
+  // PRD #266 Phase C step 2 deleted `makeNoTtyPrompt` and `FixerOpts.prompt`:
+  // the command-level pre-pass in audit-fix decides everything (defer in
+  // non-TTY; ask via makeTtyPrompt in TTY) and writes per-finding answers to
+  // `ctx.decisions.fixerChoices` before any `plan()` runs. The leaf fixer no
+  // longer takes a prompt callback — its behavior is a pure function of
+  // `(finding, ctx)`. Coverage that used to live as `makeNoTtyPrompt` /
+  // `FixerOpts.prompt` unit tests now lives at the seam that actually wires
+  // these things together: see `tests/unit/audit-fix-pre-pass.test.ts`.
 
   // DRIFT-MISPLACED / DRIFT-MISCLASSIFIED-* used to ship dedicated fixers that
   // moved files between tiers. Per ADR-0015 + PRD #241 / sub-issue #242, audit
@@ -428,7 +339,7 @@ describe("drift-fixers", () => {
       expect(result.fixed).toBe(false);
     });
 
-    it("prompts only when two tokens are equidistant from the value", async () => {
+    it("resolves equidistant tokens via ctx.decisions.fixerChoices (index 0 = first nearest token)", async () => {
       const spacingTokens = {
         spacing: { 2: "8", 4: "16" },
       };
@@ -436,19 +347,16 @@ describe("drift-fixers", () => {
       const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
       await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-      let prompted = false;
-      const mockPrompt = async (_q: string, _opts: Array<{ label: string; description: string }>) => {
-        prompted = true;
-        return 0 as number | "defer";
-      };
+      const finding = makeFinding();
       const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
-      const result = await fixAndApply(fixer, makeFinding(), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, finding, dir, {
+        fixerChoices: { [findingKey(finding)]: { "token-tie:padding:12": 0 } },
+      });
 
-      expect(prompted).toBe(true);
       expect(result.fixed).toBe(true);
     });
 
-    it("defers equidistant match when prompt returns defer", async () => {
+    it("defers equidistant match when fixerChoices answer is 'defer'", async () => {
       const spacingTokens = {
         spacing: { 2: "8", 4: "16" },
       };
@@ -456,9 +364,25 @@ describe("drift-fixers", () => {
       const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
       await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-      const mockPrompt = async () => "defer" as number | "defer";
+      const finding = makeFinding();
       const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
-      const result = await fixAndApply(fixer, makeFinding(), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, finding, dir, {
+        fixerChoices: { [findingKey(finding)]: { "token-tie:padding:12": "defer" } },
+      });
+
+      expect(result.fixed).toBe(false);
+    });
+
+    it("defers equidistant match when no fixerChoices entry exists (missing = defer)", async () => {
+      const spacingTokens = {
+        spacing: { 2: "8", 4: "16" },
+      };
+      await setupTokens(spacingTokens);
+      const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
+
+      const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+      const result = await fixAndApply(fixer, makeFinding(), dir);
 
       expect(result.fixed).toBe(false);
     });
@@ -588,9 +512,8 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
-      const mockPrompt = async () => 0 as number | "defer";
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding(), dir);
 
       expect(result.fixed).toBe(true);
 
@@ -620,48 +543,15 @@ describe("drift-fixers", () => {
       await writeFile(join(dir, "src/page.tsx"),
         `import { formatDate } from "@/lib/utils/format";\nexport default function Page() { return <div>{formatDate(new Date())}</div>; }\n`);
 
-      const mockPrompt = async () => 0 as number | "defer";
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+      await fixAndApply(fixer, makeFinding(), dir);
 
       const pageContent = await readFile(join(dir, "src/page.tsx"), "utf8");
       expect(pageContent).toContain("@/design-system/utils/format");
       expect(pageContent).not.toContain("@/lib/utils/format");
     });
 
-    it("does not offer extract-to-utils when symbol has transitive domain deps", async () => {
-      await mkdir(join(dir, "design-system/composites"), { recursive: true });
-      await mkdir(join(dir, "lib/api"), { recursive: true });
-      await mkdir(join(dir, "features/auth"), { recursive: true });
-
-      await writeFile(join(dir, "features/auth/session.ts"),
-        `export function getSession() { return { user: "test" }; }\n`);
-
-      await writeFile(join(dir, "lib/api/client.ts"),
-        `import { getSession } from "../../features/auth/session";\nexport function apiClient() { return getSession(); }\n`);
-
-      const dsSource = [
-        `import { apiClient } from "../../lib/api/client";`,
-        `export function UserBadge() { return <div>{apiClient()}</div>; }`,
-        `export const meta = { kind: "composite" as const, examples: [] };`,
-      ].join("\n") + "\n";
-      await writeFile(join(dir, "design-system/composites/user-badge.tsx"), dsSource);
-
-      const promptOptions: Array<Array<{ label: string; description: string }>> = [];
-      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
-        promptOptions.push(opts);
-        return 0 as number | "defer";
-      };
-      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      await fixAndApply(fixer,makeFinding("design-system/composites/user-badge.tsx"), dir, { prompt: mockPrompt });
-
-      expect(promptOptions.length).toBeGreaterThan(0);
-      const labels = promptOptions[0].map(o => o.label.toLowerCase());
-      expect(labels.some(l => l.includes("extract"))).toBe(false);
-      expect(labels.some(l => l.includes("prop"))).toBe(true);
-    });
-
-    it("auto-extracts 3+ param functions without offering prop injection", async () => {
+    it("auto-extracts 3+ param functions without needing a fixerChoices entry", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await mkdir(join(dir, "lib/utils"), { recursive: true });
 
@@ -675,18 +565,15 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
 
-      let prompted = false;
-      const mockPrompt = async () => { prompted = true; return 0 as number | "defer"; };
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      const result = await fixAndApply(fixer, makeFinding("design-system/composites/widget.tsx"), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding("design-system/composites/widget.tsx"), dir);
 
-      expect(prompted).toBe(false);
       expect(result.fixed).toBe(true);
       const content = await readFile(join(dir, "design-system/composites/widget.tsx"), "utf8");
       expect(content).toContain("@/design-system/utils/complex");
     });
 
-    it("auto-extracts constants without offering prop injection", async () => {
+    it("auto-extracts constants without needing a fixerChoices entry", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await mkdir(join(dir, "lib/config"), { recursive: true });
 
@@ -700,47 +587,50 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
 
-      let prompted = false;
-      const mockPrompt = async () => { prompted = true; return 0 as number | "defer"; };
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      const result = await fixAndApply(fixer, makeFinding("design-system/composites/badge.tsx"), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding("design-system/composites/badge.tsx"), dir);
 
-      expect(prompted).toBe(false);
       expect(result.fixed).toBe(true);
       const content = await readFile(join(dir, "design-system/composites/badge.tsx"), "utf8");
       expect(content).toContain("@/design-system/utils/theme");
     });
 
-    it("converts to prop injection — removes import and adds prop", async () => {
+    it("converts to prop injection when fixerChoices answers 0 (Convert) for a symbol that can't be extracted", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
-      await mkdir(join(dir, "lib/utils"), { recursive: true });
+      await mkdir(join(dir, "lib/api"), { recursive: true });
+      await mkdir(join(dir, "features/auth"), { recursive: true });
 
-      await writeFile(join(dir, "lib/utils/format.ts"),
-        `export function formatDate(d: Date): string { return d.toISOString(); }\n`);
+      // session has its own domain dep → apiClient can't be extracted to utils/
+      await writeFile(join(dir, "features/auth/session.ts"),
+        `export function getSession() { return { user: "test" }; }\n`);
+      await writeFile(join(dir, "lib/api/client.ts"),
+        `import { getSession } from "../../features/auth/session";\nexport function apiClient() { return getSession(); }\n`);
 
       const dsSource = [
-        `import { formatDate } from "../../lib/utils/format";`,
+        `import { apiClient } from "../../lib/api/client";`,
         `export function EventCard({ title }: { title: string }) {`,
-        `  return <div>{title}: {formatDate(new Date())}</div>;`,
+        `  return <div>{title}: {apiClient()}</div>;`,
         `}`,
         `export const meta = { kind: "composite" as const, examples: [] };`,
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
-      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
-        return opts.findIndex(o => o.label.toLowerCase().includes("prop")) as number | "defer";
-      };
+      const finding = makeFinding();
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, finding, dir, {
+        fixerChoices: {
+          [findingKey(finding)]: { "convert:../../lib/api/client:apiClient": 0 },
+        },
+      });
 
       expect(result.fixed).toBe(true);
       const content = await readFile(join(dir, "design-system/composites/event-card.tsx"), "utf8");
-      expect(content).not.toContain("lib/utils/format");
-      expect(content).toContain("formatDate");
-      expect(content).toMatch(/\bformatDate\b.*\}/); // prop in destructuring
+      expect(content).not.toContain("lib/api/client");
+      expect(content).toContain("apiClient");
+      expect(content).toMatch(/\bapiClient\b.*\}/); // prop in destructuring
     });
 
-    it("defers when prompt returns defer for non-auto-extractable symbol", async () => {
+    it("defers when fixerChoices answer is 'defer' for non-auto-extractable symbol", async () => {
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
       await mkdir(join(dir, "design-system"), { recursive: true });
       await mkdir(join(dir, "lib/api"), { recursive: true });
@@ -759,9 +649,13 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
-      const mockPrompt = async () => "defer" as number | "defer";
+      const finding = makeFinding();
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, finding, dir, {
+        fixerChoices: {
+          [findingKey(finding)]: { "convert:../../lib/api/client:apiClient": "defer" },
+        },
+      });
 
       expect(result.fixed).toBe(false);
       expect(result.message).toMatch(/defer/i);
@@ -809,9 +703,8 @@ describe("drift-fixers", () => {
       ].join("\n") + "\n";
       await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
-      const mockPrompt = async () => 0 as number | "defer";
       const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      const result = await fixAndApply(fixer,makeFinding(), dir, { prompt: mockPrompt });
+      const result = await fixAndApply(fixer, makeFinding(), dir);
 
       expect(result.fixed).toBe(true);
       const dsContent = await readFile(join(dir, "design-system/composites/event-card.tsx"), "utf8");
@@ -865,37 +758,11 @@ describe("drift-fixers", () => {
       expect(content).toContain("@/design-system/utils/complex");
     });
 
-    it("prompts with simple-question when circular dependency prevents extraction", async () => {
-      await mkdir(join(dir, "design-system/composites"), { recursive: true });
-      await mkdir(join(dir, "lib/api"), { recursive: true });
-      await mkdir(join(dir, "features/auth"), { recursive: true });
-
-      await writeFile(join(dir, "features/auth/session.ts"),
-        `export function getSession() { return { user: "test" }; }\n`);
-
-      await writeFile(join(dir, "lib/api/client.ts"),
-        `import { getSession } from "../../features/auth/session";\nexport function apiClient() { return getSession(); }\n`);
-
-      const dsSource = [
-        `import { apiClient } from "../../lib/api/client";`,
-        `export function UserBadge() { return <div>{apiClient()}</div>; }`,
-        `export const meta = { kind: "composite" as const, examples: [] };`,
-      ].join("\n") + "\n";
-      await writeFile(join(dir, "design-system/composites/user-badge.tsx"), dsSource);
-
-      let prompted = false;
-      const mockPrompt = async (_q: string, opts: Array<{ label: string; description: string }>) => {
-        prompted = true;
-        const labels = opts.map(o => o.label.toLowerCase());
-        expect(labels.some(l => l.includes("extract"))).toBe(false);
-        expect(labels.some(l => l.includes("prop"))).toBe(true);
-        return opts.findIndex(o => o.label.toLowerCase().includes("prop")) as number | "defer";
-      };
-      const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-      await fixAndApply(fixer, makeFinding("design-system/composites/user-badge.tsx"), dir, { prompt: mockPrompt });
-
-      expect(prompted).toBe(true);
-    });
+    // PRD #266 Phase C step 2: the "what options would the fixer offer the
+    // consumer?" question moved out of the fixer (which used to fabricate the
+    // prompt inline during `plan()`) into the rule's pure `describeDecisions`
+    // hook. Coverage that asserts the surfaced option set when extract is
+    // unavailable lives in `tests/unit/describe-decisions.test.ts`.
 
     it("registry marks DRIFT-DS-IMPORTS-FEATURE as interactive (PRD #266 Phase C)", () => {
       expect(isInteractive("DRIFT-DS-IMPORTS-FEATURE" as DriftRuleId)).toBe(true);
@@ -1315,26 +1182,18 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
-        const promptCalls: string[] = [];
-        const mockPrompt = async (q: string) => {
-          promptCalls.push(q);
-          return 0 as number | "defer";
-        };
-
         const finding: DriftFinding = {
           ruleId: "DRIFT-RAW-PRIMITIVE",
           file: "design-system/composites/toolbar.tsx",
           message: "raw <button>",
         };
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        const result = await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+        const result = await fixAndApply(fixer, finding, dir);
 
         expect(result.fixed).toBe(true);
         const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
         expect(content).toContain('variant="ghost"');
         expect(content).toContain("<Button");
-        // Should NOT have prompted — variant was auto-inferred
-        expect(promptCalls).toHaveLength(0);
       });
 
       it("auto-applies default variant when className has no variant keywords", async () => {
@@ -1366,25 +1225,17 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/form.tsx"), compositeSource);
 
-        const promptCalls: string[] = [];
-        const mockPrompt = async (q: string) => {
-          promptCalls.push(q);
-          return 0 as number | "defer";
-        };
-
         const finding: DriftFinding = {
           ruleId: "DRIFT-RAW-PRIMITIVE",
           file: "design-system/composites/form.tsx",
           message: "raw <button>",
         };
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        const result = await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+        const result = await fixAndApply(fixer, finding, dir);
 
         expect(result.fixed).toBe(true);
         const content = await readFile(join(dir, "design-system/composites/form.tsx"), "utf8");
         expect(content).toContain("<Button");
-        // No prompt needed — auto-applied default
-        expect(promptCalls).toHaveLength(0);
       });
 
       it("auto-applies default (no variant) when className matches 2+ variant keywords", async () => {
@@ -1422,7 +1273,7 @@ describe("drift-fixers", () => {
           message: "raw <button>",
         };
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        const result = await fixAndApply(fixer, finding, dir, {});
+        const result = await fixAndApply(fixer, finding, dir);
 
         expect(result.fixed).toBe(true);
         const content = await readFile(join(dir, "design-system/composites/actions.tsx"), "utf8");
@@ -1453,25 +1304,18 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
-        const promptCalls: string[] = [];
-        const mockPrompt = async (q: string) => {
-          promptCalls.push(q);
-          return 0 as number | "defer";
-        };
-
         const finding: DriftFinding = {
           ruleId: "DRIFT-RAW-PRIMITIVE",
           file: "design-system/composites/filter-bar.tsx",
           message: "raw primitive",
         };
         const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
-        const result = await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+        const result = await fixAndApply(fixer, finding, dir);
 
-        // Extraction is classify's job — audit defers, creates nothing, asks nothing
+        // Extraction is classify's job — audit defers, creates nothing.
         expect(result.fixed).toBe(false);
         expect(result.message).toContain("needs extraction");
         await expect(stat(join(dir, "design-system/atoms/chip.tsx"))).rejects.toThrow();
-        expect(promptCalls).toHaveLength(0);
       });
     });
 
@@ -1490,25 +1334,17 @@ describe("drift-fixers", () => {
         ].join("\n") + "\n";
         await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
-        const promptCalls: string[] = [];
-        const mockPrompt = async (q: string) => {
-          promptCalls.push(q);
-          return 0 as number | "defer";
-        };
-
         const finding: DriftFinding = {
           ruleId: "DRIFT-DS-IMPORTS-FEATURE",
           file: "design-system/composites/event-card.tsx",
           message: "domain import",
         };
         const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
-        const result = await fixAndApply(fixer, finding, dir, { prompt: mockPrompt });
+        const result = await fixAndApply(fixer, finding, dir);
 
         expect(result.fixed).toBe(true);
         const content = await readFile(join(dir, "design-system/composites/event-card.tsx"), "utf8");
         expect(content).toContain("@/design-system/utils/format");
-        // Should NOT have prompted — auto-extracted pure function
-        expect(promptCalls).toHaveLength(0);
       });
     });
   });

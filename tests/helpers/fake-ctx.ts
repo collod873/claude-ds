@@ -32,6 +32,7 @@ export function makeFakeCtx(
     claudeMdTarget: "CLAUDE.md",
     ...(extra.auditConfig ?? {}),
   };
-  const { auditConfig: _drop, ...rest } = extra;
-  return { cwd, ...rest, auditConfig } as unknown as ProjectContext;
+  const { auditConfig: _drop, decisions: extraDecisions, ...rest } = extra;
+  const decisions: ProjectContext["decisions"] = extraDecisions ?? {};
+  return { cwd, ...rest, auditConfig, decisions } as unknown as ProjectContext;
 }
