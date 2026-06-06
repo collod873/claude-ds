@@ -62,10 +62,14 @@ export interface FixResult {
   changes: Change[];
 }
 
+/**
+ * Per-call options threaded into a drift fixer. Phase B of PRD #266 collapsed
+ * the audit-config fields here (`domainRoots`, `allowedImports`, `dsAliases`)
+ * onto `ctx.auditConfig` — fixers now read those directly off ctx and `FixerOpts`
+ * carries only the prompt. Phase C will remove `prompt` from this seam too;
+ * `FixerOpts` disappears entirely once that lands.
+ */
 export interface FixerOpts {
-  domainRoots?: string[];
-  allowedImports?: string[];
-  dsAliases?: string[];
   prompt?: FixerPrompt;
 }
 

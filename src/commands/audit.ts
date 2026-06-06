@@ -4,12 +4,10 @@ import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
 import { info, err, printNextStep, detectBuildCommand } from "../lib/log.js";
-import { detectAppDir } from "../lib/paths.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { parseExceptions, type Exception } from "../lib/exceptions.js";
 import { isExtractionNeededFinding, isFixable, type DriftRuleId } from "../lib/drift/index.js";
 import { isIntegrityFixable, type IntegrityRuleId } from "../lib/integrity/index.js";
-import { detectDsAliases, detectTsconfigPaths } from "../lib/ds-aliases.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import {
   scanUnexpectedFiles,
@@ -55,10 +53,9 @@ export async function auditCmd(opts: AuditOpts) {
     const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
     ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
   }
-  const { packDir, manifest } = ctx;
+  const { manifest } = ctx;
   // #47/#34: honor app_dir + claude_md_target when checking presence.
-  const appDir = cfg?.app_dir ?? await detectAppDir(cwd);
-  const claudeMdTarget = cfg?.claude_md_target ?? "CLAUDE.md";
+  const { appDir, claudeMdTarget } = ctx.auditConfig;
 
   const verbose = opts.verbose ?? false;
 
@@ -106,19 +103,8 @@ export async function auditCmd(opts: AuditOpts) {
   }
   const suppressedSet = new Set(exceptions.map(e => suppressedKey(e.rule, e.path)));
 
-  // Drift + integrity scan.
-  const domainRoots = cfg?.domain_roots;
-  const metaKindStrict = cfg?.meta_kind_strict ?? false;
-  const allowedImports = cfg?.allowed_imports ?? [];
-  let dsAliases = cfg?.ds_aliases ?? [];
-  if (dsAliases.length === 0) {
-    dsAliases = await detectDsAliases(cwd, cfg?.srcRoot ?? "src");
-  }
-  const tsconfigPaths = await detectTsconfigPaths(cwd, cfg?.srcRoot ?? "src");
-
-  const driftIntegrity = await scanDriftAndIntegrity(ctx, {
-    domainRoots, metaKindStrict, allowedImports, dsAliases, tsconfigPaths,
-  });
+  // Drift + integrity scan reads everything from `ctx.auditConfig`.
+  const driftIntegrity = await scanDriftAndIntegrity(ctx);
   info(driftIntegrity.coverageLine);
 
   const initialActive: AuditFinding[] = driftIntegrity.findings.filter(
@@ -136,10 +122,6 @@ export async function auditCmd(opts: AuditOpts) {
     reason: opts.reason,
     issue: opts.issue,
     permanent: opts.permanent,
-    domainRoots,
-    metaKindStrict,
-    allowedImports,
-    dsAliases,
   });
 
   warningCount += fixSummary.warningCount;

@@ -11,7 +11,6 @@ import type {
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 /** DRIFT-META-KIND-MISSING: DS file with no meta.kind when strict mode is on. */
@@ -27,7 +26,7 @@ function detect(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
-async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts): Promise<FixResult> {
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
   const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
@@ -36,8 +35,9 @@ async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts)
     return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
+  const { domainRoots, allowedImports, dsAliases } = ctx.auditConfig;
   const locationTier = locationTierFromPath(finding.file);
-  const verdict = classifySource(source, opts?.domainRoots, opts?.allowedImports, opts?.dsAliases);
+  const verdict = classifySource(source, domainRoots, allowedImports, dsAliases);
   const tier = locationTier ?? verdict.tier;
 
   if (tier === "feature" || tier === "unknown") {

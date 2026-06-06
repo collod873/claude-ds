@@ -20,12 +20,6 @@ export interface IntegrityFinding {
   message: string;
 }
 
-export interface IntegrityContext {
-  cwd: string;
-  dsAliases: string[];
-  tsconfigPaths?: Record<string, string[]>;
-}
-
 export interface IntegrityFixResult {
   finding: IntegrityFinding;
   fixed: boolean;
@@ -51,8 +45,10 @@ export interface IntegrityFixResult {
  * `detect` returns `IntegrityFinding[] | Promise<IntegrityFinding[]>` and
  * takes `(file, source, ctx?)`: a single rule may emit multiple findings on
  * one file (UNRESOLVABLE-IMPORT does, one per unresolved import path) and may
- * need the project `IntegrityContext` (cwd, aliases, tsconfig paths). Rules
- * that don't need `ctx` simply ignore the third arg.
+ * need the `ProjectContext` (cwd, `ctx.auditConfig.dsAliases`,
+ * `ctx.auditConfig.tsconfigPaths`). Rules that don't need `ctx` simply ignore
+ * the third arg. PRD #266 Phase B: `IntegrityContext` is deleted in favor of
+ * `ProjectContext`, so integrity and drift share one audit-config source.
  */
 export type IntegrityRule =
   | {
@@ -63,7 +59,7 @@ export type IntegrityRule =
       detect: (
         file: string,
         source: string,
-        ctx?: IntegrityContext,
+        ctx?: ProjectContext,
       ) => IntegrityFinding[] | Promise<IntegrityFinding[]>;
       fixable: false;
     }
@@ -75,7 +71,7 @@ export type IntegrityRule =
       detect: (
         file: string,
         source: string,
-        ctx?: IntegrityContext,
+        ctx?: ProjectContext,
       ) => IntegrityFinding[] | Promise<IntegrityFinding[]>;
       fixable: true;
       fix: (finding: IntegrityFinding, ctx: ProjectContext) => Promise<IntegrityFixResult>;

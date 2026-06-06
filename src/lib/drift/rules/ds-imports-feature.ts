@@ -1,7 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { DEFAULT_DOMAIN_ROOTS } from "../../classifier.js";
 import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
 
@@ -217,7 +216,7 @@ async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts)
     return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
-  const domainRoots = opts?.domainRoots ?? DEFAULT_DOMAIN_ROOTS;
+  const { domainRoots } = ctx.auditConfig;
   const domainImports = parseDomainImports(source, domainRoots);
   if (domainImports.length === 0) {
     return { finding, fixed: false, message: `no domain imports found in ${finding.file}`, changes: [] };

@@ -9,7 +9,6 @@ import type {
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 const STALE_DS_IMPORT_RE = /from\s+["']@\/design-system\//;
@@ -35,7 +34,7 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 
 const STALE_ALIAS_RE = /(from\s+["'])@\/design-system\/(.*?)(["'])/g;
 
-async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts): Promise<FixResult> {
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
   const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
@@ -44,7 +43,7 @@ async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts)
     return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
-  const canonicalAlias = (opts?.dsAliases ?? []).find(a => a !== "@/design-system") ?? "@/design-system";
+  const canonicalAlias = ctx.auditConfig.dsAliases.find(a => a !== "@/design-system") ?? "@/design-system";
   let result = source.replace(STALE_ALIAS_RE, `$1${canonicalAlias}/$2$3`);
 
   // Deduplicate identical import lines created by the rewrite

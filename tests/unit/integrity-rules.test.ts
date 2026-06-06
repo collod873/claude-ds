@@ -9,6 +9,7 @@ import {
   integrityRuleSeverity,
   type IntegrityRuleId,
 } from "../../src/lib/integrity/index";
+import { makeFakeCtx } from "../helpers/fake-ctx";
 
 describe("integrity rule registry", () => {
   it("exposes INTEGRITY-UNPARSEABLE as a rule ID", () => {
@@ -174,7 +175,7 @@ export const Card = () => <div />;
     const findings = await evaluateIntegrity(
       "design-system/composites/card.tsx",
       source,
-      { cwd: tmpDir, dsAliases: [] },
+      makeFakeCtx(tmpDir, { auditConfig: { dsAliases: [] } }),
     );
     const hit = findings.find(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
     expect(hit).toBeDefined();
@@ -189,7 +190,7 @@ export const Card = () => <Button />;
     const findings = await evaluateIntegrity(
       "design-system/composites/card.tsx",
       source,
-      { cwd: tmpDir, dsAliases: [] },
+      makeFakeCtx(tmpDir, { auditConfig: { dsAliases: [] } }),
     );
     expect(findings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT")).toHaveLength(0);
   });
@@ -202,7 +203,7 @@ export const Card = () => <Button />;
     const findings = await evaluateIntegrity(
       "design-system/composites/card.tsx",
       source,
-      { cwd: tmpDir, dsAliases: ["@ds"] },
+      makeFakeCtx(tmpDir, { auditConfig: { dsAliases: ["@ds"] } }),
     );
     expect(findings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT")).toHaveLength(0);
   });
@@ -215,7 +216,7 @@ export const Card = () => <div />;
     const findings = await evaluateIntegrity(
       "design-system/composites/card.tsx",
       source,
-      { cwd: tmpDir, dsAliases: ["@ds"] },
+      makeFakeCtx(tmpDir, { auditConfig: { dsAliases: ["@ds"] } }),
     );
     const hit = findings.find(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
     expect(hit).toBeDefined();
@@ -230,7 +231,7 @@ export const Card = () => <div />;
     const findings = await evaluateIntegrity(
       "design-system/composites/card.tsx",
       source,
-      { cwd: tmpDir, dsAliases: ["@ds"] },
+      makeFakeCtx(tmpDir, { auditConfig: { dsAliases: ["@ds"] } }),
     );
     expect(findings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT")).toHaveLength(0);
   });
@@ -246,7 +247,7 @@ export const Card = () => <div />;
     const findings = await evaluateIntegrity(
       "design-system/composites/card.tsx",
       source,
-      { cwd: tmpDir, dsAliases: [] },
+      makeFakeCtx(tmpDir, { auditConfig: { dsAliases: [] } }),
     );
     expect(findings.filter(f => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT")).toHaveLength(0);
   });

@@ -10,7 +10,6 @@ import type {
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 /** DRIFT-META-EXAMPLES-CORRUPT: examples array has unbalanced braces (truncated entries). */
@@ -36,7 +35,7 @@ function detect(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
-async function fix(finding: DriftFinding, ctx: ProjectContext, _opts?: FixerOpts): Promise<FixResult> {
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
   const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {

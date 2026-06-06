@@ -5,14 +5,12 @@ import { validateFixerOutput } from "../fixer-validate.js";
 import { info } from "../log.js";
 import { INTEGRITY_RULES, INTEGRITY_RULES_BY_ID } from "./registry.js";
 import type {
-  IntegrityContext,
   IntegrityFinding,
   IntegrityFixResult,
   IntegrityRuleId,
 } from "./rule.js";
 
 export type {
-  IntegrityContext,
   IntegrityFinding,
   IntegrityFixResult,
   IntegrityRule,
@@ -60,11 +58,11 @@ export function isIntegrityBlocking(id: IntegrityRuleId): boolean {
  * synchronously and the array path picks them up.
  */
 export function evaluateIntegrity(file: string, source: string): IntegrityFinding[];
-export function evaluateIntegrity(file: string, source: string, ctx: IntegrityContext): Promise<IntegrityFinding[]>;
+export function evaluateIntegrity(file: string, source: string, ctx: ProjectContext): Promise<IntegrityFinding[]>;
 export function evaluateIntegrity(
   file: string,
   source: string,
-  ctx?: IntegrityContext,
+  ctx?: ProjectContext,
 ): IntegrityFinding[] | Promise<IntegrityFinding[]> {
   if (!ctx) {
     const findings: IntegrityFinding[] = [];

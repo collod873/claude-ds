@@ -1,5 +1,6 @@
 import { classifySource, type Tier, type TierVerdict } from "./classifier.js";
 import { evaluateDrift, type DriftFinding } from "./drift/index.js";
+import type { ProjectContext } from "./project.js";
 
 export interface ThreeSignals {
   /** Tier inferred from folder path, null if not under a known DS tier dir. */
@@ -44,18 +45,17 @@ export function metaKindFromSource(source: string): Tier | null {
 /**
  * Run the three-signal check for a single file.
  *
- * Pure: no I/O. Pass the file's relative path and its full source text.
- * @param domainRoots - Domain folder names that mark a file as feature-tier (passed to classifier).
- * @param metaKindStrict - When true, DRIFT-META-KIND-MISSING fires on DS files lacking meta.kind.
+ * Pure: no I/O. Reads `ctx.auditConfig` for the four cfg-with-detected-fallback
+ * fields (`domainRoots`, `metaKindStrict`, `allowedImports`, `dsAliases`) so all
+ * detect/classify/fix paths share the one resolver (PRD #266 Phase B). Pass the
+ * file's relative path and its full source text.
  */
 export function checkThreeSignals(
   filePath: string,
   source: string,
-  domainRoots?: string[],
-  metaKindStrict?: boolean,
-  allowedImports?: string[],
-  dsAliases?: string[],
+  ctx: ProjectContext,
 ): ThreeSignalResult {
+  const { domainRoots, metaKindStrict, allowedImports, dsAliases } = ctx.auditConfig;
   const locationTier = locationTierFromPath(filePath);
   const metaKind = metaKindFromSource(source);
   const classifierVerdict = classifySource(source, domainRoots, allowedImports, dsAliases);

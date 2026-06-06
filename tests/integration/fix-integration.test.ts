@@ -16,6 +16,7 @@ async function collectFindings(cwd: string): Promise<DriftFinding[]> {
   const { readdir, readFile: rf } = await import("node:fs/promises");
   const tierDirs = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
   const findings: DriftFinding[] = [];
+  const ctx = makeFakeCtx(cwd);
   for (const tierDir of tierDirs) {
     let entries: string[];
     try { entries = await readdir(join(cwd, tierDir)); } catch { continue; }
@@ -25,7 +26,7 @@ async function collectFindings(cwd: string): Promise<DriftFinding[]> {
       const filePath = `${tierDir}/${entry}`;
       let source: string;
       try { source = await rf(join(cwd, filePath), "utf8"); } catch { continue; }
-      const { findings: f } = checkThreeSignals(filePath, source);
+      const { findings: f } = checkThreeSignals(filePath, source, ctx);
       findings.push(...f);
     }
   }

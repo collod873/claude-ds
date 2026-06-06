@@ -48,10 +48,6 @@ export interface AuditFixParams {
   reason?: string;
   issue?: string;
   permanent?: boolean;
-  domainRoots?: string[];
-  metaKindStrict: boolean;
-  allowedImports: string[];
-  dsAliases: string[];
 }
 
 export interface AuditFixSummary {
@@ -87,7 +83,6 @@ export async function runAuditFix(
   const {
     unexpected, driftTierDirs,
     fix, except, reason, issue, permanent,
-    domainRoots, metaKindStrict, allowedImports, dsAliases,
   } = params;
   let exceptions = params.exceptions;
   const suppressedSet = new Set(params.suppressedSet);
@@ -255,7 +250,7 @@ export async function runAuditFix(
     for (const filePath of integrityFixedFiles) {
       let source: string;
       try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
-      const { findings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
+      const { findings } = checkThreeSignals(filePath, source, ctx);
       for (const f of findings) {
         if (!suppressedSet.has(suppressedKey(f.ruleId, f.file))) {
           activeFindings.push(f);
@@ -270,9 +265,7 @@ export async function runAuditFix(
       (f): f is DriftFinding =>
         !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
     );
-    const fixPassResult = await runFixPass(ctx, driftFindings, {
-      domainRoots, allowedImports, dsAliases, prompt,
-    });
+    const fixPassResult = await runFixPass(ctx, driftFindings, { prompt });
 
     if (fixPassResult.aborted) {
       err("Fix pass failed — all changes rolled back. Re-run to retry.");
@@ -305,9 +298,7 @@ export async function runAuditFix(
         let source: string | null = null;
         try { source = await readFile(absFile, "utf8"); } catch { /* file may have moved */ }
         if (source === null) continue;
-        const { findings: reFindings } = checkThreeSignals(
-          ex.path, source, domainRoots, metaKindStrict, allowedImports, dsAliases,
-        );
+        const { findings: reFindings } = checkThreeSignals(ex.path, source, ctx);
         const stillFires = reFindings.some(f => f.ruleId === ex.rule);
         if (stillFires) remainingExceptions.push(ex);
       }
@@ -342,7 +333,7 @@ export async function runAuditFix(
         if (!inTierDir) continue;
         let source: string;
         try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
-        const { findings: reFindings } = checkThreeSignals(filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases);
+        const { findings: reFindings } = checkThreeSignals(filePath, source, ctx);
         for (const f of reFindings) {
           const key = suppressedKey(f.ruleId, f.file);
           if (!activeFindingKeys.has(key) && !suppressedSet.has(key)) {
@@ -362,9 +353,7 @@ export async function runAuditFix(
             !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
         );
         if (reFixFindings.length > 0) {
-          const reFixResult = await runFixPass(ctx, reFixFindings, {
-            domainRoots, allowedImports, dsAliases, prompt,
-          });
+          const reFixResult = await runFixPass(ctx, reFixFindings, { prompt });
           if (!reFixResult.aborted) {
             const reFixedCount = reFixResult.results.filter(r => r.fixed).length;
             if (reFixedCount > 0) {

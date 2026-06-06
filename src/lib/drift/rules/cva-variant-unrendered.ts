@@ -11,7 +11,6 @@ import type {
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 /**
@@ -76,7 +75,7 @@ function buildExampleStub(axis: string, value: string): string {
   return `{ name: "${value}", props: { ${axis}: "${value}" } }`;
 }
 
-async function fix(finding: DriftFinding, ctx: ProjectContext, _opts?: FixerOpts): Promise<FixResult> {
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
   const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
