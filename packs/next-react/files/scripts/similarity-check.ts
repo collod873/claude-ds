@@ -67,6 +67,14 @@ function main(): void {
     process.exit(1);
   }
 
+  // #295: when invoked by the PreToolUse hook, the edited file is argv[2].
+  // Per ADR-0002 / ADR-0006, write-time hooks block on the write in front of
+  // them — pre-existing global state in unrelated files is the audit's surface.
+  // Scope: report only pairs that include the target file's component name.
+  // No target → standalone/CI mode reports every near-duplicate.
+  const targetFile = process.argv[2] ?? "";
+  const targetBase = targetFile ? basename(targetFile, extname(targetFile)) : "";
+
   const names = collectNames(dsRoot);
   let violations = 0;
 
@@ -78,6 +86,8 @@ function main(): void {
       const dist = levenshtein(a.name.toLowerCase(), b.name.toLowerCase());
       const maxLen = Math.max(a.name.length, b.name.length);
       if (maxLen > 0 && dist / maxLen < 0.4) {
+        // Hook mode: only flag pairs where the edit target is one side.
+        if (targetBase && a.name !== targetBase && b.name !== targetBase) continue;
         const pathA = join(dsRoot, a.dir, `${a.name}.tsx`);
         const pathB = join(dsRoot, b.dir, `${b.name}.tsx`);
         process.stderr.write(
