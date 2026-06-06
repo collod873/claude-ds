@@ -19,8 +19,13 @@ those is a defect by the bar claude-ds should hold itself to.
 **Completeness principle.** Anything a consumer project hand-rolls for
 design-system concerns is a claude-ds defect. The end state for any consumer
 is *zero local DS infrastructure outside the pack-installed scaffold*. The
-goal of `adopt → classify → audit` is **0 to hero** with no thinking about
-fixes or workarounds: clear direction, uniform process across projects.
+goal of `adopt → heal` is **0 to hero** with no thinking about fixes or
+workarounds: clear direction, uniform process across projects. `heal` is the
+self-converging brownfield loop (issue #265) — `sync → upgrade → classify →
+audit --fix` repeated to a fixed point (max 3 iterations, fails loudly
+otherwise). It replaces the documented-but-manual two-pass classify ↔
+`audit --fix` sequence that v1.1.0 used to require for corrupt-baseline
+imports.
 
 This sits **alongside** the existing north star ("safe to drop into any
 consumer repo without breaking it"). The north star is about safety;

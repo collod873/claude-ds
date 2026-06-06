@@ -17,6 +17,12 @@ Status: Accepted
 
 - The Path B branch of the raw-primitive fixer (`src/lib/drift-fixers.ts` lines ~1820-1894 at time of writing) is deleted. Audit becomes simpler and never writes a file it didn't read first.
 - `classify` becomes the only command that can create new tier files. Its destructive-one-shot framing already prepared consumers for that.
-- The three-command brownfield sequence (`adopt → classify → audit`) gets a sharper division of labour: classify makes structural decisions, audit checks conventions. Each command does one thing.
+- The brownfield sequence (`adopt → heal`, where `heal` loops
+  `sync → upgrade → classify → audit --fix` to a fixed point per #265) gets a
+  sharper division of labour: classify makes structural decisions, audit
+  checks conventions. Each command does one thing. `heal` handles the
+  multi-pass loop classify-then-audit needed for corrupt baselines (atoms
+  whose imports re-derive into composites after `audit --fix` runs) so the
+  consumer never sequences the two-pass dance by hand.
 - Fix-loop rubric item `coverage-all-files` becomes achievable: every `.tsx` under `design-system/` was present at audit's file-walk because audit no longer adds files mid-run.
 - The fix-loop rubric's expectation that `audit --fix` alone produces a 23/23 clean run on a brownfield baseline is wrong; the rubric must allow `classify` to run first. That's a fix-loop change, not a tool change.

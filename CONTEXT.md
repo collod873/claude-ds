@@ -126,15 +126,22 @@ and distinguishable, (3) the system's best guess would be wrong often enough
 to matter. If any test fails, automate instead of asking.
 
 ### Convergence
-The brownfield acceptance property: `sync → classify → audit --fix → audit`
-on a real consumer reaches a clean, idempotent tree in one human-run
-sequence. A second `audit --fix` from the converged state makes 0 changes
-and produces 0 new errors. Convergence is structural, not iterative — once
-classify owns every tier move and audit cannot relocate files, the pipeline
-is a fixed point by design (not by retry loop). Failure to converge — a
-self-worsening `--fix`, dangling imports left behind, audit pointing at
-itself for findings it cannot fix — is the deepest possible violation of
-the north star. See ADR-0014, ADR-0015.
+The brownfield acceptance property: a single `claude-ds heal` invocation
+drives a real consumer tree to clean + idempotent. `heal` is the
+self-converging command (#265): a bounded loop over `sync → upgrade →
+classify → audit --fix` that exits as soon as one iteration produces 0
+file changes and `audit` reports 0 findings, or fails loudly at the
+iteration ceiling (default 3) — never silently spins. Convergence is
+detected, not assumed: the corrupt-baseline shape that motivated #265
+(atoms whose import block was stripped score `atom` at first classify,
+then re-derive into composites once `audit --fix` heals their imports —
+ADR-0015 bars audit from relocating, so a second classify is required)
+needs two classify passes to settle, and `heal` runs them automatically.
+A second `heal` from the converged state makes 0 changes and produces 0
+new errors. Failure to converge — a self-worsening `--fix`, dangling
+imports left behind, audit pointing at itself for findings it cannot fix
+— is the deepest possible violation of the north star. See ADR-0014,
+ADR-0015.
 
 ### Intervention
 A manual correction or rescue the consumer had to make to reach a clean
