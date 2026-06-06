@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
 
+import type { FixerDecisionPoint } from "../decisions.js";
 import type {
   DriftFinding,
   DriftRule,
@@ -339,6 +340,48 @@ async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts)
   return { finding, fixed: true, message: `replaced inline styles with token classes in ${finding.file}`, changes };
 }
 
+/**
+ * Pure enumerator of the equidistant-token tie-break questions the fixer
+ * could ask. The live fixer only prompts when a numeric style value is
+ * equidistant from two tokens — that resolution requires reading
+ * `design-system/tokens.json` (I/O), which describeDecisions must not do.
+ *
+ * For this step we conservatively emit one decision point per `(prop, value)`
+ * pair in each static `style={{ ... }}` block whose property name maps to a
+ * known token group (color / spacing / shadow / etc.). The pre-pass can
+ * resolve the actual two-token options at ask-time; the fixer reads back
+ * only the answers it ends up needing. Options are placeholders here — the
+ * real labels come from `tokens.json` at fix time (PRD #266 Phase C step 2+).
+ *
+ * Reads no filesystem and no prompt (PRD #266 Phase C step 1).
+ */
+function describeDecisions(
+  finding: DriftFinding,
+  source: string,
+  _opts: { ctx: ProjectContext },
+): FixerDecisionPoint[] {
+  const points: FixerDecisionPoint[] = [];
+  const re = new RegExp(STATIC_STYLE_BLOCK_RE.source, STATIC_STYLE_BLOCK_RE.flags);
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(source)) !== null) {
+    const props = parseStyleProps(match[2]);
+    for (const prop of props) {
+      if (!(prop.name in CSS_PROP_TOKEN_GROUP)) continue;
+      if (extractNumeric(prop.normalizedValue) === null) continue;
+      points.push({
+        key: `token-tie:${prop.name}:${prop.normalizedValue}`,
+        question:
+          `${finding.file}: "${prop.name}: ${prop.normalizedValue}" is equidistant from two tokens`,
+        options: [
+          { label: "(nearest token A)", description: "Resolved against design-system/tokens.json at fix time" },
+          { label: "(nearest token B)", description: "Resolved against design-system/tokens.json at fix time" },
+        ],
+      });
+    }
+  }
+  return points;
+}
+
 export const inlineStaticStyleRule: DriftRule = {
   id: "DRIFT-INLINE-STATIC-STYLE",
   severity: "error",
@@ -347,5 +390,6 @@ export const inlineStaticStyleRule: DriftRule = {
   fixable: true,
   fix,
   priority: 2,
-  interactive: false,
+  interactive: true,
+  describeDecisions,
 };

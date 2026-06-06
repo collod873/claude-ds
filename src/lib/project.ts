@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveAuditConfig, type ResolvedAuditConfig } from "./audit-config.js";
 import type { Config } from "./config.js";
+import type { DecisionAnswer, DecisionKey, FindingKey } from "./drift/decisions.js";
 import { parseManifest, type Manifest } from "./manifest.js";
 import { loadConfig } from "./paths.js";
 
@@ -35,7 +36,18 @@ export interface ProjectContext {
   manifest: Manifest;
   auditConfig: ResolvedAuditConfig;
   exists(path: string): Promise<boolean>;
-  decisions: { renames?: Record<string, string>; claudeMdTarget?: string };
+  decisions: {
+    renames?: Record<string, string>;
+    claudeMdTarget?: string;
+    /**
+     * Per-finding answers to the questions a fixer would otherwise ask via
+     * `opts.prompt`. Keyed by `findingKey(finding)` → `decisionKey` →
+     * `DecisionAnswer` (`number` index or `"defer"`). Populated by a
+     * command-level pre-pass in audit-fix once Phase C step 2+ lands; today
+     * the slot exists but nothing reads it (PRD #266 Phase C step 1).
+     */
+    fixerChoices?: Record<FindingKey, Record<DecisionKey, DecisionAnswer>>;
+  };
 }
 
 async function existsAt(p: string): Promise<boolean> {

@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
 
+import type { FixerDecisionPoint } from "../decisions.js";
 import { extractUntilStatement } from "../extract.js";
 import type { PromptOption } from "../prompt.js";
 import type {
@@ -365,6 +366,41 @@ async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts)
   return { finding, fixed: true, message: `resolved domain imports in ${finding.file}`, changes };
 }
 
+/**
+ * Pure enumerator of per-(import, symbol) convert/defer questions the fixer
+ * could ask. Walks `source` for domain imports against `ctx.auditConfig.
+ * domainRoots` and emits one decision point per (importPath, symbol) — an
+ * over-approximation (the live fixer skips imports whose source-file probe
+ * succeeds and shows extract is safe), kept conservative so a future
+ * pre-pass can ask everything that might be needed without doing I/O here.
+ *
+ * Reads no filesystem and no prompt (PRD #266 Phase C step 1).
+ */
+function describeDecisions(
+  _finding: DriftFinding,
+  source: string,
+  { ctx }: { ctx: ProjectContext },
+): FixerDecisionPoint[] {
+  const points: FixerDecisionPoint[] = [];
+  const { domainRoots } = ctx.auditConfig;
+  const domainImports = parseDomainImports(source, domainRoots);
+  for (const imp of domainImports) {
+    for (const symbolName of imp.symbols) {
+      points.push({
+        key: `convert:${imp.importPath}:${symbolName}`,
+        question:
+          `"${symbolName}" comes from a domain module that can't be moved to design-system` +
+          ` (it has its own domain dependencies). What should we do?`,
+        options: [
+          { label: `Convert "${symbolName}" to prop injection`, description: "Pass this value as a prop instead of importing it" },
+          { label: "Defer (add exception)", description: "Skip for now and add an exception entry" },
+        ],
+      });
+    }
+  }
+  return points;
+}
+
 export const dsImportsFeatureRule: DriftRule = {
   id: "DRIFT-DS-IMPORTS-FEATURE",
   severity: "error",
@@ -373,5 +409,6 @@ export const dsImportsFeatureRule: DriftRule = {
   fixable: true,
   fix,
   priority: 2,
-  interactive: false,
+  interactive: true,
+  describeDecisions,
 };

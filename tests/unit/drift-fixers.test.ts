@@ -107,6 +107,14 @@ describe("drift-fixers", () => {
     it("returns false for DRIFT-RAW-PRIMITIVE (automated safe default)", () => {
       expect(isInteractive("DRIFT-RAW-PRIMITIVE" as DriftRuleId)).toBe(false);
     });
+
+    it("returns true for DRIFT-DS-IMPORTS-FEATURE (prompts on prop-vs-defer)", () => {
+      expect(isInteractive("DRIFT-DS-IMPORTS-FEATURE")).toBe(true);
+    });
+
+    it("returns true for DRIFT-INLINE-STATIC-STYLE (prompts on equidistant token ties)", () => {
+      expect(isInteractive("DRIFT-INLINE-STATIC-STYLE")).toBe(true);
+    });
   });
 
   describe("getFixerPriority", () => {
@@ -889,8 +897,8 @@ describe("drift-fixers", () => {
       expect(prompted).toBe(true);
     });
 
-    it("registry marks DRIFT-DS-IMPORTS-FEATURE as non-interactive", () => {
-      expect(isInteractive("DRIFT-DS-IMPORTS-FEATURE" as DriftRuleId)).toBe(false);
+    it("registry marks DRIFT-DS-IMPORTS-FEATURE as interactive (PRD #266 Phase C)", () => {
+      expect(isInteractive("DRIFT-DS-IMPORTS-FEATURE" as DriftRuleId)).toBe(true);
     });
   });
 
