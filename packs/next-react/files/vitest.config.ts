@@ -1,18 +1,17 @@
 import { defineConfig } from "vitest/config";
 
 /**
- * Vitest config seeded by claude-ds (#293).
+ * Vitest config seeded by claude-ds.
  *
- * Default environment is "node" so DB/RLS and other server-side tests stay
- * fast and don't pull in jsdom. Component tests opt into jsdom per-file with
- * a leading `// @vitest-environment jsdom` docblock — `backfill-companions`
- * emits this on every scaffolded `<component>.test.tsx`.
+ * Default environment is "node" so server-side tests stay fast and don't pull
+ * in jsdom. Component tests opt into jsdom per-file with a leading
+ * `// @vitest-environment jsdom` docblock — every scaffolded
+ * `<component>.test.tsx` carries one.
  *
- * `include` covers both the standard `src/**` location and the design-system
- * tree so the scaffolded atom/composite stubs are collected from the start.
+ * `include` covers `src/**` plus the design-system tree so the scaffolded
+ * atom/composite stubs are collected from the start.
  *
- * Once on disk, this file is seeded — claude-ds will never re-touch it.
- * Consumers may add coverage settings, projects, aliases, etc. freely.
+ * Seeded once on adopt; claude-ds never re-touches it. Edit freely.
  */
 export default defineConfig({
   test: {
