@@ -67,6 +67,28 @@ describe("exceptions — parseExceptions", () => {
     expect(ex[0].permanent).toBeUndefined();
   });
 
+  it("accepts an OWNED-* concern id as a valid rule (#320)", () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "OWNED-TOKEN-LINT", path: "scripts/lint-tokens.ts", issue: "#42", reason: "tracked shadow infra" },
+      ],
+    }));
+    expect(ex).toHaveLength(1);
+    expect(ex[0].rule).toBe("OWNED-TOKEN-LINT");
+    expect(ex[0].path).toBe("scripts/lint-tokens.ts");
+    expect(ex[0].issue).toBe("#42");
+  });
+
+  it("accepts an OWNED-* concern id with permanent:true (#320)", () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "OWNED-TOKEN-LINT", path: "scripts/check-where-chain.sh", permanent: true, reason: "detector over-match — DB checker, not DS" },
+      ],
+    }));
+    expect(ex).toHaveLength(1);
+    expect(ex[0].permanent).toBe(true);
+  });
+
   it("errors on unknown rule ID with a clear message naming the bad ID", () => {
     try {
       parseExceptions(JSON.stringify({
@@ -301,6 +323,43 @@ describe("lintExceptions", () => {
     const warnings = await lintExceptions(ex);
     expect(warnings).toHaveLength(1);
     expect(warnings[0].warning).toMatch(/no issue link/i);
+  });
+
+  it("warns when an OWNED-* exception has no issue link and is not permanent (#320)", async () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "OWNED-TOKEN-LINT", path: "scripts/lint-tokens.ts" },
+      ],
+    }));
+    const warnings = await lintExceptions(ex);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].warning).toMatch(/no issue link/i);
+    expect(warnings[0].rule).toBe("OWNED-TOKEN-LINT");
+    expect(warnings[0].path).toBe("scripts/lint-tokens.ts");
+  });
+
+  it("warns when an OWNED-* exception references a closed issue (#320)", async () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "OWNED-TOKEN-LINT", path: "scripts/lint-tokens.ts", issue: "#7" },
+      ],
+    }));
+    const checker: IssueChecker = vi.fn().mockResolvedValue("closed");
+    const warnings = await lintExceptions(ex, checker);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].warning).toMatch(/closed issue/i);
+    expect(warnings[0].issue).toBe("#7");
+    expect(warnings[0].rule).toBe("OWNED-TOKEN-LINT");
+  });
+
+  it("does not warn on a permanent OWNED-* exception (#320)", async () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "OWNED-TOKEN-LINT", path: "scripts/check-where-chain.sh", permanent: true, reason: "detector over-match" },
+      ],
+    }));
+    const warnings = await lintExceptions(ex);
+    expect(warnings).toHaveLength(0);
   });
 
   it("permanent exception with both permanent:true and issue link is valid (no conflict)", async () => {
