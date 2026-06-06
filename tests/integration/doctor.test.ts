@@ -399,4 +399,66 @@ describe("doctor --completeness", () => {
     expect(r.stdout).toContain("Permanent exceptions");
     expect(r.stdout).toContain("AppShell.tsx");
   });
+
+  // #319: clean tree prints a coverage footer naming the Owned concerns checked,
+  // so the `✓` is honest about what it evaluated (ADR-0017).
+  it("clean tree prints the Owned-concern coverage footer", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("OK");
+    expect(r.stdout).toMatch(/Owned concerns checked/i);
+    expect(r.stdout).toContain("OWNED-TOKEN-LINT");
+  });
+
+  // #319: Crewops-shaped fixture — a shadow token-linter living under scripts/
+  // (outside any managed_root). The Owned-concern scan must catch it where the
+  // location-scoped orphan check does not. Footer still lists token-lint.
+  it("flags a shadow scripts/lint-tokens.ts via OWNED-TOKEN-LINT (#316)", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+
+    // Paraphrased real lint-tokens.ts: design-system-ignore pragma + raw
+    // hex/spacing regexes + violations.push — every signal the detector keys on.
+    const lintTokensSrc = [
+      "#!/usr/bin/env node",
+      "/**",
+      " * lint-tokens.ts — flags raw color and spacing values in component files.",
+      " *",
+      " * Walks design-system/atoms looking for hex colors and px/rem spacing",
+      " * values that should come from design-system/tokens.json. Lines with the",
+      " * `design-system-ignore:` pragma are skipped.",
+      " */",
+      "import { readFileSync } from 'node:fs';",
+      "",
+      "const RAW_HEX_COLOR_RE = /#[0-9a-fA-F]{3,8}\\b/g;",
+      "const RAW_SPACING_RE = /\\b\\d+(?:px|rem)\\b/g;",
+      "",
+      "export function lintFile(path: string): string[] {",
+      "  const src = readFileSync(path, 'utf8');",
+      "  const violations: string[] = [];",
+      "  src.split('\\n').forEach((line, i) => {",
+      "    if (line.includes('design-system-ignore:')) return;",
+      "    if (RAW_HEX_COLOR_RE.test(line) || RAW_SPACING_RE.test(line)) {",
+      "      violations.push(`${path}:${i + 1}: raw color/spacing — use a token`);",
+      "    }",
+      "  });",
+      "  return violations;",
+      "}",
+    ].join("\n");
+
+    await mkdir(join(dir, "scripts"), { recursive: true });
+    await writeFile(join(dir, "scripts/lint-tokens.ts"), lintTokensSrc);
+
+    const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain("OWNED-TOKEN-LINT");
+    expect(r.stdout).toContain("scripts/lint-tokens.ts");
+    expect(r.stdout).toContain("DRIFT-RAW-PRIMITIVE");
+    // Coverage footer present on the failing path too — honest "what we checked"
+    // is exactly as important when there ARE findings.
+    expect(r.stdout).toMatch(/Owned concerns checked/i);
+  });
 });

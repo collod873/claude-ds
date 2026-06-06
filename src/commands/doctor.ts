@@ -12,6 +12,11 @@ import { parseExceptions, openCount, lintExceptions, type Exception, type Except
 import { detectLookalikes, Finding } from "../lib/lookalike.js";
 import { detectPackageManager, PackageManager } from "../lib/package-manager.js";
 import { scanRootDupes, RootDupeFinding } from "../lib/root-dupes.js";
+import {
+  scanOwnedConcerns,
+  allOwnedConcernIds,
+  type OwnedConcernScannerFinding,
+} from "../lib/owned-concerns/index.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -177,6 +182,16 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
 
   const workarounds = await scanWorkaroundComments(cwd, roots);
 
+  // Owned-concern scan (ADR-0017): repo-wide, signature-as-identity. Catches
+  // DS infrastructure hand-rolled in unowned dirs (scripts/, src/) that the
+  // location-scoped orphan check above is blind to.
+  const ownedFindings: OwnedConcernScannerFinding[] = await scanOwnedConcerns({
+    cwd,
+    manifestPaths,
+    generatedPatterns: manifest.generated_patterns,
+  });
+  const ownedConcernsChecked = allOwnedConcernIds();
+
   const lines: string[] = ["## claude-ds doctor --completeness\n"];
 
   if (orphans.length > 0) {
@@ -197,18 +212,32 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
     lines.push("");
   }
 
+  if (ownedFindings.length > 0) {
+    lines.push(`### Shadow DS infrastructure (${ownedFindings.length} found — Owned concerns)\n`);
+    for (const f of ownedFindings) {
+      lines.push(`- \`${f.file}:${f.line}\` (${f.concernId}): ${f.message}`);
+    }
+    lines.push("");
+  }
+
   if (permanentExceptions.length > 0) {
     lines.push(`### Permanent exceptions (${permanentExceptions.length} — informational)\n`);
     for (const e of permanentExceptions) lines.push(`- \`${e.path}\` (${e.rule}): ${e.reason ?? "no reason given"}`);
     lines.push("");
   }
 
-  const totalFindings = orphans.length + exceptionWarnings.length + workarounds.length;
+  const totalFindings = orphans.length + exceptionWarnings.length + workarounds.length + ownedFindings.length;
   if (totalFindings === 0) {
     lines.push("✓ Completeness OK — no local DS infrastructure outside pack-managed scaffold\n");
   } else {
     lines.push(`✗ Completeness check failed: ${totalFindings} finding(s)\n`);
   }
+
+  // Coverage footer (ADR-0017): print which Owned concerns were checked so the
+  // verdict is honest about scope. A clean `✓` then tells the truth about what
+  // was evaluated — the residual blind spot is precisely "a concern not yet in
+  // the registry."
+  lines.push(`Owned concerns checked: ${ownedConcernsChecked.join(", ")}\n`);
 
   process.stdout.write(lines.join("\n"));
 
