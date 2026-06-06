@@ -125,6 +125,27 @@ describe("runRoleContracts (end-to-end)", () => {
     ).rejects.toThrow(/BrokenCombobox.*combobox.*split-context|commit/i);
   });
 
+  it("throws when a role-bearing component ships zero examples (no silent pass)", async () => {
+    // Symmetric to the missing-contract throw: a role declared with no
+    // meta.examples would let vitest see a no-op test that "passes" without
+    // ever exercising the contract — exactly the F3 trap the role-contract
+    // system was built to retire.
+    const components = selectRoleBearingComponents([
+      {
+        name: "EmptyExamplesCombobox",
+        Component: mountComboboxGood,
+        meta: {
+          kind: "atom",
+          examples: [],
+          role: "combobox",
+        },
+      },
+    ]);
+    await expect(
+      runRoleContracts(components, { render: mountFixtureRender }),
+    ).rejects.toThrow(/EmptyExamplesCombobox.*combobox.*examples/i);
+  });
+
   it("runs every example for a role-bearing component (multi-example coverage)", async () => {
     let renderCount = 0;
     const trackingRender = (

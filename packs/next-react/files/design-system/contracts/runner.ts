@@ -146,6 +146,14 @@ export async function runRoleContracts(
         `runRoleContracts: ${comp.name} declares role "${comp.role}" but no contract is registered`,
       );
     }
+    if (comp.examples.length === 0) {
+      // Symmetric to the missing-contract throw: a role declared with zero
+      // examples would silently pass — the inner loop never runs and vitest
+      // sees a no-op test. That's the F3 trap by another name. Surface it.
+      throw new Error(
+        `runRoleContracts: ${comp.name} declares role "${comp.role}" but ships no meta.examples — add at least one to exercise the contract`,
+      );
+    }
     for (const example of comp.examples) {
       const container = document.createElement("div");
       document.body.appendChild(container);
