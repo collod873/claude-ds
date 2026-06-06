@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { info, err } from "../log.js";
 import { run, rollbackChanges, type Change } from "../runner.js";
 import type { ProjectContext } from "../project.js";
-import type { Manifest } from "../manifest.js";
 import { type Exception } from "../exceptions.js";
 import {
   isInteractive,
@@ -39,8 +38,6 @@ async function exists(p: string): Promise<boolean> {
 }
 
 export interface AuditFixParams {
-  cwd: string;
-  manifest: Manifest;
   unexpected: UnexpectedScanReport;
   driftTierDirs: readonly string[];
   exceptions: Exception[];
@@ -86,8 +83,9 @@ export async function runAuditFix(
   ctx: ProjectContext,
   params: AuditFixParams,
 ): Promise<AuditFixSummary> {
+  const { cwd, manifest } = ctx;
   const {
-    cwd, manifest, unexpected, driftTierDirs,
+    unexpected, driftTierDirs,
     fix, except, reason, issue, permanent,
     domainRoots, metaKindStrict, allowedImports, dsAliases,
   } = params;
