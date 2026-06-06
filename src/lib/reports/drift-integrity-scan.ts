@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { checkThreeSignals } from "../three-signal.js";
 import { evaluateIntegrity, isIntegrityBlocking, type IntegrityFinding } from "../integrity/index.js";
 import type { DriftFinding } from "../drift/index.js";
+import type { ProjectContext } from "../project.js";
 import { walkDir } from "./unexpected-files.js";
 
 export type AuditFinding = DriftFinding | IntegrityFinding;
@@ -34,23 +35,15 @@ const DRIFT_TIER_DIRS = ["design-system/atoms", "design-system/composites", "des
  * Files that fail blocking integrity (anything other than UNRESOLVABLE-IMPORT)
  * have their drift check skipped, matching the audit command's prior behavior:
  * integrity is gating, drift is downstream.
+ *
+ * Reads `ctx.auditConfig` — the one resolved source of truth — for everything
+ * the integrity context + the drift check need (PRD #266 Phase B). The old
+ * per-call opts bag is gone.
  */
-export async function scanDriftAndIntegrity(opts: {
-  cwd: string;
-  domainRoots?: string[];
-  metaKindStrict?: boolean;
-  allowedImports?: string[];
-  dsAliases?: string[];
-  tsconfigPaths?: Record<string, string[]>;
-}): Promise<DriftIntegrityReport> {
-  const {
-    cwd,
-    domainRoots,
-    metaKindStrict = false,
-    allowedImports = [],
-    dsAliases = [],
-    tsconfigPaths,
-  } = opts;
+export async function scanDriftAndIntegrity(
+  ctx: ProjectContext,
+): Promise<DriftIntegrityReport> {
+  const { cwd } = ctx;
 
   const findings: AuditFinding[] = [];
   const integrityFailedFiles = new Set<string>();
@@ -73,7 +66,7 @@ export async function scanDriftAndIntegrity(opts: {
     try { source = await readFile(join(cwd, filePath), "utf8"); } catch { continue; }
     scannedFiles.add(filePath);
 
-    const integrityFindings = await evaluateIntegrity(filePath, source, { cwd, dsAliases, tsconfigPaths });
+    const integrityFindings = await evaluateIntegrity(filePath, source, ctx);
     const blockingIntegrity = integrityFindings.filter(f => isIntegrityBlocking(f.ruleId));
     const nonBlockingIntegrity = integrityFindings.filter(f => !isIntegrityBlocking(f.ruleId));
     findings.push(...nonBlockingIntegrity);
@@ -85,9 +78,7 @@ export async function scanDriftAndIntegrity(opts: {
       continue;
     }
 
-    const { findings: driftFindings } = checkThreeSignals(
-      filePath, source, domainRoots, metaKindStrict, allowedImports, dsAliases,
-    );
+    const { findings: driftFindings } = checkThreeSignals(filePath, source, ctx);
     findings.push(...driftFindings);
     for (const f of driftFindings) filesWithFindings.add(f.file);
   }

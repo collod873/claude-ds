@@ -16,6 +16,7 @@ import { runFixPass } from "../../src/lib/fix-pass";
 import { validateFixerOutput } from "../../src/lib/fixer-validate";
 import { getFixer } from "../../src/lib/drift/index.js";
 import type { DriftFinding } from "../../src/lib/drift/index.js";
+import { makeFakeCtx } from "../helpers/fake-ctx";
 
 const mockedGetFixer = vi.mocked(getFixer);
 
@@ -159,7 +160,7 @@ describe("fixer output validation gate", () => {
         }],
       }));
 
-      const result = await runFixPass(dir, [{
+      const result = await runFixPass(makeFakeCtx(dir), [{
         ruleId: "DRIFT-META-KIND-MISSING",
         file: "design-system/atoms/chip.tsx",
         message: "missing meta.kind",
@@ -192,7 +193,7 @@ describe("fixer output validation gate", () => {
         }],
       }));
 
-      const result = await runFixPass(dir, [{
+      const result = await runFixPass(makeFakeCtx(dir), [{
         ruleId: "DRIFT-META-KIND-MISSING",
         file: "design-system/atoms/chip.tsx",
         message: "missing meta.kind",
@@ -223,7 +224,7 @@ describe("fixer output validation gate", () => {
         }],
       }));
 
-      const result = await runFixPass(dir, [{
+      const result = await runFixPass(makeFakeCtx(dir), [{
         ruleId: "DRIFT-META-KIND-MISSING",
         file: "design-system/atoms/chip.tsx",
         message: "missing meta.kind",
@@ -254,7 +255,7 @@ describe("fixer output validation gate", () => {
         }],
       }));
 
-      const result = await runFixPass(dir, [{
+      const result = await runFixPass(makeFakeCtx(dir), [{
         ruleId: "DRIFT-META-KIND-MISSING",
         file: "design-system/atoms/chip.css",
         message: "style issue",

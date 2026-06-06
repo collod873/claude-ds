@@ -4,6 +4,7 @@ import { mkdir, writeFile, readFile, stat, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { runFixPass, sortFindingsByPriority } from "../../src/lib/fix-pass";
 import type { DriftFinding } from "../../src/lib/drift/index.js";
+import { makeFakeCtx } from "../helpers/fake-ctx";
 
 describe("fix-pass", () => {
   describe("sortFindingsByPriority", () => {
@@ -65,6 +66,18 @@ describe("fix-pass", () => {
     beforeEach(async () => { dir = await freshTmpDir(); });
     afterEach(async () => { await cleanup(dir); });
 
+    // PRD #266 Phase A: runFixPass takes the real ctx threaded down from
+    // audit-fix, so the synthetic-ctx fabrication (`minimalCtx`) and its
+    // `as unknown as ProjectContext` cast are gone from fix-pass.ts.
+    it("fix-pass.ts no longer fabricates a synthetic ProjectContext", async () => {
+      const source = await readFile(
+        join(process.cwd(), "src/lib/fix-pass.ts"),
+        "utf8",
+      );
+      expect(source).not.toMatch(/minimalCtx/);
+      expect(source).not.toMatch(/as unknown as ProjectContext/);
+    });
+
     it("applies fixes in priority order", async () => {
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });
       await mkdir(join(dir, "design-system/composites"), { recursive: true });
@@ -91,7 +104,7 @@ describe("fix-pass", () => {
         },
       ];
 
-      const result = await runFixPass(dir, findings, {});
+      const result = await runFixPass(makeFakeCtx(dir), findings, {});
       expect(result.aborted).toBe(false);
       expect(result.applied.length).toBeGreaterThan(0);
       expect(result.results.filter(r => r.fixed)).toHaveLength(2);
@@ -113,7 +126,7 @@ describe("fix-pass", () => {
         message: "missing meta.kind",
       }];
 
-      const result = await runFixPass(dir, findings, {
+      const result = await runFixPass(makeFakeCtx(dir), findings, {
         confirm: async () => false,
       });
 
@@ -136,7 +149,7 @@ describe("fix-pass", () => {
         message: "missing meta.kind",
       }];
 
-      const result = await runFixPass(dir, findings, {
+      const result = await runFixPass(makeFakeCtx(dir), findings, {
         confirm: async () => true,
       });
 
@@ -153,7 +166,7 @@ describe("fix-pass", () => {
         message: "pattern without slots",
       }];
 
-      const result = await runFixPass(dir, findings, {});
+      const result = await runFixPass(makeFakeCtx(dir), findings, {});
       expect(result.aborted).toBe(false);
       expect(result.results).toHaveLength(0);
       expect(result.applied).toHaveLength(0);
@@ -195,7 +208,7 @@ describe("fix-pass", () => {
         },
       ];
 
-      const result = await runFixPass(dir, findings, {});
+      const result = await runFixPass(makeFakeCtx(dir), findings, {});
 
       expect(result.aborted).toBe(false);
 
@@ -229,7 +242,7 @@ describe("fix-pass", () => {
         message: "missing meta.kind",
       }];
 
-      const result = await runFixPass(dir, findings, {});
+      const result = await runFixPass(makeFakeCtx(dir), findings, {});
       const fixed = result.results.find(r => r.fixed);
       expect(fixed).toBeDefined();
       expect(fixed!.changes.length).toBeGreaterThan(0);
@@ -254,7 +267,7 @@ describe("fix-pass", () => {
         message: "missing meta.kind",
       }];
 
-      const result = await runFixPass(dir, findings, {});
+      const result = await runFixPass(makeFakeCtx(dir), findings, {});
       expect(result.aborted).toBe(false);
 
       // Barrel should be regenerated
@@ -278,7 +291,7 @@ describe("fix-pass", () => {
         message: "missing meta.kind",
       }];
 
-      const result = await runFixPass(dir, findings, {});
+      const result = await runFixPass(makeFakeCtx(dir), findings, {});
       expect(result.aborted).toBe(false);
 
       const manifestRaw = await readFile(join(dir, "design-system/manifest.json"), "utf8");
@@ -301,7 +314,7 @@ describe("fix-pass", () => {
         message: "missing meta.kind",
       }];
 
-      const result = await runFixPass(dir, findings, {});
+      const result = await runFixPass(makeFakeCtx(dir), findings, {});
       const paths = result.applied.map(c => c.path);
       expect(paths).toContain("design-system/atoms/index.ts");
       expect(paths).toContain("design-system/manifest.json");
@@ -314,7 +327,7 @@ describe("fix-pass", () => {
         message: "pattern without slots",
       }];
 
-      const result = await runFixPass(dir, findings, {});
+      const result = await runFixPass(makeFakeCtx(dir), findings, {});
       expect(result.applied).toHaveLength(0);
     });
 
@@ -333,7 +346,7 @@ describe("fix-pass", () => {
       await chmod(join(dir, "design-system"), 0o555);
 
       try {
-        const result = await runFixPass(dir, findings, {});
+        const result = await runFixPass(makeFakeCtx(dir), findings, {});
         expect(result.aborted).toBe(true);
         expect(result.applied).toHaveLength(0);
         // Fixer changes should be rolled back
@@ -361,7 +374,7 @@ describe("fix-pass", () => {
         },
       ];
 
-      const result = await runFixPass(dir, findings, {});
+      const result = await runFixPass(makeFakeCtx(dir), findings, {});
       // Ensure no duplicate paths in applied changes
       const writePaths = result.applied
         .filter(c => c.kind === "write")

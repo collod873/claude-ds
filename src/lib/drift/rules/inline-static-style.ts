@@ -2,13 +2,14 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 
+import { findingKey, type FixerDecisionPoint } from "../decisions.js";
 import type {
   DriftFinding,
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 /**
@@ -226,8 +227,8 @@ const STATIC_STYLE_BLOCK_RE = new RegExp(
   "g",
 );
 
-async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");
@@ -237,7 +238,7 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
 
   let tokensRaw: string;
   try {
-    tokensRaw = await readFile(join(cwd, "design-system/tokens.json"), "utf8");
+    tokensRaw = await readFile(join(ctx.cwd, "design-system/tokens.json"), "utf8");
   } catch {
     return { finding, fixed: false, message: "could not read design-system/tokens.json", changes: [] };
   }
@@ -250,6 +251,9 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
   }
 
   const tokenEntries = flattenTokens(tokens);
+  // Per-finding decisions answered by the command-level pre-pass (PRD #266
+  // Phase C step 2). Missing entry → "defer".
+  const choices = ctx.decisions.fixerChoices?.[findingKey(finding)] ?? {};
   let anyFixed = false;
   let result = source;
 
@@ -275,22 +279,15 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
         const nearest = findNearestNumericToken(tokenEntries, prop.name, prop.normalizedValue);
         if (!nearest) {
           unresolved.push(prop);
-        } else if (nearest.equidistantPeer && opts?.prompt) {
-          const options = [
-            { label: nearest.token.className, description: `Use token class "${nearest.token.className}" (value: ${nearest.token.value})` },
-            { label: nearest.equidistantPeer.className, description: `Use token class "${nearest.equidistantPeer.className}" (value: ${nearest.equidistantPeer.value})` },
-          ];
-          const choice = await opts.prompt(
-            `${finding.file}: "${prop.name}: ${prop.normalizedValue}" is equidistant from two tokens`,
-            options,
-          );
-          if (choice === "defer") {
+        } else if (nearest.equidistantPeer) {
+          const answer = choices[`token-tie:${prop.name}:${prop.normalizedValue}`] ?? "defer";
+          if (answer === "defer") {
             unresolved.push(prop);
           } else {
-            resolved.push({ prop, className: options[choice].label });
+            const options = [nearest.token, nearest.equidistantPeer];
+            const pick = options[answer] ?? nearest.token;
+            resolved.push({ prop, className: pick.className });
           }
-        } else if (nearest.equidistantPeer) {
-          unresolved.push(prop);
         } else {
           resolved.push({ prop, className: nearest.token.className });
         }
@@ -338,6 +335,48 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
   return { finding, fixed: true, message: `replaced inline styles with token classes in ${finding.file}`, changes };
 }
 
+/**
+ * Pure enumerator of the equidistant-token tie-break questions the fixer
+ * could ask. The live fixer only prompts when a numeric style value is
+ * equidistant from two tokens — that resolution requires reading
+ * `design-system/tokens.json` (I/O), which describeDecisions must not do.
+ *
+ * For this step we conservatively emit one decision point per `(prop, value)`
+ * pair in each static `style={{ ... }}` block whose property name maps to a
+ * known token group (color / spacing / shadow / etc.). The pre-pass can
+ * resolve the actual two-token options at ask-time; the fixer reads back
+ * only the answers it ends up needing. Options are placeholders here — the
+ * real labels come from `tokens.json` at fix time (PRD #266 Phase C step 2+).
+ *
+ * Reads no filesystem and no prompt (PRD #266 Phase C step 1).
+ */
+function describeDecisions(
+  finding: DriftFinding,
+  source: string,
+  _opts: { ctx: ProjectContext },
+): FixerDecisionPoint[] {
+  const points: FixerDecisionPoint[] = [];
+  const re = new RegExp(STATIC_STYLE_BLOCK_RE.source, STATIC_STYLE_BLOCK_RE.flags);
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(source)) !== null) {
+    const props = parseStyleProps(match[2]);
+    for (const prop of props) {
+      if (!(prop.name in CSS_PROP_TOKEN_GROUP)) continue;
+      if (extractNumeric(prop.normalizedValue) === null) continue;
+      points.push({
+        key: `token-tie:${prop.name}:${prop.normalizedValue}`,
+        question:
+          `${finding.file}: "${prop.name}: ${prop.normalizedValue}" is equidistant from two tokens`,
+        options: [
+          { label: "(nearest token A)", description: "Resolved against design-system/tokens.json at fix time" },
+          { label: "(nearest token B)", description: "Resolved against design-system/tokens.json at fix time" },
+        ],
+      });
+    }
+  }
+  return points;
+}
+
 export const inlineStaticStyleRule: DriftRule = {
   id: "DRIFT-INLINE-STATIC-STYLE",
   severity: "error",
@@ -346,5 +385,6 @@ export const inlineStaticStyleRule: DriftRule = {
   fixable: true,
   fix,
   priority: 2,
-  interactive: false,
+  interactive: true,
+  describeDecisions,
 };

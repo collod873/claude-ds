@@ -1,7 +1,7 @@
 import type { DriftFinding } from "./drift/index.js";
 import type { Change, Operation } from "./operation.js";
 import type { ProjectContext } from "./project.js";
-import type { FixResult, FixerOpts } from "./drift/index.js";
+import type { FixResult } from "./drift/index.js";
 import { getFixer, getFixerPriority } from "./drift/index.js";
 import { regenIndexes } from "./finalizers/regen-indexes.js";
 import { run, rollbackChanges } from "./runner.js";
@@ -16,7 +16,7 @@ export interface FixPassResult {
 
 type ConfirmPrompt = (diffText: string) => Promise<boolean>;
 
-export interface FixPassOpts extends FixerOpts {
+export interface FixPassOpts {
   confirm?: ConfirmPrompt;
 }
 
@@ -105,10 +105,7 @@ export interface FixerOperation extends Operation {
   result: FixResult | "no-fixer" | null;
 }
 
-export function fixerAsOperation(
-  finding: DriftFinding,
-  opts: FixPassOpts,
-): FixerOperation {
+export function fixerAsOperation(finding: DriftFinding): FixerOperation {
   const op: FixerOperation = {
     name: finding.ruleId,
     finding,
@@ -119,7 +116,7 @@ export function fixerAsOperation(
         op.result = "no-fixer";
         return [];
       }
-      const r = await fixer(finding, ctx.cwd, opts);
+      const r = await fixer(finding, ctx);
 
       if (r.fixed && r.changes.length > 0) {
         for (const ch of r.changes) {
@@ -139,14 +136,10 @@ export function fixerAsOperation(
   return op;
 }
 
-function minimalCtx(cwd: string): ProjectContext {
-  return { cwd } as unknown as ProjectContext;
-}
-
 const REGEN_INDEXES_OP: Operation = {
   name: "regenIndexes",
   async plan(ctx: ProjectContext): Promise<Change[]> {
-    return regenIndexes(ctx.cwd);
+    return regenIndexes(ctx);
   },
 };
 
@@ -173,12 +166,11 @@ const REGEN_INDEXES_OP: Operation = {
  * migration is invisible to callers.
  */
 export async function runFixPass(
-  cwd: string,
+  ctx: ProjectContext,
   findings: DriftFinding[],
   opts: FixPassOpts,
 ): Promise<FixPassResult> {
-  const ctx = minimalCtx(cwd);
-  const ops = sortFindingsByPriority(findings).map(f => fixerAsOperation(f, opts));
+  const ops = sortFindingsByPriority(findings).map(f => fixerAsOperation(f));
 
   const collectResults = (): FixResult[] =>
     ops

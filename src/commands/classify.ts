@@ -4,8 +4,7 @@ import { basename, join } from "node:path";
 import picomatch from "picomatch";
 import { info, err, confirm, printNextStep } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
-import { classifySource, DEFAULT_DOMAIN_ROOTS, type Tier } from "../lib/classifier.js";
-import { detectDsAliases } from "../lib/ds-aliases.js";
+import { classifySource, type Tier } from "../lib/classifier.js";
 import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
 import { parseExceptions, type Exception } from "../lib/exceptions.js";
 import { run } from "../lib/runner.js";
@@ -145,11 +144,7 @@ export async function classifyCmd(opts: {
     process.exit(2);
   }
 
-  const domainRoots = ctx.cfg.domain_roots ?? DEFAULT_DOMAIN_ROOTS;
-  let dsAliases = ctx.cfg.ds_aliases ?? [];
-  if (dsAliases.length === 0) {
-    dsAliases = await detectDsAliases(cwd, ctx.cfg.srcRoot ?? "src");
-  }
+  const { domainRoots, dsAliases, allowedImports, appDir } = ctx.auditConfig;
 
   // Brownfield pull-in is opt-in via --src (ADR-0005, issue #209). With no
   // --src, classify never walks app code — it only reorganizes within
@@ -157,7 +152,7 @@ export async function classifyCmd(opts: {
   // explicit --src inside DS scope: app_dir, domain roots, design-system/, and
   // any lookalike_ignore globs are skipped, so app code is never relocated.
   const exclude = makeExcluder({
-    appDir: ctx.cfg.app_dir,
+    appDir,
     domainRoots,
     ignoreGlobs: ctx.cfg.lookalike_ignore ?? [],
   });
@@ -200,7 +195,7 @@ export async function classifyCmd(opts: {
       } catch {
         continue;
       }
-      const verdict = classifySource(source, domainRoots, ctx.cfg.allowed_imports ?? [], dsAliases);
+      const verdict = classifySource(source, domainRoots, allowedImports, dsAliases);
       const tier = verdict.tier;
       const domainBucket = tier === "feature" ? inferDomainBucket(source, domainRoots) : null;
       classified.push({ srcRel: fileRel, tier, domainBucket });
@@ -333,7 +328,7 @@ export async function classifyCmd(opts: {
       // Regenerate barrel indexes so stale tier-barrel exports don't cause TS2307.
       const { regenIndexes } = await import("../lib/finalizers/regen-indexes.js");
       const ctx2b = await loadProject(cwd);
-      const indexChanges = await regenIndexes(ctx2b.cwd);
+      const indexChanges = await regenIndexes(ctx2b);
       if (indexChanges.length > 0) {
         const regenOp = { name: "classify-regen-indexes", plan: async () => indexChanges };
         await run(ctx2b, [regenOp], "apply");
@@ -446,7 +441,7 @@ export async function classifyCmd(opts: {
 
       // Use the same classifySource call (same args) that audit's three-signal
       // checker uses so classify and audit share one classification boundary.
-      const verdict = classifySource(source, domainRoots, ctx.cfg.allowed_imports ?? [], dsAliases);
+      const verdict = classifySource(source, domainRoots, allowedImports, dsAliases);
       if (verdict.tier !== "composite") continue;
 
       if (!verdict.ambiguous) {
@@ -545,7 +540,7 @@ export async function classifyCmd(opts: {
       // next tsc run even though audit reports 0 findings (ADR-0015, #264).
       const { regenIndexes } = await import("../lib/finalizers/regen-indexes.js");
       const ctx5 = await loadProject(cwd);
-      const indexChanges = await regenIndexes(ctx5.cwd);
+      const indexChanges = await regenIndexes(ctx5);
       if (indexChanges.length > 0) {
         const regenOp = {
           name: "classify-regen-indexes",

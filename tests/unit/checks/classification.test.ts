@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { findMisclassified } from "../../../src/lib/checks/classification";
 import { rewriteImportPaths } from "../../../src/lib/ops/rewrite-imports";
 import { freshTmpDir, cleanup } from "../../helpers/tmpdir";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
 
 let cwd: string;
 beforeEach(async () => { cwd = await freshTmpDir("classification-"); });
@@ -68,7 +69,7 @@ describe("classification auto-move import rewrite (issue #90)", () => {
     );
 
     // 1. Detect the misclassification.
-    const findings = await findMisclassified(cwd, false);
+    const findings = await findMisclassified(makeFakeCtx(cwd), false);
     expect(findings).toHaveLength(1);
     expect(findings[0].currentTier).toBe("atom");
     expect(findings[0].shouldBe).toBe("composite");

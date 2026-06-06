@@ -3,6 +3,7 @@ import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { regenIndexes } from "../../src/lib/finalizers/regen-indexes";
+import { makeFakeCtx } from "../helpers/fake-ctx";
 
 describe("regenIndexes", () => {
   let dir: string;
@@ -24,7 +25,7 @@ describe("regenIndexes", () => {
         "input.tsx": `export function Input() { return <input />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(barrelChange).toBeDefined();
       const content = (barrelChange as any).after.toString("utf8");
@@ -39,7 +40,7 @@ describe("regenIndexes", () => {
         "toolbar.tsx": `export function Toolbar() { return <div />; }\nexport const meta = { kind: "composite" as const, examples: [] };\n`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/composites/index.ts");
       expect(barrelChange).toBeDefined();
       const content = (barrelChange as any).after.toString("utf8");
@@ -53,7 +54,7 @@ describe("regenIndexes", () => {
         "layout.tsx": `export function Layout({ children }) { return <div>{children}</div>; }\nexport const meta = { kind: "pattern" as const, examples: [] };\n`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/patterns/index.ts");
       expect(barrelChange).toBeDefined();
       const content = (barrelChange as any).after.toString("utf8");
@@ -71,7 +72,7 @@ describe("regenIndexes", () => {
         "button.snapshot.tsx": `export default function() { return null; }`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(barrelChange).toBeDefined();
       const content = (barrelChange as any).after.toString("utf8");
@@ -89,7 +90,7 @@ describe("regenIndexes", () => {
         "input.tsx": `export function Input() { return <input />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(barrelChange).toBeDefined();
       const content = (barrelChange as any).after.toString("utf8");
@@ -104,7 +105,7 @@ describe("regenIndexes", () => {
         "button.tsx": `export default function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       // File has no named exports (only default + meta), so no barrel entry
       expect(barrelChange).toBeUndefined();
@@ -117,7 +118,7 @@ describe("regenIndexes", () => {
         "button.tsx": `export function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       const content = (barrelChange as any).after.toString("utf8");
       const lines = content.trim().split("\n");
@@ -131,13 +132,13 @@ describe("regenIndexes", () => {
         "button.tsx": `export function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
       });
       // First generate to get the expected content
-      const firstChanges = await regenIndexes(dir);
+      const firstChanges = await regenIndexes(makeFakeCtx(dir));
       const firstBarrel = firstChanges.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(firstBarrel).toBeDefined();
       const expectedContent = (firstBarrel as any).after.toString("utf8");
       await writeFile(join(dir, "design-system/atoms/index.ts"), expectedContent);
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(barrelChange).toBeUndefined();
     });
@@ -152,7 +153,7 @@ describe("regenIndexes", () => {
         `export { Button } from "./button";\n`,
       );
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(barrelChange).toBeDefined();
       const content = (barrelChange as any).after.toString("utf8");
@@ -166,7 +167,7 @@ describe("regenIndexes", () => {
       });
       // composites/ and patterns/ do not exist
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const compositesBarrel = changes.find(c => c.kind === "write" && c.path === "design-system/composites/index.ts");
       const patternsBarrel = changes.find(c => c.kind === "write" && c.path === "design-system/patterns/index.ts");
       expect(compositesBarrel).toBeUndefined();
@@ -178,7 +179,7 @@ describe("regenIndexes", () => {
         "button.tsx": `export function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(barrelChange).toBeDefined();
       expect((barrelChange as any).before).toBeNull();
@@ -191,7 +192,7 @@ describe("regenIndexes", () => {
       });
       await writeFile(join(dir, "design-system/atoms/index.ts"), existing);
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(barrelChange).toBeDefined();
       expect((barrelChange as any).before.toString("utf8")).toBe(existing);
@@ -207,7 +208,7 @@ describe("regenIndexes", () => {
         "toolbar.tsx": `import { Button } from "@/design-system/atoms/button";\nexport function Toolbar() { return <div><Button /></div>; }\nexport const meta = { kind: "composite" as const, examples: [] };\n`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const manifestChange = changes.find(c => c.kind === "write" && c.path === "design-system/manifest.json");
       expect(manifestChange).toBeDefined();
 
@@ -240,7 +241,7 @@ describe("regenIndexes", () => {
         "button.test.tsx": `describe("Button", () => {});`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const manifestChange = changes.find(c => c.kind === "write" && c.path === "design-system/manifest.json");
       const manifest = JSON.parse((manifestChange as any).after.toString("utf8"));
 
@@ -254,7 +255,7 @@ describe("regenIndexes", () => {
         "chip.tsx": `export function Chip() { return <span />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const manifestChange = changes.find(c => c.kind === "write" && c.path === "design-system/manifest.json");
       const manifest = JSON.parse((manifestChange as any).after.toString("utf8"));
 
@@ -269,7 +270,7 @@ describe("regenIndexes", () => {
         "chip.tsx": `export function Chip() { return <span />; }\n`, // no meta.kind
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const manifestChange = changes.find(c => c.kind === "write" && c.path === "design-system/manifest.json");
       const manifest = JSON.parse((manifestChange as any).after.toString("utf8"));
 
@@ -285,7 +286,7 @@ describe("regenIndexes", () => {
         "button.tsx": `export function Button() { return <button />; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
       });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       const manifestChange = changes.find(c => c.kind === "write" && c.path === "design-system/manifest.json");
       const manifest = JSON.parse((manifestChange as any).after.toString("utf8"));
       expect(manifest.generated).toBeDefined();
@@ -293,14 +294,14 @@ describe("regenIndexes", () => {
     });
 
     it("returns empty changes when no design-system directory exists", async () => {
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       expect(changes).toHaveLength(0);
     });
 
     it("handles empty tier directories", async () => {
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });
 
-      const changes = await regenIndexes(dir);
+      const changes = await regenIndexes(makeFakeCtx(dir));
       // No barrel change for empty dir (empty === ""), no manifest change (no components)
       const barrelChange = changes.find(c => c.kind === "write" && c.path === "design-system/atoms/index.ts");
       expect(barrelChange).toBeUndefined();

@@ -73,3 +73,23 @@ Two metrics fall out of this check:
   upstream backlog. Each gets a tracking issue and a removal trigger.
 - Tolerating an undocumented workaround in a consumer is a policy violation,
   not just a stylistic choice. The discipline is the whole point.
+
+## Amendment (2026-06-06, PRD #266): internal workarounds also need removal triggers
+
+The discipline above applies to consumer-side workarounds, but the same
+principle binds the CLI's own internal code. PRD #266 closed three
+synthetic-`ProjectContext` fabrications — `minimalCtx` in `src/lib/fix-pass.ts`,
+the inline cast in `src/commands/migrate-layout.ts`, and `makeAuditCtx` in
+`src/commands/audit.ts` — each an internal workaround that bypassed the
+`loadProject` factory with no documented removal trigger. They were the
+internal-code equivalent of the consumer drift this ADR rules out.
+
+The removal triggers are now in place: a `loadPreAdoptProject` factory mints a
+real frozen ctx for pre-`.claude-ds.json` callers, and
+`tests/unit/no-ad-hoc-project-context.test.ts` fails CI on `as ProjectContext`
+casts or inline `ProjectContext = {` outside `src/lib/project.ts`. A fourth
+synthetic ctx is structurally impossible to land.
+
+The lesson: workarounds inside the CLI hide the same way consumer workarounds
+do — fine the first time, codified the third. Track them with the same
+discipline; close them with the same kind of mechanical seam.

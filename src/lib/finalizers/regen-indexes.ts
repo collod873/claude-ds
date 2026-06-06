@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join, extname } from "node:path";
 import type { Change } from "../operation.js";
+import type { ProjectContext } from "../project.js";
 import { metaKindFromSource } from "../three-signal.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx", ".snapshot.tsx"];
@@ -37,7 +38,8 @@ interface ComponentEntry {
   has_test: boolean;
 }
 
-export async function regenIndexes(cwd: string): Promise<Change[]> {
+export async function regenIndexes(ctx: ProjectContext): Promise<Change[]> {
+  const cwd = ctx.cwd;
   const dsRoot = join(cwd, "design-system");
   const changes: Change[] = [];
   const allComponents: ComponentEntry[] = [];

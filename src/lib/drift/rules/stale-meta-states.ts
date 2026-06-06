@@ -2,13 +2,13 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 
 import type {
   DriftFinding,
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 const META_STATES_RE = /\bstates\s*:\s*\{/;
@@ -102,8 +102,8 @@ function stripMetaStates(source: string): string {
   return source.slice(0, start) + source.slice(end);
 }
 
-async function fix(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");

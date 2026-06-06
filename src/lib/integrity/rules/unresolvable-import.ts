@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { IntegrityContext, IntegrityFinding, IntegrityRule } from "../rule.js";
+import type { ProjectContext } from "../../project.js";
+import type { IntegrityFinding, IntegrityRule } from "../rule.js";
 
 const RESOLVE_EXTS = [".ts", ".tsx", ".js", ".jsx"];
 
@@ -27,41 +28,41 @@ async function tryResolve(candidate: string): Promise<boolean> {
 async function resolveImportPath(
   importPath: string,
   fromFileRel: string,
-  ctx: IntegrityContext,
+  ctx: ProjectContext,
 ): Promise<boolean> {
+  const { cwd } = ctx;
+  const { dsAliases, tsconfigPaths } = ctx.auditConfig;
   let candidate: string;
 
   if (importPath.startsWith("./") || importPath.startsWith("../")) {
-    const fromDir = dirname(join(ctx.cwd, fromFileRel));
+    const fromDir = dirname(join(cwd, fromFileRel));
     candidate = join(fromDir, importPath);
     return tryResolve(candidate);
   }
 
-  if (ctx.tsconfigPaths) {
-    for (const [pattern, targets] of Object.entries(ctx.tsconfigPaths)) {
-      if (!pattern.endsWith("/*")) continue;
-      const prefix = pattern.slice(0, -1);
-      if (!importPath.startsWith(prefix)) continue;
-      const rest = importPath.slice(prefix.length);
-      for (const target of targets) {
-        if (!target.endsWith("/*")) continue;
-        const dir = target.slice(0, -1);
-        const resolved = join(ctx.cwd, dir, rest);
-        if (await tryResolve(resolved)) return true;
-      }
+  for (const [pattern, targets] of Object.entries(tsconfigPaths)) {
+    if (!pattern.endsWith("/*")) continue;
+    const prefix = pattern.slice(0, -1);
+    if (!importPath.startsWith(prefix)) continue;
+    const rest = importPath.slice(prefix.length);
+    for (const target of targets) {
+      if (!target.endsWith("/*")) continue;
+      const dir = target.slice(0, -1);
+      const resolved = join(cwd, dir, rest);
+      if (await tryResolve(resolved)) return true;
     }
   }
 
-  for (const alias of ctx.dsAliases) {
+  for (const alias of dsAliases) {
     const prefix = alias + "/";
     if (importPath.startsWith(prefix)) {
-      candidate = join(ctx.cwd, "design-system", importPath.slice(prefix.length));
+      candidate = join(cwd, "design-system", importPath.slice(prefix.length));
       return tryResolve(candidate);
     }
   }
 
   if (importPath.startsWith("@/")) {
-    candidate = join(ctx.cwd, importPath.slice(2));
+    candidate = join(cwd, importPath.slice(2));
     return tryResolve(candidate);
   }
 
@@ -85,7 +86,7 @@ function extractImportPaths(source: string): string[] {
 async function detect(
   file: string,
   source: string,
-  ctx?: IntegrityContext,
+  ctx?: ProjectContext,
 ): Promise<IntegrityFinding[]> {
   if (!ctx) return [];
 

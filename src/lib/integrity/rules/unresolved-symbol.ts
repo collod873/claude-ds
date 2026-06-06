@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 import type { IntegrityFinding, IntegrityFixResult, IntegrityRule } from "../rule.js";
 import { analyzeResolution } from "../resolve-symbols.js";
 import { repairUnresolvedSymbols } from "../repair-symbols.js";
@@ -39,7 +40,8 @@ function detect(file: string, source: string): IntegrityFinding[] {
  * are left untouched so the finding persists: honest partial repair, never a
  * guess that could compile-then-break a consumer (#260).
  */
-async function fix(finding: IntegrityFinding, cwd: string): Promise<IntegrityFixResult> {
+async function fix(finding: IntegrityFinding, ctx: ProjectContext): Promise<IntegrityFixResult> {
+  const cwd = ctx.cwd;
   let source: string;
   try {
     source = await readFile(join(cwd, finding.file), "utf8");
@@ -47,7 +49,7 @@ async function fix(finding: IntegrityFinding, cwd: string): Promise<IntegrityFix
     return { finding, fixed: false, message: `Could not read ${finding.file}`, changes: [] };
   }
 
-  const env = await buildRepairEnv({ cwd, fileName: finding.file });
+  const env = await buildRepairEnv(ctx, finding.file);
   const { source: repaired, repaired: didRepair, remaining } = repairUnresolvedSymbols(
     source,
     finding.file,

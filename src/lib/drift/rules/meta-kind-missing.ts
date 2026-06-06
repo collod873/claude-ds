@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { classifySource } from "../../classifier.js";
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 import { locationTierFromPath } from "../../three-signal.js";
 
 import type {
@@ -10,7 +11,6 @@ import type {
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 /** DRIFT-META-KIND-MISSING: DS file with no meta.kind when strict mode is on. */
@@ -26,8 +26,8 @@ function detect(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
-async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");
@@ -35,8 +35,9 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
     return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
+  const { domainRoots, allowedImports, dsAliases } = ctx.auditConfig;
   const locationTier = locationTierFromPath(finding.file);
-  const verdict = classifySource(source, opts?.domainRoots, opts?.allowedImports, opts?.dsAliases);
+  const verdict = classifySource(source, domainRoots, allowedImports, dsAliases);
   const tier = locationTier ?? verdict.tier;
 
   if (tier === "feature" || tier === "unknown") {

@@ -31,9 +31,10 @@ export interface ClassificationFinding {
  * `classificationMovesOp` below.
  */
 export async function findMisclassified(
-  cwd: string,
+  ctx: ProjectContext,
   demoteComposites: boolean,
 ): Promise<ClassificationFinding[]> {
+  const cwd = ctx.cwd;
   const findings: ClassificationFinding[] = [];
   const tiers: Array<{ dir: string; tier: "atom" | "composite" }> = [
     { dir: join(cwd, "design-system", "atoms"), tier: "atom" },

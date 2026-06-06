@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { freshTmpDir, cleanup } from "../../helpers/tmpdir";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
 import { scanScaffoldPresence } from "../../../src/lib/reports/scaffold-presence";
 import type { Manifest } from "../../../src/lib/manifest";
 
@@ -29,8 +30,8 @@ describe("scanScaffoldPresence", () => {
       { path: "design-system/contracts.md", category: "seeded" },
       { path: "design-system/tokens.json", category: "seeded" },
     ]);
-    const r = await scanScaffoldPresence({
-      cwd, manifest, appDir: "app", claudeMdTarget: "CLAUDE.md", verbose: false,
+    const r = await scanScaffoldPresence(makeFakeCtx(cwd), {
+      manifest, appDir: "app", claudeMdTarget: "CLAUDE.md", verbose: false,
     });
     expect(r.total).toBe(2);
     expect(r.present).toBe(1);
@@ -41,8 +42,8 @@ describe("scanScaffoldPresence", () => {
       { path: "design-system/contracts.md", category: "seeded" },
       { path: "design-system/references/tokens.showcase.tsx", category: "generated" },
     ]);
-    const r = await scanScaffoldPresence({
-      cwd, manifest, appDir: "app", claudeMdTarget: "CLAUDE.md", verbose: false,
+    const r = await scanScaffoldPresence(makeFakeCtx(cwd), {
+      manifest, appDir: "app", claudeMdTarget: "CLAUDE.md", verbose: false,
     });
     expect(r.total).toBe(1);
     expect(r.present).toBe(0);
@@ -56,8 +57,8 @@ describe("scanScaffoldPresence", () => {
       { path: "design-system/contracts.md", category: "seeded" },
       { path: "design-system/tokens.json", category: "seeded" },
     ]);
-    const r = await scanScaffoldPresence({
-      cwd, manifest, appDir: "app", claudeMdTarget: "CLAUDE.md", verbose: false,
+    const r = await scanScaffoldPresence(makeFakeCtx(cwd), {
+      manifest, appDir: "app", claudeMdTarget: "CLAUDE.md", verbose: false,
     });
     expect(r.lines.some(l => l.startsWith("missing: design-system/tokens.json"))).toBe(true);
     expect(r.lines.some(l => l.startsWith("present:"))).toBe(false);
@@ -70,8 +71,8 @@ describe("scanScaffoldPresence", () => {
     const manifest = makeManifest([
       { path: "design-system/contracts.md", category: "seeded" },
     ]);
-    const r = await scanScaffoldPresence({
-      cwd, manifest, appDir: "app", claudeMdTarget: "CLAUDE.md", verbose: true,
+    const r = await scanScaffoldPresence(makeFakeCtx(cwd), {
+      manifest, appDir: "app", claudeMdTarget: "CLAUDE.md", verbose: true,
     });
     expect(r.lines.some(l => l.startsWith("present: design-system/contracts.md"))).toBe(true);
   });
@@ -83,8 +84,8 @@ describe("scanScaffoldPresence", () => {
     const manifest = makeManifest([
       { path: "app/page.tsx", category: "managed" },
     ]);
-    const r = await scanScaffoldPresence({
-      cwd, manifest, appDir: "src/app", claudeMdTarget: "CLAUDE.md", verbose: true,
+    const r = await scanScaffoldPresence(makeFakeCtx(cwd), {
+      manifest, appDir: "src/app", claudeMdTarget: "CLAUDE.md", verbose: true,
     });
     expect(r.present).toBe(1);
     expect(r.lines.some(l => l.includes("app/page.tsx (at src/app/page.tsx)"))).toBe(true);
@@ -97,8 +98,8 @@ describe("scanScaffoldPresence", () => {
     const manifest = makeManifest([
       { path: "CLAUDE.md", category: "managed" },
     ]);
-    const r = await scanScaffoldPresence({
-      cwd, manifest, appDir: "app", claudeMdTarget: ".claude/CLAUDE.md", verbose: true,
+    const r = await scanScaffoldPresence(makeFakeCtx(cwd), {
+      manifest, appDir: "app", claudeMdTarget: ".claude/CLAUDE.md", verbose: true,
     });
     expect(r.present).toBe(1);
     expect(r.lines.some(l => l.includes("CLAUDE.md (at .claude/CLAUDE.md)"))).toBe(true);

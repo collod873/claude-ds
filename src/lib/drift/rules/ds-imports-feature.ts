@@ -1,17 +1,16 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { DEFAULT_DOMAIN_ROOTS } from "../../classifier.js";
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 
+import { findingKey, type FixerDecisionPoint } from "../decisions.js";
 import { extractUntilStatement } from "../extract.js";
-import type { PromptOption } from "../prompt.js";
 import type {
   DriftFinding,
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 /** DRIFT-DS-IMPORTS-FEATURE: DS file whose classifier verdict is feature. */
@@ -207,8 +206,8 @@ async function collectProjectImportRewriteChanges(
   return changes;
 }
 
-async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");
@@ -216,18 +215,22 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
     return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
   }
 
-  const domainRoots = opts?.domainRoots ?? DEFAULT_DOMAIN_ROOTS;
+  const { domainRoots } = ctx.auditConfig;
   const domainImports = parseDomainImports(source, domainRoots);
   if (domainImports.length === 0) {
     return { finding, fixed: false, message: `no domain imports found in ${finding.file}`, changes: [] };
   }
+
+  // Per-finding decisions answered by the command-level pre-pass (PRD #266
+  // Phase C step 2). Missing entry → "defer".
+  const choices = ctx.decisions.fixerChoices?.[findingKey(finding)] ?? {};
 
   let anyFixed = false;
   let currentSource = source;
   const changes: Change[] = [];
 
   for (const imp of domainImports) {
-    const resolvedFile = await resolveImportFile(imp.importPath, finding.file, cwd);
+    const resolvedFile = await resolveImportFile(imp.importPath, finding.file, ctx.cwd);
     let sourceFileContent: string | null = null;
     if (resolvedFile) {
       try { sourceFileContent = await readFile(resolvedFile, "utf8"); } catch { /* */ }
@@ -251,21 +254,10 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
       let selectedOption: string;
       if (canExtract) {
         selectedOption = `Extract "${symbolName}" to design-system/utils/`;
-      } else if (canConvertToProp || opts?.prompt) {
-        const options: PromptOption[] = [];
-        if (canConvertToProp) options.push({ label: `Convert "${symbolName}" to prop injection`, description: "Pass this value as a prop instead of importing it" });
-        options.push({ label: "Defer (add exception)", description: "Skip for now and add an exception entry" });
-
-        if (options.length === 1 || !opts?.prompt) {
-          continue;
-        }
-
-        const choice = await opts.prompt(
-          `"${symbolName}" comes from a domain module that can't be moved to design-system (it has its own domain dependencies). What should we do?`,
-          options,
-        );
-        if (choice === "defer") continue;
-        selectedOption = options[choice].label;
+      } else if (canConvertToProp) {
+        const answer = choices[`convert:${imp.importPath}:${symbolName}`] ?? "defer";
+        if (answer === "defer") continue;
+        selectedOption = `Convert "${symbolName}" to prop injection`;
       } else {
         continue;
       }
@@ -296,10 +288,10 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
         );
 
         const aliasOldPath = `@/${canonical}`;
-        const importChanges = await collectProjectImportRewriteChanges(cwd, imp.importPath, newPath);
+        const importChanges = await collectProjectImportRewriteChanges(ctx.cwd, imp.importPath, newPath);
         changes.push(...importChanges);
         if (aliasOldPath !== imp.importPath) {
-          const aliasChanges = await collectProjectImportRewriteChanges(cwd, aliasOldPath, newPath);
+          const aliasChanges = await collectProjectImportRewriteChanges(ctx.cwd, aliasOldPath, newPath);
           changes.push(...aliasChanges);
         }
         anyFixed = true;
@@ -365,6 +357,41 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
   return { finding, fixed: true, message: `resolved domain imports in ${finding.file}`, changes };
 }
 
+/**
+ * Pure enumerator of per-(import, symbol) convert/defer questions the fixer
+ * could ask. Walks `source` for domain imports against `ctx.auditConfig.
+ * domainRoots` and emits one decision point per (importPath, symbol) — an
+ * over-approximation (the live fixer skips imports whose source-file probe
+ * succeeds and shows extract is safe), kept conservative so a future
+ * pre-pass can ask everything that might be needed without doing I/O here.
+ *
+ * Reads no filesystem and no prompt (PRD #266 Phase C step 1).
+ */
+function describeDecisions(
+  _finding: DriftFinding,
+  source: string,
+  { ctx }: { ctx: ProjectContext },
+): FixerDecisionPoint[] {
+  const points: FixerDecisionPoint[] = [];
+  const { domainRoots } = ctx.auditConfig;
+  const domainImports = parseDomainImports(source, domainRoots);
+  for (const imp of domainImports) {
+    for (const symbolName of imp.symbols) {
+      points.push({
+        key: `convert:${imp.importPath}:${symbolName}`,
+        question:
+          `"${symbolName}" comes from a domain module that can't be moved to design-system` +
+          ` (it has its own domain dependencies). What should we do?`,
+        options: [
+          { label: `Convert "${symbolName}" to prop injection`, description: "Pass this value as a prop instead of importing it" },
+          { label: "Defer (add exception)", description: "Skip for now and add an exception entry" },
+        ],
+      });
+    }
+  }
+  return points;
+}
+
 export const dsImportsFeatureRule: DriftRule = {
   id: "DRIFT-DS-IMPORTS-FEATURE",
   severity: "error",
@@ -373,5 +400,6 @@ export const dsImportsFeatureRule: DriftRule = {
   fixable: true,
   fix,
   priority: 2,
-  interactive: false,
+  interactive: true,
+  describeDecisions,
 };

@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import picomatch from "picomatch";
 import { isManifestOrKeepfile, type DeprecatedPath, type ManagedRoot } from "../manifest.js";
+import type { ProjectContext } from "../project.js";
 
 /** Strict-by-default managed roots used when the manifest does not declare any. */
 export const FALLBACK_MANAGED_ROOTS: ManagedRoot[] = [
@@ -17,10 +18,10 @@ const DS_KEYWORDS_RE = /\b(design[- _]?system|atoms?|composites?|tokens?|design[
  * path or its contents mention DS keywords. Used to suppress unrelated skills
  * from the audit's strict-root output.
  */
-export async function isDsRelatedSkill(cwd: string, skillPath: string): Promise<boolean> {
+export async function isDsRelatedSkill(ctx: ProjectContext, skillPath: string): Promise<boolean> {
   if (DS_KEYWORDS_RE.test(skillPath)) return true;
   try {
-    const content = await readFile(join(cwd, skillPath), "utf8");
+    const content = await readFile(join(ctx.cwd, skillPath), "utf8");
     return DS_KEYWORDS_RE.test(content);
   } catch { return false; }
 }
@@ -79,13 +80,14 @@ export function findDeprecatedMatch(
  * how to surface each.
  */
 export async function findUnexpectedFiles(
-  cwd: string,
+  ctx: ProjectContext,
   manifestPaths: Set<string>,
   ignoreGlobs: string[],
   managedRoots: ManagedRoot[],
   generatedPatterns: string[],
   deprecatedPaths: DeprecatedPath[],
 ): Promise<UnexpectedFileFinding[]> {
+  const { cwd } = ctx;
   const roots = managedRoots.length > 0 ? managedRoots : FALLBACK_MANAGED_ROOTS;
 
   const openPrefixes = roots
@@ -131,23 +133,25 @@ export interface UnexpectedScanReport {
  * each category — strict, open, deprecated-match, or unrelated skill.
  * Pure read — no writes, no printing.
  */
-export async function scanUnexpectedFiles(opts: {
-  cwd: string;
-  manifestPaths: Set<string>;
-  ignoreGlobs: string[];
-  managedRoots: ManagedRoot[];
-  generatedPatterns: string[];
-  deprecatedPaths: DeprecatedPath[];
-  /** Paths already reported as deprecated-path orphans — skipped here to avoid double-counting. */
-  orphanPaths: Set<string>;
-}): Promise<UnexpectedScanReport> {
+export async function scanUnexpectedFiles(
+  ctx: ProjectContext,
+  opts: {
+    manifestPaths: Set<string>;
+    ignoreGlobs: string[];
+    managedRoots: ManagedRoot[];
+    generatedPatterns: string[];
+    deprecatedPaths: DeprecatedPath[];
+    /** Paths already reported as deprecated-path orphans — skipped here to avoid double-counting. */
+    orphanPaths: Set<string>;
+  },
+): Promise<UnexpectedScanReport> {
   const {
-    cwd, manifestPaths, ignoreGlobs, managedRoots,
+    manifestPaths, ignoreGlobs, managedRoots,
     generatedPatterns, deprecatedPaths, orphanPaths,
   } = opts;
 
   const raw = await findUnexpectedFiles(
-    cwd, manifestPaths, ignoreGlobs,
+    ctx, manifestPaths, ignoreGlobs,
     managedRoots, generatedPatterns, deprecatedPaths,
   );
 
@@ -162,7 +166,7 @@ export async function scanUnexpectedFiles(opts: {
       deprecatedMatches.push(f);
     } else if (f.strict) {
       const isSkill = f.path.startsWith(".claude/skills/");
-      if (isSkill && !(await isDsRelatedSkill(cwd, f.path))) {
+      if (isSkill && !(await isDsRelatedSkill(ctx, f.path))) {
         nonDsUnexpected.push(f.path);
       } else {
         strictFindings.push(f);

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { freshTmpDir, cleanup } from "../../helpers/tmpdir";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
 import { scanUnexpectedFiles, formatStrictWarnings, formatDeprecatedMatchWarnings } from "../../../src/lib/reports/unexpected-files";
 import type { DeprecatedPath, ManagedRoot } from "../../../src/lib/manifest";
 
@@ -17,8 +18,7 @@ describe("scanUnexpectedFiles — strict vs open root", () => {
     await mkdir(join(cwd, ".claude/skills/custom-lint"), { recursive: true });
     await writeFile(join(cwd, ".claude/skills/custom-lint/SKILL.md"), "# custom-lint\nDesign-system token policing");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(),
       ignoreGlobs: [],
       managedRoots: [{ root: ".claude/skills/", strict: true }],
@@ -35,8 +35,7 @@ describe("scanUnexpectedFiles — strict vs open root", () => {
     await mkdir(join(cwd, "design-system/atoms"), { recursive: true });
     await writeFile(join(cwd, "design-system/atoms/switch.tsx"), "export {}");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(),
       ignoreGlobs: [],
       managedRoots: [
@@ -56,8 +55,7 @@ describe("scanUnexpectedFiles — strict vs open root", () => {
     await mkdir(join(cwd, ".claude/skills/custom-lint"), { recursive: true });
     await writeFile(join(cwd, ".claude/skills/custom-lint/SKILL.md"), "# custom-lint\nA design-system rule");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(),
       ignoreGlobs: [],
       managedRoots: [],
@@ -79,8 +77,7 @@ describe("scanUnexpectedFiles — suppression", () => {
     await mkdir(join(cwd, ".claude/skills/badge-system"), { recursive: true });
     await writeFile(join(cwd, ".claude/skills/badge-system/SKILL.md"), "# badge-system");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(),
       ignoreGlobs: [".claude/skills/badge-system/**"],
       managedRoots: [{ root: ".claude/skills/", strict: true }],
@@ -97,8 +94,7 @@ describe("scanUnexpectedFiles — suppression", () => {
     await mkdir(join(cwd, "design-system/references"), { recursive: true });
     await writeFile(join(cwd, "design-system/references/tokens.showcase.tsx"), "export {}");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(),
       ignoreGlobs: [],
       managedRoots: [{ root: "design-system/", strict: true }],
@@ -114,8 +110,7 @@ describe("scanUnexpectedFiles — suppression", () => {
     await mkdir(join(cwd, "design-system"), { recursive: true });
     await writeFile(join(cwd, "design-system/contracts.md"), "# contracts");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(["design-system/contracts.md"]),
       ignoreGlobs: [],
       managedRoots: [{ root: "design-system/", strict: true }],
@@ -131,8 +126,7 @@ describe("scanUnexpectedFiles — suppression", () => {
     await mkdir(join(cwd, "design-system/icons"), { recursive: true });
     await writeFile(join(cwd, "design-system/icons/.gitkeep"), "");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(["design-system/icons/.keep"]),
       ignoreGlobs: [],
       managedRoots: [{ root: "design-system/", strict: true }],
@@ -148,8 +142,7 @@ describe("scanUnexpectedFiles — suppression", () => {
     await mkdir(join(cwd, "design-system"), { recursive: true });
     await writeFile(join(cwd, "design-system/drift-audit.md"), "# Drift Audit");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(),
       ignoreGlobs: [],
       managedRoots: [{ root: "design-system/", strict: true }],
@@ -172,8 +165,7 @@ describe("scanUnexpectedFiles — deprecated-match", () => {
     await mkdir(join(cwd, ".claude/skills/badge-system"), { recursive: true });
     await writeFile(join(cwd, ".claude/skills/badge-system/README.md"), "# legacy readme");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(),
       ignoreGlobs: [],
       managedRoots: [{ root: ".claude/skills/", strict: true }],
@@ -198,8 +190,7 @@ describe("scanUnexpectedFiles — non-DS skill heuristic", () => {
     await mkdir(join(cwd, ".claude/skills/git-helper"), { recursive: true });
     await writeFile(join(cwd, ".claude/skills/git-helper/SKILL.md"), "# git-helper\nHelps manage git operations only.");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(),
       ignoreGlobs: [],
       managedRoots: [{ root: ".claude/skills/", strict: true }],
@@ -216,8 +207,7 @@ describe("scanUnexpectedFiles — non-DS skill heuristic", () => {
     await mkdir(join(cwd, ".claude/skills/atoms-helper"), { recursive: true });
     await writeFile(join(cwd, ".claude/skills/atoms-helper/SKILL.md"), "# whatever");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(),
       ignoreGlobs: [],
       managedRoots: [{ root: ".claude/skills/", strict: true }],
@@ -234,8 +224,7 @@ describe("scanUnexpectedFiles — non-DS skill heuristic", () => {
     await mkdir(join(cwd, ".claude/skills/lint"), { recursive: true });
     await writeFile(join(cwd, ".claude/skills/lint/SKILL.md"), "# lint\nEnforces design-system token usage.");
 
-    const r = await scanUnexpectedFiles({
-      cwd,
+    const r = await scanUnexpectedFiles(makeFakeCtx(cwd), {
       manifestPaths: new Set(),
       ignoreGlobs: [],
       managedRoots: [{ root: ".claude/skills/", strict: true }],

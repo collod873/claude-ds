@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { freshTmpDir, cleanup } from "../../helpers/tmpdir";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
 import { scanDriftAndIntegrity } from "../../../src/lib/reports/drift-integrity-scan";
 
 describe("scanDriftAndIntegrity", () => {
@@ -10,7 +11,7 @@ describe("scanDriftAndIntegrity", () => {
   afterEach(async () => { await cleanup(cwd); });
 
   it("returns no findings on an empty design-system tree", async () => {
-    const r = await scanDriftAndIntegrity({ cwd });
+    const r = await scanDriftAndIntegrity(makeFakeCtx(cwd));
     expect(r.findings).toEqual([]);
     expect(r.scannedFiles.size).toBe(0);
     expect(r.filesWithFindings.size).toBe(0);
@@ -22,7 +23,7 @@ describe("scanDriftAndIntegrity", () => {
       join(cwd, "design-system/composites/solo-label.tsx"),
       "export function SoloLabel() { return <span />; }",
     );
-    const r = await scanDriftAndIntegrity({ cwd });
+    const r = await scanDriftAndIntegrity(makeFakeCtx(cwd));
     expect(r.findings.some(f => f.ruleId === "DRIFT-MISPLACED")).toBe(true);
     expect(r.scannedFiles.has("design-system/composites/solo-label.tsx")).toBe(true);
     expect(r.filesWithFindings.has("design-system/composites/solo-label.tsx")).toBe(true);
@@ -34,7 +35,7 @@ describe("scanDriftAndIntegrity", () => {
       join(cwd, "design-system/atoms/broken.tsx"),
       `import { fmt } from "../../features/billing/format";\nexport function Broken( {\n`,
     );
-    const r = await scanDriftAndIntegrity({ cwd });
+    const r = await scanDriftAndIntegrity(makeFakeCtx(cwd));
     expect(r.findings.some(f => f.ruleId === "INTEGRITY-UNPARSEABLE")).toBe(true);
     expect(r.findings.some(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE")).toBe(false);
     expect(r.integrityFailedFiles.has("design-system/atoms/broken.tsx")).toBe(true);
@@ -46,7 +47,7 @@ describe("scanDriftAndIntegrity", () => {
       join(cwd, "design-system/atoms/button.tsx"),
       `export function Button() { return <button />; }`,
     );
-    const r = await scanDriftAndIntegrity({ cwd });
+    const r = await scanDriftAndIntegrity(makeFakeCtx(cwd));
     expect(r.coverageLine).toMatch(/evaluated 1 file/);
     expect(r.coverageLine).toMatch(/1 clean, 0 with findings/);
   });
@@ -61,7 +62,7 @@ describe("scanDriftAndIntegrity", () => {
       join(cwd, "design-system/atoms/button.test.tsx"),
       "export {}",
     );
-    const r = await scanDriftAndIntegrity({ cwd });
+    const r = await scanDriftAndIntegrity(makeFakeCtx(cwd));
     expect(r.scannedFiles.size).toBe(0);
   });
 });

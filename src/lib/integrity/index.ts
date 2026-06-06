@@ -5,14 +5,12 @@ import { validateFixerOutput } from "../fixer-validate.js";
 import { info } from "../log.js";
 import { INTEGRITY_RULES, INTEGRITY_RULES_BY_ID } from "./registry.js";
 import type {
-  IntegrityContext,
   IntegrityFinding,
   IntegrityFixResult,
   IntegrityRuleId,
 } from "./rule.js";
 
 export type {
-  IntegrityContext,
   IntegrityFinding,
   IntegrityFixResult,
   IntegrityRule,
@@ -60,11 +58,11 @@ export function isIntegrityBlocking(id: IntegrityRuleId): boolean {
  * synchronously and the array path picks them up.
  */
 export function evaluateIntegrity(file: string, source: string): IntegrityFinding[];
-export function evaluateIntegrity(file: string, source: string, ctx: IntegrityContext): Promise<IntegrityFinding[]>;
+export function evaluateIntegrity(file: string, source: string, ctx: ProjectContext): Promise<IntegrityFinding[]>;
 export function evaluateIntegrity(
   file: string,
   source: string,
-  ctx?: IntegrityContext,
+  ctx?: ProjectContext,
 ): IntegrityFinding[] | Promise<IntegrityFinding[]> {
   if (!ctx) {
     const findings: IntegrityFinding[] = [];
@@ -87,7 +85,7 @@ export function evaluateIntegrity(
 /**
  * Adapter that exposes an integrity rule's `fix` as a Runner Operation.
  * `plan()` looks up the rule from the registry and invokes `rule.fix(finding,
- * ctx.cwd)` (read-only — fixers return Changes without touching disk),
+ * ctx)` (read-only — fixers return Changes without touching disk),
  * runs the ADR-0014 `validateFixerOutput` gate on every emitted Change so
  * integrity fixers carry the same parse-before-write guarantee as drift
  * fixers (PRD #234), stashes the `IntegrityFixResult` on `op.result` so
@@ -125,7 +123,7 @@ export function integrityFixerAsOperation(
         };
         return [];
       }
-      const r = await rule.fix(finding, ctx.cwd);
+      const r = await rule.fix(finding, ctx);
 
       if (r.fixed && r.changes.length > 0) {
         for (const ch of r.changes) {

@@ -1,5 +1,6 @@
 import { DRIFT_RULES, DRIFT_RULES_BY_ID } from "./registry.js";
 import type {
+  DescribeDecisions,
   DriftFinding,
   DriftFixer,
   DriftRuleId,
@@ -7,18 +8,25 @@ import type {
 } from "./rule.js";
 
 export type {
+  DescribeDecisions,
   DriftFinding,
   DriftFixer,
   DriftRuleId,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "./rule.js";
+export type {
+  DecisionAnswer,
+  DecisionKey,
+  FindingKey,
+  FixerDecisionPoint,
+} from "./decisions.js";
+export { findingKey } from "./decisions.js";
 export type { Severity } from "../severity.js";
 export type { FixerPrompt, PromptOption } from "./prompt.js";
 export type { InternalComponent } from "./rules/raw-primitive.js";
 
-export { makeNoTtyPrompt, makeTtyPrompt } from "./prompt.js";
+export { makeTtyPrompt } from "./prompt.js";
 export { parseCvaVariants } from "./cva.js";
 export {
   EXTRACTION_NEEDED_MARKER,
@@ -68,6 +76,18 @@ export function getFixer(id: DriftRuleId): DriftFixer | null {
 export function isInteractive(id: DriftRuleId): boolean {
   const rule = DRIFT_RULES_BY_ID[id];
   return rule.fixable ? rule.interactive : false;
+}
+
+/**
+ * The rule's pure decision-point enumerator if it's interactive, else `null`.
+ * The command-level pre-pass (Phase C step 2+) uses this to enumerate the
+ * questions a fixer would otherwise ask via `opts.prompt`. Today nothing
+ * calls it; the hook exists so the type system can enforce that every
+ * `fixable:true, interactive:true` rule supplies one (PRD #266 Phase C step 1).
+ */
+export function getDescribeDecisions(id: DriftRuleId): DescribeDecisions | null {
+  const rule = DRIFT_RULES_BY_ID[id];
+  return rule.fixable && rule.interactive ? rule.describeDecisions : null;
 }
 
 /**

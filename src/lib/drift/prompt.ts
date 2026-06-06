@@ -7,10 +7,6 @@ export interface PromptOption {
 
 export type FixerPrompt = (question: string, options: PromptOption[]) => Promise<number | "defer">;
 
-export function makeNoTtyPrompt(): FixerPrompt {
-  return async () => 0;
-}
-
 export function makeTtyPrompt(): FixerPrompt {
   return async (question: string, options: PromptOption[]): Promise<number | "defer"> => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });

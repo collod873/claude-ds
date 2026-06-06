@@ -1,7 +1,8 @@
 import type { Tier, TierVerdict } from "../classifier.js";
 import type { Change } from "../operation.js";
+import type { ProjectContext } from "../project.js";
 import type { Severity } from "../severity.js";
-import type { FixerPrompt } from "./prompt.js";
+import type { FixerDecisionPoint } from "./decisions.js";
 
 /**
  * Stable public vocabulary for drift rule IDs (ADR-0006).
@@ -61,22 +62,45 @@ export interface FixResult {
   changes: Change[];
 }
 
-export interface FixerOpts {
-  domainRoots?: string[];
-  allowedImports?: string[];
-  dsAliases?: string[];
-  prompt?: FixerPrompt;
-}
+/**
+ * Drift fixer signature: a pure function of `(finding, ctx)`. PRD #266 Phase C
+ * step 2 finalizes the surface — Phase A removed the bare `cwd` rationale,
+ * Phase B folded `domainRoots`/`allowedImports`/`dsAliases` onto `ctx.auditConfig`,
+ * and this step lifts the prompt to a command-level pre-pass that writes per-
+ * finding answers into `ctx.decisions.fixerChoices`. The fixer reads those
+ * answers via `ctx.decisions.fixerChoices?.[findingKey(finding)]?.[decisionKey]`
+ * (missing entry → `"defer"`), so `plan(ctx)` is now provably deterministic
+ * given its ctx. `FixerOpts` is deleted; nothing threads through alongside ctx.
+ */
+export type DriftFixer = (finding: DriftFinding, ctx: ProjectContext) => Promise<FixResult>;
 
-export type DriftFixer = (finding: DriftFinding, cwd: string, opts?: FixerOpts) => Promise<FixResult>;
+/**
+ * Pure enumerator of the questions a fixer might ask the consumer for a given
+ * finding (PRD #266 Phase C step 1). Required on the `fixable:true,
+ * interactive:true` arm of `DriftRule` and forbidden on the other arms —
+ * forgetting it on a new interactive rule is a compile error.
+ *
+ * Pure: must not perform I/O beyond what `detect` already reads (the file
+ * `source`) and must not prompt. The command-level pre-pass calls this to
+ * decide what to ask up front; the fixer reads the answers from
+ * `ctx.decisions.fixerChoices` instead of calling `opts.prompt`.
+ */
+export type DescribeDecisions = (
+  finding: DriftFinding,
+  source: string,
+  opts: { ctx: ProjectContext },
+) => FixerDecisionPoint[];
 
 /**
  * One drift rule, co-locating its detect + (optional) fix + metadata.
  *
- * Discriminated on `fixable`: a `fixable: true` rule MUST also declare
- * `fix`, `priority`, and `interactive`. A `fixable: false` rule MUST NOT
- * declare them. Forgetting `fix` on a fixable rule is a compile error —
- * this is the seam that prevents a silently-unfixable rule from shipping.
+ * Discriminated on `fixable`: a `fixable: false` rule MUST NOT declare
+ * `fix`/`priority`/`interactive`. A `fixable: true` rule splits further on
+ * `interactive` — the `interactive: true` arm additionally requires
+ * `describeDecisions` (the pre-pass hook), and the `interactive: false` arm
+ * forbids it. Forgetting `describeDecisions` on a new interactive rule is a
+ * compile error — the same shape that prevents silently-unfixable rules from
+ * shipping now also prevents silently-prompting ones.
  */
 export type DriftRule =
   | {
@@ -94,5 +118,16 @@ export type DriftRule =
       fixable: true;
       fix: DriftFixer;
       priority: number;
-      interactive: boolean;
+      interactive: false;
+    }
+  | {
+      id: DriftRuleId;
+      severity: Severity;
+      description: string;
+      detect: (input: DriftRuleInput) => DriftFinding | null;
+      fixable: true;
+      fix: DriftFixer;
+      priority: number;
+      interactive: true;
+      describeDecisions: DescribeDecisions;
     };

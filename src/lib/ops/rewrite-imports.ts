@@ -2,7 +2,6 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
-import { detectDsAliases } from "../ds-aliases.js";
 
 /**
  * Match `from "...@/design-system/<tier>/..."` — but exclude `types/meta`. The
@@ -92,17 +91,13 @@ async function listTier(ctx: ProjectContext, tier: "atoms" | "composites"): Prom
 /**
  * Resolve the set of import-path prefixes that map to the consumer's
  * `design-system/` directory. Always includes `@/design-system` (the implicit
- * baseline assumed by ADR-0009). Adds anything in `cfg.ds_aliases`, falling
- * back to `detectDsAliases` (tsconfig.json paths) when the config didn't pin
- * them — same precedence classify uses for `classifySource`.
+ * baseline assumed by ADR-0009). Adds the resolver-bundle `dsAliases`, which
+ * already applies the `cfg.ds_aliases ?? detectDsAliases(...)` precedence
+ * classify uses for `classifySource` (PRD #266 Phase B: one source of truth).
  */
-async function resolveDsImportPrefixes(ctx: ProjectContext): Promise<string[]> {
-  const cfgAliases = ctx.cfg.ds_aliases ?? [];
-  const aliases = cfgAliases.length > 0
-    ? cfgAliases
-    : await detectDsAliases(ctx.cwd, ctx.cfg.srcRoot ?? "src");
+function resolveDsImportPrefixes(ctx: ProjectContext): string[] {
   const prefixes = new Set<string>(["@/design-system"]);
-  for (const a of aliases) prefixes.add(a);
+  for (const a of ctx.auditConfig.dsAliases) prefixes.add(a);
   return [...prefixes];
 }
 
@@ -136,7 +131,7 @@ export const rewriteImports: Operation = {
     const composites = await listTier(ctx, "composites");
     if (atoms.size === 0 && composites.size === 0) return [];
 
-    const prefixes = await resolveDsImportPrefixes(ctx);
+    const prefixes = resolveDsImportPrefixes(ctx);
 
     // Build substitution map: for each component × prefix, the wrong-tier
     // import path we should rewrite *to* the right-tier path under the same

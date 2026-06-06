@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { checkThreeSignals, locationTierFromPath, metaKindFromSource } from "../../src/lib/three-signal";
+import { makeFakeCtx } from "../helpers/fake-ctx";
+
+const CTX = makeFakeCtx("/tmp/three-signal");
 
 // ── locationTierFromPath ─────────────────────────────────────────────────────
 
@@ -58,7 +61,7 @@ import { Input } from "@/design-system/atoms/input";
 import { Badge } from "@/design-system/atoms/badge";
 export function SearchBar() { return <div><Input /><Button label="Go" /><Badge /></div>; }
 export const meta = { kind: "composite" };`;
-    const result = checkThreeSignals("design-system/atoms/search-bar.tsx", src);
+    const result = checkThreeSignals("design-system/atoms/search-bar.tsx", src, CTX);
     expect(result.signals.locationTier).toBe("atom");
     expect(result.signals.classifierVerdict.tier).toBe("composite");
     const hit = result.findings.find(f => f.ruleId === "DRIFT-MISPLACED");
@@ -71,7 +74,7 @@ export function Badge({ label }: { label: string }) {
   return <span className="badge">{label}</span>;
 }
 export const meta = { kind: "atom" };`;
-    const result = checkThreeSignals("design-system/composites/badge.tsx", src);
+    const result = checkThreeSignals("design-system/composites/badge.tsx", src, CTX);
     expect(result.signals.locationTier).toBe("composite");
     expect(result.signals.classifierVerdict.tier).toBe("atom");
     const hit = result.findings.find(f => f.ruleId === "DRIFT-MISPLACED");
@@ -84,13 +87,13 @@ export function Button({ label }: { label: string }) {
   return <button>{label}</button>;
 }
 export const meta = { kind: "atom" };`;
-    const result = checkThreeSignals("design-system/atoms/button.tsx", src);
+    const result = checkThreeSignals("design-system/atoms/button.tsx", src, CTX);
     expect(result.findings).toHaveLength(0);
   });
 
   it("does not fire for atom outside design-system/ folder", () => {
     const src = `export function Util() { return null; }`;
-    const result = checkThreeSignals("src/utils/util.tsx", src);
+    const result = checkThreeSignals("src/utils/util.tsx", src, CTX);
     expect(result.signals.locationTier).toBeNull();
     expect(result.findings).toHaveLength(0);
   });
@@ -100,7 +103,7 @@ export const meta = { kind: "atom" };`;
 import { Button } from "@/design-system/atoms/button";
 import { Input } from "@/design-system/atoms/input";
 export const meta = { kind: "atom" };`;
-    const result = checkThreeSignals("design-system/atoms/search-bar.tsx", src);
+    const result = checkThreeSignals("design-system/atoms/search-bar.tsx", src, CTX);
     expect(result.signals.locationTier).toBe("atom");
     expect(result.signals.metaKind).toBe("atom");
     expect(result.signals.classifierVerdict.tier).toBe("composite");
@@ -118,7 +121,7 @@ export function InvoiceAmount({ id }: { id: string }) {
   return <span>{inv.amount}</span>;
 }
 export const meta = { kind: "atom" };`;
-    const result = checkThreeSignals("design-system/atoms/invoice-amount.tsx", src);
+    const result = checkThreeSignals("design-system/atoms/invoice-amount.tsx", src, CTX);
     expect(result.signals.locationTier).toBe("atom");
     expect(result.signals.classifierVerdict.tier).toBe("feature");
     const hit = result.findings.find(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE");
@@ -132,7 +135,7 @@ import { formatDate } from "@/lib/date";
 import { Button } from "@/design-system/atoms/button";
 export function DateButton() { return <Button label={formatDate(new Date())} />; }
 export const meta = { kind: "composite" };`;
-    const result = checkThreeSignals("design-system/composites/date-button.tsx", src);
+    const result = checkThreeSignals("design-system/composites/date-button.tsx", src, CTX);
     expect(result.signals.classifierVerdict.tier).toBe("feature");
     const hit = result.findings.find(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE");
     expect(hit).toBeDefined();
@@ -145,7 +148,7 @@ import { Button } from "@/design-system/atoms/button";
 import { Input } from "@/design-system/atoms/input";
 export function SearchBar() { return <div><Input /><Button label="Go" /></div>; }
 export const meta = { kind: "composite" };`;
-    const result = checkThreeSignals("design-system/composites/search-bar.tsx", src);
+    const result = checkThreeSignals("design-system/composites/search-bar.tsx", src, CTX);
     expect(result.findings.filter(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE")).toHaveLength(0);
   });
 
@@ -153,7 +156,7 @@ export const meta = { kind: "composite" };`;
     const src = `
 import { useInvoice } from "@/features/invoicing/use-invoice";
 export function InvoiceList() { return <div />; }`;
-    const result = checkThreeSignals("features/invoicing/invoice-list.tsx", src);
+    const result = checkThreeSignals("features/invoicing/invoice-list.tsx", src, CTX);
     expect(result.signals.locationTier).toBeNull();
     expect(result.findings.filter(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE")).toHaveLength(0);
   });
@@ -163,7 +166,10 @@ export function InvoiceList() { return <div />; }`;
 import { useOrders } from "@/services/orders/use-orders";
 export function OrderCard() { return <div />; }
 export const meta = { kind: "atom" };`;
-    const result = checkThreeSignals("design-system/atoms/order-card.tsx", src, ["services"]);
+    const result = checkThreeSignals(
+      "design-system/atoms/order-card.tsx", src,
+      makeFakeCtx("/tmp/three-signal", { auditConfig: { domainRoots: ["services"] } }),
+    );
     expect(result.signals.classifierVerdict.tier).toBe("feature");
     const hit = result.findings.find(f => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE");
     expect(hit).toBeDefined();
@@ -179,7 +185,7 @@ export function AppLayout({ title }: { title: string }) {
   return <div><h1>{title}</h1></div>;
 }
 export const meta = { kind: "pattern" };`;
-    const result = checkThreeSignals("design-system/patterns/app-layout.tsx", src);
+    const result = checkThreeSignals("design-system/patterns/app-layout.tsx", src, CTX);
     expect(result.signals.locationTier).toBe("pattern");
     const hit = result.findings.find(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS");
     expect(hit).toBeDefined();
@@ -192,7 +198,7 @@ export function PageWrapper({ children }: { children: React.ReactNode }) {
   return <AppShell>{children}</AppShell>;
 }
 export const meta = { kind: "pattern" };`;
-    const result = checkThreeSignals("design-system/patterns/page-wrapper.tsx", src);
+    const result = checkThreeSignals("design-system/patterns/page-wrapper.tsx", src, CTX);
     expect(result.signals.locationTier).toBe("pattern");
     const hit = result.findings.find(f => f.ruleId === "DRIFT-PATTERN-IMPORTS-PATTERN");
     expect(hit).toBeDefined();
@@ -204,7 +210,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return <main className="app-shell">{children}</main>;
 }
 export const meta = { kind: "pattern" };`;
-    const result = checkThreeSignals("design-system/patterns/app-shell.tsx", src);
+    const result = checkThreeSignals("design-system/patterns/app-shell.tsx", src, CTX);
     expect(result.signals.locationTier).toBe("pattern");
     expect(result.signals.classifierVerdict.tier).toBe("pattern");
     expect(result.findings.filter(f => f.ruleId === "DRIFT-PATTERN-NO-SLOTS")).toHaveLength(0);
@@ -218,7 +224,7 @@ export function Dashboard({ sidebar, main }: { sidebar: React.ReactNode; main: R
   return <div><aside>{sidebar}</aside><main>{main}</main></div>;
 }
 export const meta = { kind: "pattern" };`;
-    const result = checkThreeSignals("design-system/patterns/dashboard.tsx", src);
+    const result = checkThreeSignals("design-system/patterns/dashboard.tsx", src, CTX);
     expect(result.signals.classifierVerdict.tier).toBe("pattern");
     expect(result.findings).toHaveLength(0);
   });
@@ -228,7 +234,7 @@ export const meta = { kind: "pattern" };`;
 export function AppShell({ children }: { children: React.ReactNode }) {
   return <main>{children}</main>;
 }`;
-    const result = checkThreeSignals("design-system/patterns/app-shell.tsx", src);
+    const result = checkThreeSignals("design-system/patterns/app-shell.tsx", src, CTX);
     expect(result.signals.locationTier).toBe("pattern");
   });
 });
@@ -243,7 +249,7 @@ export const meta = { kind: "composite", examples: [] } as const;
 export function SubmitButton() { return <Button label="Submit" />; }`;
     const result = checkThreeSignals(
       "design-system/composites/submit-button.tsx", src,
-      undefined, false, undefined, ["@ds"],
+      makeFakeCtx("/tmp/three-signal", { auditConfig: { dsAliases: ["@ds"] } }),
     );
     expect(result.signals.classifierVerdict.tier).toBe("composite");
     expect(result.findings.some(f => f.ruleId === "DRIFT-MISPLACED")).toBe(false);
@@ -256,7 +262,7 @@ export const meta = { kind: "composite", examples: [] } as const;
 export function PageLayout() { return <AppShell />; }`;
     const result = checkThreeSignals(
       "design-system/composites/page-layout.tsx", src,
-      undefined, false, undefined, ["@ds"],
+      makeFakeCtx("/tmp/three-signal", { auditConfig: { dsAliases: ["@ds"] } }),
     );
     expect(result.signals.classifierVerdict.tier).toBe("unknown");
   });
@@ -267,7 +273,7 @@ import { Button } from "@ds/atoms/button";
 export const meta = { kind: "composite", examples: [] } as const;
 export function SubmitButton() { return <Button label="Submit" />; }`;
     const result = checkThreeSignals(
-      "design-system/composites/submit-button.tsx", src,
+      "design-system/composites/submit-button.tsx", src, CTX,
     );
     expect(result.signals.classifierVerdict.tier).toBe("atom");
     expect(result.findings.some(f => f.ruleId === "DRIFT-MISPLACED")).toBe(true);

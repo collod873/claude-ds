@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 import type { IntegrityFinding, IntegrityFixResult, IntegrityRule } from "../rule.js";
 import { analyzeResolution } from "../resolve-symbols.js";
 import { dedupeDuplicateFns } from "../dedupe-decls.js";
@@ -35,7 +36,8 @@ function detect(file: string, source: string): IntegrityFinding[] {
  * a component body duplicated verbatim, which this heals; anything ambiguous
  * stays a finding (#260).
  */
-async function fix(finding: IntegrityFinding, cwd: string): Promise<IntegrityFixResult> {
+async function fix(finding: IntegrityFinding, ctx: ProjectContext): Promise<IntegrityFixResult> {
+  const cwd = ctx.cwd;
   let source: string;
   try {
     source = await readFile(join(cwd, finding.file), "utf8");

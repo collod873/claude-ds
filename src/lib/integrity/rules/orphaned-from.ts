@@ -39,5 +39,5 @@ export const orphanedFromRule: IntegrityRule = {
     "File contains '} from' without a matching import opener — likely a fixer stripped the import declaration",
   detect,
   fixable: true,
-  fix: (finding, cwd) => restoreFromHead(finding, cwd),
+  fix: (finding, ctx) => restoreFromHead(finding, ctx),
 };

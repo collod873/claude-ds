@@ -8,6 +8,7 @@ import { restoreFromHead } from "../../src/lib/integrity/restore-from-head";
 import { INTEGRITY_RULES_BY_ID } from "../../src/lib/integrity/registry";
 import type { IntegrityFinding, IntegrityFixResult } from "../../src/lib/integrity/index";
 import type { ProjectContext } from "../../src/lib/project";
+import { makeFakeCtx } from "../helpers/fake-ctx";
 
 function initGitRepo(dir: string): void {
   execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
@@ -67,7 +68,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await restoreFromHead(finding, dir);
+      const result = await restoreFromHead(finding, makeFakeCtx(dir));
 
       expect(result.fixed).toBe(true);
       expect(result.changes).toHaveLength(1);
@@ -98,7 +99,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await restoreFromHead(finding, dir);
+      const result = await restoreFromHead(finding, makeFakeCtx(dir));
 
       expect(result.fixed).toBe(false);
       expect(result.changes).toHaveLength(0);
@@ -120,7 +121,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await restoreFromHead(finding, dir);
+      const result = await restoreFromHead(finding, makeFakeCtx(dir));
 
       expect(result.fixed).toBe(false);
       expect(result.changes).toHaveLength(0);
@@ -147,7 +148,7 @@ describe("integrity-fixers", () => {
         message: "Orphaned '} from' at line 1",
       };
 
-      const result = await restoreFromHead(finding, dir);
+      const result = await restoreFromHead(finding, makeFakeCtx(dir));
 
       expect(result.fixed).toBe(true);
       expect(result.changes).toHaveLength(1);
@@ -166,7 +167,7 @@ describe("integrity-fixers", () => {
         message: "File has syntax errors",
       };
 
-      const result = await restoreFromHead(finding, dir);
+      const result = await restoreFromHead(finding, makeFakeCtx(dir));
 
       expect(result.fixed).toBe(false);
       expect(result.changes).toHaveLength(0);
@@ -254,7 +255,7 @@ describe("integrity-fixers", () => {
     // gate runs `validateFixerOutput` on every Change the rule's `fix`
     // returns and converts a rejection into one `abort` Change.
     let originalFix:
-      | ((finding: IntegrityFinding, cwd: string) => Promise<IntegrityFixResult>)
+      | ((finding: IntegrityFinding, ctx: ProjectContext) => Promise<IntegrityFixResult>)
       | undefined;
 
     beforeEach(() => {

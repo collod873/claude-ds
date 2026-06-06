@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 
 import { parseCvaVariants } from "../cva.js";
 import { extractExamplesContent } from "../examples.js";
@@ -10,7 +11,6 @@ import type {
   DriftRule,
   DriftRuleInput,
   FixResult,
-  FixerOpts,
 } from "../rule.js";
 
 /**
@@ -75,8 +75,8 @@ function buildExampleStub(axis: string, value: string): string {
   return `{ name: "${value}", props: { ${axis}: "${value}" } }`;
 }
 
-async function fix(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");

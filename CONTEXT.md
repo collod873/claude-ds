@@ -217,7 +217,9 @@ Landed across issues:
 A planned mutation phase. Interface: `{ name, plan(ctx): Promise<Change[]> }`.
 Operations do not write to disk; they describe what would change. Examples:
 `migrateClaudeMd`, `backfillCompanions`, `backfillMeta`, `rewriteImports`,
-`syncPackFiles`.
+`syncPackFiles`. `plan(ctx)` is a pure function of `ctx` — running the same
+Op twice over a frozen ctx yields equal `Change[]`. Pinned by the capstone
+test in `tests/unit/runner.test.ts` (PRD #266).
 
 ### Change
 The unit of work an Operation emits. Bytes-on-disk only:
@@ -230,10 +232,38 @@ Non-file effects (registering an exception, recording a canonical path) are mode
 as writes to the file that holds them. Nothing else.
 
 ### ProjectContext
-What Operations read from. Produced by `loadProject(cwd, decisions?)`. Carries
-`cwd`, `cfg`, `packDir`, `manifest`, `exists()`, plus a `decisions` bag containing
-anything the calling command pre-resolved with the user (renames, claude-md target).
-`plan()` may read the filesystem through `ctx`; it may not write.
+What every below-command-line API reads from — Operations, fixers, scan
+helpers, finalizers, classification helpers, the fix-pass orchestrator.
+Constructed in exactly two places (PRD #266 Phase A):
+
+- `loadProject(cwd, decisions?)` — post-adopt path. `kind: "adopted"` with a
+  fully parsed `Config`.
+- `loadPreAdoptProject(cwd, { pack, packDir, manifest }, decisions?)` — the
+  pre-`.claude-ds.json` factory for `audit --pack` and `migrate-layout`.
+  `kind: "pre-adopt"` with a partial `cfg` carrying only `pack`. Code that
+  needs the rest of `cfg` gates on `ctx.kind === "adopted"`.
+
+Below-command-line code receives `ctx`, never a bare `cwd: string`. Ad-hoc
+construction outside `src/lib/project.ts` is forbidden — `as ProjectContext`
+casts and inline `ProjectContext = {` literals fail
+`tests/unit/no-ad-hoc-project-context.test.ts` (PRD #266 Phase A capstone).
+The ctx is frozen on return so Operations cannot mutate it after load.
+
+Carries:
+- `cwd`, `cfg`, `packDir`, `manifest`, `exists()`
+- `auditConfig: ResolvedAuditConfig` — the seven-field detect/classify/fix
+  bundle (`domainRoots`, `metaKindStrict`, `allowedImports`, `dsAliases`,
+  `tsconfigPaths`, `appDir`, `claudeMdTarget`), resolved once at boot by
+  `resolveAuditConfig(cwd, cfg)` and frozen with the ctx. No `?` fields —
+  the resolver guarantees population, so leaf functions never handle
+  `undefined`. Replaces the four per-command rebuilds the pre-refactor
+  audit/classify/migrate/doctor paths each had (PRD #266 Phase B).
+- `decisions` bag — anything the calling command pre-resolved with the user
+  (renames, claude-md target) plus `fixerChoices` (per-finding answers for
+  interactive fixers; see Working rules).
+
+`plan()` may read the filesystem through `ctx`; it may not write. `plan(ctx)`
+is a pure function of `ctx`.
 
 ### Runner
 `run(ctx, ops, mode)`. Concatenates the `Change[]` from each Operation, then either
@@ -248,7 +278,22 @@ present and the path is tracked. Lives in `src/lib/runner.ts`.
 - **`diffFile()` runs at plan time.** Operations that touch Pack files call it while
   building `Change[]`. The dry-run output is the exact bytes apply would write.
 - **Prompts live in commands, not Operations.** Commands gather user decisions into
-  `ctx.decisions` before calling `run()`. `plan()` is deterministic given a ctx.
+  `ctx.decisions` before calling `run()`. `plan()` is deterministic given a ctx —
+  the capstone test in `tests/unit/runner.test.ts` pins it. For interactive
+  fixers, the rule's `describeDecisions(finding, source, opts)` hook enumerates
+  the decision points; a command-level pre-pass in `audit-fix` asks them via
+  `makeTtyPrompt` (TTY) or records `"defer"` (non-TTY) into
+  `ctx.decisions.fixerChoices` *before* planning, and routes deferrals to
+  `exceptions.json`. Fixers read `ctx.decisions.fixerChoices`; they never
+  prompt inside `plan()`. Enforced by
+  `tests/unit/no-prompt-inside-rules.test.ts` (PRD #266 Phase C).
+- **`auditConfig` resolves once at boot.** Both `loadProject` and
+  `loadPreAdoptProject` call `resolveAuditConfig(cwd, cfg)` to build the
+  seven-field bundle every detect/classify/fix path reads. `detectDsAliases`
+  / `detectTsconfigPaths` / `detectAppDir` outside `src/lib/audit-config.ts`
+  (plus the pre-config carve-outs `src/commands/adopt.ts`,
+  `src/commands/init.ts`) fail
+  `tests/unit/no-direct-audit-config-detect.test.ts` (PRD #266 Phase B).
 - **One chokepoint for bytes.** All file mutation flows through the Runner. No raw
   `writeFile()` / `unlink()` / `rename()` calls under `src/commands/` or
   `src/lib/checks/`, with these two structurally-forced carve-outs:

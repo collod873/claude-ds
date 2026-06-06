@@ -5,7 +5,8 @@ import { freshTmpDir, cleanup } from "../../helpers/tmpdir";
 import { integrityFixerAsOperation, evaluateIntegrity } from "../../../src/lib/integrity/index";
 import { isIntegrityFixable } from "../../../src/lib/integrity/index";
 import type { IntegrityFinding } from "../../../src/lib/integrity/index";
-import type { ProjectContext } from "../../../src/lib/project";
+import { resolveAuditConfig } from "../../../src/lib/audit-config";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
 
 async function write(dir: string, rel: string, content: string): Promise<void> {
   await mkdir(join(dir, rel, ".."), { recursive: true });
@@ -40,7 +41,8 @@ describe("INTEGRITY-UNRESOLVED-SYMBOL fix", () => {
     };
 
     const op = integrityFixerAsOperation(finding);
-    const changes = await op.plan({ cwd: dir } as unknown as ProjectContext);
+    const auditConfig = await resolveAuditConfig(dir, null);
+    const changes = await op.plan(makeFakeCtx(dir, { auditConfig }));
 
     expect(op.result!.fixed).toBe(true);
     expect(changes).toHaveLength(1);
@@ -64,7 +66,8 @@ describe("INTEGRITY-UNRESOLVED-SYMBOL fix", () => {
     };
 
     const op = integrityFixerAsOperation(finding);
-    const changes = await op.plan({ cwd: dir } as unknown as ProjectContext);
+    const auditConfig = await resolveAuditConfig(dir, null);
+    const changes = await op.plan(makeFakeCtx(dir, { auditConfig }));
 
     expect(op.result!.fixed).toBe(false);
     expect(changes).toHaveLength(0);
