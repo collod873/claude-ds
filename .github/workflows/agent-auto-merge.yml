@@ -30,11 +30,17 @@ jobs:
         id: merge
         run: |
           set -uo pipefail
-          # Mirror the lander's decision tree: merge only a genuinely clean PR,
-          # hand stale/conflicting ones to the rebase robot (which re-arms
-          # ready-to-merge on success, so we retry automatically — no cron
-          # needed), and briefly retry while GitHub is still computing
-          # mergeability (UNKNOWN right after a push).
+          # Decision tree: land a mergeable, non-stale PR; hand stale/conflicting
+          # ones to the rebase robot (which re-arms ready-to-merge on a real
+          # rebase); briefly retry while GitHub is still computing mergeability
+          # (UNKNOWN right after a push).
+          #
+          # We gate on `mergeable` + staleness, NOT on mergeStateStatus=CLEAN.
+          # This repo has no required PR checks — agent review is the merge gate
+          # (it sets ready-to-merge) — and THIS job's own in-progress `merge`
+          # check run holds the PR at UNSTABLE while we poll, so CLEAN is
+          # unreachable from inside the job. Gating on CLEAN deadlocks and
+          # bounces to the rebase robot forever (the merge loop).
           merged=false
           rebase=false
           for attempt in 1 2 3 4 5 6; do
@@ -46,13 +52,16 @@ jobs:
               echo "PR #$PR_NUMBER is $st — nothing to merge."
               merged=skip; break
             fi
-            if [ "$m" = "MERGEABLE" ] && [ "$s" = "CLEAN" ]; then
-              if gh pr merge "$PR_NUMBER" --squash --delete-branch; then merged=true; fi
-              break
-            fi
+            # Genuinely stale or conflicting → rebase robot. Check this FIRST so a
+            # BEHIND/DIRTY PR is never landed.
             if [ "$m" = "CONFLICTING" ] || [ "$s" = "DIRTY" ] || [ "$s" = "BEHIND" ]; then
               echo "PR #$PR_NUMBER is stale/conflicting (mergeable=$m state=$s)."
               rebase=true; break
+            fi
+            # Mergeable and not stale → land it (UNSTABLE/HAS_HOOKS included).
+            if [ "$m" = "MERGEABLE" ] && [ "$s" != "DRAFT" ]; then
+              if gh pr merge "$PR_NUMBER" --squash --delete-branch; then merged=true; fi
+              break
             fi
             echo "Mergeability still computing (mergeable=$m state=$s); retry $attempt..."
             sleep 5

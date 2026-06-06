@@ -69,10 +69,14 @@ jobs:
         run: npx tsx .sandcastle/agent-workflows/update-branch/update-branch.ts
 
       - name: Push branch (abort cleanly if non-fast-forward)
+        id: push
         if: success()
         env:
           SHOULD_PUSH_FILE: ${{ runner.temp }}/should_push.txt
         run: |
+          # Default to "did not push"; the re-arm step keys off this so a no-op
+          # rebase never re-arms auto-merge (which would loop).
+          echo "pushed=false" >> "$GITHUB_OUTPUT"
           if [ ! -f "$SHOULD_PUSH_FILE" ] || [ "$(cat "$SHOULD_PUSH_FILE")" != "true" ]; then
             echo "Nothing to push."
             exit 0
@@ -93,6 +97,7 @@ jobs:
             cat push_err.txt
             exit $status
           fi
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
 
       - name: Post PR comment
         if: success()
@@ -132,6 +137,7 @@ jobs:
         if: success()
         env:
           AGENT_PAT: ${{ secrets.AGENT_PAT }}
+          PUSHED: ${{ steps.push.outputs.pushed }}
         run: |
           set -uo pipefail
           # The rebase robot is the only thing that mends a PR auto-merge gave up
@@ -144,6 +150,17 @@ jobs:
           has_rtm=$(gh pr view "$PR_NUMBER" --json labels --jq '[.labels[].name] | index("ready-to-merge") != null')
           if [ "$has_rtm" != "true" ]; then
             echo "PR #$PR_NUMBER is not ready-to-merge — leaving it for the normal review flow."
+            exit 0
+          fi
+          # Only re-arm if this run actually advanced the branch. If the rebase
+          # changed nothing, re-arming would reproduce the exact same merge
+          # decision that handed the PR here → infinite loop. Escalate to a human
+          # instead of spinning.
+          if [ "$PUSHED" != "true" ]; then
+            echo "Rebase was a no-op (branch already current) — not re-arming to avoid a merge loop."
+            gh pr edit "$PR_NUMBER" --remove-label "ready-to-merge" || true
+            gh pr edit "$PR_NUMBER" --add-label "agent:blocked" || true
+            gh pr comment "$PR_NUMBER" --body "Auto-merge handed this PR to the rebase robot, but the branch was already up to date — nothing to rebase. Re-arming would loop, so I've stopped and marked it \`agent:blocked\`. (Usually a stale-mergeability race; re-add \`ready-to-merge\` to retry.)"
             exit 0
           fi
           gh pr edit "$PR_NUMBER" --remove-label "ready-to-merge" || true
