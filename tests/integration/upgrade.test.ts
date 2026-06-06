@@ -220,4 +220,33 @@ describe("upgrade", () => {
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.packVersion).toBe("v0.7.0");
   });
+
+  // Issue #300 — heal/upgrade must verify migration end-states, not just that
+  // the migration Op ran. The Crewops reproducer: pack pinned at v1.0.0 with
+  // `meta_kind_strict: false` despite the v0.9.0 meta-kind-hard migration
+  // having flipped it. Without end-state verification, `upgrade` no-ops on the
+  // "already at target" path and the drifted flag persists forever.
+  it("self-corrects a drifted meta_kind_strict on a v1.0.0 baseline (#300)", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v1.0.0", meta_kind_strict: false }),
+    );
+    const r = await runCli(["upgrade", "--to", "v1.0.0", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.meta_kind_strict).toBe(true);
+  });
+
+  // Dry-run discovers drift but never writes — the consumer's bytes must
+  // match exactly what they had on disk going in.
+  it("dry-run reports drifted end-states without applying (#300)", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v1.0.0", meta_kind_strict: false }),
+    );
+    const r = await runCli(["upgrade", "--to", "v1.0.0", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.meta_kind_strict).toBe(false);
+  });
 });

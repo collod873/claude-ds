@@ -41,6 +41,28 @@ export function computeMigrationChain(
 }
 
 /**
+ * Compute the list of migration sets a consumer at `packVersion` should have
+ * already applied — every registered version `<= packVersion`. Returned in
+ * ascending order.
+ *
+ * The "end-state verification" chain. Re-running these Ops through the Runner
+ * is the verification: every migration's `plan()` returns `[]` when its end
+ * state holds, and re-emits its Changes when the consumer has drifted away
+ * from it (the v0.9.0 `meta-kind-hard` flag silently flipping back to `false`
+ * is the bug this guards — #300). Replaces the previous assumption that
+ * "migration was applied once at upgrade time" implies "end state still
+ * holds today."
+ */
+export function computeVerificationChain(
+  packVersion: string,
+  registry: MigrationVersion[],
+): MigrationVersion[] {
+  return [...registry]
+    .sort((a, b) => semverCompare(a.version, b.version))
+    .filter((mv) => semverCompare(mv.version, packVersion) <= 0);
+}
+
+/**
  * Run all ops in the given migration chain through the Runner in the given mode.
  * Ops across every version in the chain are batched into a single Runner call.
  */

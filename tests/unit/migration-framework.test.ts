@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { computeMigrationChain } from "../../src/lib/migration-framework.js";
+import {
+  computeMigrationChain,
+  computeVerificationChain,
+} from "../../src/lib/migration-framework.js";
 import type { MigrationVersion } from "../../src/lib/migration-framework.js";
 import type { Operation, Change } from "../../src/lib/operation.js";
 import type { ProjectContext } from "../../src/lib/project.js";
@@ -71,5 +74,35 @@ describe("computeMigrationChain", () => {
     // v0.8.0-rc.1 < v0.8.0 in strict semver, but parseSemver strips pre-release
     // so v0.8.0-rc.1 compares equal to v0.8.0 in our math → v0.8.0 is NOT included
     expect(chain.map((mv) => mv.version)).toEqual(["v0.9.0"]);
+  });
+});
+
+// Issue #300: end-state verification chain — the set of migrations that
+// should already be applied at the consumer's pinned packVersion. Re-running
+// these through the Runner self-corrects a migration whose end-state has
+// drifted (idempotent ops return `[]` on a clean tree).
+describe("computeVerificationChain", () => {
+  it("returns every migration up to and including the consumer's packVersion", () => {
+    const chain = computeVerificationChain("v0.9.0", registry);
+    expect(chain.map((mv) => mv.version)).toEqual(["v0.7.0", "v0.8.0", "v0.9.0"]);
+  });
+
+  it("includes the most recent version when packVersion matches it exactly", () => {
+    const chain = computeVerificationChain("v1.0.0", registry);
+    expect(chain.map((mv) => mv.version)).toEqual(["v0.7.0", "v0.8.0", "v0.9.0", "v1.0.0"]);
+  });
+
+  it("returns empty when packVersion is older than every registered migration", () => {
+    const chain = computeVerificationChain("v0.6.0", registry);
+    expect(chain).toHaveLength(0);
+  });
+
+  it("returns versions ascending even when registry is provided out of order", () => {
+    const unordered: MigrationVersion[] = [
+      { version: "v0.9.0", ops: [mockOp("op-0.9")] },
+      { version: "v0.8.0", ops: [mockOp("op-0.8")] },
+    ];
+    const chain = computeVerificationChain("v0.9.0", unordered);
+    expect(chain.map((mv) => mv.version)).toEqual(["v0.8.0", "v0.9.0"]);
   });
 });

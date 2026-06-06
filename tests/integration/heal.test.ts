@@ -145,6 +145,27 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
     }
   });
 
+  // Issue #300 — heal converges drifted migration end-states. The Crewops
+  // reproducer: pack at v1.0.0 with `meta_kind_strict: false` despite the
+  // v0.9.0 meta-kind-hard migration. A single `heal` invocation must restore
+  // the flag — the migration's end-state — without prompting the consumer.
+  it("self-corrects a drifted meta_kind_strict on a v1.0.0 baseline (#300)", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: "v1.0.0", meta_kind_strict: false }),
+    );
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <span/>; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+    );
+
+    const r = await runCli(["heal"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.meta_kind_strict).toBe(true);
+  }, 30000);
+
   it("reports `converged` and exits 0 on an already-clean tree", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
