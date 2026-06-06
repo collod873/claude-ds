@@ -166,6 +166,30 @@ skip issue-link validation and appear as informational in doctor output;
 these represent intentional architectural decisions (e.g. an app-chrome
 singleton exceeding atom-import limits).
 
+### Owned concern
+A DS job claude-ds ships machinery for — paired with a content **detector** that
+recognizes a consumer hand-rolling it and the pack **capability that supersedes**
+it (a drift rule, pack script, or hook). The registry of Owned concerns is the
+denominator the **Completeness principle** (ADR-0003) measures against: a file
+*anywhere* in a consumer repo matching an Owned concern's detector, that is
+neither the pack's own managed file nor a tracked **Exception**, is hand-rolled
+DS infrastructure — a defect. `doctor --completeness` runs two complementary
+detectors: **orphan-under-roots** (location-as-identity, scoped to
+`design-system/` and `.claude/`, where a file's presence alone makes it DS-owned)
+and the repo-wide **Owned-concern scan** (signature-as-identity, for DS work
+hiding in unowned dirs like `scripts/`, `src/` — `scripts/lint-tokens.ts` is the
+motivating miss). The detector is **over-flag biased**: the failure mode it
+guards is a silent false-negative (false "✓ Completeness OK"), so when unsure it
+flags and the consumer dismisses via a tracked Exception. `doctor` prints which
+Owned concerns it checked, so coverage is honest, not assumed — the residual
+blind spot is precisely "a DS concern not yet in the registry." Each finding is
+ADR-0013-actionable: "remove `scripts/lint-tokens.ts` — superseded by
+`DRIFT-RAW-PRIMITIVE`."
+_Note_: distinct from **Managed roots**, which answer *"what does the pack own
+and overwrite?"* (the safety north star). Owned concern answers *"what counts as
+DS infrastructure?"* (completeness). Conflating the two is the original ADR-0003
+enforcement gap.
+
 ### Migration Op
 A versioned `Op` shipped in `pack/versions/<version>/migrations/` that
 transforms a consumer from one pack version to the next. Migrations emit
