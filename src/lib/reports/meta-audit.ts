@@ -1,6 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { info } from "../log.js";
+import type { ProjectContext } from "../project.js";
 
 const SCAN_DIRS = ["design-system/atoms", "design-system/composites", "design-system/patterns"];
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
@@ -16,7 +17,8 @@ const META_RE = /export\s+const\s+meta\b/;
  * actual fix; this helper exists so reconform can print the missing-meta tally
  * before deciding whether to run the Op.
  */
-export async function findMissingMeta(cwd: string, dryRun: boolean): Promise<string[]> {
+export async function findMissingMeta(ctx: ProjectContext, dryRun: boolean): Promise<string[]> {
+  const { cwd } = ctx;
   const missing: string[] = [];
   for (const scanRel of SCAN_DIRS) {
     const scanAbs = join(cwd, scanRel);

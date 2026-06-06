@@ -62,7 +62,7 @@ export async function auditCmd(opts: AuditOpts) {
 
   const verbose = opts.verbose ?? false;
 
-  const scaffold = await scanScaffoldPresence({ cwd, manifest, appDir, claudeMdTarget, verbose });
+  const scaffold = await scanScaffoldPresence(ctx, { manifest, appDir, claudeMdTarget, verbose });
   for (const line of scaffold.lines) info(line);
 
   // #29/#57/#174: unexpected-file scan — enumerate files under managed roots.
@@ -78,8 +78,7 @@ export async function auditCmd(opts: AuditOpts) {
     for (const f of consumerManifest.files) manifestFilePaths.add(f.path);
   } catch { /* no tracking manifest or parse error — use pack manifest only */ }
   const orphanPaths = new Set(manifest.deprecated_paths.map(d => d.path));
-  const unexpected = await scanUnexpectedFiles({
-    cwd,
+  const unexpected = await scanUnexpectedFiles(ctx, {
     manifestPaths: manifestFilePaths,
     ignoreGlobs: unexpectedIgnoreGlobs,
     managedRoots: manifest.managed_roots,
@@ -117,8 +116,8 @@ export async function auditCmd(opts: AuditOpts) {
   }
   const tsconfigPaths = await detectTsconfigPaths(cwd, cfg?.srcRoot ?? "src");
 
-  const driftIntegrity = await scanDriftAndIntegrity({
-    cwd, domainRoots, metaKindStrict, allowedImports, dsAliases, tsconfigPaths,
+  const driftIntegrity = await scanDriftAndIntegrity(ctx, {
+    domainRoots, metaKindStrict, allowedImports, dsAliases, tsconfigPaths,
   });
   info(driftIntegrity.coverageLine);
 
@@ -127,8 +126,6 @@ export async function auditCmd(opts: AuditOpts) {
   );
 
   const fixSummary = await runAuditFix(ctx, {
-    cwd,
-    manifest,
     unexpected,
     driftTierDirs: driftIntegrity.tierDirs,
     exceptions,

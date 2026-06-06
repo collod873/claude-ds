@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { checkThreeSignals } from "../three-signal.js";
 import { evaluateIntegrity, isIntegrityBlocking, type IntegrityFinding } from "../integrity/index.js";
 import type { DriftFinding } from "../drift/index.js";
+import type { ProjectContext } from "../project.js";
 import { walkDir } from "./unexpected-files.js";
 
 export type AuditFinding = DriftFinding | IntegrityFinding;
@@ -35,16 +36,18 @@ const DRIFT_TIER_DIRS = ["design-system/atoms", "design-system/composites", "des
  * have their drift check skipped, matching the audit command's prior behavior:
  * integrity is gating, drift is downstream.
  */
-export async function scanDriftAndIntegrity(opts: {
-  cwd: string;
-  domainRoots?: string[];
-  metaKindStrict?: boolean;
-  allowedImports?: string[];
-  dsAliases?: string[];
-  tsconfigPaths?: Record<string, string[]>;
-}): Promise<DriftIntegrityReport> {
+export async function scanDriftAndIntegrity(
+  ctx: ProjectContext,
+  opts: {
+    domainRoots?: string[];
+    metaKindStrict?: boolean;
+    allowedImports?: string[];
+    dsAliases?: string[];
+    tsconfigPaths?: Record<string, string[]>;
+  } = {},
+): Promise<DriftIntegrityReport> {
+  const { cwd } = ctx;
   const {
-    cwd,
     domainRoots,
     metaKindStrict = false,
     allowedImports = [],

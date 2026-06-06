@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Manifest, ManifestEntry } from "../manifest.js";
 import { resolveManifestPath } from "../paths.js";
+import type { ProjectContext } from "../project.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -30,14 +31,17 @@ export interface ScaffoldPresenceReport {
  * Skips entries with `category === "generated"` because those are hook-produced
  * and not part of the scaffold.
  */
-export async function scanScaffoldPresence(opts: {
-  cwd: string;
-  manifest: Manifest;
-  appDir: string;
-  claudeMdTarget: string;
-  verbose: boolean;
-}): Promise<ScaffoldPresenceReport> {
-  const { cwd, manifest, appDir, claudeMdTarget, verbose } = opts;
+export async function scanScaffoldPresence(
+  ctx: ProjectContext,
+  opts: {
+    manifest: Manifest;
+    appDir: string;
+    claudeMdTarget: string;
+    verbose: boolean;
+  },
+): Promise<ScaffoldPresenceReport> {
+  const { cwd } = ctx;
+  const { manifest, appDir, claudeMdTarget, verbose } = opts;
   let total = 0;
   let present = 0;
   const entries: ScaffoldEntryStatus[] = [];

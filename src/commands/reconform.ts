@@ -67,7 +67,7 @@ export async function reconformCmd(opts: {
   for (const p of companionsCreated) info(`${dryRun ? "[dry-run] would create" : "created stub"}: ${p}`);
 
   // Phase 3 — meta-export audit (always) + backfill (gated on --backfill-meta).
-  const metaMissing = await findMissingMeta(cwd, dryRun);
+  const metaMissing = await findMissingMeta(ctx, dryRun);
   let metaBackfilled = 0;
   if (backfillMetaFlag && metaMissing.length > 0) {
     const writeMeta = fix && !dryRun;
@@ -164,7 +164,7 @@ export async function reconformCmd(opts: {
   await reviewExceptions(ctx, allViolations, dryRun);
 
   // Phase 8 — stub-file warning.
-  await emitStubWarning(cwd);
+  await emitStubWarning(ctx);
 
   // Final report. Dry-run exits 2 when GEN-001/002 violations are present so
   // CI can surface generator drift without an apply run (#89). The apply path

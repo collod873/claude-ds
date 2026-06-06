@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { ProjectContext } from "../project.js";
 
 /** Count lines in a file. Returns 0 if file is absent or unreadable. */
 async function countLines(p: string): Promise<number> {
@@ -17,7 +18,8 @@ async function countLines(p: string): Promise<number> {
  * never writes. Lives here because the threshold + format are reconform-specific
  * but the line-count probe is cheap and reusable.
  */
-export async function emitStubWarning(cwd: string): Promise<void> {
+export async function emitStubWarning(ctx: ProjectContext): Promise<void> {
+  const { cwd } = ctx;
   const contractsLines = await countLines(join(cwd, "design-system", "contracts.md"));
   const tokensLines = await countLines(join(cwd, "design-system", "tokens.json"));
   if (contractsLines >= 25 && tokensLines >= 25) return;
