@@ -7,12 +7,60 @@ import { info, err, confirm } from "../lib/log.js";
 
 const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
-import { computeMigrationChain, runMigrations } from "../lib/migration-framework.js";
+import {
+  computeMigrationChain,
+  computeVerificationChain,
+  runMigrations,
+} from "../lib/migration-framework.js";
 import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
 import { run } from "../lib/runner.js";
 import { finalizeUpgrade } from "../lib/ops/finalize-upgrade.js";
 import { syncCmd } from "./sync.js";
 import pkg from "../../package.json" with { type: "json" };
+
+/**
+ * Verify end-states of every migration that should already be applied at the
+ * consumer's current `packVersion` and re-apply any whose effect has drifted.
+ *
+ * Issue #300: the Crewops baseline hit pack v1.0.0 with the v0.9.0
+ * `meta-kind-hard` migration's `meta_kind_strict: true` flip silently absent.
+ * Before this verification step, `upgrade --to <current>` no-op'd on the
+ * "already at target" branch and the drifted flag persisted forever. Each
+ * migration's `plan()` is idempotent — it returns `[]` when its end-state
+ * holds, and re-emits its Changes when the consumer has drifted away — so
+ * re-running the chain through the Runner *is* the verification.
+ *
+ * Returns the number of drifted ops that were (or would be in dry-run) re-applied.
+ */
+async function verifyEndStates(
+  ctx: Awaited<ReturnType<typeof loadProject>>,
+  packVersion: string,
+  opts: { dryRun?: boolean; yes?: boolean },
+): Promise<number> {
+  const verifyChain = computeVerificationChain(packVersion, MIGRATION_REGISTRY);
+  if (verifyChain.length === 0) return 0;
+
+  const dryReport = await runMigrations(ctx, verifyChain, "dry-run");
+  const driftedOps = dryReport.ops.filter((o) => o.changes.length > 0);
+  if (driftedOps.length === 0) return 0;
+
+  info(`migration end-state drift detected: ${driftedOps.map((o) => o.name).join(", ")}`);
+
+  if (opts.dryRun) return driftedOps.length;
+
+  if (!opts.yes && !(await confirm("Re-apply drifted migrations?"))) {
+    info("aborted");
+    return driftedOps.length;
+  }
+
+  const applyReport = await runMigrations(ctx, verifyChain, "apply");
+  if (applyReport.failed) {
+    err(`end-state restore failed: ${applyReport.failed.error}`);
+    process.exit(2);
+  }
+  info(`restored ${driftedOps.length} drifted migration end-state(s)`);
+  return driftedOps.length;
+}
 
 export async function upgradeCmd(opts: {
   to?: string;
@@ -32,7 +80,8 @@ export async function upgradeCmd(opts: {
   const to = opts.to ?? `v${pkg.version}`;
 
   if (from === to) {
-    info(`already at ${to}, nothing to upgrade`);
+    info(`already at ${to}`);
+    await verifyEndStates(ctx, from, opts);
     return;
   }
 
@@ -41,6 +90,7 @@ export async function upgradeCmd(opts: {
   if (chain.length === 0) {
     info(`no registered migrations between ${from} and ${to}`);
     info(`pack is at ${from}`);
+    await verifyEndStates(ctx, from, opts);
     return;
   }
 

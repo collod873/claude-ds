@@ -197,6 +197,16 @@ transforms a consumer from one pack version to the next. Migrations emit
 Examples: `add-patterns-tier`, `retire-states`, `migrate-managed-manifest`.
 See ADR-0011.
 
+Every migration Op is idempotent: `plan()` returns `[]` when its end-state
+holds and re-emits its Changes when the consumer has drifted away. That
+contract is load-bearing for **end-state verification**: `upgrade` (and
+`heal` via its prelude) re-runs every migration `<= packVersion` through
+the Runner whenever no chain advance is needed, self-correcting drifted
+config flags (e.g. `meta_kind_strict` silently flipping back, #300) or
+missing managed files. Without this pass, "migration was applied once at
+upgrade time" was wrongly assumed to imply "end state still holds today,"
+and a flipped flag could vanish forever.
+
 ### Pack version
 The semver tag (`0.8.0`, `0.9.0`, ...) a consumer is pinned to in its
 `.claude-ds.json`. Consumed via `npx github:collod873/claude-ds#vX.Y.Z`.
