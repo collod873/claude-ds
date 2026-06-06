@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { classifySource } from "../../classifier.js";
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 import { locationTierFromPath } from "../../three-signal.js";
 
 import type {
@@ -26,8 +27,8 @@ function detect(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
-async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");

@@ -1,5 +1,6 @@
 import type { Tier, TierVerdict } from "../classifier.js";
 import type { Change } from "../operation.js";
+import type { ProjectContext } from "../project.js";
 import type { Severity } from "../severity.js";
 import type { FixerPrompt } from "./prompt.js";
 
@@ -68,7 +69,7 @@ export interface FixerOpts {
   prompt?: FixerPrompt;
 }
 
-export type DriftFixer = (finding: DriftFinding, cwd: string, opts?: FixerOpts) => Promise<FixResult>;
+export type DriftFixer = (finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts) => Promise<FixResult>;
 
 /**
  * One drift rule, co-locating its detect + (optional) fix + metadata.

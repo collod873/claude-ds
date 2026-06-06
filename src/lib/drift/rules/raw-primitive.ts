@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 
 import { parseCvaVariants } from "../cva.js";
 import { extractUntilStatement } from "../extract.js";
@@ -382,8 +383,8 @@ function inferVariantForInstance(
   return null;
 }
 
-async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");
@@ -429,7 +430,7 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
       continue;
     }
 
-    const atomPath = await atomFileExists(cwd, atomFileName);
+    const atomPath = await atomFileExists(ctx.cwd, atomFileName);
     if (!atomPath) {
       skippedElements.push(element);
       continue;
@@ -438,7 +439,7 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
     const atomComponent = capitalize(element);
     let atomSource: string;
     try {
-      atomSource = await readFile(join(cwd, atomPath), "utf8");
+      atomSource = await readFile(join(ctx.cwd, atomPath), "utf8");
     } catch {
       continue;
     }

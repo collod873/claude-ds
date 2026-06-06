@@ -3,6 +3,7 @@ import { basename, dirname, join, resolve } from "node:path";
 
 import { DEFAULT_DOMAIN_ROOTS } from "../../classifier.js";
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 
 import { extractUntilStatement } from "../extract.js";
 import type { PromptOption } from "../prompt.js";
@@ -207,8 +208,8 @@ async function collectProjectImportRewriteChanges(
   return changes;
 }
 
-async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");
@@ -227,7 +228,7 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
   const changes: Change[] = [];
 
   for (const imp of domainImports) {
-    const resolvedFile = await resolveImportFile(imp.importPath, finding.file, cwd);
+    const resolvedFile = await resolveImportFile(imp.importPath, finding.file, ctx.cwd);
     let sourceFileContent: string | null = null;
     if (resolvedFile) {
       try { sourceFileContent = await readFile(resolvedFile, "utf8"); } catch { /* */ }
@@ -296,10 +297,10 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
         );
 
         const aliasOldPath = `@/${canonical}`;
-        const importChanges = await collectProjectImportRewriteChanges(cwd, imp.importPath, newPath);
+        const importChanges = await collectProjectImportRewriteChanges(ctx.cwd, imp.importPath, newPath);
         changes.push(...importChanges);
         if (aliasOldPath !== imp.importPath) {
-          const aliasChanges = await collectProjectImportRewriteChanges(cwd, aliasOldPath, newPath);
+          const aliasChanges = await collectProjectImportRewriteChanges(ctx.cwd, aliasOldPath, newPath);
           changes.push(...aliasChanges);
         }
         anyFixed = true;

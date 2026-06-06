@@ -6,6 +6,7 @@ import type { DriftFinding } from "../../src/lib/drift/index.js";
 import { evaluateDrift, type DriftRuleInput } from "../../src/lib/drift/index.js";
 import type { Change } from "../../src/lib/operation";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
+import { makeFakeCtx } from "../helpers/fake-ctx";
 import { mkdir, writeFile, readFile, stat, rename, unlink } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
@@ -24,7 +25,7 @@ async function applyChanges(cwd: string, changes: Change[]): Promise<void> {
 }
 
 async function fixAndApply(fn: DriftFixer, finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
-  const result = await fn(finding, cwd, opts);
+  const result = await fn(finding, makeFakeCtx(cwd), opts);
   await applyChanges(cwd, result.changes);
   return result;
 }
@@ -182,7 +183,7 @@ describe("drift-fixers", () => {
           file: "design-system/atoms/card.tsx",
           message: "inline static style",
         };
-        await fixer(finding, dir, { prompt: mockPrompt });
+        await fixer(finding, makeFakeCtx(dir), { prompt: mockPrompt });
 
         expect(received.length).toBeGreaterThan(0);
       } finally {
@@ -208,7 +209,7 @@ describe("drift-fixers", () => {
           file: "design-system/atoms/alert.tsx",
           message: "inline static style",
         };
-        const result = await fixer(finding, dir, { prompt });
+        const result = await fixer(finding, makeFakeCtx(dir), { prompt });
 
         expect(result.fixed).toBe(true);
         expect(result.changes.length).toBeGreaterThan(0);
@@ -1645,7 +1646,7 @@ export const meta = { kind: "atom" as const, examples: [] };
         message: "unexercised",
       };
       const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
-      const result = await fixer(finding, dir);
+      const result = await fixer(finding, makeFakeCtx(dir));
       expect(result.fixed).toBe(false);
     });
 
@@ -1662,7 +1663,7 @@ export const meta = { kind: "atom" as const, examples: [] };
         message: "unexercised",
       };
       const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
-      const result = await fixer(finding, dir);
+      const result = await fixer(finding, makeFakeCtx(dir));
       expect(result.fixed).toBe(false);
     });
 
@@ -1768,7 +1769,7 @@ export const meta = {
         message: "0 duplicate meta.examples entries",
       };
       const fixer = getFixer("DRIFT-META-EXAMPLES-DUPLICATE")!;
-      const result = await fixer(finding, dir);
+      const result = await fixer(finding, makeFakeCtx(dir));
       expect(result.fixed).toBe(false);
     });
   });
@@ -1850,7 +1851,7 @@ export const meta = {
 
       // Second run: detector reports zero findings (idempotent).
       expect(detect(after)).toHaveLength(0);
-      const second = await fixer(finding, dir);
+      const second = await fixer(finding, makeFakeCtx(dir));
       expect(second.fixed).toBe(false);
     });
   });

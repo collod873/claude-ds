@@ -119,7 +119,7 @@ export function fixerAsOperation(
         op.result = "no-fixer";
         return [];
       }
-      const r = await fixer(finding, ctx.cwd, opts);
+      const r = await fixer(finding, ctx, opts);
 
       if (r.fixed && r.changes.length > 0) {
         for (const ch of r.changes) {

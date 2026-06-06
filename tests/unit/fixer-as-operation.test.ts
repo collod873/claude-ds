@@ -115,6 +115,30 @@ describe("fix-pass: fixerAsOperation wrapper (#224)", () => {
       expect(betaContent).toBe(validOutputB);
     });
 
+    // PRD #266 Phase A (#281): the drift Op wrapper passes the full ctx down,
+    // not just `ctx.cwd`. Locking this in here so Phase B / Phase C don't have
+    // to re-prove it when they start reading further fields off ctx.
+    it("fixerAsOperation invokes the fixer with the full ctx, not ctx.cwd", async () => {
+      const seen: Array<{ second: unknown }> = [];
+      mockedGetFixer.mockReturnValue(async (finding: DriftFinding, ctx: unknown) => {
+        seen.push({ second: ctx });
+        return { finding, fixed: false, message: "noop", changes: [] };
+      });
+
+      const { fixerAsOperation } = await import("../../src/lib/fix-pass");
+      const finding: DriftFinding = {
+        ruleId: "DRIFT-META-KIND-MISSING",
+        file: "design-system/atoms/chip.tsx",
+        message: "missing meta.kind",
+      };
+      const op = fixerAsOperation(finding, {});
+      const ctx = makeFakeCtx(dir, { kind: "adopted" });
+      await op.plan(ctx);
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0].second).toBe(ctx);
+    });
+
     it("aborted finding emits an abort Change carrying the validation reason", async () => {
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });
       const valid = `export function Chip() { return <span />; }\n`;

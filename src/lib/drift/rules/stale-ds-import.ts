@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 
 import type {
   DriftFinding,
@@ -34,8 +35,8 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 
 const STALE_ALIAS_RE = /(from\s+["'])@\/design-system\/(.*?)(["'])/g;
 
-async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");

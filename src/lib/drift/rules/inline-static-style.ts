@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 
 import type {
   DriftFinding,
@@ -226,8 +227,8 @@ const STATIC_STYLE_BLOCK_RE = new RegExp(
   "g",
 );
 
-async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext, opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");
@@ -237,7 +238,7 @@ async function fix(finding: DriftFinding, cwd: string, opts?: FixerOpts): Promis
 
   let tokensRaw: string;
   try {
-    tokensRaw = await readFile(join(cwd, "design-system/tokens.json"), "utf8");
+    tokensRaw = await readFile(join(ctx.cwd, "design-system/tokens.json"), "utf8");
   } catch {
     return { finding, fixed: false, message: "could not read design-system/tokens.json", changes: [] };
   }

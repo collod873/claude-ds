@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Change } from "../../operation.js";
+import type { ProjectContext } from "../../project.js";
 
 import { extractBraceEntries, extractExamplesContent } from "../examples.js";
 import type {
@@ -41,8 +42,8 @@ function detect(input: DriftRuleInput): DriftFinding | null {
   };
 }
 
-async function fix(finding: DriftFinding, cwd: string, _opts?: FixerOpts): Promise<FixResult> {
-  const absPath = join(cwd, finding.file);
+async function fix(finding: DriftFinding, ctx: ProjectContext, _opts?: FixerOpts): Promise<FixResult> {
+  const absPath = join(ctx.cwd, finding.file);
   let source: string;
   try {
     source = await readFile(absPath, "utf8");
