@@ -117,6 +117,66 @@ Two new regression test groups in `generate-showcase-companion.integration.test.
 
 ---
 
+## [0.7.13] — 2026-05-22
+
+### Fixed
+
+- **Fixture-internal refs leaking into showcase carried imports** (`generate-showcase-companion.ts`). `resolveImportedValue` passed the meta file's carried map straight into `astNodeToValue`, so any `emitFn` triggered while evaluating a fixture export's initializer (e.g. an internal helper `CallExpression` like `contact({...})`) added the fixture's own private function declarations and transitive imports to the meta's carried set — producing phantom import lines TS rejects as not-exported locals. Fix: evaluate the fixture export with an isolated carried map and merge back only when the resolved value is a non-FnMarker container with nested FnMarkers (the one case where FnMarker source text appears verbatim in showcase output and its referenced identifiers must be imported). Fixes the phantom `contact` import and phantom `hendersonAddress` / `longAddress` transitive imports seen in Crewops `contact-card.showcase.tsx` after the v0.7.12 sync.
+
+---
+
+## [0.7.12] — 2026-05-22
+
+### Fixed
+
+- **Unresolvable `@/`-alias import specifiers in generated showcases** (#93). `resolveAtPrefix()` produced root-anchored paths starting with `/` when the tsconfig target was `./*`, so `join(consumerRoot, ...)` was skipped, the file never entered `importScope`, identifiers came back unresolved, and props fell back to `null`. The generator now emits alias-form specifiers for `@/`-imported fixture files.
+- **Namespace-only exports aborted the whole run** (#92). On encountering a namespace-only export (e.g. `Skeleton = { Line, Block }`) `GEN-069` called `process.exit(1)`, silently abandoning every component sorted after the offending one. A namespace export is a legitimate pattern we simply can't auto-generate JSX for, so it now skips that one component instead of aborting run-wide.
+- **Screen-filling and portal showcase rows pushed captions away from their cells** (#91). Constrained those rows so each caption stays adjacent to the cell it labels.
+
+### Changed
+
+- Stopped round-tripping the Meta-import flag through bytes; scoped claude-ds as a personal tool and defined the Showcase concept; added North Star + `doctor` subcommand + `lookalike_ignore` field to the spec.
+
+---
+
+## [0.7.11] — 2026-05-22
+
+The Operation/Change/Runner refactor: command side effects are now declared as Operations applied by a single Runner, so dry-runs and real runs share one code path and mutations are visible/testable rather than scattered.
+
+### Added
+
+- **Operation/Change contract and Runner.** `CONTEXT.md` anchors the model. `adopt`, `sync`, `reconform`, and `migrate` now route their file writes and config migrations through the Runner via Ops (`syncPackFiles`, `migrateConfig`, `migrateClaudeMd`, `backfillCompanions` / `backfillMeta` / `rewriteImports`, `seedClaudeMdMarkers`). `reconform.ts` shrank to 132 LOC; the command boot ritual is concentrated behind `loadProject()`.
+- RALPH: reconcile mutations route through Runner Ops (#88); `reconform --dry-run` exits 2 on GEN-001/002 violations (#89).
+
+### Fixed
+
+- **Double-prefix bug in classification auto-move import rewrite** (#90).
+- **Markerless first-install CLAUDE.md** now routes through the `seedClaudeMdMarkers` Op (#86).
+- **Generator resolver gaps:** import sibling component declarations and fail loud on namespace-only exports; resolve `PropertyAccess`, `ElementAccess`, and `NewExpression` in meta; emit boolean CVA axes, self-close childless components, JSX-encode embedded quotes.
+- **STATE-001** accepts both bare-array and wrapped `.states.json` shapes; **CLASS-001** exempts type-only imports from atom classification; allow `meta.states.empty` on atoms.
+
+---
+
+## [0.7.10] — 2026-05-21
+
+### Fixed
+
+- **Bare-specifier imports dropped from showcases** (`generate-showcase-companion.ts`). `buildScopes` skipped all non-relative, non-`@/` imports, so identifiers like `Send` from `lucide-react` were never registered in `importScope`; when `collectRefsFromNode` found `<Send />` in JSX it couldn't resolve the ref, and no import line was emitted. Fix: register bare-specifier imports in `importScope` with `filePath=""` (so `resolveImportedValue` short-circuits harmlessly) and let `collectRefsFromNode` carry them.
+
+---
+
+## [0.7.9] — 2026-05-21
+
+Three defects surfaced by the Button pilot HITL review.
+
+### Fixed
+
+- **Forced-state CSS didn't fire.** Ships `design-system/utils/force-state.css` with Tailwind v4 `@custom-variant` overrides for hover / focus-visible / aria-*, so existing `hover:X` declarations also fire when an ancestor carries `.force-hover` / `.force-focus`. The Hover/Focus state rows in the gallery now show a real visual difference.
+- **JSX slot props serialized to `null`** (`generate-showcase-companion.ts`). `astNodeToValue` now treats `JsxElement` / `JsxSelfClosingElement` / `JsxFragment` as FnMarkers (emitting raw source text) instead of falling through to the null-returning catch-all; identifiers inside the JSX (e.g. `Send`) flow into carried imports as before. `emitStatesJson` strips FnMarker-bearing props so `states.json` stays valid JSON, and the showcase reads them from the AST instead.
+- **Unknown-callsite row too noisy.** `emitUsageBlock` now flags a callsite prop as Unknown only when its name exactly matches a CVA variant (wrong enum value) or is Levenshtein-1 from one (API drift). HTML passthroughs (`className`, `type`, `aria-*`, `data-*`, `title`, `loading`, `nativeButton`) are excluded entirely.
+
+---
+
 ## [0.7.8] — 2026-05-21
 
 Showcase format finalization after the Crewops Button pilot HITL review. Five bundled changes so the pilot resyncs once before Step 8 fan-out across 88 components. Issue #65.

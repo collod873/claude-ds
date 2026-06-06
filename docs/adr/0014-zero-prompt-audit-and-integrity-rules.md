@@ -108,6 +108,10 @@ The amendment moves the resolve check inside audit:
 
 Re-deriving the missing import closure to *auto-repair* the broken atoms is intentionally out of scope here — guessing a symbol's source module risks writing imports that break a consumer, which violates the north star. Detection + gate kills the false green; repair is a separate, evidence-gated follow-up. The headline defect — audit reporting clean on a non-compiling tree — is closed by detection alone.
 
+## Amendment (2026-06-06, #260): the deferred repair shipped
+
+The "separate, evidence-gated follow-up" deferred above has landed. `INTEGRITY-UNRESOLVED-SYMBOL` (and the duplicate-decl rule) now *repair* rather than only flag, in `src/lib/integrity/repair-symbols.ts` (commit `4be08f6`, #260). The evidence gate the original deferral demanded is honored exactly: an import is re-derived only when the symbol's origin is **provable** — a sibling-DS definition, the sole DS re-export, or a unique existing import — backed by a 3-tier DS export-surface index. Unprovable symbols stay honestly flagged, never guessed, so audit still never writes an import that could compile-then-break a consumer. Same-file fixers compose sequentially so a file carrying both a duplicate decl and an unresolved symbol doesn't have its two ops clobber each other.
+
 ## Amendment (2026-06-05, #260/#263/#264): canonical heal sequence requires a second classify pass
 
 After `audit --fix` re-derives the import closure for corrupt atoms, some of those atoms may now compose enough DS components to be correctly classified as composites. Because `classify` ran before `audit --fix` restored the imports (at which point the atom had 0 imports and scored as atom), a second `classify` pass is required for the classification verdict to be correct.
