@@ -294,6 +294,26 @@
       "category": "seeded"
     },
     {
+      "path": "design-system/_fixtures/combobox-good.ts",
+      "category": "managed"
+    },
+    {
+      "path": "design-system/_fixtures/combobox-broken.ts",
+      "category": "managed"
+    },
+    {
+      "path": "design-system/contracts/roles/types.ts",
+      "category": "managed"
+    },
+    {
+      "path": "design-system/contracts/roles/combobox.ts",
+      "category": "managed"
+    },
+    {
+      "path": "design-system/contracts/roles/index.ts",
+      "category": "managed"
+    },
+    {
       "path": ".claude/skills/aesthetic-principles/SKILL.md",
       "category": "seeded"
     },
