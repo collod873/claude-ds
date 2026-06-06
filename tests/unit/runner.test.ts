@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { run } from "../../src/lib/runner";
 import type { Operation, Change } from "../../src/lib/operation";
-import type { ProjectContext } from "../../src/lib/project";
+import { loadProject, type ProjectContext } from "../../src/lib/project";
+import { makeSyncPackFiles } from "../../src/lib/ops/sync-pack-files";
 import { cleanup, freshTmpDir } from "../helpers/tmpdir";
 
 function makeCtx(cwd: string): ProjectContext {
@@ -310,5 +311,85 @@ describe("runner — Change.mode executable", () => {
     expect(report.failed).toBeUndefined();
     const s = await stat(join(dir, "hook.sh"));
     expect(s.mode & 0o777).toBe(0o755);
+  });
+});
+
+/**
+ * PRD #266 capstone: `plan(ctx)` is a pure function of ctx.
+ *
+ * This is the literal statement the whole effort exists to enable. After
+ * Phase A (cwd → ctx), Phase B (auditConfig on ctx), and Phase C (prompts
+ * lifted out of plan()), every Operation reads from a frozen ProjectContext
+ * and nothing else — so running the same Op twice over the same ctx must
+ * yield the same `Change[]`. If it doesn't, the seam ProjectContext is
+ * meant to provide is a fiction.
+ *
+ * Tested in both modes:
+ *   - dry-run: drive plan() via the Runner's dry-run path twice; equal.
+ *   - apply:   drive plan() via the Runner's apply path on one fixture and
+ *              its dry-run path on an identical fixture; the planned
+ *              Change[] match — the apply path plans the same thing the
+ *              dry-run preview promised.
+ *
+ * Uses `syncPackFiles` (a real Operation against the real `next-react` pack)
+ * so the property is exercised end-to-end across a non-trivial Change[].
+ */
+describe("runner — plan(ctx) is a pure function of ctx (PRD #266 capstone)", () => {
+  let consumerDir: string;
+  beforeEach(async () => { consumerDir = await freshTmpDir("plan-pure-"); });
+  afterEach(async () => { await cleanup(consumerDir); });
+
+  const CONFIG_JSON = JSON.stringify({
+    version: "v0.0.0",
+    pack: "next-react",
+    mode: "warn",
+  });
+
+  it("dry-run: same Op planned twice over a frozen ctx → equal Change[]", async () => {
+    await writeFile(join(consumerDir, ".claude-ds.json"), CONFIG_JSON);
+    const ctx = await loadProject(consumerDir);
+    expect(Object.isFrozen(ctx)).toBe(true);
+
+    const op1 = makeSyncPackFiles();
+    const op2 = makeSyncPackFiles();
+
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const r1 = await run(ctx, [op1], "dry-run");
+    const r2 = await run(ctx, [op2], "dry-run");
+    spy.mockRestore();
+
+    expect(r1.ops[0].error).toBeUndefined();
+    expect(r2.ops[0].error).toBeUndefined();
+    expect(r1.ops[0].changes.length).toBeGreaterThan(0);
+    expect(r1.ops[0].changes).toEqual(r2.ops[0].changes);
+  });
+
+  it("apply mode plans the same Change[] dry-run would have, over an identical frozen ctx", async () => {
+    await writeFile(join(consumerDir, ".claude-ds.json"), CONFIG_JSON);
+    const dryRunCtx = await loadProject(consumerDir);
+    expect(Object.isFrozen(dryRunCtx)).toBe(true);
+
+    const dryOp = makeSyncPackFiles();
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const dryReport = await run(dryRunCtx, [dryOp], "dry-run");
+    spy.mockRestore();
+
+    const applyDir = await freshTmpDir("plan-pure-apply-");
+    try {
+      await writeFile(join(applyDir, ".claude-ds.json"), CONFIG_JSON);
+      const applyCtx = await loadProject(applyDir);
+      expect(Object.isFrozen(applyCtx)).toBe(true);
+
+      const applyOp = makeSyncPackFiles();
+      const applyReport = await run(applyCtx, [applyOp], "apply");
+
+      expect(dryReport.ops[0].error).toBeUndefined();
+      expect(applyReport.ops[0].error).toBeUndefined();
+      expect(applyReport.failed).toBeUndefined();
+      expect(dryReport.ops[0].changes.length).toBeGreaterThan(0);
+      expect(applyReport.ops[0].changes).toEqual(dryReport.ops[0].changes);
+    } finally {
+      await cleanup(applyDir);
+    }
   });
 });
