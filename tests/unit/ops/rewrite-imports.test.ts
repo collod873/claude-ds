@@ -6,6 +6,7 @@ import { run } from "../../../src/lib/runner";
 import type { ProjectContext } from "../../../src/lib/project";
 import type { Manifest } from "../../../src/lib/manifest";
 import { cleanup, freshTmpDir } from "../../helpers/tmpdir";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
 
 const emptyManifest: Manifest = {
   files: [], canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
@@ -16,18 +17,17 @@ beforeEach(async () => { cwd = await freshTmpDir("rewrite-imports-"); });
 afterEach(async () => { await cleanup(cwd); });
 
 function fakeCtx(): ProjectContext {
-  return {
-    cwd,
+  return makeFakeCtx(cwd, {
     cfg: {
       version: "v0.6.0", pack: "next-react", mode: "warn",
       enforce_threshold: 10, removed: [], lookalike_ignore: [],
       app_dir: "app", claude_md_target: ".claude/CLAUDE.md",
-    },
+    } as ProjectContext["cfg"],
     packDir: "/nonexistent",
     manifest: emptyManifest,
     exists: async (p) => { try { await stat(join(cwd, p)); return true; } catch { return false; } },
     decisions: {},
-  };
+  });
 }
 
 describe("rewriteImports op", () => {

@@ -1,7 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, join, resolve, relative } from "node:path";
 import { classifySource } from "../lib/classifier.js";
-import { detectDsAliases } from "../lib/ds-aliases.js";
 import { parseExceptions } from "../lib/exceptions.js";
 import { info, err, confirm } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
@@ -42,9 +41,8 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
     tier = opts.tier;
   } else {
     // Classify with the same 5-tier engine as `classify` and the drift rules (#220).
-    let dsAliases = ctx.cfg.ds_aliases ?? [];
-    if (dsAliases.length === 0) dsAliases = await detectDsAliases(cwd, ctx.cfg.srcRoot ?? "src");
-    const verdict = classifySource(src, ctx.cfg.domain_roots, ctx.cfg.allowed_imports ?? [], dsAliases);
+    const { domainRoots, dsAliases, allowedImports } = ctx.auditConfig;
+    const verdict = classifySource(src, domainRoots, allowedImports, dsAliases);
     if (verdict.tier !== "atom" && verdict.tier !== "composite") {
       err(`${opts.source} classifies as ${verdict.tier} — migrate only handles atom/composite. Run \`claude-ds classify\`, or pass \`--tier atom|composite\` to override.`);
       process.exit(2);

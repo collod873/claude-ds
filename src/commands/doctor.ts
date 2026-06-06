@@ -6,8 +6,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { parseManifest, isManifestOrKeepfile, type ManagedRoot } from "../lib/manifest.js";
 import { parseConfig } from "../lib/config.js";
-import { resolveManifestPath, detectAppDir } from "../lib/paths.js";
-import { loadProject } from "../lib/project.js";
+import { resolveManifestPath } from "../lib/paths.js";
+import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { parseExceptions, openCount, lintExceptions, type Exception, type ExceptionLint, type IssueChecker } from "../lib/exceptions.js";
 import { detectLookalikes, Finding } from "../lib/lookalike.js";
 import { detectPackageManager, PackageManager } from "../lib/package-manager.js";
@@ -502,23 +502,30 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
   const manifestRaw = await readFile(join(packDir, "manifest.json"), "utf8");
   const manifest = parseManifest(manifestRaw);
 
-  // Load ignore globs from on-disk config (if present), then merge with --ignore flag globs.
-  // Order: pack defaults < project config < --ignore flag (project/flag extend, not replace).
+  // Resolve appDir + lookalike-ignore via `ProjectContext` so doctor reads the
+  // same `ctx.auditConfig.appDir` the audit command does — healing the prior
+  // "audit detects src/app fall-through, doctor uses cfg.app_dir only" divergence
+  // (PRD #266 Problem #2). The pre-adopt branch mints a real frozen ctx via
+  // `loadPreAdoptProject` so the resolver — not a direct `detectAppDir` call —
+  // owns the src/app detection that #58 introduced.
   const configPath = join(cwd, ".claude-ds.json");
-  let configIgnore: string[] = [];
-  let appDir: string = "app";
-  if (await exists(configPath)) {
+  const isPostAdopt = await exists(configPath);
+  let ctx: ProjectContext;
+  if (isPostAdopt) {
     try {
-      const cfg = parseConfig(await readFile(configPath, "utf8"));
-      configIgnore = cfg.lookalike_ignore;
-      appDir = cfg.app_dir;
+      // loadProject handles the #47/#34 backfill + persist of app_dir / claude_md_target.
+      ctx = await loadProject(cwd);
     } catch {
-      // parseConfig will error properly later; don't block doctor on it here
+      // Malformed config — fall back to pre-adopt resolution so doctor still runs.
+      ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
     }
   } else {
-    // Pre-adopt: detect src/ layout so doctor doesn't false-positive on src/app projects (#58)
-    appDir = await detectAppDir(cwd);
+    ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
   }
+  const { appDir } = ctx.auditConfig;
+  // `lookalike_ignore` is not in the audit-config bundle (it is doctor-specific,
+  // not shared with detect/classify/fix). Only the adopted ctx has a full cfg.
+  const configIgnore: string[] = ctx.kind === "adopted" ? ctx.cfg.lookalike_ignore : [];
 
   // Resolve canonical paths through app_dir for the fs existence check (#58).
   // app/* → <app_dir>/* so src/app projects don't false-positive.
@@ -545,14 +552,10 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
   // #23: scan for root-level dupes of canonical design-system/ files
   const rootDupes = await scanRootDupes(cwd, manifest.deprecated_paths);
 
-  const isPostAdopt = await exists(configPath);
-
   let result: DoctorResult;
 
-  if (isPostAdopt) {
+  if (ctx.kind === "adopted") {
     // Post-adopt: check drift (missing managed files + exception count)
-    // loadProject handles the #47/#34 backfill + persist of app_dir / claude_md_target.
-    const ctx = await loadProject(cwd);
     const cfg = ctx.cfg;
     let openExceptions = 0;
     const exceptionsPath = join(cwd, "design-system/exceptions.json");

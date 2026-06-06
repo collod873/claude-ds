@@ -138,6 +138,36 @@ describe("ProjectContext.auditConfig — PRD #266 Phase B", () => {
     expect(ctx.auditConfig.appDir).toBe("src/app");
   });
 
+  it("PRD #266 parity: audit's pre-adopt cfg path yields the same domainRoots classify uses", async () => {
+    // Heals the divergence PRD #266 Problem #2 lists: pre-refactor audit.ts
+    // passed `cfg?.domain_roots` (possibly `undefined`) into `classifySource`
+    // while classify.ts defaulted to `DEFAULT_DOMAIN_ROOTS`. With both paths
+    // resolved through the same `ctx.auditConfig.domainRoots`, the pre-adopt
+    // (cfg=null) branch yields DEFAULT_DOMAIN_ROOTS instead of `undefined` —
+    // and the adopted branch (parseConfig defaults `domain_roots` to
+    // ["features","lib"] = DEFAULT_DOMAIN_ROOTS when absent from JSON) yields
+    // the same. Same source, no divergence.
+    const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+    const preAdoptCtx = await loadPreAdoptProject(dir, { pack: "next-react", packDir, manifest });
+
+    const dir2 = await freshTmpDir();
+    try {
+      // Config JSON omits `domain_roots` entirely — the pre-#266 audit.ts
+      // would have passed `undefined` here; the resolver now backfills.
+      await writeFile(
+        join(dir2, ".claude-ds.json"),
+        JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }),
+      );
+      const adoptedCtx = await loadProject(dir2);
+
+      expect(preAdoptCtx.auditConfig.domainRoots).toEqual(DEFAULT_DOMAIN_ROOTS);
+      expect(adoptedCtx.auditConfig.domainRoots).toEqual(DEFAULT_DOMAIN_ROOTS);
+      expect(preAdoptCtx.auditConfig.domainRoots).toEqual(adoptedCtx.auditConfig.domainRoots);
+    } finally {
+      await cleanup(dir2);
+    }
+  });
+
   it("ctx (including auditConfig) is frozen on return from both factories", async () => {
     await writeFile(
       join(dir, ".claude-ds.json"),

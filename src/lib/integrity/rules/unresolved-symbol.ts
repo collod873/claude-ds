@@ -49,7 +49,7 @@ async function fix(finding: IntegrityFinding, ctx: ProjectContext): Promise<Inte
     return { finding, fixed: false, message: `Could not read ${finding.file}`, changes: [] };
   }
 
-  const env = await buildRepairEnv({ cwd, fileName: finding.file });
+  const env = await buildRepairEnv(ctx, finding.file);
   const { source: repaired, repaired: didRepair, remaining } = repairUnresolvedSymbols(
     source,
     finding.file,

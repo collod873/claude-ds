@@ -1,21 +1,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import ts from "typescript";
-import { detectTsconfigPaths } from "../ds-aliases.js";
+import type { ProjectContext } from "../project.js";
 import type { RepairEnv, SymbolSource } from "./repair-symbols.js";
-
-/**
- * Options for assembling a repair environment over a consumer project.
- * `fileName` is the file being repaired (cwd-relative); it is excluded from the
- * import-graph scan so a file never resolves a symbol against its own
- * (now-stripped) imports. `srcRoot` locates the tsconfig that declares the DS
- * path aliases (defaults to the repo root, where Crewops keeps it).
- */
-export interface RepairEnvOptions {
-  cwd: string;
-  fileName: string;
-  srcRoot?: string;
-}
 
 const SCAN_DIRS = ["src", "design-system", "app", "components", "lib"];
 const SCAN_EXTS = new Set([".ts", ".tsx", ".js", ".jsx"]);
@@ -281,13 +268,14 @@ function aliasSpecifierFor(
  * `UNRESOLVED-SYMBOL` finding to flag it (e.g. a parent-local helper no module
  * exports — the calendar-atom case).
  */
-export async function buildRepairEnv(opts: RepairEnvOptions): Promise<RepairEnv> {
-  const selfAbs = join(opts.cwd, opts.fileName);
+export async function buildRepairEnv(ctx: ProjectContext, fileName: string): Promise<RepairEnv> {
+  const { cwd } = ctx;
+  const selfAbs = join(cwd, fileName);
   const collected: Array<{ rel: string; source: string }> = [];
   for (const d of SCAN_DIRS) {
-    for (const f of await walk(join(opts.cwd, d))) {
-      const rel = relative(opts.cwd, f);
-      if (rel === opts.fileName || f === selfAbs) continue;
+    for (const f of await walk(join(cwd, d))) {
+      const rel = relative(cwd, f);
+      if (rel === fileName || f === selfAbs) continue;
       try {
         collected.push({ rel, source: await readFile(f, "utf8") });
       } catch {
@@ -303,7 +291,7 @@ export async function buildRepairEnv(opts: RepairEnvOptions): Promise<RepairEnv>
   const dsFiles = collected.filter(c => c.rel.startsWith(dsPrefix) || c.rel.startsWith("design-system/"));
   const dsExports = indexDsExports(dsFiles);
 
-  const paths = await detectTsconfigPaths(opts.cwd, opts.srcRoot ?? "");
+  const paths = ctx.auditConfig.tsconfigPaths;
   const prefixUsage = new Map<string, number>();
   const allText = sources.join("\n");
   for (const key of Object.keys(paths)) {
