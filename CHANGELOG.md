@@ -6,6 +6,92 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [1.1.0] — 2026-06-05
+
+The brownfield onboarding flow reaches "0 to hero with no thinking about fixes." `adopt → heal` takes any existing project — corrupt baseline or not — to a fully scaffolded, converged, idempotent tree with zero manual intervention. No breaking changes and no v1.1.0 migration set; a consumer pinned at v1.0.0 runs zero migrations on upgrade. Verified PASS against the Crewops baseline in a real TTY (6/6 acceptance items, 0 interventions, idempotent — `pack/versions/1.1.0/verification.md`).
+
+### Added
+- **`claude-ds heal` — self-converging brownfield loop** (#265). Loops `sync → upgrade → classify → audit --fix` to a fixed point (max 3 iterations, fails loudly otherwise). Corrupt baselines whose stripped atoms re-derive into composites after `audit --fix` restores their imports previously needed a manual two-pass `classify ↔ audit --fix` dance; `heal` runs that to convergence so the consumer never sequences it by hand. This is the second half of the `adopt → heal` flow the completeness principle (ADR-0003) calls for.
+- **Truth-telling breadcrumbs.** When `audit --fix` hits a finding it can't resolve (extraction-needed, misplaced, misclassified), the next-step line routes to `claude-ds classify` instead of looping the consumer back into `audit`. Each command's breadcrumb is context-aware, not static.
+
+### Changed
+- **One classification boundary** (ADR-0015, #203/#208/#209/#220). `classify` is now the *only* command that creates tier files; `audit --fix` is surgical — every fix edits in place, never writes a file it didn't read first. Inline-component extraction moved out of the raw-primitive fixer (where it minted unaudited files with broken imports, the #195 plateau at 19-20/23) and into `classify`'s one-shot walk. `audit` emits `MISPLACED` / `MISCLASSIFIED-*` as report-only findings that defer to `classify`. The dual classifier and dead ownership module were collapsed (#220).
+- **Classify scope locked to `design-system/`** (#209). The walker no longer descends into app `src/`, so `classify` can never clobber consumer atoms or move app code. Verified: a `classify`-only run shows `git status` changes confined to `design-system/` and its manifest.
+- **Extraction carries parent-exported types into lifted atoms** (#196), and never leaves a dangling reference — extraction keeps every declaration the parent still needs (#250) and refuses a parent that doesn't resolve (ADR-0014 amendment #259).
+
+### Fixed
+- **`--fix` is a single-pass fixed point** (#256). Audit file-tracking moved off the pack showcase `design-system/manifest.json` into `.claude-ds/tracking-manifest.json`, eliminating the collision that made `--fix` non-idempotent and produced a consumer `TS2352` cast error. Tier barrel indexes (`atoms/composites/patterns/index.ts`) are now treated as generated. Idempotency proven by identical `git write-tree` hash across two consecutive `audit --fix` passes.
+- **`doctor --completeness` no longer false-positives on consumer-owned skills** (#257). Strict ownership is scoped to pack-declared skill directories only; the consumer's own `.claude/skills/` (e.g. sandcastle agents) are left alone.
+- **Drift rules unified behind one interface** (#217/#240). Detect + fix fused into a single `DriftRule`, and integrity-rule shape unified with drift-rule shape — the precondition for `heal`'s loop to reason about all rule classes uniformly.
+
+---
+
+## [1.0.0] — 2026-05-25
+
+First stable release. The audit subsystem is rebuilt around three principles that land across the 0.8.0/0.9.0/1.0.0 migration chain: every finding must be actionable (ADR-0013), `audit --fix` runs to completion with zero interactive prompts and validates its own output (ADR-0014), and the tool ships a managed pack of files so consumers carry *zero* local DS infrastructure (ADR-0003). Verified on the Crewops baseline (v0.7.13 → v1.0.0): 24/24 mechanical checks pass, `audit` and `doctor --completeness` both exit 0 (`pack/versions/1.0.0/verification.md`).
+
+### Added
+- **Zero-prompt audit + integrity rules** (ADR-0014, #194). `audit --fix` runs without interactive prompts: every ambiguity that previously blocked on a developer-jargon question gets a safe automated default, and only genuine atom-vs-composite / token-nudge questions (passing a three-part "a non-coder can answer this" test) ever surface. A new `INTEGRITY-*` rule category checks structural file health (`UNPARSEABLE`, `ORPHANED-FROM`, `UNRESOLVABLE-IMPORT`) and fires before convention rules. Every fixer parses its output before writing — if the result doesn't parse but the input did, the broken version never reaches disk. This closed the trust-eroding gap where a fixer could break a file and audit would still report "No action required."
+- **`audit --fix` and `--except` flags** (#145/#159/#175). Deterministic fixes apply automatically; `--except` registers exceptions inline. Comprehensive detect/fix/extract coverage, pseudo-state variant filtering, and a re-fix pass so integrity-repaired files still get drift scanning in the same run.
+- **`classify` command + `meta.kind` migration** (#102). Hard-classifies every component as `atom` or `composite` and injects `meta.kind` where missing.
+- **`claude-ds upgrade` + migration framework** (#99). Chains migration sets strictly after the consumer's pinned version and auto-runs `sync` on completion (#128). The npx install path is fixed and `packVersion` is pinned in `.claude-ds.json` (#96).
+- **`doctor --completeness` check** (#115). Verifies a consumer has no local DS infrastructure outside the pack-managed scaffold — the mechanical enforcement of ADR-0003.
+- **Patterns tier, end-to-end** (#100), plus a `DRIFT-INLINE-STATIC-STYLE` evaluator (#113) and a classifier that recognizes DS imports via path aliases (#127).
+- **GitHub Actions agent workflow** (ADR-0012). Label-driven state machine, agent runners, `/go` and `/merge` skills, and project-local `/to-prd-project` + `/to-issues-project` skills.
+
+### Changed
+- **Actionable-findings contract** (ADR-0013, #2b7c916). Every rule must either auto-fix, give specific remediation, or not flag at all — runtime-dynamic expressions (`style={{ width: variable }}`) are correct code, not drift. `DRIFT-MISPLACED` no longer emits a pattern verdict.
+- **Scaffold-component skill replaced with separate component + pattern skills** (#119).
+
+### Fixed
+- **`manifest.generated.ts` lifecycle** (#148 and predecessors). The `manage-manifest` migration deletes the legacy committed `manifest.generated.ts`; it's now regenerated on demand by the companion hook after `upgrade`/`sync` instead of being left missing until a hook happens to fire.
+- **Hook input read from stdin JSON** instead of an unset `$1` positional (#144); **`jq`-missing fails loudly** instead of silently disabling governance hooks (#164).
+- **`reconcile` prunes dangling hook references** from `settings.json` (#142); **`sync` reads version from `packVersion`**, not remote tags (#141); **doctor/audit orphan + exceptions false positives** fixed (#130).
+- **`migrate-exceptions`** converts `exceptions.json` from a flat array to the categorized object shape; permanent exceptions skip issue-link validation (#139/#143).
+
+### Breaking for consumers
+Consumers upgrading from any v0.7.x release traverse the v0.8.0 → v0.9.0 → v1.0.0 migration chain automatically via `claude-ds upgrade`. All changes apply without manual steps; run `claude-ds doctor --completeness` to verify. See `pack/versions/1.0.0/breaking.md`. Key removals: `.states.json` files and their `STATE-001` exceptions (folded into `meta.states`), the committed `manifest.generated.ts`, and `@/design-system/*` imports (rewritten to `@ds/*`).
+
+---
+
+## [0.9.0] — 2026-05-24
+
+Shipped as a migration bucket inside the v1.0.0 release — no standalone v0.9.0 tag. Consumes the migration framework from v0.8.0 to restructure the DS folder, widen the token surface, and move the manifest under pack management. Details in `pack/versions/1.0.0/breaking.md`.
+
+### Pack changes
+- **`@ds/*` path alias** added to `tsconfig.json` pointing at `design-system/`, with a `rewrite-ds-imports` migration that rewrites every `@/design-system/*` import to `@ds/*` across the codebase (#109).
+- **Widened token surface** (ADR-0008, #111). `design-system/tokens.json` expands with motion / mask / shadow / z-index categories, plus a Tailwind plugin that exposes them.
+- **Managed manifest generator** (#110). `scripts/build-manifest.ts` ships from the pack; the legacy committed `design-system/manifest.generated.ts` is deleted and regenerated on demand.
+- **Managed portal-scope CSS** (#112). `design-system/utils/portal-scope.module.css` installs as a pack-managed file, with a `rewrite-portal-styles` migration replacing inline `display:contents` portal CSS with the scoped module.
+- **`meta.kind` required** (#102). The `meta-kind-hard` migration infers and injects `meta.kind` (`"atom"` / `"composite"`) on every component.
+- **CI workflow shipped as a managed pack file** (#107) — moving CI out of consumer-hand-rolled territory per ADR-0003.
+
+### Breaking for consumers
+Applied automatically by `claude-ds upgrade`. The folder restructure, import rewrites, and manifest relocation are all migration-driven; no manual steps. See `pack/versions/1.0.0/breaking.md`.
+
+---
+
+## [0.8.0] — 2026-05-24
+
+Shipped as a migration bucket inside the v1.0.0 release — no standalone v0.8.0 tag (the work landed at `v0.8.0-rc.1`, 2026-05-24). Retires the `.states.json` contract, introduces the migration framework that the whole 0.8→1.0 chain rides on, and graduates `audit` into a real CI gate.
+
+### Pack changes
+- **Migration framework + `claude-ds upgrade`** (#99). The backbone for every subsequent breaking change — versioned migration sets applied in chain order, with semver helpers collapsed and a chain accepted by `runMigrations`.
+- **`.states.json` contract retired** (ADR-0007, #105). The `retire-states` migration deletes every `.states.json` file and its `STATE-001` exceptions; showcases now derive states from `meta.states` in the component file. (This completes the deprecation the 0.7.0 bundle-shape change began.)
+- **Managed `force-state.css`** (#103). `design-system/utils/force-state.css` installs as a pack-managed file, replacing any hand-written version.
+- **`audit` graduated to a CI gate** (#106). Honors `exceptions.json` and exits non-zero on drift so it can fail a pipeline.
+- **`doctor --completeness`** (#115) and **distribution fix** (#96): the npx install path works and `packVersion` is pinned, completing the `packVersion` rename across the `adopt`/`sync` write paths.
+- **Stable drift rule IDs + `exceptions.json` schema** (#104). Schema changes from `rule_id`/`file`/`expiry` to `rule`/`path`; the classifier core lands with `DRIFT-MISPLACED` and `DRIFT-DS-IMPORTS-FEATURE` end-to-end (#97/#101).
+
+### Tooling
+- CLI now runs in-process for tests (suite wall-clock down ~77%); script tests consolidated into pack integration tests with thread pooling.
+- Architecture decisions captured: ADR-0002 through ADR-0011 from the design-system deep dive; domain dictionary and project framing rewritten to match.
+
+### Breaking for consumers
+Applied automatically by `claude-ds upgrade`. `.states.json` removal and the `exceptions.json` schema change are migration-driven; no manual steps. See `pack/versions/1.0.0/breaking.md`.
+
+---
+
 ## [0.7.15] — 2026-05-22
 
 Tightened `buildScopes` after the deeper resolver in 0.7.14 started leaking private fixture helpers into showcase carry imports.
@@ -28,15 +114,6 @@ Two generator bugs that caused `tsc --noEmit` failures in showcase companions wh
 Two new regression test groups in `generate-showcase-companion.integration.test.ts`:
 - `"Bug A — undefined props are omitted from generated JSX"` — verifies that both inline `undefined` values and spread-overridden-to-undefined props are omitted, not emitted as `null`.
 - `"Bug B — nested object properties in imported fixtures resolve correctly"` — verifies that `array[i].nestedObj.prop` resolves to the string value rather than `null`.
-
----
-
-## [Unreleased]
-
-### Breaking for consumers
-- **`tests/visual/` removed from scaffold** (issue #39). Any existing project carrying `tests/visual/.keep` or `tests/visual/README.md` should delete the `tests/visual/` directory. Run `claude-ds reconcile` to have the tool prune it automatically.
-- **`has_snapshot` field removed from `design-system/manifest.json`** — any tooling that reads `manifest.json` and references `has_snapshot` will need updating.
-- **Component bundle is now 4 files** (`<Name>.tsx + .showcase.tsx + .states.json + .test.tsx`). `.snapshot.png` is no longer expected or generated.
 
 ---
 
@@ -157,6 +234,12 @@ Showcase generator gains a full-variant matrix, declarative state rows, and a pl
 
 ### Tooling
 - Generator entry point is now async to support dynamic-import of the analyzer module.
+
+### Breaking for consumers
+> Recorded retroactively — these shipped in v0.7.0 (commit `d5bcddf`, issue #39) but were stranded in an `[Unreleased]` block until the 0.8.0–1.1.0 backfill.
+- **`tests/visual/` removed from scaffold** (issue #39). The visual/a11y baseline dirs seeded in v0.3.0 (Slice I) never earned their keep — the bundle convention moved states proof into the showcase, so the separate snapshot/visual lane was dead weight. Any existing project carrying `tests/visual/.keep` or `tests/visual/README.md` should delete the `tests/visual/` directory. Run `claude-ds reconcile` to have the tool prune it automatically.
+- **`has_snapshot` field removed from `design-system/manifest.json`** — any tooling that reads `manifest.json` and references `has_snapshot` will need updating.
+- **Component bundle is now 4 files** (`<Name>.tsx + .showcase.tsx + .states.json + .test.tsx`). `.snapshot.png` is no longer expected or generated.
 
 ### Folded-in
 - Closes crewops#2 (revert `@ts-nocheck`); the re-sync half is the consumer's responsibility downstream.
