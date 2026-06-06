@@ -17,26 +17,18 @@ if [ ! -f "$file" ]; then
   exit 0
 fi
 
+# jq is a hard dependency of the governance hooks (see lib/read-hook-input.sh).
+if ! command -v jq >/dev/null 2>&1; then
+  echo "claude-ds: jq is required for governance hooks — install it with: brew install jq" >&2
+  exit 1
+fi
+
 # EXC-003: must be wrapped object {exceptions:[]} not a bare array
 if jq -e 'type == "array"' "$file" >/dev/null 2>&1; then
   hint="use wrapped object format: {\"exceptions\": [...]}, not a bare array"
   echo "$file:0: EXC-003: $hint" >&2
   bash .claude/hooks/lib/log-failure.sh "EXC-003" "$file" "0" "$hint" || true
   exit 2
-fi
-
-# If jq not installed, fall back to grep heuristics
-if ! command -v jq >/dev/null 2>&1; then
-  # TODO: replace grep heuristics with jq once jq is reliably present
-  if grep -qE '^\s*\[' "$file" && ! grep -qE '"exceptions"' "$file"; then
-    hint="use wrapped object format: {\"exceptions\": [...]}, not a bare array"
-    echo "$file:0: EXC-003: $hint" >&2
-    bash .claude/hooks/lib/log-failure.sh "EXC-003" "$file" "0" "$hint" || true
-    exit 2
-  fi
-  # Can't validate further without jq — allow and warn
-  echo "$file:0: EXC-000: jq not installed; skipping deep validation" >&2
-  exit 0
 fi
 
 # EXC-001 & EXC-002: validate each entry in .exceptions[]
