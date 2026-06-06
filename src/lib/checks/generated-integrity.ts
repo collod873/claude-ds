@@ -1,6 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { Change, Operation } from "../operation.js";
+import type { Change, Operation, PlanResult } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 
 const GEN_TIERS = ["atoms", "composites", "patterns"] as const;
@@ -314,6 +314,11 @@ async function existsAt(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
 }
 
+/** Outcome of the generated-integrity planner — reported on `RunReport.ops[i].outcome`. */
+export interface GenIntegrityOutcome {
+  violations: GenViolation[];
+}
+
 /**
  * GEN-001 / GEN-002 planner.
  *
@@ -324,20 +329,17 @@ async function existsAt(p: string): Promise<boolean> {
  *
  * Emits one `write` Change per drifted companion. The caller picks `run()` mode
  * (apply auto-repairs in-place; dry-run renders the diff). Detected violations
- * are surfaced via the side-channel `op.violations` so the caller can drive
- * scorecard logging and the dry-run check-script stderr output — both are
- * command-shaped concerns the Runner doesn't model.
+ * are surfaced as the Op's typed outcome on `RunReport.ops[i].outcome` so the
+ * caller can drive scorecard logging and the dry-run check-script stderr output
+ * — both are command-shaped concerns the Runner doesn't model.
  */
-export interface GenIntegrityOperation extends Operation {
-  violations: GenViolation[];
-}
+export type GenIntegrityOperation = Operation<GenIntegrityOutcome>;
 
 export function planGeneratedIntegrityFixes(): GenIntegrityOperation {
-  const violations: GenViolation[] = [];
-  const op: GenIntegrityOperation = {
+  return {
     name: "generated-integrity",
-    violations,
-    async plan(ctx: ProjectContext): Promise<Change[]> {
+    async plan(ctx: ProjectContext): Promise<PlanResult<GenIntegrityOutcome>> {
+      const violations: GenViolation[] = [];
       const changes: Change[] = [];
       const cwd = ctx.cwd;
 
@@ -401,8 +403,7 @@ export function planGeneratedIntegrityFixes(): GenIntegrityOperation {
         }
       }
 
-      return changes;
+      return { changes, outcome: { violations } };
     },
   };
-  return op;
 }

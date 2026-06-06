@@ -2,7 +2,7 @@ import { mkdir, rename, unlink, writeFile, stat, chmod } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { ProjectContext } from "./project.js";
-import type { Change, Operation } from "./operation.js";
+import type { Change, Operation, PlanResult } from "./operation.js";
 
 export type RunMode = "dry-run" | "apply";
 
@@ -15,8 +15,21 @@ export interface RunOptions {
   rollbackOnFailure?: boolean;
 }
 
+/**
+ * Per-Op entry in `RunReport.ops`. `outcome` is the typed non-byte fact the
+ * Op produced — present iff `plan()` succeeded and the Op declared an outcome
+ * (Operation<TOutcome> with TOutcome !== void). Byte-only Ops and plan-time
+ * failures leave `outcome` unset.
+ */
+export interface OpReport<TOutcome = unknown> {
+  name: string;
+  changes: Change[];
+  outcome?: TOutcome;
+  error?: string;
+}
+
 export interface RunReport {
-  ops: { name: string; changes: Change[]; error?: string }[];
+  ops: OpReport[];
   applied: Change[];
   failed?: { change: Change; error: string };
 }
@@ -162,9 +175,20 @@ export async function rollbackChanges(ctx: ProjectContext, applied: Change[]): P
  * In `dry-run` mode no disk mutations occur; a unified-ish diff per Change is
  * written to stdout, prefixed `[op-name] path` so the user can trace authorship.
  */
+/**
+ * The runner-side Op type — accepts both byte-only Ops (`Operation<void>`,
+ * `plan(): Promise<Change[]>`) and outcome-bearing Ops (`Operation<TOutcome>`
+ * for any `TOutcome`, `plan(): Promise<PlanResult<TOutcome>>`). The runner
+ * normalizes both shapes into `RunReport.ops[i]`.
+ */
+type RunnerOp = {
+  name: string;
+  plan(ctx: ProjectContext): Promise<Change[] | PlanResult<unknown>>;
+};
+
 export async function run(
   ctx: ProjectContext,
-  ops: Operation[],
+  ops: RunnerOp[],
   mode: RunMode,
   options: RunOptions = {},
 ): Promise<RunReport> {
@@ -174,8 +198,11 @@ export async function run(
   const planned: { opName: string; change: Change }[] = [];
   for (const op of ops) {
     try {
-      const changes = await op.plan(ctx);
-      report.ops.push({ name: op.name, changes });
+      const result = await op.plan(ctx);
+      const changes = Array.isArray(result) ? result : result.changes;
+      const entry: OpReport = { name: op.name, changes };
+      if (!Array.isArray(result)) entry.outcome = result.outcome;
+      report.ops.push(entry);
       for (const change of changes) planned.push({ opName: op.name, change });
     } catch (e) {
       report.ops.push({ name: op.name, changes: [], error: (e as Error).message });
@@ -209,4 +236,4 @@ export async function run(
 }
 
 // Re-export for callers that want a single import surface.
-export type { Change, Operation } from "./operation.js";
+export type { Change, Operation, PlanResult } from "./operation.js";

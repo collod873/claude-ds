@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { diffFile, type FileVerdict } from "../sync-diff.js";
 import type { Manifest } from "../manifest.js";
-import type { Change, Operation } from "../operation.js";
+import type { Change, Operation, PlanResult } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 import { resolveManifestPath } from "../paths.js";
 
@@ -21,10 +21,12 @@ export interface PackFileDecision {
   displayPath: string;
 }
 
-export interface SyncPackFilesOp extends Operation {
-  /** Populated during `plan()`. Empty until plan runs. Stable across repeat plan() calls. */
+/** Outcome reported on `RunReport.ops[i].outcome` — per-file sync verdicts. */
+export interface SyncPackFilesOutcome {
   decisions: PackFileDecision[];
 }
+
+export type SyncPackFilesOp = Operation<SyncPackFilesOutcome>;
 
 export interface SyncPackFilesOpts {
   /** Override the manifest used (e.g. `--offline-fixture` fixtures). Defaults to `ctx.manifest`. */
@@ -39,19 +41,20 @@ export interface SyncPackFilesOpts {
  * loads upstream/current bytes, runs `diffFile`, and emits one Change per non-skip verdict
  * (or `abort` Change for hand-edited managed files — see operation.ts).
  *
- * Plan results are cached on the returned op (per-call) so sync can do a "plan to preview,
+ * Plan results are cached internally (per-instance) so sync can do a "plan to preview,
  * confirm, then apply" flow without re-running diffFile twice. The op is single-use:
  * re-running plan() returns the cached result.
+ *
+ * Per-file decisions reach the caller as the Op's typed outcome on
+ * `RunReport.ops[i].outcome.decisions` — no mutable side-channel on the op handle.
  */
 export function makeSyncPackFiles(opts: SyncPackFilesOpts = {}): SyncPackFilesOp {
   let cached: { changes: Change[]; decisions: PackFileDecision[] } | null = null;
-  const op: SyncPackFilesOp = {
+  return {
     name: "sync-pack-files",
-    decisions: [],
-    async plan(ctx: ProjectContext): Promise<Change[]> {
+    async plan(ctx: ProjectContext): Promise<PlanResult<SyncPackFilesOutcome>> {
       if (cached) {
-        op.decisions = cached.decisions;
-        return cached.changes;
+        return { changes: cached.changes, outcome: { decisions: cached.decisions } };
       }
       const manifest = opts.manifest ?? ctx.manifest;
       const packDir = opts.packDir ?? ctx.packDir;
@@ -125,9 +128,7 @@ export function makeSyncPackFiles(opts: SyncPackFilesOpts = {}): SyncPackFilesOp
       }
 
       cached = { changes, decisions };
-      op.decisions = decisions;
-      return changes;
+      return { changes, outcome: { decisions } };
     },
   };
-  return op;
 }

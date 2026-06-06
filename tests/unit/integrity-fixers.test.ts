@@ -195,21 +195,20 @@ describe("integrity-fixers", () => {
 
       const op = integrityFixerAsOperation(finding);
       const ctx = { cwd: dir } as unknown as ProjectContext;
-      const changes = await op.plan(ctx);
+      const { changes, outcome } = await op.plan(ctx);
 
       expect(op.name).toBe("INTEGRITY-UNPARSEABLE");
       expect(changes).toHaveLength(1);
       expect(changes[0].kind).toBe("write");
-      expect(op.result).not.toBeNull();
-      expect(op.result!.fixed).toBe(true);
-      expect(op.result!.finding).toBe(finding);
+      expect(outcome.fixed).toBe(true);
+      expect(outcome.finding).toBe(finding);
 
       // plan() is read-only — the broken file should not yet be repaired
       const onDisk = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
       expect(onDisk).toBe(brokenSource);
     });
 
-    it("plan() returns [] and result.fixed=false when fixer declines", async () => {
+    it("plan() returns [] and outcome.fixed=false when fixer declines", async () => {
       // No git repo → restoreFromHead declines.
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });
       const brokenSource = `export function Chip( { return <span />; }\n`;
@@ -223,15 +222,14 @@ describe("integrity-fixers", () => {
 
       const op = integrityFixerAsOperation(finding);
       const ctx = { cwd: dir } as unknown as ProjectContext;
-      const changes = await op.plan(ctx);
+      const { changes, outcome } = await op.plan(ctx);
 
       expect(changes).toHaveLength(0);
-      expect(op.result).not.toBeNull();
-      expect(op.result!.fixed).toBe(false);
-      expect(op.result!.finding).toBe(finding);
+      expect(outcome.fixed).toBe(false);
+      expect(outcome.finding).toBe(finding);
     });
 
-    it("plan() returns [] and a 'no auto-fix' result for non-fixable rules", async () => {
+    it("plan() returns [] and a 'no auto-fix' outcome for non-fixable rules", async () => {
       const finding: IntegrityFinding = {
         ruleId: "INTEGRITY-UNRESOLVABLE-IMPORT",
         file: "design-system/atoms/chip.tsx",
@@ -240,12 +238,11 @@ describe("integrity-fixers", () => {
 
       const op = integrityFixerAsOperation(finding);
       const ctx = { cwd: dir } as unknown as ProjectContext;
-      const changes = await op.plan(ctx);
+      const { changes, outcome } = await op.plan(ctx);
 
       expect(changes).toHaveLength(0);
-      expect(op.result).not.toBeNull();
-      expect(op.result!.fixed).toBe(false);
-      expect(op.result!.message).toMatch(/no auto-fix/i);
+      expect(outcome.fixed).toBe(false);
+      expect(outcome.message).toMatch(/no auto-fix/i);
     });
   });
 
@@ -294,7 +291,7 @@ describe("integrity-fixers", () => {
 
       const op = integrityFixerAsOperation(finding);
       const ctx = { cwd: dir } as unknown as ProjectContext;
-      const changes = await op.plan(ctx);
+      const { changes, outcome } = await op.plan(ctx);
 
       expect(changes).toHaveLength(1);
       expect(changes[0].kind).toBe("abort");
@@ -302,9 +299,8 @@ describe("integrity-fixers", () => {
         expect(changes[0].path).toBe("design-system/atoms/chip.tsx");
         expect(changes[0].reason).toMatch(/INTEGRITY-UNPARSEABLE/);
       }
-      expect(op.result).not.toBeNull();
-      expect(op.result!.fixed).toBe(false);
-      expect(op.result!.message).toMatch(/INTEGRITY-UNPARSEABLE/);
+      expect(outcome.fixed).toBe(false);
+      expect(outcome.message).toMatch(/INTEGRITY-UNPARSEABLE/);
     });
 
     it("plan() returns the fix Changes unchanged when validation passes", async () => {
@@ -333,11 +329,11 @@ describe("integrity-fixers", () => {
 
       const op = integrityFixerAsOperation(finding);
       const ctx = { cwd: dir } as unknown as ProjectContext;
-      const changes = await op.plan(ctx);
+      const { changes, outcome } = await op.plan(ctx);
 
       expect(changes).toHaveLength(1);
       expect(changes[0].kind).toBe("write");
-      expect(op.result!.fixed).toBe(true);
+      expect(outcome.fixed).toBe(true);
     });
   });
 });

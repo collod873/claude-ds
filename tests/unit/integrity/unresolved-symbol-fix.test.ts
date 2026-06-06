@@ -42,9 +42,9 @@ describe("INTEGRITY-UNRESOLVED-SYMBOL fix", () => {
 
     const op = integrityFixerAsOperation(finding);
     const auditConfig = await resolveAuditConfig(dir, null);
-    const changes = await op.plan(makeFakeCtx(dir, { auditConfig }));
+    const { changes, outcome } = await op.plan(makeFakeCtx(dir, { auditConfig }));
 
-    expect(op.result!.fixed).toBe(true);
+    expect(outcome.fixed).toBe(true);
     expect(changes).toHaveLength(1);
     expect(changes[0].kind).toBe("write");
     const after = changes[0].kind === "write" ? changes[0].after.toString("utf8") : "";
@@ -67,9 +67,9 @@ describe("INTEGRITY-UNRESOLVED-SYMBOL fix", () => {
 
     const op = integrityFixerAsOperation(finding);
     const auditConfig = await resolveAuditConfig(dir, null);
-    const changes = await op.plan(makeFakeCtx(dir, { auditConfig }));
+    const { changes, outcome } = await op.plan(makeFakeCtx(dir, { auditConfig }));
 
-    expect(op.result!.fixed).toBe(false);
+    expect(outcome.fixed).toBe(false);
     expect(changes).toHaveLength(0);
     // File untouched on disk, and the finding still fires.
     const onDisk = await readFile(join(dir, "design-system/atoms/row.tsx"), "utf8");

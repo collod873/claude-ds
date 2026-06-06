@@ -1,4 +1,4 @@
-import type { Change, Operation } from "../operation.js";
+import type { Change, Operation, PlanResult } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 import type { Severity } from "../severity.js";
 import { validateFixerOutput } from "../fixer-validate.js";
@@ -88,40 +88,40 @@ export function evaluateIntegrity(
  * ctx)` (read-only — fixers return Changes without touching disk),
  * runs the ADR-0014 `validateFixerOutput` gate on every emitted Change so
  * integrity fixers carry the same parse-before-write guarantee as drift
- * fixers (PRD #234), stashes the `IntegrityFixResult` on `op.result` so
- * callers can drive their own message printing / scorecard accounting, and
- * returns the fix's Changes for the Runner to apply.
+ * fixers (PRD #234), and returns the `IntegrityFixResult` as the Op's typed
+ * outcome on `RunReport.ops[i].outcome` — no mutable side-channel on the op
+ * handle.
  *
- * Declined fixes return `[]` (no writes); `op.result` still carries the
+ * Declined fixes return `[]` changes; the outcome still carries the
  * remediation message. A non-fixable rule produces no Changes and an
- * explanatory `op.result` — defensive, since `audit-fix.ts` already filters
- * by `isIntegrityFixable` before constructing the Operation. A validation
+ * explanatory outcome — defensive, since `audit-fix.ts` already filters by
+ * `isIntegrityFixable` before constructing the Operation. A validation
  * failure returns exactly one `abort` Change carrying the gate's reason and
- * `op.result.fixed = false`, mirroring `fixerAsOperation`'s per-finding
+ * an `outcome.fixed = false`, mirroring `fixerAsOperation`'s per-finding
  * skip-and-continue established for drift in PRD #221.
  */
-export interface IntegrityFixerOperation extends Operation {
+export interface IntegrityFixerOperation extends Operation<IntegrityFixResult> {
   finding: IntegrityFinding;
-  result: IntegrityFixResult | null;
 }
 
 export function integrityFixerAsOperation(
   finding: IntegrityFinding,
 ): IntegrityFixerOperation {
-  const op: IntegrityFixerOperation = {
+  return {
     name: finding.ruleId,
     finding,
-    result: null,
-    async plan(ctx: ProjectContext): Promise<Change[]> {
+    async plan(ctx: ProjectContext): Promise<PlanResult<IntegrityFixResult>> {
       const rule = INTEGRITY_RULES_BY_ID[finding.ruleId];
       if (!rule.fixable) {
-        op.result = {
-          finding,
-          fixed: false,
-          message: `No auto-fix available for ${finding.ruleId} — manually repair ${finding.file}`,
+        return {
           changes: [],
+          outcome: {
+            finding,
+            fixed: false,
+            message: `No auto-fix available for ${finding.ruleId} — manually repair ${finding.file}`,
+            changes: [],
+          },
         };
-        return [];
       }
       const r = await rule.fix(finding, ctx);
 
@@ -130,15 +130,15 @@ export function integrityFixerAsOperation(
           const gate = validateFixerOutput(ch, finding.ruleId);
           if (gate) {
             info(gate.message);
-            op.result = { finding, fixed: false, message: gate.message, changes: [] };
-            return [{ kind: "abort", path: finding.file, reason: gate.message }];
+            return {
+              changes: [{ kind: "abort", path: finding.file, reason: gate.message }],
+              outcome: { finding, fixed: false, message: gate.message, changes: [] },
+            };
           }
         }
       }
 
-      op.result = r;
-      return r.fixed ? r.changes : [];
+      return { changes: r.fixed ? r.changes : [], outcome: r };
     },
   };
-  return op;
 }

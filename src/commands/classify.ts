@@ -11,6 +11,8 @@ import { run } from "../lib/runner.js";
 import { moveTierFile } from "../lib/ops/move-tier-file.js";
 import { appendExceptions } from "../lib/ops/append-exceptions.js";
 import type { Operation } from "../lib/operation.js";
+import type { ExtractInlineOutcome } from "../lib/ops/extract-inline-components.js";
+import type { BackfillAtomHelpersOutcome } from "../lib/ops/backfill-atom-helpers.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
@@ -348,13 +350,15 @@ export async function classifyCmd(opts: {
   const { extractInlineComponents } = await import("../lib/ops/extract-inline-components.js");
   const extractOp = extractInlineComponents(canonicalAlias);
   const ctx3 = await loadProject(cwd);
-  await run(ctx3, [extractOp], "apply");
+  const extractReport = await run(ctx3, [extractOp], "apply");
+  const extractOutcome = extractReport.ops[0]?.outcome as ExtractInlineOutcome | undefined;
+  const extractions = extractOutcome?.extractions ?? [];
 
-  if (extractOp.extractions.length > 0) {
+  if (extractions.length > 0) {
     info(
-      `classify: extracted ${extractOp.extractions.length} inline component(s) into design-system/atoms/:`,
+      `classify: extracted ${extractions.length} inline component(s) into design-system/atoms/:`,
     );
-    for (const e of extractOp.extractions) {
+    for (const e of extractions) {
       info(`  ${e.componentName} (from ${e.parentRel}) → ${e.atomRel}`);
     }
   }
@@ -367,10 +371,12 @@ export async function classifyCmd(opts: {
   const { backfillAtomHelpers } = await import("../lib/ops/backfill-atom-helpers.js");
   const backfillOp = backfillAtomHelpers();
   const ctx4 = await loadProject(cwd);
-  await run(ctx4, [backfillOp], "apply");
+  const backfillReport = await run(ctx4, [backfillOp], "apply");
+  const backfillOutcome = backfillReport.ops[0]?.outcome as BackfillAtomHelpersOutcome | undefined;
+  const backfillResults = backfillOutcome?.results ?? [];
 
-  if (backfillOp.results.length > 0) {
-    for (const r of backfillOp.results) {
+  if (backfillResults.length > 0) {
+    for (const r of backfillResults) {
       if (r.kind === "healed") {
         info(`classify: backfilled helper(s) [${r.carriedSymbols?.join(", ")}] into ${r.atomRel}`);
       } else if (r.kind === "marker-added") {
@@ -383,7 +389,7 @@ export async function classifyCmd(opts: {
 
   if (
     moved === 0 &&
-    extractOp.extractions.length === 0 &&
+    extractions.length === 0 &&
     ambiguityMoved === 0 &&
     ambiguityKept === 0
   ) {

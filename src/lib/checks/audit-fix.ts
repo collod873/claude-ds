@@ -20,6 +20,7 @@ import {
   isIntegrityFixable,
   integrityFixerAsOperation,
   type IntegrityFinding,
+  type IntegrityFixResult,
   type IntegrityRuleId,
 } from "../integrity/index.js";
 import { runFixPass } from "../fix-pass.js";
@@ -194,8 +195,11 @@ export async function runAuditFix(
     // independent, so per-op application is equivalent for them. Transactional
     // across the whole set: any failure unwinds every applied change.
     const integrityApplied: Change[] = [];
+    const integrityResults: IntegrityFixResult[] = [];
     for (const op of integrityOps) {
       const rep = await run(ctx, [op], "apply");
+      const outcome = rep.ops[0]?.outcome as IntegrityFixResult | undefined;
+      if (outcome) integrityResults.push(outcome);
       integrityApplied.push(...rep.applied);
       if (rep.failed) {
         await rollbackChanges(ctx, integrityApplied);
@@ -204,10 +208,7 @@ export async function runAuditFix(
       }
     }
 
-    const integrityResults: Array<{ finding: IntegrityFinding; fixed: boolean; message: string }> = [];
-    for (const op of integrityOps) {
-      const r = op.result!;
-      integrityResults.push(r);
+    for (const r of integrityResults) {
       if (r.fixed) {
         info(`fixed [${r.finding.ruleId}]: ${r.message}`);
       } else {

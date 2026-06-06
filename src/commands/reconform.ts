@@ -10,7 +10,7 @@ import { rewriteImports } from "../lib/ops/rewrite-imports.js";
 import { run } from "../lib/runner.js";
 import { findMissingMeta } from "../lib/reports/meta-audit.js";
 import { findMisclassified, classificationMovesOp } from "../lib/checks/classification.js";
-import { planGeneratedIntegrityFixes } from "../lib/checks/generated-integrity.js";
+import { planGeneratedIntegrityFixes, type GenIntegrityOutcome } from "../lib/checks/generated-integrity.js";
 import { runCheckScripts } from "../lib/checks/run-check-scripts.js";
 import { reviewExceptions } from "../lib/checks/exception-review.js";
 import { emitStubWarning } from "../lib/reports/stub-warning.js";
@@ -143,8 +143,9 @@ export async function reconformCmd(opts: {
   // each violation in the check-script protocol format (#51 / #89). Routed
   // through `run()` so every regen byte goes through the chokepoint.
   const genOp = planGeneratedIntegrityFixes();
-  await run(ctx, [genOp], mode);
-  const genViolations = genOp.violations;
+  const genReport = await run(ctx, [genOp], mode);
+  const genOutcome = genReport.ops[0]?.outcome as GenIntegrityOutcome | undefined;
+  const genViolations = genOutcome?.violations ?? [];
   for (const v of genViolations) info(`${v.ruleId}: ${v.message}`);
   if (genViolations.length > 0) {
     if (dryRun) {

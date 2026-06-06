@@ -50,12 +50,16 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
     opOpts.manifest = parseManifest(await readFile(join(opOpts.packDir, "manifest.json"), "utf8"));
   }
 
-  // Plan once. The Runner is the only thing that writes; we just stage Changes here.
+  // Plan once. The Op's plan() returns its decisions in the typed outcome arm of
+  // its PlanResult — sync renders the preview from there. The Runner is the only
+  // thing that writes; we just stage Changes here. Plan is cached internally so
+  // the apply path below does not re-run diffFile.
   const op = makeSyncPackFiles(opOpts);
-  await op.plan(ctx);
+  const planResult = await op.plan(ctx);
+  const decisions = planResult.outcome.decisions;
 
   // Render preview in the existing user-facing format (tests assert on these labels).
-  for (const d of op.decisions) {
+  for (const d of decisions) {
     info(`${d.displayAction}: ${d.displayPath} — ${d.verdict.reason}`);
   }
 
@@ -80,7 +84,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
   const report = await run(ctx, [op], "apply");
 
   // Surface aborts in the existing format (Runner records them; we report them).
-  for (const d of op.decisions) {
+  for (const d of decisions) {
     if (d.verdict.action === "abort") err(`skipped (abort): ${d.manifestPath} — ${d.verdict.reason}`);
   }
   if (report.failed) {

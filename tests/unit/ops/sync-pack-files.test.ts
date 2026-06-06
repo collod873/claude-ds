@@ -59,9 +59,9 @@ describe("syncPackFiles op — plan()", () => {
       canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
     };
     const op = makeSyncPackFiles();
-    const changes = await op.plan(makeCtx(manifest));
+    const { changes, outcome } = await op.plan(makeCtx(manifest));
     expect(changes).toEqual([]);
-    expect(op.decisions[0].displayAction).toBe("skip");
+    expect(outcome.decisions[0].displayAction).toBe("skip");
   });
 
   it("emits a write Change with before+after when managed file is out of date", async () => {
@@ -72,14 +72,14 @@ describe("syncPackFiles op — plan()", () => {
       canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
     };
     const op = makeSyncPackFiles();
-    const changes = await op.plan(makeCtx(manifest));
+    const { changes, outcome } = await op.plan(makeCtx(manifest));
     expect(changes).toHaveLength(1);
     const c = changes[0] as Extract<Change, { kind: "write" }>;
     expect(c.kind).toBe("write");
     expect(c.path).toBe("a.txt");
     expect(c.before?.toString("utf8")).toBe("old\n");
     expect(c.after.toString("utf8")).toBe("new\n");
-    expect(op.decisions[0].displayAction).toBe("rewrite");
+    expect(outcome.decisions[0].displayAction).toBe("rewrite");
   });
 
   it("emits a write Change with before=null when target is missing locally", async () => {
@@ -89,14 +89,14 @@ describe("syncPackFiles op — plan()", () => {
       canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
     };
     const op = makeSyncPackFiles();
-    const changes = await op.plan(makeCtx(manifest));
+    const { changes, outcome } = await op.plan(makeCtx(manifest));
     expect(changes).toHaveLength(1);
     const c = changes[0] as Extract<Change, { kind: "write" }>;
     expect(c.kind).toBe("write");
     expect(c.before).toBeNull();
     expect(c.after.toString("utf8")).toBe("fresh\n");
     // #18c: displayAction collapses "missing on disk" rewrite into "create"
-    expect(op.decisions[0].displayAction).toBe("create");
+    expect(outcome.decisions[0].displayAction).toBe("create");
   });
 
   it("emits an abort Change when a managed file was hand-edited (prev != current)", async () => {
@@ -113,13 +113,13 @@ describe("syncPackFiles op — plan()", () => {
       canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
     };
     const op = makeSyncPackFiles();
-    const changes = await op.plan(makeCtx(manifest));
+    const { changes, outcome } = await op.plan(makeCtx(manifest));
     expect(changes).toHaveLength(1);
     const c = changes[0] as Extract<Change, { kind: "abort" }>;
     expect(c.kind).toBe("abort");
     expect(c.path).toBe("config.json");
     expect(c.reason).toMatch(/json merge failed/);
-    expect(op.decisions[0].displayAction).toBe("abort");
+    expect(outcome.decisions[0].displayAction).toBe("abort");
   });
 
   it("skips generated files and removed entries", async () => {
@@ -134,9 +134,9 @@ describe("syncPackFiles op — plan()", () => {
     };
     const ctx = makeCtx(manifest, { cfg: { ...baseCfg, removed: ["r.txt"] } });
     const op = makeSyncPackFiles();
-    const changes = await op.plan(ctx);
+    const { changes, outcome } = await op.plan(ctx);
     expect(changes).toEqual([]);
-    expect(op.decisions).toHaveLength(0);
+    expect(outcome.decisions).toHaveLength(0);
   });
 
   it("sets mode: 'executable' on write Changes under .claude/hooks/", async () => {
@@ -147,7 +147,7 @@ describe("syncPackFiles op — plan()", () => {
       canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
     };
     const op = makeSyncPackFiles();
-    const changes = await op.plan(makeCtx(manifest));
+    const { changes } = await op.plan(makeCtx(manifest));
     expect(changes).toHaveLength(1);
     const c = changes[0] as Extract<Change, { kind: "write" }>;
     expect(c.kind).toBe("write");
@@ -162,7 +162,7 @@ describe("syncPackFiles op — plan()", () => {
       canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
     };
     const op = makeSyncPackFiles();
-    const changes = await op.plan(makeCtx(manifest));
+    const { changes } = await op.plan(makeCtx(manifest));
     expect(changes).toHaveLength(1);
     const c = changes[0] as Extract<Change, { kind: "write" }>;
     expect(c.kind).toBe("write");
@@ -176,14 +176,14 @@ describe("syncPackFiles op — plan()", () => {
       canonical_paths: [], lookalike_ignore: [], deprecated_paths: [], managed_roots: [],
     };
     const op = makeSyncPackFiles();
-    const changes = await op.plan(makeCtx(manifest));
+    const { changes } = await op.plan(makeCtx(manifest));
     expect(changes).toHaveLength(1);
     const c = changes[0] as Extract<Change, { kind: "write" }>;
     expect(c.kind).toBe("write");
     expect(c.mode).toBeUndefined();
   });
 
-  it("plan() is cached — repeat calls return the same array, no double diffFile work", async () => {
+  it("plan() is cached — repeat calls return the same changes array, no double diffFile work", async () => {
     await writeFile(join(packDir, "files", "a.txt"), "new\n");
     const manifest: Manifest = {
       files: [{ path: "a.txt", category: "managed" }],
@@ -192,6 +192,6 @@ describe("syncPackFiles op — plan()", () => {
     const op = makeSyncPackFiles();
     const a = await op.plan(makeCtx(manifest));
     const b = await op.plan(makeCtx(manifest));
-    expect(a).toBe(b);
+    expect(a.changes).toBe(b.changes);
   });
 });
