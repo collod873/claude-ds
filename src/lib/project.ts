@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveAuditConfig, type ResolvedAuditConfig } from "./audit-config.js";
 import type { Config } from "./config.js";
 import { parseManifest, type Manifest } from "./manifest.js";
 import { loadConfig } from "./paths.js";
@@ -18,6 +19,12 @@ import { loadConfig } from "./paths.js";
  * command-line code that needs the full cfg gates on `ctx.kind === "adopted"`
  * (PRD #266 Phase A — replaces the synthetic-ctx fabrications + their casts).
  *
+ * `auditConfig` is the fully-resolved seven-field bundle every detect/classify/
+ * fix path reads — populated once at boot via `resolveAuditConfig(cwd, cfg)`
+ * and frozen with the ctx. One source of truth replaces the four per-command
+ * rebuilds (PRD #266 Phase B). Pure addition for now; later steps swap the
+ * call sites over.
+ *
  * Frozen on return so Operations / commands cannot mutate the context after load.
  */
 export interface ProjectContext {
@@ -26,6 +33,7 @@ export interface ProjectContext {
   cfg: Config;
   packDir: string;
   manifest: Manifest;
+  auditConfig: ResolvedAuditConfig;
   exists(path: string): Promise<boolean>;
   decisions: { renames?: Record<string, string>; claudeMdTarget?: string };
 }
@@ -56,6 +64,7 @@ export async function loadProject(
   const repoRoot = resolve(here, "..", "..");
   const packDir = join(repoRoot, "packs", cfg.pack);
   const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+  const auditConfig = await resolveAuditConfig(cwd, cfg);
 
   const ctx: ProjectContext = {
     kind: "adopted",
@@ -63,6 +72,7 @@ export async function loadProject(
     cfg,
     packDir,
     manifest,
+    auditConfig,
     exists: (p: string) => existsAt(isAbsolute(p) ? p : join(cwd, p)),
     decisions,
   };
@@ -86,12 +96,15 @@ export async function loadPreAdoptProject(
   args: { pack: string; packDir: string; manifest: Manifest },
   decisions: ProjectContext["decisions"] = {},
 ): Promise<ProjectContext> {
+  const auditConfig = await resolveAuditConfig(cwd, null);
+
   const ctx: ProjectContext = {
     kind: "pre-adopt",
     cwd,
     cfg: { pack: args.pack } as Config,
     packDir: args.packDir,
     manifest: args.manifest,
+    auditConfig,
     exists: (p: string) => existsAt(isAbsolute(p) ? p : join(cwd, p)),
     decisions,
   };
