@@ -2114,17 +2114,20 @@ async function main(): Promise<void> {
       if (meta.kind === "reference") {
         showcaseContent = emitReferenceShowcase(componentName, displayName, meta, sourceName, useClient);
       } else if (isNamespaceOnlyExport(entryPath, displayName)) {
-        // #69 / #92: namespace-only export (e.g. `export const Skeleton = { Line, Block, Circle }`).
+        // #69 / #92 / #295: namespace-only export (e.g. `export const Skeleton = { Line, Block, Circle }`).
         // The component is not callable — we cannot emit `<Skeleton ... />` JSX for it, but
         // that is a per-component limitation, not a fatal run error. Skip this component,
         // preserve any hand-authored .showcase.tsx, and continue with the rest of the run.
+        // Counts as `skipped`, not `errors` — `errors` gates `process.exit(1)` and the
+        // PostToolUse hook re-runs the generator on every DS edit, so one pre-existing
+        // namespace-only component must not block every subsequent write (ADR-0002/0006).
         process.stderr.write(
           `${entryPath}:0: GEN-069: \`${displayName}\` is a namespace-only export (object literal, not callable). ` +
           `Generator cannot emit <${displayName} ... /> JSX. ` +
           `Either (a) hand-author \`${componentName}.showcase.tsx\` beside this file (it will be preserved across runs), ` +
           `or (b) export a top-level callable \`${displayName}\` component alongside the namespace object.\n`
         );
-        errors++;
+        skipped++;
         continue;
       } else {
         const usage = usageMap?.get(displayName) ?? usageMap?.get(componentName);

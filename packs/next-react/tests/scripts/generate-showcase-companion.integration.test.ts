@@ -1334,8 +1334,11 @@ describe("namespace export + sibling function declarations (#69, #70)", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  // ── #69 — namespace-only export must fail loud, not silently emit broken JSX ─
-  it("#69 namespace-only export (object literal) fails loud with actionable error", async () => {
+  // ── #69 — namespace-only export emits actionable warning but does NOT fail the run.
+  // Per #295: a per-component structural limitation is not a fatal run error. Per-edit
+  // hooks invoke the generator on every Write/Edit; treating GEN-069 as fatal blocks
+  // every DS edit because of one pre-existing namespace-only component.
+  it("#69 namespace-only export (object literal) emits actionable warning but exits 0", async () => {
     const dsDir = join(dir, "design-system", "atoms");
     await mkdir(dsDir, { recursive: true });
     await writeFile(
@@ -1353,12 +1356,46 @@ describe("namespace export + sibling function declarations (#69, #70)", () => {
       cwd: dir,
       encoding: "utf8",
     });
-    // Must exit non-zero
-    expect(r.status).not.toBe(0);
-    // Error must mention the file and the problem
+    // Run must succeed — namespace-only is a per-component limitation, not a fatal run error.
+    expect(r.status).toBe(0);
+    // Warning must still be emitted to stderr so authors see it (and so audit can flag it).
     const combined = r.stdout + r.stderr;
     expect(combined).toMatch(/skeleton\.tsx/);
+    expect(combined).toMatch(/GEN-069/);
     expect(combined).toMatch(/namespace|not callable|object literal/i);
+  });
+
+  // ── #295 — one pre-existing namespace-only component must not block edits to other DS files.
+  it("#295 namespace-only sibling does not fail run for unrelated callable components", async () => {
+    const dsDir = join(dir, "design-system", "atoms");
+    await mkdir(dsDir, { recursive: true });
+    // Pre-existing namespace-only component (simulating combobox-item in Crewops).
+    await writeFile(
+      join(dsDir, "combobox-item.tsx"),
+      [
+        `import React from "react";`,
+        `function Trigger(props: any) { return <button {...props} />; }`,
+        `function Content(props: any) { return <div {...props} />; }`,
+        `export const ComboboxItem = { Trigger, Content };`,
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+    // The file being edited — a normal callable component that must still get a companion.
+    await writeFile(
+      join(dsDir, "button.tsx"),
+      [
+        `import React from "react";`,
+        `export function Button(props: any) { return <button {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    // The callable component's companion must still be generated.
+    expect(existsSync(join(dsDir, "button.showcase.tsx"))).toBe(true);
   });
 
   // ── #70 — sibling function declarations get imports emitted when referenced in meta JSX ─
