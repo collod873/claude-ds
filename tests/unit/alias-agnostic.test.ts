@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { fileImportsDsModule } from "../../src/lib/ops/rewrite-imports";
 import { findMisclassified } from "../../src/lib/checks/classification";
 import { MIGRATION_REGISTRY } from "../../src/lib/migration-registry";
+import { allRuleIds } from "../../src/lib/drift/index";
 
 import { cleanup, freshTmpDir } from "../helpers/tmpdir";
 import { makeFakeCtx } from "../helpers/fake-ctx";
@@ -97,5 +98,17 @@ describe("MIGRATION_REGISTRY — rewrite-ds-imports is retired", () => {
   it("ds-folder-alias@v0.9.0 is still registered (alias stays in tsconfig)", () => {
     const allOpNames = MIGRATION_REGISTRY.flatMap(v => v.ops.map(op => op.name));
     expect(allOpNames).toContain("ds-folder-alias@v0.9.0");
+  });
+});
+
+describe("DRIFT_RULES — DRIFT-STALE-DS-IMPORT is retired", () => {
+  // DRIFT-STALE-DS-IMPORT flagged `@/design-system/*` imports as "stale"
+  // whenever an `@ds/*` alias was available, then auto-rewrote them. That is
+  // the same forced canonical-form normalization the migration was retired
+  // for — heal's `audit --fix` step would have continued the rewrite even
+  // after removing the migration. The ADR-0009 addendum's "stop treating the
+  // non-`@ds` spelling as drift" applies equally here.
+  it("no rule named DRIFT-STALE-DS-IMPORT is registered", () => {
+    expect(allRuleIds() as string[]).not.toContain("DRIFT-STALE-DS-IMPORT");
   });
 });
