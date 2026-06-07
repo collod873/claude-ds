@@ -21,7 +21,7 @@ output matches the `→ Next:` breadcrumb convention CONTEXT.md mandates.
 
 ## Surfaced friction
 
-13 findings, filed as separate issues:
+16 findings, filed as separate issues:
 
 ### Critical
 - **#355** — `migrate-layout` silently renames `.tsx` files to `.json`
