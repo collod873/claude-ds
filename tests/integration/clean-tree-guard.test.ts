@@ -88,22 +88,26 @@ describe("clean-tree guard — applied to every destructive command (#328)", () 
     });
   });
 
-  describe("classify", () => {
-    it("dirty tree: refuses with a named exit", async () => {
+  describe("classify (dirty-tree guard removed — PRD #340 F7 / sub-issue #350)", () => {
+    // PRD #340 (sub-issue #350) removed classify's hard-block on a dirty tree.
+    // The commitment-gate preview is the safety; git is the undo (ADR-0016).
+    // The other destructive commands keep their guard — classify is the one
+    // surface friction report F7 named explicitly.
+    it("dirty tree: classify runs (no refusal)", async () => {
       await seedAdoptedRepo(dir);
       await makeDirty(dir);
 
       const r = await runCli(["classify"], { cwd: dir });
-      expect(r.code).toBe(2);
-      expect(r.stderr).toMatch(/^classify:/m);
-      expect(r.stderr).toMatch(/working tree is dirty/);
+      expect(r.code).toBe(0);
+      expect(r.stderr).not.toMatch(/working tree is dirty/);
     });
 
-    it("--allow-dirty: bypasses the refusal", async () => {
+    it("--allow-dirty: still accepted as a no-op for API compat", async () => {
       await seedAdoptedRepo(dir);
       await makeDirty(dir);
 
       const r = await runCli(["classify", "--allow-dirty"], { cwd: dir });
+      expect(r.code).toBe(0);
       expect(r.stderr).not.toMatch(/working tree is dirty/);
     });
   });

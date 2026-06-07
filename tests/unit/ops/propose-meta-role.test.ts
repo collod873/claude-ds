@@ -72,8 +72,10 @@ describe("proposeMetaRole — injects role for combobox-shaped smart parts", () 
   });
 });
 
-describe("proposeMetaRole — flags bespoke smart parts as candidate features", () => {
-  it("emits candidate-feature outcome WITHOUT a byte change", async () => {
+describe("proposeMetaRole — F7 default for bespoke smart parts", () => {
+  // PRD #340 F7: a stateful DS atom that imports nothing from a domain root
+  // defaults to a tracked exception, NOT "relocate to features/".
+  it("emits tracked-exception outcome WITHOUT a byte change for a smart part with no domain imports", async () => {
     const src = `
       import { useState } from "react";
       export function MoneyInput() {
@@ -89,6 +91,29 @@ describe("proposeMetaRole — flags bespoke smart parts as candidate features", 
     expect(result.outcome.proposals).toEqual([
       {
         file: "design-system/atoms/money-input.tsx",
+        proposal: { kind: "tracked-exception" },
+      },
+    ]);
+  });
+
+  it("emits candidate-feature when the smart part actually imports from a domain root", async () => {
+    const src = `
+      import { useState } from "react";
+      import { useInvoice } from "@/features/invoicing/use-invoice";
+      export function InvoiceBadge() {
+        const [_, set] = useState(0);
+        const inv = useInvoice();
+        return <span>{inv.id}</span>;
+      }
+      export const meta = { kind: "atom", examples: [{ name: "default", props: {} }] };
+    `;
+    await writeAtom("invoice-badge.tsx", src);
+
+    const result = await proposeMetaRole().plan(fakeCtx());
+    expect(result.changes).toHaveLength(0);
+    expect(result.outcome.proposals).toEqual([
+      {
+        file: "design-system/atoms/invoice-badge.tsx",
         proposal: { kind: "candidate-feature" },
       },
     ]);

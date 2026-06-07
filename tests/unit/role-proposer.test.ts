@@ -3,15 +3,21 @@ import { proposeRole } from "../../src/lib/role-proposer";
 
 /**
  * `proposeRole` is the classifier the `classify` command consults for
- * `meta.role` (PRD #301 / #312). Mirrors the existing tier classifier shape:
- * pure function of `(source)`, returns a structured proposal or `null`. The
- * command-side decision flow turns the proposal into an apply/skip.
+ * `meta.role` (PRD #301 / #312, PRD #340 F7). Mirrors the existing tier
+ * classifier shape: pure function of `(source, domainRoots?)`, returns a
+ * structured proposal or `null`. The command-side decision flow turns the
+ * proposal into an apply/skip.
  *
- * Two positive bands and one negative:
- *   - `{ kind: "role", role }`     — smart part whose ARIA shape matches a
- *                                    shipped role's anchors.
- *   - `{ kind: "candidate-feature" }` — smart part with no matching anchor
- *                                    set. Hand-off to the ADR-0005 path.
+ * Three positive bands and one negative:
+ *   - `{ kind: "role", role }`         — smart part whose ARIA shape matches
+ *                                        a shipped role's anchors.
+ *   - `{ kind: "candidate-feature" }`  — smart part with no shipped role AND
+ *                                        imports from a configured domain
+ *                                        root (ADR-0005 import predicate).
+ *   - `{ kind: "tracked-exception" }`  — smart part with no shipped role AND
+ *                                        no domain imports. PRD #340 F7
+ *                                        default: state alone is not a
+ *                                        feature signal.
  *   - `null` — not a smart part at all (presentational); nothing to propose.
  *
  * A component that already declares `meta.role` is the *caller's* skip
@@ -52,8 +58,11 @@ describe("proposeRole — combobox detection", () => {
   });
 });
 
-describe("proposeRole — candidate-feature flag", () => {
-  it("flags a smart part with no matching ARIA anchors as a candidate feature", () => {
+describe("proposeRole — tracked-exception default (PRD #340 F7)", () => {
+  // F7 anchor: a stateful DS atom that imports nothing from a domain root
+  // defaults to a tracked exception, NOT "relocate to features/". Presence
+  // of state alone is no longer a feature signal.
+  it("returns tracked-exception for a smart part with no ARIA anchor and no domain imports", () => {
     const src = `
       import { useState, useEffect } from "react";
       export function MoneyInput() {
@@ -62,10 +71,10 @@ describe("proposeRole — candidate-feature flag", () => {
         return <input value={v} onChange={e => setV(e.target.value)} />;
       }
     `;
-    expect(proposeRole(src)).toEqual({ kind: "candidate-feature" });
+    expect(proposeRole(src)).toEqual({ kind: "tracked-exception" });
   });
 
-  it("flags a smart part using useContext but no ARIA-pattern shape", () => {
+  it("returns tracked-exception for a smart part using useContext but no domain imports", () => {
     const src = `
       import { useContext } from "react";
       const Ctx = createContext(null);
@@ -74,7 +83,51 @@ describe("proposeRole — candidate-feature flag", () => {
         return <span>{String(v)}</span>;
       }
     `;
+    expect(proposeRole(src)).toEqual({ kind: "tracked-exception" });
+  });
+});
+
+describe("proposeRole — candidate-feature requires domain imports", () => {
+  // The only path that lands on candidate-feature is the ADR-0005 import
+  // predicate: smart AND imports from a configured domain root.
+  it("flags a smart part that imports from features/ as a candidate feature", () => {
+    const src = `
+      import { useState } from "react";
+      import { useInvoice } from "@/features/invoicing/use-invoice";
+      export function InvoiceBadge() {
+        const [_, set] = useState(0);
+        const inv = useInvoice();
+        return <span>{inv.id}</span>;
+      }
+    `;
     expect(proposeRole(src)).toEqual({ kind: "candidate-feature" });
+  });
+
+  it("flags a smart part that imports from lib/ as a candidate feature", () => {
+    const src = `
+      import { useEffect } from "react";
+      import { formatMoney } from "@/lib/money";
+      export function MoneyDisplay() {
+        useEffect(() => {}, []);
+        return <span>{formatMoney(0)}</span>;
+      }
+    `;
+    expect(proposeRole(src)).toEqual({ kind: "candidate-feature" });
+  });
+
+  it("respects a custom domain-roots list", () => {
+    const src = `
+      import { useState } from "react";
+      import { x } from "@/server/x";
+      export function X() {
+        const [_, set] = useState(0);
+        return <span>{x}</span>;
+      }
+    `;
+    // Default roots wouldn't fire on @/server/x.
+    expect(proposeRole(src)).toEqual({ kind: "tracked-exception" });
+    // Custom roots including "server" do.
+    expect(proposeRole(src, ["server"])).toEqual({ kind: "candidate-feature" });
   });
 });
 

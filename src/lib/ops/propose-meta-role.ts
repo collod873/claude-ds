@@ -26,7 +26,8 @@ export interface MetaRoleProposal {
   file: string;
   proposal:
     | { kind: "role"; role: string; written: boolean }
-    | { kind: "candidate-feature" };
+    | { kind: "candidate-feature" }
+    | { kind: "tracked-exception" };
 }
 
 export interface ProposeMetaRoleOutcome {
@@ -91,12 +92,16 @@ export function proposeMetaRole(): Operation<ProposeMetaRoleOutcome> {
           // a declared role that lacks a contract.
           if (metaRoleFromSource(source) !== null) continue;
 
-          const proposal = proposeRole(source);
+          const proposal = proposeRole(source, ctx.auditConfig.domainRoots);
           if (proposal === null) continue;
 
           const relPath = join(scanRel, entry);
           if (proposal.kind === "candidate-feature") {
             proposals.push({ file: relPath, proposal: { kind: "candidate-feature" } });
+            continue;
+          }
+          if (proposal.kind === "tracked-exception") {
+            proposals.push({ file: relPath, proposal: { kind: "tracked-exception" } });
             continue;
           }
 
