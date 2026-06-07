@@ -180,6 +180,29 @@ describe("exceptions — openCount and gate", () => {
     }));
     expect(() => gate(ex, 10)).toThrow(ExceptionError);
   });
+
+  it("openCount excludes permanent exceptions (informational, not gate-bearing)", () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: [
+        { rule: "DRIFT-MISPLACED", path: "a.tsx", issue: "#1" },
+        { rule: "DRIFT-MISPLACED", path: "AppShell.tsx", permanent: true, reason: "chrome singleton" },
+        { rule: "DRIFT-MISPLACED", path: "Root.tsx", permanent: true, reason: "root layout" },
+      ],
+    }));
+    expect(openCount(ex)).toBe(1);
+  });
+
+  it("gate ignores permanent exceptions when counting against threshold", () => {
+    const ex = parseExceptions(JSON.stringify({
+      exceptions: Array.from({ length: 11 }, (_, i) => ({
+        rule: "DRIFT-MISPLACED",
+        path: `permanent-${i}.tsx`,
+        permanent: true,
+        reason: "intentional architectural decision",
+      })),
+    }));
+    expect(() => gate(ex, 10)).not.toThrow();
+  });
 });
 
 describe("lintExceptions", () => {
