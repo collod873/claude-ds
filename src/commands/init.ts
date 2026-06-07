@@ -20,8 +20,8 @@ export async function initCmd(opts: { pack: string; yes?: boolean; cwd?: string 
     if (e.code !== "ENOENT") throw e;
   }
   if (!opts.yes && !(await confirm(`Initialize claude-ds with pack '${opts.pack}' here?`))) {
-    info("aborted");
-    return;
+    err("aborted");
+    process.exit(130);
   }
   // Resolve packs dir from this file's location, walking up from src/commands or dist/commands to repo root.
   const here = dirname(fileURLToPath(import.meta.url));

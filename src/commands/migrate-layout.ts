@@ -113,8 +113,8 @@ export async function migrateLayoutCmd(opts: {
   process.stdout.write("\n");
 
   if (!opts.yes && !(await confirm("Apply renames with git mv?"))) {
-    info("aborted");
-    return;
+    err("aborted");
+    process.exit(130);
   }
 
   const renamesOp: Operation = {

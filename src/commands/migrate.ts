@@ -54,7 +54,7 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   const destRel = join("design-system", tier === "atom" ? "atoms" : "composites", destName);
   const dest = join(cwd, destRel);
   if (await ctx.exists(dest)) { err(`destination exists: ${dest} (pass --rename to override)`); process.exit(2); }
-  if (!opts.yes && !(await confirm(`Migrate ${opts.source} → ${dest}?`))) { info("aborted"); return; }
+  if (!opts.yes && !(await confirm(`Migrate ${opts.source} → ${dest}?`))) { err("aborted"); process.exit(130); }
 
   const showcaseRel = destRel.replace(/\.tsx$/, ".showcase.tsx");
   const showcaseContent = `// auto-generated showcase stub for ${destName}\nexport default function Showcase(){ return null; }\n`;

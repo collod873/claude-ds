@@ -13,7 +13,7 @@ export async function enforceCmd(opts: { yes?: boolean; cwd?: string }) {
   const ctx = await loadProject(cwd);
   const ex = parseExceptions(await readFile(join(cwd, "design-system/exceptions.json"), "utf8"));
   try { gate(ex, ctx.cfg.enforce_threshold); } catch (e) { err((e as Error).message); process.exit(2); }
-  if (!opts.yes && !(await confirm(`Flip mode warn → block (open exceptions ≤ ${ctx.cfg.enforce_threshold})?`))) { info("aborted"); return; }
+  if (!opts.yes && !(await confirm(`Flip mode warn → block (open exceptions ≤ ${ctx.cfg.enforce_threshold})?`))) { err("aborted"); process.exit(130); }
   const report = await run(ctx, [setConfigMode("block")], "apply");
   if (report.failed) { err(`enforce failed: ${report.failed.error}`); process.exit(2); }
   info("enforce: mode flipped to block");

@@ -99,8 +99,8 @@ async function verifyEndStates(
   if (opts.dryRun) return driftedOps.length;
 
   if (!opts.yes && !(await confirm("Re-apply drifted migrations?"))) {
-    info("aborted");
-    return driftedOps.length;
+    err("aborted");
+    process.exit(130);
   }
 
   const applyReport = await runMigrations(ctx, verifyChain, "apply");
@@ -205,8 +205,8 @@ export async function upgradeCmd(opts: {
   }
 
   if (!opts.yes && !(await confirm("Apply migrations?"))) {
-    humanLog("aborted");
-    return;
+    err("aborted");
+    process.exit(130);
   }
 
   const report = await runMigrations(ctx, chain, "apply");
