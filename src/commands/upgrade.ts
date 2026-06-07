@@ -16,6 +16,7 @@ import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
 import { run } from "../lib/runner.js";
 import { finalizeUpgrade } from "../lib/ops/finalize-upgrade.js";
 import { syncCmd } from "./sync.js";
+import { checkCleanTree } from "../lib/clean-tree.js";
 import pkg from "../../package.json" with { type: "json" };
 
 /**
@@ -66,9 +67,21 @@ export async function upgradeCmd(opts: {
   to?: string;
   dryRun?: boolean;
   yes?: boolean;
+  /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). */
+  allowDirty?: boolean;
   cwd?: string;
 }) {
   const cwd = opts.cwd ?? process.cwd();
+
+  // Clean-tree guard. --dry-run is non-destructive so it skips; the apply
+  // path refuses on a dirty tree unless --allow-dirty (or heal forwards it).
+  if (!opts.dryRun) {
+    const guard = checkCleanTree({ command: "upgrade", cwd, allowDirty: opts.allowDirty });
+    if (!guard.ok) {
+      err(guard.message);
+      process.exit(2);
+    }
+  }
 
   try { await stat(join(cwd, ".claude-ds.json")); } catch {
     err(".claude-ds.json absent — run adopt first");
@@ -142,7 +155,10 @@ export async function upgradeCmd(opts: {
   info(`upgrade complete → ${to}`);
 
   info("running sync to deliver pack files…");
-  await syncCmd({ cwd, yes: opts.yes });
+  // Once upgrade applied bytes the tree is dirty — pass --allow-dirty through
+  // to the embedded sync so it doesn't refuse on the very state upgrade just
+  // produced (PRD #325 / sub-issue #328).
+  await syncCmd({ cwd, yes: opts.yes, allowDirty: true });
 
   // Regenerate manifest.generated.ts — migrations may delete it (e.g.
   // manage-manifest@v0.9.0) and the PostToolUse hook won't fire until the

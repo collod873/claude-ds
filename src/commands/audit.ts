@@ -17,6 +17,7 @@ import { scanDriftAndIntegrity, type AuditFinding } from "../lib/reports/drift-i
 import { formatFindings, formatScorecard } from "../lib/reports/findings-format.js";
 import { runAuditFix } from "../lib/checks/audit-fix.js";
 import { loadAnswersFile, UnresolvedAmbiguityError } from "../lib/decision/index.js";
+import { checkCleanTree } from "../lib/clean-tree.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -33,6 +34,9 @@ export interface AuditOpts {
    * Loaded into `ctx.decisions.answers` before the audit-fix pre-pass runs
    * (PRD #325 / ADR-0016). */
   answers?: string;
+  /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). Only meaningful
+   * with --fix; the read-only audit path is non-destructive and does not gate. */
+  allowDirty?: boolean;
   cwd?: string;
 }
 
@@ -40,6 +44,19 @@ const suppressedKey = (rule: string, path: string) => `${rule}:${path}`;
 
 export async function auditCmd(opts: AuditOpts) {
   const cwd = opts.cwd ?? process.cwd();
+
+  // Clean-tree guard (PRD #325 / sub-issue #328). Only the destructive
+  // `--fix` path gates; the read-only audit can always run, dirty or not.
+  // Runs before any Decision resolution so a clean-tree failure short-
+  // circuits before the operator is asked anything.
+  if (opts.fix) {
+    const guard = checkCleanTree({ command: "audit", cwd, allowDirty: opts.allowDirty });
+    if (!guard.ok) {
+      err(guard.message);
+      process.exit(2);
+    }
+  }
+
   let pack = opts.pack;
   let cfg: Config | null = null;
   let ctx: ProjectContext;

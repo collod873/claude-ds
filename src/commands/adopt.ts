@@ -15,6 +15,7 @@ import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { makeSeedClaudeMdMarkers } from "../lib/ops/seed-claude-md-markers.js";
 import { patchTsconfigPathAlias } from "../lib/ops/patch-tsconfig-path-alias.js";
 import { writeBootstrapClaudeDsConfig } from "../lib/bootstrap-config.js";
+import { checkCleanTree } from "../lib/clean-tree.js";
 
 const execFile = promisify(execFileCb);
 
@@ -56,8 +57,22 @@ async function patchTsconfigForSrcApp(cwd: string): Promise<void> {
   }
 }
 
-export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: string; dryRun?: boolean; cwd?: string }) {
+export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: string; dryRun?: boolean; allowDirty?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
+
+  // Clean-tree guard (PRD #325 / sub-issue #328). Adopt writes the initial
+  // .claude-ds.json and a sheaf of pack-managed files; mixing those with the
+  // consumer's uncommitted work loses the git-history-is-the-undo property.
+  // --dry-run is non-destructive so it bypasses; --allow-dirty is the
+  // authorized override.
+  if (!opts.dryRun) {
+    const guard = checkCleanTree({ command: "adopt", cwd, allowDirty: opts.allowDirty });
+    if (!guard.ok) {
+      err(guard.message);
+      process.exit(2);
+    }
+  }
+
   if (await exists(join(cwd, ".claude-ds.json"))) { err(".claude-ds.json already exists — did you mean `claude-ds sync`?"); process.exit(2); }
 
   const here = dirname(fileURLToPath(import.meta.url));

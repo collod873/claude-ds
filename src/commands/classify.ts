@@ -21,6 +21,7 @@ import {
   type AnswerBag,
   type Decision,
 } from "../lib/decision/index.js";
+import { checkCleanTree } from "../lib/clean-tree.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
@@ -160,12 +161,25 @@ export async function classifyCmd(opts: {
    * leaves it undefined and classify builds a TTY prompt when interactive (issue #203).
    */
   prompt?: FixerPrompt;
+  /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). */
+  allowDirty?: boolean;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const dryRun = opts.dryRun ?? false;
   const yes = opts.yes ?? false;
   const srcRel = opts.src;
   const hasSrc = typeof srcRel === "string" && srcRel.length > 0;
+
+  // Clean-tree guard (PRD #325 / sub-issue #328). Runs before any Decision
+  // resolution — the dry-run path can skip since it never mutates.
+  if (!dryRun) {
+    const guard = checkCleanTree({ command: "classify", cwd, allowDirty: opts.allowDirty });
+    if (!guard.ok) {
+      err(guard.message);
+      process.exit(2);
+      return;
+    }
+  }
 
   let suppliedAnswers: AnswerBag = {};
   if (opts.answers) {

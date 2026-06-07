@@ -5,6 +5,7 @@ import { syncCmd } from "./sync.js";
 import { upgradeCmd } from "./upgrade.js";
 import { classifyCmd } from "./classify.js";
 import { auditCmd } from "./audit.js";
+import { checkCleanTree } from "../lib/clean-tree.js";
 
 /**
  * `claude-ds heal` — drive a consumer tree to a fixed point in one command.
@@ -40,6 +41,14 @@ export interface HealOpts {
    * Tests use this to assert the bound-failure message.
    */
   maxIterations?: number;
+  /**
+   * Bypass the clean-tree guard (PRD #325 / sub-issue #328). When true heal
+   * also propagates `allowDirty: true` to every sub-command so the inner
+   * sync/upgrade/classify/audit don't refuse on the tree heal itself just
+   * dirtied. Default `false`: the guard refuses at the top and never enters
+   * the loop, preserving the "git history is the undo" property.
+   */
+  allowDirty?: boolean;
 }
 
 class HealExitSignal extends Error {
@@ -122,6 +131,18 @@ export async function healCmd(opts: HealOpts): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 
+  // Clean-tree guard at the top of the loop (PRD #325 / sub-issue #328).
+  // The guard refuses BEFORE the loop body so dirtying never happens. Once
+  // accepted (clean tree, no git, or --allow-dirty), every sub-command runs
+  // with `allowDirty: true` — heal itself dirties the tree between
+  // iterations, and we don't want sync/upgrade/classify/audit to refuse on
+  // the very state heal just produced.
+  const guard = checkCleanTree({ command: "heal", cwd, allowDirty: opts.allowDirty });
+  if (!guard.ok) {
+    err(guard.message);
+    process.exit(2);
+  }
+
   // Guard against bad --max-iterations input (NaN from `--max-iterations abc`,
   // 0, negatives). Without this, the loop body never runs and heal prints
   // "did not converge after NaN iterations" — a confusing failure for a
@@ -145,17 +166,29 @@ export async function healCmd(opts: HealOpts): Promise<void> {
   // would defeat the snapshot-equality fixed-point check below. The
   // convergence bug this command closes (#265) lives in the classify ↔
   // audit --fix dance; that's what the loop guards.
+  // Resumability hint (PRD #325 / sub-issue #328). TTY only — agent runs
+  // (non-TTY) keep today's output verbatim. Heal is convergent and
+  // idempotent (the #265 loop guarantee), so a mid-run Ctrl-C and re-invoke
+  // is safe; this line surfaces that property at the moment the user might
+  // worry about it.
+  if (process.stdout.isTTY === true) {
+    info("heal: Ctrl-C and re-run is safe — this loop is idempotent.");
+  }
+
   info("heal: sync + upgrade (one-shot prelude)");
-  await runWithoutExit(() => syncCmd({ cwd, yes: true }));
-  await runWithoutExit(() => upgradeCmd({ cwd, yes: true }));
+  // allowDirty: true on every sub-command (#328). Heal owns the clean-tree
+  // contract at its boundary; the inner sync/upgrade/classify/audit must not
+  // refuse on the dirty state heal's previous iteration produced.
+  await runWithoutExit(() => syncCmd({ cwd, yes: true, allowDirty: true }));
+  await runWithoutExit(() => upgradeCmd({ cwd, yes: true, allowDirty: true }));
 
   info(`heal: looping classify → audit --fix (max ${maxIterations} iterations)`);
   for (let iter = 1; iter <= maxIterations; iter++) {
     info(`heal: iteration ${iter}/${maxIterations}`);
     const before = await snapshotTree(cwd);
 
-    await runWithoutExit(() => classifyCmd({ cwd, yes: true }));
-    const auditExit = await runWithoutExit(() => auditCmd({ cwd, fix: true }));
+    await runWithoutExit(() => classifyCmd({ cwd, yes: true, allowDirty: true }));
+    const auditExit = await runWithoutExit(() => auditCmd({ cwd, fix: true, allowDirty: true }));
 
     const after = await snapshotTree(cwd);
     const stable = treesEqual(before, after);

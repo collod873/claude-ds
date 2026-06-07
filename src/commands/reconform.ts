@@ -14,6 +14,7 @@ import { planGeneratedIntegrityFixes, type GenIntegrityOutcome } from "../lib/ch
 import { runCheckScripts } from "../lib/checks/run-check-scripts.js";
 import { reviewExceptions } from "../lib/checks/exception-review.js";
 import { emitStubWarning } from "../lib/reports/stub-warning.js";
+import { checkCleanTree } from "../lib/clean-tree.js";
 
 export async function reconformCmd(opts: {
   dryRun?: boolean;
@@ -21,6 +22,8 @@ export async function reconformCmd(opts: {
   backfillMeta?: boolean;
   fix?: boolean;
   demoteComposites?: boolean;
+  /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). */
+  allowDirty?: boolean;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const dryRun = opts.dryRun ?? false;
@@ -28,6 +31,18 @@ export async function reconformCmd(opts: {
   const fix = opts.fix ?? false;
   const demoteComposites = opts.demoteComposites ?? false;
   const mode = dryRun ? "dry-run" : "apply";
+
+  // Clean-tree guard at the top (PRD #325 / sub-issue #328). The historical
+  // phase-4 auto-move check is the same idea; centralising here means the
+  // refusal fires once, at the boundary, before any Decision is asked.
+  // --dry-run skips the guard (no mutations).
+  if (!dryRun) {
+    const guard = checkCleanTree({ command: "reconform", cwd, allowDirty: opts.allowDirty });
+    if (!guard.ok) {
+      err(guard.message);
+      process.exit(2);
+    }
+  }
 
   // Precondition: must be post-adopt.
   let ctx;
@@ -101,11 +116,9 @@ export async function reconformCmd(opts: {
         info(`  CLASS-001: ${relPath} — is ${f.currentTier}, should be ${f.shouldBe}`);
       }
       if (fix) {
-        const gitStatus = spawnSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
-        if ((gitStatus.stdout ?? "").trim() !== "") {
-          err("commit or stash first — auto-move rewrites import paths across the project.");
-          process.exit(1);
-        }
+        // The historical per-phase dirty-tree check is now redundant — the
+        // top-level clean-tree guard already refused (or the caller passed
+        // --allow-dirty to override). Auto-move proceeds.
         const movesReport = await run(ctx, [classificationMovesOp(findings)], mode);
         if (movesReport.failed) {
           err(`classification auto-move failed: ${movesReport.failed.error}`);
