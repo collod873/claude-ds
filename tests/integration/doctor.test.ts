@@ -13,9 +13,8 @@ describe("doctor", () => {
     const r = await runCli(["doctor", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("pre-adopt");
-    // Should include JSON block
-    expect(r.stdout).toContain("```json");
-    expect(r.stdout).toContain('"mode": "pre-adopt"');
+    // #344: default is the human checklist only — no JSON blob fenced underneath.
+    expect(r.stdout).not.toContain("```json");
     // No missing canonicals that have lookalikes means no "Rename required" section
     expect(r.stdout).not.toContain("Rename required");
   });
@@ -34,10 +33,8 @@ describe("doctor", () => {
     expect(r.stdout).toContain("design-tokens.json");
     // Should report atom-kit-contract.md as lookalike for contracts.md
     expect(r.stdout).toContain("atom-kit-contract.md");
-    // JSON block should be present
-    expect(r.stdout).toContain("```json");
-    expect(r.stdout).toContain('"mode": "pre-adopt"');
-    expect(r.stdout).toContain('"lookalike"');
+    // #344: default is human checklist only; JSON moves under --json.
+    expect(r.stdout).not.toContain("```json");
   });
 
   it("post-adopt clean project: exits 0, reports post-adopt mode", async () => {
@@ -48,8 +45,29 @@ describe("doctor", () => {
     const r = await runCli(["doctor", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("post-adopt");
-    expect(r.stdout).toContain("```json");
-    expect(r.stdout).toContain('"mode": "post-adopt"');
+    // #344: default is human checklist only.
+    expect(r.stdout).not.toContain("```json");
+  });
+
+  // #344: --json selects the machine surface, suppressing the human render.
+  it("--json emits JSON only and suppresses the markdown checklist", async () => {
+    const r = await runCli(["doctor", "--pack", "next-react", "--json"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // No markdown headers
+    expect(r.stdout).not.toContain("## claude-ds doctor");
+    // Output is parseable JSON
+    const parsed = JSON.parse(r.stdout) as { mode: string };
+    expect(parsed.mode).toBe("pre-adopt");
+  });
+
+  // #344: default never emits the JSON blob — regression guard against the
+  // pre-#344 behavior where every invocation dumped both.
+  it("default emits markdown only, no JSON blob", async () => {
+    const r = await runCli(["doctor", "--pack", "next-react"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("## claude-ds doctor");
+    expect(r.stdout).not.toContain("```json");
+    expect(r.stdout).not.toContain('"mode":');
   });
 
   // v0.2.1: --ignore flag tests

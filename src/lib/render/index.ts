@@ -19,6 +19,9 @@ export { identityColor } from "./color.js";
 export type { DiffEntry } from "./diff.js";
 export { renderCommitmentGateDiff, colorizeDiffLines } from "./diff.js";
 
+export type { SummaryEntry } from "./summary.js";
+export { renderChangeSummary, renderChangesJson } from "./summary.js";
+
 export type {
   DashboardFinding,
   DashboardMode,

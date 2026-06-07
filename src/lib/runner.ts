@@ -13,6 +13,14 @@ export interface RunOptions {
    * historical best-effort, stop-on-first-failure, no-unwind behavior.
    */
   rollbackOnFailure?: boolean;
+  /**
+   * When true, the Runner does NOT write the per-Change unified diff to stdout
+   * in `dry-run` mode. The caller is rendering the preview itself (summary,
+   * JSON, or its own custom diff) and the Runner's default verbose dump would
+   * step on it. PRD #340 sub-issue #344 — without this, `upgrade` dumped a
+   * 30k-line full-file diff on top of the new summary-default render.
+   */
+  quiet?: boolean;
 }
 
 /**
@@ -217,8 +225,10 @@ export async function run(
   }
 
   if (mode === "dry-run") {
-    for (const { opName, change } of planned) {
-      process.stdout.write(renderDiff(opName, change) + "\n");
+    if (!options.quiet) {
+      for (const { opName, change } of planned) {
+        process.stdout.write(renderDiff(opName, change) + "\n");
+      }
     }
     return report;
   }

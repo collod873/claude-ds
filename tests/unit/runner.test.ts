@@ -57,6 +57,28 @@ describe("runner — dry-run", () => {
     expect(report.ops[1].changes).toHaveLength(1);
     expect(written.join("")).toContain("[good] good.txt");
   });
+
+  // #344: callers that render their own preview pass `quiet: true` so the
+  // Runner's diff dump doesn't pile up underneath. The plan/report contract
+  // is unchanged — only the stdout side-effect is silenced.
+  it("quiet:true suppresses stdout in dry-run; report is unchanged", async () => {
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "write", path: "a.txt", before: null, after: Buffer.from("a") },
+      { kind: "write", path: "b.txt", before: Buffer.from("b1"), after: Buffer.from("b2") },
+    ]);
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: any) => {
+      written.push(String(chunk));
+      return true;
+    }) as any);
+    const report = await run(ctx, [op], "dry-run", { quiet: true });
+    spy.mockRestore();
+
+    expect(written.join("")).toBe("");
+    expect(report.ops).toHaveLength(1);
+    expect(report.ops[0].changes).toHaveLength(2);
+  });
 });
 
 describe("runner — apply write", () => {

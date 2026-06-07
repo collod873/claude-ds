@@ -527,7 +527,7 @@ function renderVerifyTable(results: HookVerifyResult[]): string {
   return lines.join("\n");
 }
 
-export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: string; verifyHooks?: boolean; completeness?: boolean }): Promise<void> {
+export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: string; verifyHooks?: boolean; completeness?: boolean; json?: boolean }): Promise<void> {
   if (opts.completeness) {
     await runCompletenessCheck({ pack: opts.pack, cwd: opts.cwd });
     return;
@@ -698,11 +698,15 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
     }
   }
 
-  const md = renderMarkdown(result);
-  const json = JSON.stringify(result, null, 2);
-  const output = `${md}\n\`\`\`json\n${json}\n\`\`\`\n`;
-
-  process.stdout.write(output);
+  // PRD #340 sub-issue #344: doctor no longer emits both unconditionally.
+  // `--json` selects the machine surface; default is the human checklist.
+  // Pre-#344 every invocation dumped both. The verdict aggregation above
+  // still runs in both modes — it feeds the exit code, not just the render.
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+  } else {
+    process.stdout.write(renderMarkdown(result));
+  }
 
   // Exit 1 if any findings: lookalikes present, managed files missing, or root dupes detected (#23)
   const hasLookalikes = findings.some(f => !f.present && f.lookalike !== null);
@@ -745,7 +749,8 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
     if (everythingClean) verdictLines.push("- ✓ All clear");
   }
   verdictLines.push("");
-  process.stdout.write(verdictLines.join("\n"));
+  // #344: --json is the machine surface — suppress the human verdict block.
+  if (!opts.json) process.stdout.write(verdictLines.join("\n"));
 
   // #349 F21: every command ends with a → Next breadcrumb. Pick the route
   // the same way the verdict ordered the concerns. Scaffold and lookalike
@@ -762,7 +767,8 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
     repairNeeded > 0 ? "repair-needed" :
     upgradeAvailable ? "upgrade-available" :
     "clean";
-  printNextStep("doctor", { doctorVerdict: verdict, buildCmd });
+  // #344: --json suppresses the human → Next breadcrumb too.
+  if (!opts.json) printNextStep("doctor", { doctorVerdict: verdict, buildCmd });
 
   // F16: failing the verdict on upgrade-available or repair-needed would
   // be more aggressive than F16 demands ("not blind to" ≠ "fail the

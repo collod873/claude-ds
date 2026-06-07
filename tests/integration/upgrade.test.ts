@@ -250,6 +250,121 @@ describe("upgrade", () => {
     expect(cfg.meta_kind_strict).toBe(false);
   });
 
+  // #344: rendering-mode selection. Default is the one-line-per-file summary
+  // with substantive flag flips surfaced first; --diff opts back into the
+  // full unified diff; --json emits the machine surface and suppresses the
+  // human chatter so scripted callers get clean stdout.
+  describe("rendering modes (#344)", () => {
+    it("default: dry-run prints summary lines, not full file diffs", async () => {
+      await writeFile(
+        join(dir, ".claude-ds.json"),
+        JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }),
+      );
+      // Seed a DS file with an inline portal style so rewrite-portal-styles
+      // emits a real Change in the dry-run preview.
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(
+        join(dir, "design-system/atoms/button.tsx"),
+        [
+          'import { cn } from "@ds/utils/cn";',
+          'export const Button = () => <div className={cn("base")} style={{ display: "contents" }} />;',
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const r = await runCli(["upgrade", "--to", "v0.9.0", "--dry-run"], { cwd: dir });
+      expect(r.code).toBe(0);
+      // Summary line for the rewritten file — no full-body +/- diff
+      expect(r.stdout).toContain("M design-system/atoms/button.tsx");
+      // The bodies of changed files must NOT appear (no full diff dump)
+      expect(r.stdout).not.toContain("[rewrite-portal-styles@v0.9.0]");
+      expect(r.stdout).not.toContain('+import portalStyles from "@ds/utils/portal-scope.module.css";');
+    });
+
+    it("--diff: dry-run opts back into the full unified diff dump", async () => {
+      await writeFile(
+        join(dir, ".claude-ds.json"),
+        JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }),
+      );
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(
+        join(dir, "design-system/atoms/button.tsx"),
+        [
+          'import { cn } from "@ds/utils/cn";',
+          'export const Button = () => <div className={cn("base")} style={{ display: "contents" }} />;',
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const r = await runCli(["upgrade", "--to", "v0.9.0", "--dry-run", "--diff"], { cwd: dir });
+      expect(r.code).toBe(0);
+      // Full unified diff present — pre-#344 default
+      expect(r.stdout).toMatch(/\[rewrite-portal-styles@v0\.9\.0\] design-system\/atoms\/button\.tsx \(modify\)/);
+      expect(r.stdout).toContain('-export const Button = () => <div className={cn("base")} style={{ display: "contents" }} />;');
+      expect(r.stdout).toContain('+import portalStyles from "@ds/utils/portal-scope.module.css";');
+    });
+
+    it("--json: emits parseable changes array and suppresses human render", async () => {
+      await writeFile(
+        join(dir, ".claude-ds.json"),
+        JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }),
+      );
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(
+        join(dir, "design-system/atoms/button.tsx"),
+        [
+          'import { cn } from "@ds/utils/cn";',
+          'export const Button = () => <div className={cn("base")} style={{ display: "contents" }} />;',
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const r = await runCli(["upgrade", "--to", "v0.9.0", "--dry-run", "--json"], { cwd: dir });
+      expect(r.code).toBe(0);
+      // No human-prose chatter in --json output
+      expect(r.stdout).not.toMatch(/upgrading from/);
+      expect(r.stdout).not.toMatch(/migration chain:/);
+      expect(r.stdout).not.toMatch(/dry-run complete/);
+      const parsed = JSON.parse(r.stdout) as { changes: { kind: string; path: string }[] };
+      expect(Array.isArray(parsed.changes)).toBe(true);
+      const button = parsed.changes.find(c => c.path === "design-system/atoms/button.tsx");
+      expect(button).toMatchObject({ kind: "write", path: "design-system/atoms/button.tsx" });
+    });
+
+    it("default: surfaces .claude-ds.json flag flips before file rewrites", async () => {
+      // The Crewops-shaped fixture: many file rewrites plus one substantive
+      // flag flip (#300 meta_kind_strict). Pre-#344 the flag flip was buried
+      // under the diff dump; now it leads.
+      await writeFile(
+        join(dir, ".claude-ds.json"),
+        JSON.stringify({ ...BASE_CFG, packVersion: "v1.0.0", meta_kind_strict: false }),
+      );
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      // Seed an import that rewrite-ds-imports will rewrite (a verification re-run)
+      await writeFile(
+        join(dir, "design-system/atoms/button.tsx"),
+        [
+          "import { Foo } from '@/design-system/foo';",
+          "export const Button = () => <Foo />;",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const r = await runCli(["upgrade", "--to", "v1.0.0", "--dry-run"], { cwd: dir });
+      expect(r.code).toBe(0);
+      // Substantive section leads
+      const substantiveIdx = r.stdout.indexOf("Substantive changes:");
+      const flagFlipIdx = r.stdout.indexOf("meta_kind_strict");
+      const fileRewriteIdx = r.stdout.indexOf("M design-system/atoms/button.tsx");
+      expect(substantiveIdx).toBeGreaterThanOrEqual(0);
+      expect(flagFlipIdx).toBeGreaterThan(substantiveIdx);
+      // Flag flip appears before the regular file-rewrite section
+      if (fileRewriteIdx >= 0) {
+        expect(flagFlipIdx).toBeLessThan(fileRewriteIdx);
+      }
+    });
+  });
+
   // End-state verification must not destroy the regenerated manifest. Without
   // this guard, manage-manifest@v0.9.0's plan() re-emits a delete on every
   // verification run — and the verification path skips the post-apply
