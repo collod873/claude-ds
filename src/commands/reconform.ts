@@ -13,7 +13,7 @@ import { findMisclassified, classificationMovesOp } from "../lib/checks/classifi
 import { planGeneratedIntegrityFixes, type GenIntegrityOutcome } from "../lib/checks/generated-integrity.js";
 import { runCheckScripts } from "../lib/checks/run-check-scripts.js";
 import { reviewExceptions } from "../lib/checks/exception-review.js";
-import { emitStubWarning } from "../lib/reports/stub-warning.js";
+import { emitStubHint } from "../lib/reports/stub-warning.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 
 export async function reconformCmd(opts: {
@@ -31,6 +31,19 @@ export async function reconformCmd(opts: {
   const fix = opts.fix ?? false;
   const demoteComposites = opts.demoteComposites ?? false;
   const mode = dryRun ? "dry-run" : "apply";
+
+  // #365: surface silent-no-op flag combinations at the boundary so the
+  // operator doesn't believe their flag took effect when it didn't.
+  // --demote-composites is purely a fix-write toggle (no audit-only meaning),
+  // so refuse it outright. --backfill-meta without --fix is a documented
+  // audit-only mode (pinned by tests), so warn loudly instead of refusing.
+  if (demoteComposites && !fix) {
+    err("reconform: --demote-composites requires --fix (composite→atom moves are mutations)");
+    process.exit(2);
+  }
+  if (backfillMetaFlag && !fix && !dryRun) {
+    info("note: --backfill-meta without --fix is audit-only — no meta stubs written, no misclassified files moved. Pass --fix to apply.");
+  }
 
   // Clean-tree guard at the top (PRD #325 / sub-issue #328). The historical
   // phase-4 auto-move check is the same idea; centralising here means the
@@ -177,8 +190,8 @@ export async function reconformCmd(opts: {
   const allViolations = await runCheckScripts(ctx, dryRun);
   await reviewExceptions(ctx, allViolations, dryRun);
 
-  // Phase 8 — stub-file warning.
-  await emitStubWarning(ctx);
+  // Phase 8 — stub-file hint (untouched seeded files only; #366).
+  await emitStubHint(ctx);
 
   // Final report. Dry-run exits 2 when GEN-001/002 violations are present so
   // CI can surface generator drift without an apply run (#89). The apply path
