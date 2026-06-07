@@ -2,37 +2,49 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProjectContext } from "../project.js";
 
-/** Count lines in a file. Returns 0 if file is absent or unreadable. */
-async function countLines(p: string): Promise<number> {
-  try {
-    const content = await readFile(p, "utf8");
-    return content.split("\n").length;
-  } catch {
-    return 0;
-  }
+/** Read a file and return its contents, or null if absent/unreadable. */
+async function readOrNull(p: string): Promise<string | null> {
+  try { return await readFile(p, "utf8"); } catch { return null; }
 }
 
 /**
- * Emit a "stub files detected" warning to stdout when contracts.md or
- * tokens.json look like un-consolidated seeds (< 25 lines). Reporting only —
- * never writes. Lives here because the threshold + format are reconform-specific
- * but the line-count probe is cheap and reusable.
+ * Reconform-time stub-file hint for the two seeded files consumers must
+ * consolidate by hand (contracts.md, tokens.json). #366: switched from a
+ * line-count heuristic that fired every run with no acknowledge path to an
+ * untouched-vs-seeded check — the hint fires only while the file is the
+ * verbatim pack seed (or absent). The moment the operator edits the file,
+ * even by one byte, the hint goes silent — that *is* the acknowledge path,
+ * no flag or config field required.
+ *
+ * Framed as a "→ Next:" hint (not a "WARNING") because the line above this
+ * in reconform's output is "check pass: no violations found" — a stub the
+ * operator hasn't gotten to yet is not a check failure.
  */
-export async function emitStubWarning(ctx: ProjectContext): Promise<void> {
-  const { cwd } = ctx;
-  const contractsLines = await countLines(join(cwd, "design-system", "contracts.md"));
-  const tokensLines = await countLines(join(cwd, "design-system", "tokens.json"));
-  if (contractsLines >= 25 && tokensLines >= 25) return;
-
-  const lines: string[] = [
-    "",
-    "WARNING: stub files detected — human consolidation needed",
-    "==========================================================",
+export async function emitStubHint(ctx: ProjectContext): Promise<void> {
+  const { cwd, packDir } = ctx;
+  const targets = [
+    { rel: "design-system/contracts.md", recipe: "describe your DS's per-component bundle, import rules, and review cadence (see the seed for the canonical structure)" },
+    { rel: "design-system/tokens.json", recipe: "add the colors / spacing / motion / shadow / z-index scales your app actually uses (extend or replace the seed entries)" },
   ];
-  if (contractsLines < 25) lines.push("  design-system/contracts.md looks like a seed stub (< 25 lines)");
-  if (tokensLines < 25)   lines.push("  design-system/tokens.json looks like a seed stub (< 25 lines)");
-  lines.push("  These files require human judgment to populate properly.");
-  lines.push("  reconform cannot fill them in automatically.");
+
+  const untouched: { rel: string; recipe: string; reason: "absent" | "verbatim-seed" }[] = [];
+  for (const t of targets) {
+    const seed = await readOrNull(join(packDir, "files", t.rel));
+    if (seed === null) continue;
+    const current = await readOrNull(join(cwd, t.rel));
+    if (current === null) {
+      untouched.push({ ...t, reason: "absent" });
+    } else if (current === seed) {
+      untouched.push({ ...t, reason: "verbatim-seed" });
+    }
+  }
+  if (untouched.length === 0) return;
+
+  const lines: string[] = ["", "→ Next: consolidate these seeded files (still the pack defaults — edit to silence):"];
+  for (const u of untouched) {
+    const tag = u.reason === "absent" ? "missing" : "untouched seed";
+    lines.push(`  ${u.rel} (${tag}) — ${u.recipe}`);
+  }
   lines.push("");
   process.stdout.write(lines.join("\n") + "\n");
 }
