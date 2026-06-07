@@ -415,6 +415,18 @@ fill and re-run. This supersedes ADR-0014's "every ambiguity gets a safe
 default" for genuine Ambiguities — the agent no longer makes project decisions
 that were Collin's to make. See ADR-0016.
 
+### First-run greet
+The bare-`claude-ds` action's pre-config branch. When no `.claude-ds.json`
+exists, the CLI detects framework (`next-react` today) + whether the
+consumer tree already carries `.tsx`/`.jsx` files and surfaces a single
+Ambiguity Decision (`first-run-onramp`) asking adopt-vs-init. The Decision
+routes through the resolver like every other one — TTY prompts, non-TTY +
+`--answers` resolves silently, non-TTY + no `--answers` fails loud — and the
+answered branch dispatches to `initCmd` / `adoptCmd` in-process. When
+`.claude-ds.json` is present the greet is skipped and the dashboard front
+door (#331) runs. Detection logic lives in `src/lib/first-run.ts` so the
+front-door brain can share it.
+
 ---
 
 ## Working rules

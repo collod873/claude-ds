@@ -25,6 +25,20 @@ describe("bare `claude-ds` non-TTY (agent / automation)", () => {
     // runCli stubs stdin.isTTY to false and never sets stdout.isTTY, so this
     // exercises the non-TTY branch. The agent/automation contract is exactly
     // today's behavior — no auto-audit, no interactive prompts.
+    //
+    // PRD #325 sub-issue #334 reserves the no-config path for the first-run
+    // greet, so we seed a minimal `.claude-ds.json` here: the agent-help
+    // contract applies to *adopted* projects, where the dashboard front-door
+    // is the human surface and non-TTY keeps the help bytes. The first-run
+    // greet's non-TTY behavior is tested in `greet.test.ts`.
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      packVersion: "v0.8.0",
+      pack: "next-react",
+      mode: "warn",
+      app_dir: "app",
+      claude_md_target: ".claude/CLAUDE.md",
+    }));
+
     const r = await runCli([], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/Usage:\s*claude-ds/);

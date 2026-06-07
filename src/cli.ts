@@ -18,28 +18,57 @@ import { upgradeCmd } from "./commands/upgrade.js";
 import { classifyCmd } from "./commands/classify.js";
 import { healCmd } from "./commands/heal.js";
 import { frontDoorCmd } from "./commands/front-door.js";
+import { greetCmd } from "./commands/greet.js";
 import { isTTY } from "./lib/render/index.js";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 
 export interface ProgramDefaults {
   cwd?: string;
+}
+
+async function configExists(cwd: string): Promise<boolean> {
+  try { await stat(join(cwd, ".claude-ds.json")); return true; } catch { return false; }
 }
 
 export function buildProgram(defaults: ProgramDefaults = {}): Command {
   const program = new Command();
   program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`, "-V");
 
-  // Bare `claude-ds` default action (PRD #325 sub-issue #331). In a TTY we run
-  // the state-aware front door: compose doctor structural state + a read-only
-  // audit pass into the dashboard. Non-TTY callers (agents, automation, CI)
-  // keep today's commander help output — the dashboard is a human surface and
-  // must not appear on the agent contract path.
-  program.action(async () => {
-    if (isTTY()) {
-      await frontDoorCmd({ cwd: defaults.cwd });
-    } else {
-      program.outputHelp();
-    }
-  });
+  // Positional-options mode means an option declared on the parent (`--answers`
+  // on the bare action below) only consumes its value when it appears BEFORE
+  // the first positional argument (the subcommand name). Without this,
+  // commander would steal `--answers` from `audit`/`classify`/`heal` because
+  // parent options otherwise win regardless of position. Pinned by the audit
+  // and heal integration tests that pass `--answers` to subcommands.
+  program.enablePositionalOptions();
+
+  // Bare `claude-ds` default action.
+  //
+  // First-run greet (PRD #325 sub-issue #334): when no `.claude-ds.json`
+  // exists, route to the greet — TTY prompts the Ambiguity Decision and
+  // dispatches to init/adopt; non-TTY with `--answers` resolves silently and
+  // dispatches; non-TTY with no `--answers` fails loud naming the Decision.
+  //
+  // Otherwise (config exists), the dashboard front door from sub-issue #331
+  // applies: TTY composes doctor structural state + a read-only audit pass
+  // and renders the dashboard; non-TTY keeps today's commander help output —
+  // the dashboard is a human surface, and the agent/automation contract for
+  // an adopted project stays exactly the bytes it shipped with.
+  program
+    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016) — used by the first-run greet")
+    .action(async (opts: { answers?: string }) => {
+      const cwd = defaults.cwd ?? process.cwd();
+      if (!(await configExists(cwd))) {
+        await greetCmd({ cwd, answers: opts.answers });
+        return;
+      }
+      if (isTTY()) {
+        await frontDoorCmd({ cwd });
+      } else {
+        program.outputHelp();
+      }
+    });
 
   program
     .command("version")
