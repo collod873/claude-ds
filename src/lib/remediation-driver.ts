@@ -72,7 +72,34 @@ export async function runWithoutExit(fn: () => Promise<void>): Promise<number> {
 }
 
 /**
- * Snapshot every text file under `root`, skipping `node_modules` / `.git`.
+ * Directory names skipped while snapshotting the tree. The remediation loop's
+ * commands (upgrade/repair/sync/classify/audit) only ever mutate DS-managed
+ * files — never build or generated output — so reading these dirs buys nothing
+ * but risk: a churning cache produces false "tree changed" non-convergence,
+ * and on real adopted apps the gigabyte `.next/` cache OOMs V8 when read into
+ * the snapshot Map twice per iteration. Ref issue #384. NOT shared with
+ * `lookalike_ignore`, which excludes `src/app/**` — a path the loop DOES mutate
+ * and must keep watching for convergence.
+ */
+const SNAPSHOT_SKIP = new Set([
+  "node_modules",
+  ".git",
+  ".next",
+  ".vercel",
+  ".turbo",
+  "dist",
+  "build",
+  "out",
+  "coverage",
+  ".cache",
+  "test-results",
+  "playwright-report",
+]);
+
+/**
+ * Snapshot every text file under `root`, skipping build/generated output and
+ * VCS/dependency dirs (see `SNAPSHOT_SKIP`) — the loop never mutates those, so
+ * reading them only risks false non-convergence or OOM on real trees (#384).
  * Two snapshots compare equal when the iteration changed zero bytes — the
  * fixed-point signal the loop uses to decide convergence. Binary content
  * (read errors) is skipped; consumer trees don't include binaries the loop
@@ -88,7 +115,7 @@ export async function snapshotTree(root: string): Promise<Map<string, string>> {
       return;
     }
     for (const e of entries) {
-      if (e.name === "node_modules" || e.name === ".git") continue;
+      if (SNAPSHOT_SKIP.has(e.name)) continue;
       const abs = join(absDir, e.name);
       if (e.isDirectory()) {
         await walk(abs);

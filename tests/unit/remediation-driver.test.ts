@@ -11,11 +11,11 @@
  * driven once per iteration so callers can flavor their own logging.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { writeFile, mkdir } from "node:fs/promises";
+import { join, dirname } from "node:path";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { runCli } from "../helpers/runcli";
-import { driveRemediation } from "../../src/lib/remediation-driver";
+import { driveRemediation, snapshotTree } from "../../src/lib/remediation-driver";
 import pkg from "../../package.json" with { type: "json" };
 
 // A no-op progress controller (the non-TTY shape) so the driver runs without a
@@ -86,4 +86,39 @@ describe("driveRemediation (shared loop)", () => {
     expect(Math.max(...iterations)).toBeLessThanOrEqual(2);
     expect(["converged", "exhausted"]).toContain(outcome.kind);
   }, 30000);
+});
+
+describe("snapshotTree (convergence detector)", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  async function seed(rel: string, content: string): Promise<void> {
+    const abs = join(dir, rel);
+    await mkdir(dirname(abs), { recursive: true });
+    await writeFile(abs, content);
+  }
+
+  it("snapshots DS-managed files but skips build/generated dirs (#384)", async () => {
+    // A DS-managed file the loop mutates — MUST be watched for convergence.
+    await seed("design-system/atoms/button.tsx", "export const Button = () => null;\n");
+    // Build/generated output the loop never touches — MUST be skipped (OOM on
+    // real trees walks the gigabyte .next cache twice per iteration).
+    await seed(".next/cache/huge.txt", "build cache");
+    await seed(".next/static/chunk.js", "chunk");
+    await seed("dist/bundle.js", "bundle");
+    await seed("coverage/lcov.info", "coverage");
+
+    const snap = await snapshotTree(dir);
+
+    expect(snap.has(join("design-system", "atoms", "button.tsx"))).toBe(true);
+
+    const skipped = [".next", "dist", "coverage"];
+    for (const key of snap.keys()) {
+      const segments = key.split(/[/\\]/);
+      for (const dirName of skipped) {
+        expect(segments).not.toContain(dirName);
+      }
+    }
+  });
 });
