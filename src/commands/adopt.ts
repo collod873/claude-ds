@@ -16,6 +16,7 @@ import { makeSeedClaudeMdMarkers } from "../lib/ops/seed-claude-md-markers.js";
 import { patchTsconfigPathAlias } from "../lib/ops/patch-tsconfig-path-alias.js";
 import { writeBootstrapClaudeDsConfig } from "../lib/bootstrap-config.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
+import { createProgress } from "../lib/render/tty-layer.js";
 
 const execFile = promisify(execFileCb);
 
@@ -161,6 +162,12 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     return;
   }
 
+  // Live progress UI for adopt's phased setup (PRD #325 / sub-issue #332).
+  // No-op on non-TTY so the agent's stdout output is byte-identical to today.
+  const progress = createProgress();
+  try {
+
+  progress.start("preparing project");
   // Run user's pre-existing build-manifest.ts (if any) BEFORE pack files overwrite it.
   // This allows a failing script to be detected as non-fatal before the pack's version lands.
   {
@@ -179,6 +186,7 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
       }
     }
   }
+  progress.succeed("preparing project");
 
   // ---- Init boundary: write the initial .claude-ds.json so loadProject can boot ----
   // This is the documented exception to the "all writes go through the Runner" rule —
@@ -233,12 +241,15 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   // never lands. seedClaudeMdMarkers is idempotent (no-ops if markers exist).
   const seedOp = makeSeedClaudeMdMarkers();
   const op = makeSyncPackFiles();
+  progress.start("installing pack files");
   const report = await run(ctx, [seedOp, op], "apply");
 
   if (report.failed) {
+    progress.fail(`installing pack files — ${report.failed.change.kind}`);
     err(`adopt failed at ${report.failed.change.kind}: ${report.failed.error}`);
     process.exit(2);
   }
+  progress.succeed("installing pack files");
 
   // Sync's per-file decisions land in its OpReport entry. Looked up by name
   // rather than index so the overwrite-reporting block below stays correct if
@@ -304,6 +315,7 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     process.stdout.write(lines.join("\n") + "\n");
   }
 
+  progress.start("finishing setup");
   // #52: src/app consumers have @/* → ./src/* in their tsconfig, so
   // @/design-system/* resolves to ./src/design-system/* which doesn't exist
   // (design-system/ always lives at repo root). Inject a path override that
@@ -332,10 +344,14 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
       info(`warning: build-manifest failed (exit ${exitCode}), manifest.json not created. Run manually: node --experimental-strip-types scripts/build-manifest.ts`);
     }
   }
+  progress.succeed("finishing setup");
 
   const pm = await detectPackageManager(cwd);
   info(`adopted claude-ds (${pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);
   info(`CI scripts installed. Run: ${runCmd(pm, "ci:hook-contract")} and ${runCmd(pm, "ci:consistency")}`);
   info(`A starter GitHub Actions workflow was seeded at .github/workflows/claude-ds-governance.yml (delete if not on GH Actions). See docs/ci-wiring.md for details.`);
   printNextStep("adopt", {});
+  } finally {
+    progress.stop();
+  }
 }

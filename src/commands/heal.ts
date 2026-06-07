@@ -6,6 +6,7 @@ import { upgradeCmd } from "./upgrade.js";
 import { classifyCmd } from "./classify.js";
 import { auditCmd } from "./audit.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
+import { createProgress } from "../lib/render/tty-layer.js";
 
 /**
  * `claude-ds heal` — drive a consumer tree to a fixed point in one command.
@@ -176,31 +177,57 @@ export async function healCmd(opts: HealOpts): Promise<void> {
   }
 
   info("heal: sync + upgrade (one-shot prelude)");
-  // allowDirty: true on every sub-command (#328). Heal owns the clean-tree
-  // contract at its boundary; the inner sync/upgrade/classify/audit must not
-  // refuse on the dirty state heal's previous iteration produced.
-  await runWithoutExit(() => syncCmd({ cwd, yes: true, allowDirty: true }));
-  await runWithoutExit(() => upgradeCmd({ cwd, yes: true, allowDirty: true }));
+  // Live progress UI (PRD #325 / sub-issue #332). On non-TTY the controller
+  // is a no-op so today's plain log output above is the only thing the agent
+  // sees; on TTY ora drives a per-phase spinner on stderr with the iteration
+  // counter surfaced via `progress.info`.
+  const progress = createProgress();
+  try {
+    // allowDirty: true on every sub-command (#328). Heal owns the clean-tree
+    // contract at its boundary; the inner sync/upgrade/classify/audit must not
+    // refuse on the dirty state heal's previous iteration produced.
+    progress.start("sync (one-shot prelude)");
+    await runWithoutExit(() => syncCmd({ cwd, yes: true, allowDirty: true }));
+    progress.succeed("sync");
+    progress.start("upgrade (one-shot prelude)");
+    await runWithoutExit(() => upgradeCmd({ cwd, yes: true, allowDirty: true }));
+    progress.succeed("upgrade");
 
-  info(`heal: looping classify → audit --fix (max ${maxIterations} iterations)`);
-  for (let iter = 1; iter <= maxIterations; iter++) {
-    info(`heal: iteration ${iter}/${maxIterations}`);
-    const before = await snapshotTree(cwd);
+    info(`heal: looping classify → audit --fix (max ${maxIterations} iterations)`);
+    let lastPhase = "classify";
+    for (let iter = 1; iter <= maxIterations; iter++) {
+      info(`heal: iteration ${iter}/${maxIterations}`);
+      progress.info(`iteration ${iter}/${maxIterations}`);
+      const before = await snapshotTree(cwd);
 
-    await runWithoutExit(() => classifyCmd({ cwd, yes: true, allowDirty: true }));
-    const auditExit = await runWithoutExit(() => auditCmd({ cwd, fix: true, allowDirty: true }));
+      lastPhase = "classify";
+      progress.start("classify");
+      await runWithoutExit(() => classifyCmd({ cwd, yes: true, allowDirty: true }));
+      progress.succeed("classify");
 
-    const after = await snapshotTree(cwd);
-    const stable = treesEqual(before, after);
+      lastPhase = "audit --fix";
+      progress.start("audit --fix");
+      const auditExit = await runWithoutExit(() => auditCmd({ cwd, fix: true, allowDirty: true }));
+      progress.succeed("audit --fix");
 
-    if (stable && auditExit === 0) {
-      info(`heal: converged in ${iter} iteration(s) — 0 changes, 0 findings`);
-      return;
+      const after = await snapshotTree(cwd);
+      const stable = treesEqual(before, after);
+
+      if (stable && auditExit === 0) {
+        info(`heal: converged in ${iter} iteration(s) — 0 changes, 0 findings`);
+        return;
+      }
     }
-  }
 
-  err(
-    `heal: did not converge after ${maxIterations} iterations — run \`claude-ds audit\` for the remaining findings`,
-  );
-  process.exit(1);
+    // Iteration ceiling hit: surface the failing phase in the progress UI so
+    // the user sees WHICH step was running when convergence ran out, not just
+    // "the loop failed somewhere" (acceptance criterion #5).
+    progress.fail(`${lastPhase} — did not converge after ${maxIterations} iterations`);
+    err(
+      `heal: did not converge after ${maxIterations} iterations — run \`claude-ds audit\` for the remaining findings`,
+    );
+    process.exit(1);
+  } finally {
+    progress.stop();
+  }
 }
