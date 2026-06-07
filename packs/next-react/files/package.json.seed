@@ -5,7 +5,6 @@
   "scripts": {
     "lint:commits": "commitlint --from=HEAD~1",
     "ds:build-manifest": "node --experimental-strip-types scripts/build-manifest.ts",
-    "ds:check-states": "node --experimental-strip-types scripts/check-states-coverage.ts",
     "ds:check-tiers": "node --experimental-strip-types scripts/check-tier-imports.ts",
     "ds:similarity": "node --experimental-strip-types scripts/similarity-check.ts",
     "ds:a11y": "node --experimental-strip-types scripts/a11y-scan.ts",

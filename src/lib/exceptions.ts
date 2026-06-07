@@ -1,7 +1,18 @@
 import { allRuleIds, type DriftRuleId } from "./drift/index.js";
 import { allIntegrityRuleIds, type IntegrityRuleId } from "./integrity/index.js";
+import { allOwnedConcernIds, type OwnedConcernId } from "./owned-concerns/index.js";
 
-export type AuditRuleId = DriftRuleId | IntegrityRuleId;
+/**
+ * Valid `rule` values in `exceptions.json` (ADR-0017, #316).
+ *
+ * Unifies the three audit-rule families consumers can dismiss: drift +
+ * integrity rules surfaced by `audit`, and Owned-concern findings surfaced
+ * by `doctor --completeness`. One shape, one shape only — there is no
+ * separate "completeness exception" kind. `permanent: true` covers
+ * detector over-match ("not actually DS"); an issue link covers a tracked
+ * gap pending upstream removal (ADR-0003).
+ */
+export type AuditRuleId = DriftRuleId | IntegrityRuleId | OwnedConcernId;
 
 export class ExceptionError extends Error {}
 
@@ -30,7 +41,7 @@ export function parseExceptions(raw: string): Exception[] {
   if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.exceptions))
     throw new ExceptionError('exceptions.json must have an "exceptions" array');
 
-  const validIds = new Set<string>([...allRuleIds(), ...allIntegrityRuleIds()]);
+  const validIds = new Set<string>([...allRuleIds(), ...allIntegrityRuleIds(), ...allOwnedConcernIds()]);
   const arr: unknown[] = parsed.exceptions;
   const result: Exception[] = [];
 
@@ -42,7 +53,7 @@ export function parseExceptions(raw: string): Exception[] {
 
     if (!validIds.has(entry.rule))
       throw new ExceptionError(
-        `unknown rule ID "${entry.rule}" in exceptions.json — registered IDs: ${[...allRuleIds(), ...allIntegrityRuleIds()].join(", ")}`
+        `unknown rule ID "${entry.rule}" in exceptions.json — registered IDs: ${[...allRuleIds(), ...allIntegrityRuleIds(), ...allOwnedConcernIds()].join(", ")}`
       );
 
     if (typeof entry.path !== "string")

@@ -203,7 +203,7 @@ describe("adopt", () => {
     const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
 
     const packScripts = [
-      "ds:build-manifest", "ds:check-states", "ds:check-tiers", "ds:similarity",
+      "ds:build-manifest", "ds:check-tiers", "ds:similarity",
       "ds:a11y", "ds:principles", "ds:tokens", "ci:hook-contract", "ci:consistency"
     ];
     for (const s of packScripts) {

@@ -371,6 +371,52 @@ present and the path is tracked. Lives in `src/lib/runner.ts`.
 
 ---
 
+## Interaction model (PRD #TBD — interactive UX)
+
+### Decision
+A structured, addressable choice the CLI surfaces before applying `Change[]`:
+`{ id, kind, question, options }`. `id` is stable and keyable (like a Drift
+rule id); `question` and `options` are plain-language and pass the **Simple
+question test**. Generalizes the fixer-only `FixerDecisionPoint` to every
+command. A Decision is resolved exactly one way — a pre-supplied **Decision
+answer**, a TTY prompt, or a kind-specific fallback — and never silently
+inside `plan()`.
+_Avoid_: prompt, gate, question (when the structured object is meant).
+
+### Decision kind
+Two interactive kinds plus the non-interactive default. The kind, not the
+command, picks the TTY/non-TTY behavior:
+- **Commitment gate** — a whole-batch "apply these Changes?" approval. **One
+  per command** (collapses `classify`'s former per-bucket confirms into a
+  single approve). TTY: colorized diff, then a single approve. Non-TTY:
+  auto-apply — git history is the undo. `--yes` skips it; `--dry-run`
+  previews without writing.
+- **Ambiguity** — a genuine project judgment that passes the Simple question
+  test (atom-vs-composite band, token tie-break, extract/convert/defer,
+  keep-which-file). TTY: prompt. Non-TTY with no Decision answer: **fail
+  loud** — a named, non-zero exit, never a silent default.
+- **Automatable** — the tool decides; safe default, recorded, never prompts.
+  Not surfaced as a Decision. The bulk of every run stays here.
+
+### Decision answer
+A pre-supplied resolution keyed by Decision `id`, carried in `ctx.decisions`
+(today's `fixerChoices`, generalized) and loadable from an `--answers` file.
+Two payoffs: an agent (or Collin) can answer up front, and the interactive
+path becomes **testable without a TTY** — feed answers and assert outcomes,
+snapshot the pure render separately. The absence of a Decision answer in
+non-TTY is what triggers an Ambiguity's fail-loud.
+
+### Pending decision
+An Ambiguity a headless run could not resolve (no TTY, no Decision answer).
+`heal` does **not** halt on the first one: it converges everything Automatable
+to a partial fixed point, **collects** the Pending decisions, and exits
+non-zero with an "N decisions need you" report plus an `--answers` scaffold to
+fill and re-run. This supersedes ADR-0014's "every ambiguity gets a safe
+default" for genuine Ambiguities — the agent no longer makes project decisions
+that were Collin's to make. See ADR-0016.
+
+---
+
 ## Working rules
 
 - **`diffFile()` runs at plan time.** Operations that touch Pack files call it while
