@@ -22,7 +22,6 @@ import {
   type Decision,
   type PendingDecision,
 } from "../lib/decision/index.js";
-import { checkCleanTree } from "../lib/clean-tree.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
@@ -162,7 +161,11 @@ export async function classifyCmd(opts: {
    * leaves it undefined and classify builds a TTY prompt when interactive (issue #203).
    */
   prompt?: FixerPrompt;
-  /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). */
+  /**
+   * Accepted for API/CLI compatibility. PRD #340 F7 / sub-issue #350 removed
+   * classify's hard-block on a dirty tree — the commitment-gate preview is
+   * the safety, git is the undo (ADR-0016). Heal still threads this through.
+   */
   allowDirty?: boolean;
   /**
    * When provided, ADR-0016 Ambiguity Decisions hit during the within-DS
@@ -179,16 +182,11 @@ export async function classifyCmd(opts: {
   const srcRel = opts.src;
   const hasSrc = typeof srcRel === "string" && srcRel.length > 0;
 
-  // Clean-tree guard (PRD #325 / sub-issue #328). Runs before any Decision
-  // resolution — the dry-run path can skip since it never mutates.
-  if (!dryRun) {
-    const guard = checkCleanTree({ command: "classify", cwd, allowDirty: opts.allowDirty });
-    if (!guard.ok) {
-      err(guard.message);
-      process.exit(2);
-      return;
-    }
-  }
+  // PRD #340 F7 / sub-issue #350: classify no longer hard-blocks on a dirty
+  // tree. The commitment-gate preview ("Ready to apply N moves … [y/N]") is
+  // the safety; git is the undo (ADR-0016). `--allow-dirty` is still
+  // accepted as a flag for API compat and so heal can forward it.
+  void opts.allowDirty;
 
   let suppliedAnswers: AnswerBag = {};
   if (opts.answers) {
@@ -504,9 +502,23 @@ export async function classifyCmd(opts: {
   const roleProposals = roleOutcome?.proposals ?? [];
   for (const p of roleProposals) {
     if (p.proposal.kind === "candidate-feature") {
+      // PRD #340 F7: this branch fires ONLY when the file imports from a
+      // configured domain root (ADR-0005 import predicate). The
+      // relocate-to-features/ hand-off is grounded in real evidence.
       info(
-        `classify: ${p.file} — no shipped role contract matches (smart, non-ARIA). ` +
-          `Candidate feature: relocate to features/, mark presentational, or register a tracked exception (ADR-0005).`,
+        `classify: ${p.file} — smart part imports from a domain root and no shipped role contract matches. ` +
+          `Candidate feature: relocate to features/, or mark presentational (ADR-0005).`,
+      );
+      continue;
+    }
+    if (p.proposal.kind === "tracked-exception") {
+      // PRD #340 F7: smart part, no shipped contract, no domain imports.
+      // Presence of state is not a feature signal — defaults to a tracked
+      // exception so a stateful DS atom is never mislabeled "relocate to
+      // features/" (ADR-0005, ADR-0003).
+      info(
+        `classify: ${p.file} — smart part with no shipped role contract yet. ` +
+          `Default tracked exception (no shipped contract) — or mark presentational, or register an entry in design-system/exceptions.json (ADR-0003).`,
       );
       continue;
     }

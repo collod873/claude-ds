@@ -108,6 +108,28 @@ jobs:
               gh issue close "$issue" --reason completed
             fi
 
+            # Cascade parent-PRD close. If this issue is a sub-issue and every
+            # sibling is now closed, close the parent PRD too. The standalone
+            # agent-close-completed-prd.yml can't do this: it triggers on
+            # issues:closed, which the GITHUB_TOKEN close above never fires —
+            # the same limitation that forces the inline promotion cascade below.
+            parent=$(gh api graphql \
+              -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { parent { number } } } }' \
+              -f owner="$owner" -f repo="$repo" -F num="$issue" \
+              --jq '.data.repository.issue.parent.number // empty' 2>/dev/null || echo "")
+            if [ -n "$parent" ]; then
+              open_remaining=$(gh api "repos/${GH_REPO}/issues/${parent}/sub_issues" \
+                --jq '[.[] | select(.state == "open")] | length' 2>/dev/null || echo "0")
+              parent_state=$(gh issue view "$parent" --json state --jq '.state')
+              if [ "$open_remaining" = "0" ] && [ "$parent_state" = "OPEN" ]; then
+                echo "All sub-issues of #$parent are closed — closing the PRD."
+                gh issue edit "$parent" --remove-label "agent:in-progress" || true
+                gh issue close "$parent" --comment "All sub-issues complete — closing this PRD. Implemented across parallel sub-issue PRs."
+              else
+                echo "Parent #$parent: $open_remaining open sub-issue(s) remaining — leaving open."
+              fi
+            fi
+
             # Find dependents (issues this one is blocking)
             dependents=$(gh api graphql \
               -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { blocking(first: 100) { nodes { number state } } } } }' \
@@ -124,12 +146,11 @@ jobs:
               echo "::group::Evaluating #$y"
 
               y_data=$(gh api graphql \
-                -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { labels(first: 50) { nodes { name } } parent { number } blockedBy(first: 100) { nodes { number state } } } } }' \
+                -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { labels(first: 50) { nodes { name } } blockedBy(first: 100) { nodes { number state } } } } }' \
                 -f owner="$owner" -f repo="$repo" -F num="$y")
 
               has_queued=$(echo "$y_data" | jq '[.data.repository.issue.labels.nodes[].name] | index("agent:queued") != null')
               has_in_progress=$(echo "$y_data" | jq '[.data.repository.issue.labels.nodes[].name] | index("agent:in-progress") != null')
-              parent_num=$(echo "$y_data" | jq -r '.data.repository.issue.parent.number // empty')
               remaining_open=$(echo "$y_data" | jq '[.data.repository.issue.blockedBy.nodes[] | select(.state == "OPEN")] | length')
 
               if [ "$has_queued" != "true" ]; then
@@ -144,15 +165,9 @@ jobs:
                 continue
               fi
 
-              if [ -n "$parent_num" ]; then
-                echo "Refuse: #$y is a sub-issue of #$parent_num"
-                gh issue edit "$y" --remove-label "agent:queued" || true
-                gh issue edit "$y" --add-label "agent:blocked" || true
-                gh issue comment "$y" --body "Refused to promote: this is a sub-issue of #${parent_num}. \`agent:queued\` is not meaningful on sub-issues — label the parent PRD instead."
-                echo "::endgroup::"
-                continue
-              fi
-
+              # Sub-issues ARE valid promotion candidates under dependency-aware
+              # fan-out (ADR-0019): the PRD dispatcher parks blocked sub-issues as
+              # agent:queued and this cascade releases each as its blockers close.
               if [ "$remaining_open" -gt 0 ]; then
                 echo "Skip: #$y still has $remaining_open open blocker(s)"
                 echo "::endgroup::"

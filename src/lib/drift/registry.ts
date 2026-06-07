@@ -15,6 +15,7 @@ import { rawPrimitiveRule } from "./rules/raw-primitive.js";
 import { roleNoContractRule } from "./rules/role-no-contract.js";
 import { smartPartNoRoleRule } from "./rules/smart-part-no-role.js";
 import { staleMetaStatesRule } from "./rules/stale-meta-states.js";
+import { tokenParityRule } from "./rules/token-parity.js";
 
 /**
  * The drift-rule registry indexed by id. Declared as `Record<DriftRuleId, DriftRule>`
@@ -38,6 +39,7 @@ export const DRIFT_RULES_BY_ID: Record<DriftRuleId, DriftRule> = {
   "DRIFT-META-EXAMPLES-DUPLICATE": metaExamplesDuplicateRule,
   "DRIFT-META-EXAMPLES-CORRUPT": metaExamplesCorruptRule,
   "DRIFT-STALE-META-STATES": staleMetaStatesRule,
+  "DRIFT-TOKEN-PARITY": tokenParityRule,
 };
 
 /**

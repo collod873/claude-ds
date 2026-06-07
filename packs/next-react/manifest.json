@@ -214,7 +214,8 @@
       "category": "hybrid",
       "format": "json",
       "owned_keys": [
-        "scripts"
+        "scripts",
+        "devDependencies"
       ]
     },
     {
