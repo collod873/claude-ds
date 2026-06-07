@@ -20,6 +20,7 @@ import {
   UnresolvedAmbiguityError,
   type AnswerBag,
   type Decision,
+  type PendingDecision,
 } from "../lib/decision/index.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 
@@ -163,6 +164,14 @@ export async function classifyCmd(opts: {
   prompt?: FixerPrompt;
   /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). */
   allowDirty?: boolean;
+  /**
+   * When provided, ADR-0016 Ambiguity Decisions hit during the within-DS
+   * ambiguity pass are collected here as `PendingDecision`s instead of
+   * throwing `UnresolvedAmbiguityError`. heal threads this through across
+   * iterations; everywhere else leaves it undefined → today's fail-loud
+   * (PRD #325 sub-issue #333).
+   */
+  pendingSink?: PendingDecision[];
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const dryRun = opts.dryRun ?? false;
@@ -622,6 +631,13 @@ export async function classifyCmd(opts: {
     if (ambiguousAtoms.length > 0) {
       let resolved: Record<string, number | "defer">;
       try {
+        // PRD #325 sub-issue #333 — heal opts INTO collect mode by passing a
+        // `pendingSink`. The resolver returns pending decisions in
+        // `result.pending` instead of throwing; classify treats them as
+        // skipped (leave the file untouched) for this iteration. heal
+        // aggregates them across iterations and surfaces an `--answers`
+        // scaffold.
+        const collect = opts.pendingSink !== undefined;
         const result = await resolveDecisions(
           ambiguousAtoms.map(a => a.decision),
           suppliedAnswers,
@@ -630,12 +646,16 @@ export async function classifyCmd(opts: {
             // treating injected prompts (test path) as TTY keeps the spine the
             // single switchboard while still honouring `opts.prompt`.
             isTTY: promptAvailable,
+            collect,
             prompt: ambiguityPrompt
               ? async (q, o) => ambiguityPrompt(q, o)
               : undefined,
           },
         );
         resolved = result.answers;
+        if (opts.pendingSink) {
+          for (const pending of result.pending) opts.pendingSink.push(pending);
+        }
       } catch (e) {
         if (e instanceof UnresolvedAmbiguityError) {
           err(`classify needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`);

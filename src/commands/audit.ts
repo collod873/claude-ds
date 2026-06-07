@@ -16,7 +16,11 @@ import {
 import { scanDriftAndIntegrity, type AuditFinding } from "../lib/reports/drift-integrity-scan.js";
 import { formatFindings, formatScorecard } from "../lib/reports/findings-format.js";
 import { runAuditFix } from "../lib/checks/audit-fix.js";
-import { loadAnswersFile, UnresolvedAmbiguityError } from "../lib/decision/index.js";
+import {
+  loadAnswersFile,
+  UnresolvedAmbiguityError,
+  type PendingDecision,
+} from "../lib/decision/index.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
@@ -37,6 +41,16 @@ export interface AuditOpts {
   /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). Only meaningful
    * with --fix; the read-only audit path is non-destructive and does not gate. */
   allowDirty?: boolean;
+  /**
+   * When provided, ADR-0016 Ambiguity Decisions hit during the audit-fix
+   * pre-pass are collected here as `PendingDecision`s instead of throwing
+   * `UnresolvedAmbiguityError`. The caller is responsible for surfacing them
+   * (e.g. heal collects across iterations, writes an `--answers` scaffold,
+   * and exits with a named non-zero code). When omitted, audit keeps today's
+   * fail-loud behaviour: a non-TTY genuine Ambiguity with no supplied answer
+   * exits 2 with a plain-language "decision X needs you" message.
+   */
+  pendingSink?: PendingDecision[];
   cwd?: string;
 }
 
@@ -155,6 +169,7 @@ export async function auditCmd(opts: AuditOpts) {
       reason: opts.reason,
       issue: opts.issue,
       permanent: opts.permanent,
+      pendingSink: opts.pendingSink,
     });
   } catch (e) {
     // ADR-0016: a genuine Ambiguity hit a non-TTY caller with no pre-supplied

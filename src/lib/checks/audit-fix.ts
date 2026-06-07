@@ -21,6 +21,7 @@ import {
   type AnswerBag,
   type Decision,
   type DecisionAnswer as SpineDecisionAnswer,
+  type PendingDecision,
 } from "../decision/index.js";
 import {
   evaluateIntegrity,
@@ -60,6 +61,13 @@ export interface AuditFixParams {
   reason?: string;
   issue?: string;
   permanent?: boolean;
+  /**
+   * When provided, ADR-0016 Ambiguity Decisions hit during the pre-pass are
+   * collected here as `PendingDecision`s (resolver runs with `collect: true`)
+   * instead of throwing `UnresolvedAmbiguityError`. heal threads this through
+   * across iterations; everywhere else leaves it undefined → today's fail-loud.
+   */
+  pendingSink?: PendingDecision[];
 }
 
 export interface AuditFixSummary {
@@ -339,8 +347,18 @@ export async function runAuditFix(
         // `collect: false` (the default) → non-TTY Ambiguities with no
         // supplied answer throw `UnresolvedAmbiguityError`. The audit command
         // catches and prints a plain-language exit naming the decision id.
+        //
+        // PRD #325 sub-issue #333: heal opts INTO collect mode by passing a
+        // `pendingSink` (an array the resolver pushes pending decisions onto).
+        // The fixer reads no entry from `fixerChoices` for a collected
+        // decision and naturally defers → the finding stays in the active set
+        // for the iteration. heal aggregates pending across iterations and
+        // exits with a named non-zero + `--answers` scaffold rather than
+        // halting on the first or silently guessing.
+        const collect = params.pendingSink !== undefined;
         const result = await resolveDecisions(decisions, supplied, {
           isTTY,
+          collect,
           prompt: ttyPrompt ? (q, o) => ttyPrompt(q, o) : undefined,
         });
 
@@ -349,6 +367,10 @@ export async function runAuditFix(
           if (id in result.answers) {
             perFinding[p.key] = result.answers[id] as DecisionAnswer;
           }
+        }
+
+        if (params.pendingSink) {
+          for (const pending of result.pending) params.pendingSink.push(pending);
         }
 
         fixerChoices[key] = perFinding;

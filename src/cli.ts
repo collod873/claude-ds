@@ -184,8 +184,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .description("loop sync → upgrade → classify → audit --fix until convergence (max 3 iterations)")
     .option("--max-iterations <n>", "override iteration ceiling (default 3)", (v) => parseInt(v, 10))
     .option("--allow-dirty", "bypass the clean-tree guard (top-level + sub-command propagation)")
-    .action(async (opts: { maxIterations?: number; allowDirty?: boolean }) => {
-      await healCmd({ maxIterations: opts.maxIterations, allowDirty: opts.allowDirty, cwd: defaults.cwd });
+    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016) — resolves Pending decisions from a prior heal run")
+    .action(async (opts: { maxIterations?: number; allowDirty?: boolean; answers?: string }) => {
+      await healCmd({ maxIterations: opts.maxIterations, allowDirty: opts.allowDirty, answers: opts.answers, cwd: defaults.cwd });
     });
 
   return program;

@@ -7,6 +7,13 @@ import { classifyCmd } from "./classify.js";
 import { auditCmd } from "./audit.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 import { createProgress } from "../lib/render/tty-layer.js";
+import { loadProject } from "../lib/project.js";
+import { run } from "../lib/runner.js";
+import {
+  PENDING_ANSWERS_SCAFFOLD,
+  writePendingAnswersScaffold,
+} from "../lib/ops/pending-answers-scaffold.js";
+import type { PendingDecision } from "../lib/decision/index.js";
 
 /**
  * `claude-ds heal` — drive a consumer tree to a fixed point in one command.
@@ -35,6 +42,26 @@ import { createProgress } from "../lib/render/tty-layer.js";
 
 const DEFAULT_MAX_ITERATIONS = 3;
 
+/**
+ * Stable named exit code for "converged modulo Pending decisions" (PRD #325
+ * sub-issue #333). Distinct from:
+ *   0 — fully converged (no findings, no pending decisions)
+ *   1 — did-not-converge / iteration ceiling hit
+ *   2 — user input or environment error (no config, dirty tree, bad flag)
+ *   3 — partial fixed point: Automatable work settled, Pending decisions
+ *       remain; the `--answers` scaffold names each and a re-run with the
+ *       filled scaffold resolves them. Sandcastle automation routes on this
+ *       specifically: it is "needs Collin," not a hard failure.
+ */
+export const HEAL_EXIT_PENDING = 3;
+
+/**
+ * Default path heal writes the `--answers` scaffold to when Pending decisions
+ * remain. Re-exported from the scaffold Op so heal's CLI surface (this file)
+ * carries the user-visible filename without duplicating the literal.
+ */
+export { PENDING_ANSWERS_SCAFFOLD } from "../lib/ops/pending-answers-scaffold.js";
+
 export interface HealOpts {
   cwd?: string;
   /**
@@ -50,6 +77,14 @@ export interface HealOpts {
    * the loop, preserving the "git history is the undo" property.
    */
   allowDirty?: boolean;
+  /**
+   * Path to an `--answers` JSON file mapping Decision id → answer index (or
+   * `"defer"`). Propagated to classify and audit sub-commands so previously-
+   * Pending decisions are resolved before the resolver would otherwise
+   * collect them. The round-trip: heal exits with a scaffold → fill in → re-
+   * run `heal --answers <file>` (PRD #325 sub-issue #333).
+   */
+  answers?: string;
 }
 
 class HealExitSignal extends Error {
@@ -194,34 +229,82 @@ export async function healCmd(opts: HealOpts): Promise<void> {
     progress.succeed("upgrade");
 
     info(`heal: looping classify → audit --fix (max ${maxIterations} iterations)`);
+    // Pending-decision sink (PRD #325 sub-issue #333). Passed by reference
+    // into classify and audit so the resolver's `collect: true` arm pushes
+    // unresolved Ambiguities here instead of throwing. Aggregated across
+    // iterations (dedupe by id below) so a single converged-modulo-Pending
+    // exit names every Pending decision the run produced, not just the last
+    // iteration's batch.
+    const pendingSink: PendingDecision[] = [];
     let lastPhase = "classify";
     for (let iter = 1; iter <= maxIterations; iter++) {
       info(`heal: iteration ${iter}/${maxIterations}`);
       progress.info(`iteration ${iter}/${maxIterations}`);
       const before = await snapshotTree(cwd);
+      const pendingBefore = pendingSink.length;
 
       lastPhase = "classify";
       progress.start("classify");
-      await runWithoutExit(() => classifyCmd({ cwd, yes: true, allowDirty: true }));
+      await runWithoutExit(() =>
+        classifyCmd({
+          cwd,
+          yes: true,
+          allowDirty: true,
+          answers: opts.answers,
+          pendingSink,
+        }),
+      );
       progress.succeed("classify");
 
       lastPhase = "audit --fix";
       progress.start("audit --fix");
-      const auditExit = await runWithoutExit(() => auditCmd({ cwd, fix: true, allowDirty: true }));
+      const auditExit = await runWithoutExit(() =>
+        auditCmd({
+          cwd,
+          fix: true,
+          allowDirty: true,
+          answers: opts.answers,
+          pendingSink,
+        }),
+      );
       progress.succeed("audit --fix");
 
       const after = await snapshotTree(cwd);
       const stable = treesEqual(before, after);
+      const pendingThisIter = pendingSink.length - pendingBefore;
 
       if (stable && auditExit === 0) {
         info(`heal: converged in ${iter} iteration(s) — 0 changes, 0 findings`);
         return;
       }
+
+      // Partial fixed point (PRD #325 sub-issue #333): bytes are stable but
+      // findings remain because one or more Ambiguities were collected as
+      // Pending. Further iterations cannot make progress without operator
+      // input — keep iterating produces zero work and would wind up at the
+      // ceiling-failure exit, which sandcastle automation must NOT conflate
+      // with "did not converge." Exit early on the named PENDING code with a
+      // scaffold the operator fills and re-runs.
+      if (stable && pendingThisIter > 0) {
+        await reportPendingAndExit(cwd, pendingSink, progress);
+        return;
+      }
     }
 
-    // Iteration ceiling hit: surface the failing phase in the progress UI so
-    // the user sees WHICH step was running when convergence ran out, not just
-    // "the loop failed somewhere" (acceptance criterion #5).
+    // After the iteration ceiling, also surface Pending if any accumulated —
+    // a project that takes the full ceiling AND has Pending decisions still
+    // needs the operator, not a "did not converge" failure. Sandcastle
+    // automation routes on the named PENDING exit either way.
+    if (pendingSink.length > 0) {
+      await reportPendingAndExit(cwd, pendingSink, progress);
+      return;
+    }
+
+    // Iteration ceiling hit with no Pending: this IS a "did not converge"
+    // failure (auto-fixers couldn't reach a fixed point on their own).
+    // Surface the failing phase in the progress UI so the user sees WHICH
+    // step was running when convergence ran out, not just "the loop failed
+    // somewhere" (acceptance criterion #5).
     progress.fail(`${lastPhase} — did not converge after ${maxIterations} iterations`);
     err(
       `heal: did not converge after ${maxIterations} iterations — run \`claude-ds audit\` for the remaining findings`,
@@ -230,4 +313,56 @@ export async function healCmd(opts: HealOpts): Promise<void> {
   } finally {
     progress.stop();
   }
+}
+
+/**
+ * Dedupe accumulated Pending decisions by id, render the "N decisions need
+ * you" report, write the `--answers` scaffold, and exit with `HEAL_EXIT_PENDING`.
+ *
+ * Scaffold shape: a flat JSON object keyed by Decision id. Each value is a
+ * sentinel string `"FILL: 0=<label>, 1=<label>, ..."` enumerating the
+ * options. `loadAnswersFile` rejects strings other than `"defer"`, so a user
+ * who passes back the unedited scaffold gets a clear "must be a non-negative
+ * integer or 'defer'" error rather than silently no-op'ing — the scaffold is
+ * the form to fill, not a ready-to-resolve answers bag.
+ */
+async function reportPendingAndExit(
+  cwd: string,
+  pending: PendingDecision[],
+  progress: ReturnType<typeof createProgress>,
+): Promise<void> {
+  const uniqueById = new Map<string, PendingDecision>();
+  for (const p of pending) if (!uniqueById.has(p.id)) uniqueById.set(p.id, p);
+  const deduped = [...uniqueById.values()];
+
+  // Route the scaffold write through the Runner — same byte chokepoint as
+  // every consumer-tree mutation (PRD #221 capstone, pinned by
+  // `no-direct-fs-mutation.test.ts`). The Op's atomic temp+rename also makes
+  // a mid-write Ctrl-C safe: heal's idempotency contract extends to its own
+  // output artifacts, not just consumer files.
+  const ctx = await loadProject(cwd);
+  await run(ctx, [writePendingAnswersScaffold(deduped)], "apply");
+
+  // Stop any in-flight spinner before printing the report so the lines aren't
+  // interleaved with the progress UI's `[*] phase` updates.
+  progress.stop();
+
+  const count = deduped.length;
+  err(
+    `heal: ${count} decision${count === 1 ? "" : "s"} need${count === 1 ? "s" : ""} you ` +
+      `— heal converged everything automatable, but the following Ambiguities need your call:`,
+  );
+  for (const d of deduped) {
+    err(`  - ${d.id}`);
+    err(`    ${d.question}`);
+    d.options.forEach((o, i) => {
+      err(`      [${i}] ${o.label} — ${o.description}`);
+    });
+  }
+  err(
+    `Scaffold written to ${PENDING_ANSWERS_SCAFFOLD}. Edit each value (replace the ` +
+      `"FILL: …" hint with the chosen option index), then re-run: ` +
+      `\`claude-ds heal --answers ${PENDING_ANSWERS_SCAFFOLD}\`.`,
+  );
+  process.exit(HEAL_EXIT_PENDING);
 }
