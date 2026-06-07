@@ -15,6 +15,7 @@ import { scanRootDupes, RootDupeFinding } from "../lib/root-dupes.js";
 import {
   scanOwnedConcerns,
   allOwnedConcernIds,
+  formatOwnedConcernFinding,
   type OwnedConcernScannerFinding,
 } from "../lib/owned-concerns/index.js";
 import { checkVersionCurrency } from "../lib/version-currency.js";
@@ -232,7 +233,7 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
   if (ownedFindings.length > 0) {
     lines.push(`### Shadow DS infrastructure (${ownedFindings.length} found — Owned concerns)\n`);
     for (const f of ownedFindings) {
-      lines.push(`- \`${f.file}:${f.line}\` (${f.concernId}): ${f.message}`);
+      lines.push(formatOwnedConcernFinding(f));
     }
     lines.push("");
   }
