@@ -26,7 +26,8 @@ export async function enforceCmd(opts: { yes?: boolean; cwd?: string }) {
   // instead of falsely claiming a flip. Branch *before* the confirm so an
   // operator re-running the command isn't asked to approve a no-op either.
   if (ctx.cfg.mode === "block") { info("enforce: already in block mode — nothing to do"); return; }
-  if (!opts.yes && !(await confirm(`Flip mode warn → block (open exceptions ≤ ${ctx.cfg.enforce_threshold})?`))) { info("aborted"); return; }
+  // #364: interactive cancel must fail loud (stderr + exit 130) per ADR-0016.
+  if (!opts.yes && !(await confirm(`Flip mode warn → block (open exceptions ≤ ${ctx.cfg.enforce_threshold})?`))) { err("aborted"); process.exit(130); }
   const report = await run(ctx, [setConfigMode("block")], "apply");
   if (report.failed) { err(`enforce failed: ${report.failed.error}`); process.exit(2); }
   info("enforce: mode flipped to block");

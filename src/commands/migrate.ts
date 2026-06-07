@@ -82,7 +82,7 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
     }
   }
 
-  if (!opts.yes && !(await confirm(`Migrate ${opts.source} → ${dest}?`))) { info("aborted"); return; }
+  if (!opts.yes && !(await confirm(`Migrate ${opts.source} → ${dest}?`))) { err("aborted"); process.exit(130); }
 
   // #369: the pre-fix stub was a bare `export default function Showcase(){ return null; }`
   // with no import of the migrated component and no operator-facing pointer. A showcase

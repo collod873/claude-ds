@@ -209,14 +209,21 @@ describe("upgrade", () => {
     expect(hookStat.mode & 0o111).not.toBe(0);
   });
 
-  it("aborts without applying when confirmation is declined", async () => {
+  // Issue #364 — running upgrade without --yes on a non-TTY must fail loud
+  // (exit 3, message to stderr) instead of silently auto-defaulting to "no"
+  // and exiting 0. The runCli harness simulates a non-TTY stdin, so this
+  // exercises the same path a Claude-driven session hits. The previous test
+  // here piped "n\n" and expected exit 0; that was the broken contract.
+  it("refuses to apply migrations without --yes on a non-TTY (#364)", async () => {
     await writeFile(
       join(dir, ".claude-ds.json"),
       JSON.stringify(BASE_CFG),
     );
-    const r = await runCli(["upgrade", "--to", "v0.8.0"], { cwd: dir, stdin: "n\n" });
-    expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/aborted/);
+    const r = await runCli(["upgrade", "--to", "v0.8.0"], { cwd: dir });
+    expect(r.code).toBe(3);
+    expect(r.stderr).toMatch(/non-TTY/i);
+    expect(r.stderr).toMatch(/--yes/);
+    // The pin must remain on the source version — no migration was applied.
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.packVersion).toBe("v0.7.0");
   });

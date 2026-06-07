@@ -182,14 +182,25 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
   if (message) info(`→ Next: ${message}`);
 }
 
+/**
+ * Issue #364 — non-TTY callers must not be silently auto-answered "no".
+ * Without a TTY there is no human to answer the prompt; the previous code
+ * raced `rl.question` against `rl.close` so a closed stdin resolved to `""`
+ * — indistinguishable from a real "n", and the command exited 0 as if the
+ * user had declined. Per ADR-0016, an unanswered prompt with no human in
+ * the loop must fail loud (named, non-zero) rather than fabricate an answer.
+ * Exit 3 = "non-TTY: pass --yes (or supply `--answers` for Decision-based
+ * commands) so the prompt does not need a human."
+ */
 export async function confirm(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    err(`${question} [y/N]: non-TTY, no answer available — pass --yes to confirm non-interactively`);
+    process.exit(3);
+  }
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   let ans: string;
   try {
-    ans = await Promise.race([
-      rl.question(`${question} [y/N] `),
-      new Promise<string>((resolve) => rl.once("close", () => resolve(""))),
-    ]);
+    ans = await rl.question(`${question} [y/N] `);
   } catch {
     ans = "";
   } finally {
