@@ -3,6 +3,7 @@ import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
+import pkg from "../../package.json" with { type: "json" };
 
 // Issue #265 — the two-pass `classify → audit --fix → classify → audit --fix`
 // workaround is a tracked completeness-principle defect (ADR-0003). `claude-ds
@@ -164,6 +165,101 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
     expect(r.code).toBe(0);
     const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
     expect(cfg.meta_kind_strict).toBe(true);
+  }, 30000);
+
+  // Issue #343 / ADR-0018 — `heal` obtains its step order from the shared
+  // remediation planner, not a hardcoded sequence. The pre-#343 sequence
+  // hardcoded `sync → upgrade → classify → audit --fix` (prelude + loop);
+  // the planner mandates `upgrade → sync → repair → ... → classify →
+  // reconform → audit --fix`. This test pins the *external* signal of that
+  // wiring: the progress UI's `[*] phase` lines, written to stderr, appear
+  // in the planner's canonical order — specifically, `upgrade` (when it
+  // fires) precedes `sync`. The pre-#343 order had `sync` first.
+  it("dispatches steps in the planner's canonical order (upgrade before sync)", async () => {
+    // Pinned packVersion below the installed CLI → upgradeAvailable=true,
+    // so `upgrade` is in the plan. The base scaffold is absent → scaffold-
+    // Gap=true, so `sync` is also in the plan. The planner's canonical
+    // order puts upgrade first.
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <span/>; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+    );
+
+    // Force a TTY so the progress UI emits the per-phase markers we
+    // observe to assert order. Non-TTY suppresses the spinner; the order
+    // would still be planner-driven but unobservable from outside.
+    const origTTY = process.stdout.isTTY;
+    Object.defineProperty(process.stdout, "isTTY", {
+      value: true,
+      writable: true,
+      configurable: true,
+    });
+    try {
+      const r = await runCli(["heal"], { cwd: dir });
+      expect(r.code).toBe(0);
+
+      // Both phases fire — the fixture has work for each.
+      const upgradeIdx = r.stderr.search(/\bupgrade\b/);
+      const syncIdx = r.stderr.search(/\bsync\b/);
+      expect(upgradeIdx).toBeGreaterThanOrEqual(0);
+      expect(syncIdx).toBeGreaterThanOrEqual(0);
+
+      // Planner order: upgrade BEFORE sync. The pre-#343 hardcoded order
+      // ran sync first; this assertion is the regression seam against a
+      // future change that re-introduces a second ordering brain.
+      expect(upgradeIdx).toBeLessThan(syncIdx);
+    } finally {
+      Object.defineProperty(process.stdout, "isTTY", {
+        value: origTTY,
+        writable: true,
+        configurable: true,
+      });
+    }
+  }, 30000);
+
+  // Regression guard for the #343 lingering-signal convergence check.
+  //
+  // ADR-0018 added `stable + 0 pending = converged` to catch the #300 shape:
+  // upgrade fires forever because `upgradeCmd`'s no-chain branch can't bump
+  // the pin, but no findings remain. Without the check heal would hit the
+  // ceiling on a project that is in fact clean.
+  //
+  // The trap that check has to avoid: an unfixable finding the iteration's
+  // plan member can't address (e.g. DRIFT-PATTERN-NO-SLOTS — fixable:false,
+  // classify has no fixer for it) lingers like the upgrade signal *but* the
+  // findings-side state still has work. Pre-#343 heal hit the ceiling and
+  // exited 1, surfacing the finding. A naive `stable + 0 pending` accepted
+  // it as convergence and exited 0 with a "0 findings" message — directly
+  // contradicting what `claude-ds audit` would print the next second.
+  //
+  // Heal must gate convergence on the deriver's findings-side booleans:
+  // if classify/audit work remains (because the dispatcher could not clear
+  // it), it is NOT a fixed point.
+  it("does not silently converge when unfixable findings remain (#343)", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: `v${pkg.version}` }),
+    );
+    await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+    // DRIFT-PATTERN-NO-SLOTS: pattern-tier file without children/slots. The
+    // rule is fixable:false; classify does not relocate it (it also fires
+    // DRIFT-MISPLACED but the file is structurally a leaf, so even classify's
+    // tier-move heuristic can't pick a destination automatically). Heal can
+    // never clear this without operator input — exit 1 (did not converge) is
+    // the correct surfacing.
+    await writeFile(
+      join(dir, "design-system/patterns/no-slots.tsx"),
+      `export function NoSlots() { return <div/>; }\nexport const meta = { kind: "pattern" as const, examples: [] };\n`,
+    );
+
+    const r = await runCli(["heal", "--max-iterations", "3"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/did not converge/);
+    // The lying happy path the fix prevents: a "0 findings" convergence
+    // message paired with non-zero `audit` output. Pin both signals.
+    expect(r.stdout).not.toMatch(/converged in \d+ iteration\(s\) — 0 changes, 0 findings/);
   }, 30000);
 
   it("reports `converged` and exits 0 on an already-clean tree", async () => {
