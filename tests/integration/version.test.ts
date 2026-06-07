@@ -3,24 +3,64 @@ import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import pkg from "../../package.json" with { type: "json" };
+
+const CLI_VERSION = `v${pkg.version}`;
 
 describe("version", () => {
   let dir: string;
   beforeEach(async () => { dir = await freshTmpDir(); });
   afterEach(async () => { await cleanup(dir); });
 
-  it("prints installed and (offline) latest unknown", async () => {
-    await writeFile(join(dir, ".claude-ds.json"),
-      JSON.stringify({ version: "v1.0.0", pack: "next-react", mode: "warn" }));
-    const r = await runCli(["version", "--offline"], { cwd: dir });
-    expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/installed: v1\.0\.0/);
-    expect(r.stdout).toMatch(/latest: unknown/);
+  describe("default mode", () => {
+    it("prints CLI version as `installed`, pinned config as `pinned`, and `latest` (offline → unknown)", async () => {
+      await writeFile(join(dir, ".claude-ds.json"),
+        JSON.stringify({ version: "v1.0.0", pack: "next-react", mode: "warn" }));
+      const r = await runCli(["version", "--offline"], { cwd: dir });
+      expect(r.code).toBe(0);
+      // `installed` is now always the CLI binary version, not the pinned pack.
+      expect(r.stdout).toMatch(new RegExp(`installed: ${CLI_VERSION.replace(/\./g, "\\.")}`));
+      expect(r.stdout).toMatch(/pinned: v1\.0\.0/);
+      expect(r.stdout).toMatch(/latest: unknown/);
+    });
+
+    it("works without .claude-ds.json (prints CLI version and `pinned: (none)`)", async () => {
+      const r = await runCli(["version", "--offline"], { cwd: dir });
+      expect(r.code).toBe(0);
+      expect(r.stdout).toMatch(new RegExp(`installed: ${CLI_VERSION.replace(/\./g, "\\.")}`));
+      expect(r.stdout).toMatch(/pinned: \(none\)/);
+    });
   });
 
-  it("works without .claude-ds.json (prints binary version only)", async () => {
-    const r = await runCli(["version", "--offline"], { cwd: dir });
-    expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/installed: \(none\)/);
+  describe("--check", () => {
+    it("routes the user to `upgrade`, not `reconcile`, when pinned < installed", async () => {
+      await writeFile(join(dir, ".claude-ds.json"),
+        JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }));
+      const r = await runCli(["version", "--check"], { cwd: dir });
+      expect(r.code).toBe(1);
+      expect(r.stdout).toMatch(/claude-ds upgrade/);
+      expect(r.stdout).not.toMatch(/reconcile/);
+    });
+
+    it("uses consistent vocabulary: `pinned` (config) vs `installed` (CLI binary)", async () => {
+      await writeFile(join(dir, ".claude-ds.json"),
+        JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }));
+      const r = await runCli(["version", "--check"], { cwd: dir });
+      expect(r.stdout).toMatch(/pinned: v0\.5\.0/);
+      expect(r.stdout).toMatch(new RegExp(`installed: ${CLI_VERSION.replace(/\./g, "\\.")}`));
+    });
+
+    it("renders CHANGELOG sections between pinned and installed", async () => {
+      // The repo's own CHANGELOG.md must be discoverable from the compiled
+      // command. Pinning to a much older version guarantees at least one
+      // intervening section (e.g. ## [1.0.0] or later) lands in the output.
+      await writeFile(join(dir, ".claude-ds.json"),
+        JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }));
+      const r = await runCli(["version", "--check"], { cwd: dir });
+      expect(r.stdout).toMatch(/Changes between your pinned version and installed version/);
+      // The CLI's own version heading must be in the listing.
+      const pat = `## \\[${pkg.version.replace(/\./g, "\\.")}\\]`;
+      expect(r.stdout).toMatch(new RegExp(pat));
+    });
   });
 });
