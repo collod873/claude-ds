@@ -1,17 +1,22 @@
 /**
  * Issue #364 — `confirm()` must fail loud on non-TTY rather than silently
- * resolving to "no" with exit 0. Three regressions are pinned here:
+ * resolving to "no" with exit 0. Two contracts on `confirm()` itself are
+ * pinned here:
  *
- *   1. Non-TTY entry → write to stderr → process.exit(3).
- *      Scripts can distinguish "no user available" from a user choosing "no".
- *   2. Aborted message goes to stderr, never stdout. Scripts grepping stderr
- *      for failures saw clean output before.
- *   3. The "aborted" path on a real "n" answer carries a non-zero exit too —
- *      cancellation is not "successful no-op".
+ *   1. Non-TTY entry → process.exit(3). Scripts can distinguish "no user
+ *      available" from a user choosing "no".
+ *   2. The fail-loud message goes to stderr, never stdout. Scripts grepping
+ *      stderr for failures saw clean output before.
  *
- * confirm() can shell out to readline; the tests here mock `process.stdin`
- * (TTY flag + a readable stream) and `process.exit` so behavior is exercised
- * without spawning the CLI.
+ * The third half of the #364 contract — that a real TTY "n" answer makes the
+ * surrounding command exit non-zero (currently 130) — lives at each call
+ * site (init/upgrade/enforce/migrate/migrate-layout), not inside `confirm()`,
+ * which still just returns `false`. Reaching that branch needs a real TTY,
+ * which `runCli` deliberately doesn't simulate; the call-site exit code is
+ * read out of the diff rather than asserted in a test.
+ *
+ * The tests here mock `process.stdin` (TTY flag + a readable stream) and
+ * `process.exit` so behavior is exercised without spawning the CLI.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Readable } from "node:stream";

@@ -209,11 +209,12 @@ describe("upgrade", () => {
     expect(hookStat.mode & 0o111).not.toBe(0);
   });
 
-  // Issue #364 — running confirm() without --yes on a non-TTY must fail loud
+  // Issue #364 — running upgrade without --yes on a non-TTY must fail loud
   // (exit 3, message to stderr) instead of silently auto-defaulting to "no"
   // and exiting 0. The runCli harness simulates a non-TTY stdin, so this
-  // exercises the same path a Claude-driven session hits.
-  it("aborts without applying when confirmation is declined (non-TTY → fail loud)", async () => {
+  // exercises the same path a Claude-driven session hits. The previous test
+  // here piped "n\n" and expected exit 0; that was the broken contract.
+  it("refuses to apply migrations without --yes on a non-TTY (#364)", async () => {
     await writeFile(
       join(dir, ".claude-ds.json"),
       JSON.stringify(BASE_CFG),
