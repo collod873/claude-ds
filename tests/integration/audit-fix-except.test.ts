@@ -35,7 +35,14 @@ describe("audit --fix", () => {
       join(dir, "design-system/composites/solo-label.tsx"),
       'import { api } from "@/features/billing/api";\nexport function SoloLabel() { return <span>{api()}</span>; }',
     );
-    const r = await runCli(["audit", "--pack", "next-react", "--fix"], { cwd: dir });
+    // ADR-0016: this fixture also fires DRIFT-DS-IMPORTS-FEATURE, an
+    // interactive rule. Pre-supply `--answers` deferring that Ambiguity so
+    // audit doesn't fail loud before reaching the unfixable DRIFT-MISPLACED.
+    const answersPath = join(dir, ".answers.json");
+    await writeFile(answersPath, JSON.stringify({
+      "DRIFT-DS-IMPORTS-FEATURE:design-system/composites/solo-label.tsx::convert:@/features/billing/api:api": "defer",
+    }));
+    const r = await runCli(["audit", "--pack", "next-react", "--fix", "--answers", answersPath], { cwd: dir });
     expect(r.code).toBe(1);
     expect(r.stdout).toMatch(/error.*require/i);
     expect(r.stdout).toMatch(/DRIFT-MISPLACED/);
@@ -66,7 +73,11 @@ describe("audit --fix", () => {
       join(dir, "design-system/composites/orphan.tsx"),
       'import { api } from "@/features/billing/api";\nexport function Orphan() { return <span>{api()}</span>; }',
     );
-    const r = await runCli(["audit", "--fix"], { cwd: dir });
+    const answersPath = join(dir, ".answers.json");
+    await writeFile(answersPath, JSON.stringify({
+      "DRIFT-DS-IMPORTS-FEATURE:design-system/composites/orphan.tsx::convert:@/features/billing/api:api": "defer",
+    }));
+    const r = await runCli(["audit", "--fix", "--answers", answersPath], { cwd: dir });
     expect(r.code).toBe(1);
     // DRIFT-META-KIND-MISSING (fixable) is fixed, but DRIFT-MISPLACED remains
     // because the fixer cannot relocate to a feature tier.

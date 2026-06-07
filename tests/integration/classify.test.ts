@@ -141,4 +141,52 @@ describe("classify", () => {
     expect(r.stdout).toMatch(/invoice-list\.tsx/);
     expect(r.stdout).toMatch(/invoice-form\.tsx/);
   });
+
+  // ADR-0016 / PRD #325 sub-issue #327 — classify's per-bucket confirms
+  // collapse into a single commitment-gate Decision per command.
+  it("apply: collapses per-bucket confirms into a single commitment-gate Decision", async () => {
+    await setupBrownfieldFixture();
+    // Add a second feature in a DIFFERENT bucket — under the OLD code this
+    // would have triggered two `Move these to <bucket>/?` prompts (one per
+    // bucket). Per ADR-0016 there is now exactly one preview-and-approve.
+    await mkdir(join(dir, "features/billing"), { recursive: true });
+    await writeFile(
+      join(dir, "src/components/billing-row.tsx"),
+      `import { getBills } from "../../features/billing/data";\nexport function BillingRow() { return <div />; }`,
+    );
+    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // The single commitment-gate question MUST appear at most once — it is
+    // the only gate in the command. Bare integer (`Apply 4 planned moves?`)
+    // confirms the collapse: the count is the total across every bucket.
+    const apply = r.stdout.match(/Apply \d+ planned moves?\?/g) ?? [];
+    expect(apply.length).toBeLessThanOrEqual(1);
+    // The legacy per-bucket question never appears.
+    expect(r.stdout).not.toMatch(/Move these to .+\/\?/);
+  });
+
+  it("apply: --yes auto-applies the single commitment-gate non-interactively", async () => {
+    await setupBrownfieldFixture();
+    await writeFile(
+      join(dir, "src/components/invoice-form.tsx"),
+      `import { saveInvoice } from "../../features/invoicing/api";\nexport function InvoiceForm() { return <form />; }`,
+    );
+    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // Every classified file was moved — the gate auto-applied.
+    await expect(access(join(dir, "design-system/atoms/button.tsx"))).resolves.toBeUndefined();
+    await expect(access(join(dir, "design-system/composites/card.tsx"))).resolves.toBeUndefined();
+    await expect(access(join(dir, "features/invoicing/invoice-list.tsx"))).resolves.toBeUndefined();
+    await expect(access(join(dir, "features/invoicing/invoice-form.tsx"))).resolves.toBeUndefined();
+  });
+
+  it("apply: non-TTY (no --yes) auto-applies the commitment-gate — git is the undo", async () => {
+    await setupBrownfieldFixture();
+    // No --yes, no TTY (test runner). ADR-0016: commitment-gate non-TTY
+    // auto-applies (zero-prompt path the agent / automation needs).
+    const r = await runCli(["classify", "--src", "src/components"], { cwd: dir });
+    expect(r.code).toBe(0);
+    await expect(access(join(dir, "design-system/atoms/button.tsx"))).resolves.toBeUndefined();
+    await expect(access(join(dir, "design-system/composites/card.tsx"))).resolves.toBeUndefined();
+  });
 });

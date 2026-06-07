@@ -16,6 +16,12 @@ import {
 import { scanDriftAndIntegrity, type AuditFinding } from "../lib/reports/drift-integrity-scan.js";
 import { formatFindings, formatScorecard } from "../lib/reports/findings-format.js";
 import { runAuditFix } from "../lib/checks/audit-fix.js";
+import {
+  loadAnswersFile,
+  UnresolvedAmbiguityError,
+  type PendingDecision,
+} from "../lib/decision/index.js";
+import { checkCleanTree } from "../lib/clean-tree.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -28,6 +34,23 @@ export interface AuditOpts {
   issue?: string;
   permanent?: boolean;
   verbose?: boolean;
+  /** Path to a JSON file mapping Decision id → answer index (or `"defer"`).
+   * Loaded into `ctx.decisions.answers` before the audit-fix pre-pass runs
+   * (PRD #325 / ADR-0016). */
+  answers?: string;
+  /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). Only meaningful
+   * with --fix; the read-only audit path is non-destructive and does not gate. */
+  allowDirty?: boolean;
+  /**
+   * When provided, ADR-0016 Ambiguity Decisions hit during the audit-fix
+   * pre-pass are collected here as `PendingDecision`s instead of throwing
+   * `UnresolvedAmbiguityError`. The caller is responsible for surfacing them
+   * (e.g. heal collects across iterations, writes an `--answers` scaffold,
+   * and exits with a named non-zero code). When omitted, audit keeps today's
+   * fail-loud behaviour: a non-TTY genuine Ambiguity with no supplied answer
+   * exits 2 with a plain-language "decision X needs you" message.
+   */
+  pendingSink?: PendingDecision[];
   cwd?: string;
 }
 
@@ -35,13 +58,35 @@ const suppressedKey = (rule: string, path: string) => `${rule}:${path}`;
 
 export async function auditCmd(opts: AuditOpts) {
   const cwd = opts.cwd ?? process.cwd();
+
+  // Clean-tree guard (PRD #325 / sub-issue #328). Only the destructive
+  // `--fix` path gates; the read-only audit can always run, dirty or not.
+  // Runs before any Decision resolution so a clean-tree failure short-
+  // circuits before the operator is asked anything.
+  if (opts.fix) {
+    const guard = checkCleanTree({ command: "audit", cwd, allowDirty: opts.allowDirty });
+    if (!guard.ok) {
+      err(guard.message);
+      process.exit(2);
+    }
+  }
+
   let pack = opts.pack;
   let cfg: Config | null = null;
   let ctx: ProjectContext;
   const cfgPath = join(cwd, ".claude-ds.json");
+  const decisions: ProjectContext["decisions"] = {};
+  if (opts.answers) {
+    try {
+      decisions.answers = await loadAnswersFile(opts.answers);
+    } catch (e) {
+      err(e instanceof Error ? e.message : String(e));
+      process.exit(2);
+    }
+  }
   if (!pack) {
     if (!(await exists(cfgPath))) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
-    ctx = await loadProject(cwd);
+    ctx = await loadProject(cwd, decisions);
     cfg = ctx.cfg;
     pack = cfg.pack;
   } else {
@@ -51,7 +96,7 @@ export async function auditCmd(opts: AuditOpts) {
     }
     const packDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../packs", pack);
     const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
-    ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
+    ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest }, decisions);
   }
   const { manifest } = ctx;
   // #47/#34: honor app_dir + claude_md_target when checking presence.
@@ -111,18 +156,33 @@ export async function auditCmd(opts: AuditOpts) {
     f => !suppressedSet.has(suppressedKey(f.ruleId, f.file)),
   );
 
-  const fixSummary = await runAuditFix(ctx, {
-    unexpected,
-    driftTierDirs: driftIntegrity.tierDirs,
-    exceptions,
-    suppressedSet,
-    activeFindings: initialActive,
-    fix: opts.fix ?? false,
-    except: opts.except ?? false,
-    reason: opts.reason,
-    issue: opts.issue,
-    permanent: opts.permanent,
-  });
+  let fixSummary;
+  try {
+    fixSummary = await runAuditFix(ctx, {
+      unexpected,
+      driftTierDirs: driftIntegrity.tierDirs,
+      exceptions,
+      suppressedSet,
+      activeFindings: initialActive,
+      fix: opts.fix ?? false,
+      except: opts.except ?? false,
+      reason: opts.reason,
+      issue: opts.issue,
+      permanent: opts.permanent,
+      pendingSink: opts.pendingSink,
+    });
+  } catch (e) {
+    // ADR-0016: a genuine Ambiguity hit a non-TTY caller with no pre-supplied
+    // answer. Print a named, plain-language exit so the operator knows which
+    // Decision id to put in `--answers` and re-run with.
+    if (e instanceof UnresolvedAmbiguityError) {
+      err(`audit needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`);
+      err(`Re-run with --answers <file> mapping "${e.decisionId}" to an option index, or --except to register an exception.`);
+      process.exit(2);
+      return;
+    }
+    throw e;
+  }
 
   warningCount += fixSummary.warningCount;
   const activeFindings = fixSummary.remainingFindings;

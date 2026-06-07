@@ -8,6 +8,7 @@ import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/pr
 import { detectLookalikes } from "../lib/lookalike.js";
 import { info, err, confirm } from "../lib/log.js";
 import { run } from "../lib/runner.js";
+import { checkCleanTree } from "../lib/clean-tree.js";
 import type { Change, Operation } from "../lib/operation.js";
 
 const execFile = promisify(execFileCb);
@@ -18,11 +19,15 @@ export async function migrateLayoutCmd(opts: {
   pack?: string;
   yes?: boolean;
   ignore?: string;
+  /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). */
+  allowDirty?: boolean;
   cwd?: string;
 }) {
   const cwd = opts.cwd ?? process.cwd();
 
-  // Refuse if not inside a git repo
+  // Refuse if not inside a git repo. migrate-layout commits its result so a
+  // git repo is a hard precondition — the shared clean-tree guard treats a
+  // missing repo as "cannot check" and proceeds, which would be wrong here.
   try {
     await execFile("git", ["rev-parse", "--is-inside-work-tree"], { cwd });
   } catch {
@@ -30,12 +35,11 @@ export async function migrateLayoutCmd(opts: {
     process.exit(2);
   }
 
-  // Refuse if working tree is dirty
-  const { stdout: porcelain } = await execFile("git", ["status", "--porcelain"], { cwd });
-  if (porcelain.trim().length > 0) {
-    process.stderr.write(
-      "migrate-layout: working tree is dirty — commit or stash changes first\n"
-    );
+  // Shared clean-tree guard (PRD #325 / sub-issue #328). Replaces the
+  // hand-rolled `git status --porcelain` check this command used to carry.
+  const guard = checkCleanTree({ command: "migrate-layout", cwd, allowDirty: opts.allowDirty });
+  if (!guard.ok) {
+    process.stderr.write(guard.message + "\n");
     process.exit(2);
   }
 

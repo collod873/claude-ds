@@ -179,4 +179,222 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/converged/);
   }, 15000);
+
+  // PRD #325 / sub-issue #328 — resumability hint.
+  //
+  // Heal is convergent and idempotent (the loop's whole point — #265), so a
+  // mid-run Ctrl-C and re-invocation is safe: the next invocation walks the
+  // same fixed-point and picks up where it left off. The hint surfaces that
+  // guarantee at the only moment a user might worry about it: when the loop
+  // is running and they're tempted to wait it out.
+  //
+  // TTY only — agent runs (non-TTY) get no decoration. The test toggles
+  // stdout.isTTY around runCli; restore in finally so the test runner's own
+  // reporter doesn't break.
+  describe("resumability hint (TTY only)", () => {
+    it("TTY: prints 'Ctrl-C and re-run is safe'", async () => {
+      await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(
+        join(dir, "design-system/atoms/button.tsx"),
+        `export function Button() { return <span/>; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+      );
+
+      const origTTY = process.stdout.isTTY;
+      Object.defineProperty(process.stdout, "isTTY", {
+        value: true,
+        writable: true,
+        configurable: true,
+      });
+      try {
+        const r = await runCli(["heal"], { cwd: dir });
+        expect(r.code).toBe(0);
+        expect(r.stdout).toMatch(/Ctrl-C and re-run is safe/);
+      } finally {
+        Object.defineProperty(process.stdout, "isTTY", {
+          value: origTTY,
+          writable: true,
+          configurable: true,
+        });
+      }
+    }, 15000);
+
+    it("non-TTY (agent run): the hint is suppressed — output is unchanged from today", async () => {
+      await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(
+        join(dir, "design-system/atoms/button.tsx"),
+        `export function Button() { return <span/>; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+      );
+
+      const origTTY = process.stdout.isTTY;
+      Object.defineProperty(process.stdout, "isTTY", {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+      try {
+        const r = await runCli(["heal"], { cwd: dir });
+        expect(r.code).toBe(0);
+        expect(r.stdout).not.toMatch(/Ctrl-C and re-run is safe/);
+      } finally {
+        Object.defineProperty(process.stdout, "isTTY", {
+          value: origTTY,
+          writable: true,
+          configurable: true,
+        });
+      }
+    }, 15000);
+  });
+
+  // PRD #325 sub-issue #333 — headless heal collects Pending decisions and
+  // exits with an --answers scaffold rather than halting on the first or
+  // silently guessing. The loop converges everything Automatable to a partial
+  // fixed point ("converged-modulo-Pending"), gathers unresolved Ambiguities,
+  // and exits with a stable named non-zero code distinct from convergence-
+  // failure so sandcastle automation can route on it specifically.
+  describe("headless Pending-decision collection (sub-issue #333)", () => {
+    const PENDING_EXIT = 3;
+    const SCAFFOLD_FILE = ".claude-ds-pending-answers.json";
+
+    // Equidistant-token fixture: `padding: 12` is exactly between `spacing-2`
+    // (8) and `spacing-4` (16), so the DRIFT-INLINE-STATIC-STYLE fixer's
+    // `describeDecisions` enumerates a `token-tie:padding:12` Ambiguity. In
+    // non-TTY with no --answers, the agent must NOT silently pick a default
+    // — this is exactly the project judgment ADR-0016 preserved for Collin.
+    async function scaffoldEquidistantTokenFixture(): Promise<void> {
+      await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(
+        join(dir, "design-system/tokens.json"),
+        JSON.stringify({ spacing: { 2: "8", 4: "16" } }),
+      );
+      await writeFile(
+        join(dir, "design-system/atoms/card.tsx"),
+        [
+          `export function Card() { return <div style={{ padding: 12 }}>x</div>; }`,
+          `export const meta = { kind: "atom" as const, examples: [] };`,
+          ``,
+        ].join("\n"),
+      );
+    }
+
+    it("exits with a named non-zero distinct from convergence-failure", async () => {
+      // Convergence-failure exit is 1; user-error is 2; the Pending-decision
+      // exit must be a third stable code (3) so sandcastle automation can
+      // route on it specifically rather than conflating "needs Collin" with
+      // "did not converge."
+      await scaffoldEquidistantTokenFixture();
+      const r = await runCli(["heal"], { cwd: dir });
+      expect(r.code).toBe(PENDING_EXIT);
+      expect(r.code).not.toBe(0);
+      expect(r.code).not.toBe(1);
+      expect(r.code).not.toBe(2);
+    }, 30000);
+
+    it("the report names each Pending decision by id, restates the question, and lists options", async () => {
+      await scaffoldEquidistantTokenFixture();
+      const r = await runCli(["heal"], { cwd: dir });
+      expect(r.code).toBe(PENDING_EXIT);
+      // The Decision id is the spine-flat key the operator types into the
+      // scaffold. It must appear verbatim or `--answers` can't refer to it.
+      const expectedId =
+        "DRIFT-INLINE-STATIC-STYLE:design-system/atoms/card.tsx::token-tie:padding:12";
+      const combined = r.stdout + r.stderr;
+      expect(combined).toContain(expectedId);
+      // Plain-language restatement of the question — no rule-ID jargon
+      // pretending to be a question. The fixer's `describeDecisions` for
+      // this rule uses generic "(nearest token A/B)" labels because the
+      // actual token names require reading tokens.json (I/O — banned in
+      // describeDecisions), but the question itself carries the prop/value
+      // pair and the word "equidistant," which is what the operator reads.
+      expect(combined).toMatch(/equidistant/i);
+      expect(combined).toMatch(/padding/);
+      // Both options enumerated so the operator can choose without
+      // re-reading the source — the failure mode is "you know there's a
+      // decision but can't find the choices."
+      expect(combined).toMatch(/\[0\]/);
+      expect(combined).toMatch(/\[1\]/);
+      // The closing summary names the count + how to act on it.
+      expect(combined).toMatch(/1 decision.*need.*you/i);
+      expect(combined).toMatch(/--answers/);
+    }, 30000);
+
+    it("writes an --answers scaffold file the resolver's loader can parse", async () => {
+      // Acceptance #3 — the scaffold is the round-trip handoff between heal
+      // and the operator. One entry per Pending decision; the value carries a
+      // hint with the option indices so the user can fill it without
+      // cross-referencing the report.
+      await scaffoldEquidistantTokenFixture();
+      const r = await runCli(["heal"], { cwd: dir });
+      expect(r.code).toBe(PENDING_EXIT);
+
+      const scaffoldPath = join(dir, SCAFFOLD_FILE);
+      expect(await fileExists(scaffoldPath)).toBe(true);
+
+      const parsed = JSON.parse(await readFile(scaffoldPath, "utf8"));
+      const expectedId =
+        "DRIFT-INLINE-STATIC-STYLE:design-system/atoms/card.tsx::token-tie:padding:12";
+      expect(parsed).toHaveProperty(expectedId);
+      const hint = parsed[expectedId];
+      // The scaffold value is a sentinel string the loader rejects (`number`
+      // or `"defer"` only), so a user who passes back the unedited scaffold
+      // gets a clear "fill these in first" error rather than silently no-
+      // op'ing. The hint enumerates the option indices so the user picks one.
+      expect(typeof hint).toBe("string");
+      expect(hint).toMatch(/^FILL: /);
+      expect(hint).toMatch(/0=/);
+      expect(hint).toMatch(/1=/);
+
+      // Shape: flat top-level object keyed by Decision id. The existing
+      // loader (`loadAnswersFile`) requires this shape; we assert it here so
+      // a regression that nests answers under a wrapper key surfaces before
+      // the round-trip test below.
+      expect(typeof parsed).toBe("object");
+      expect(parsed).not.toBeNull();
+      expect(Array.isArray(parsed)).toBe(false);
+    }, 30000);
+
+    it("re-running with --answers <scaffold-filled> resolves the Pending decision and converges", async () => {
+      // Acceptance #4 — the spine round trip. Heal exits with Pending, the
+      // operator fills the scaffold value (replacing the FILL: hint string
+      // with the chosen option index), and re-running converges.
+      await scaffoldEquidistantTokenFixture();
+      const firstRun = await runCli(["heal"], { cwd: dir });
+      expect(firstRun.code).toBe(PENDING_EXIT);
+
+      const scaffoldPath = join(dir, SCAFFOLD_FILE);
+      const scaffold = JSON.parse(await readFile(scaffoldPath, "utf8"));
+      const decisionId =
+        "DRIFT-INLINE-STATIC-STYLE:design-system/atoms/card.tsx::token-tie:padding:12";
+      // Fill the hint with option 0 (spacing-2).
+      scaffold[decisionId] = 0;
+      await writeFile(scaffoldPath, JSON.stringify(scaffold));
+
+      const secondRun = await runCli(
+        ["heal", "--answers", scaffoldPath],
+        { cwd: dir },
+      );
+      expect(secondRun.code).toBe(0);
+      expect(secondRun.stdout).toMatch(/converged/);
+
+      // The fix actually ran: padding: 12 → spacing-2 (className with token).
+      const card = await readFile(
+        join(dir, "design-system/atoms/card.tsx"),
+        "utf8",
+      );
+      expect(card).not.toContain("padding: 12");
+    }, 60000);
+
+    it("recognizes the partial fixed point: stable bytes + only Pending remain → exits clean (not 'did not converge')", async () => {
+      // Acceptance #6 — without Pending-collection the loop would either halt
+      // on the first Ambiguity (old fail-loud) or churn until the iteration
+      // ceiling reporting `did not converge`. The named PENDING exit asserts
+      // we hit the partial-fixed-point branch, not the ceiling-failure branch.
+      await scaffoldEquidistantTokenFixture();
+      const r = await runCli(["heal"], { cwd: dir });
+      expect(r.code).toBe(PENDING_EXIT);
+      expect(r.stderr).not.toMatch(/did not converge/);
+    }, 30000);
+  });
 });

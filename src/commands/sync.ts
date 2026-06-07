@@ -13,10 +13,22 @@ import { run } from "../lib/runner.js";
 import { detectFormatter, runFormatter } from "../lib/formatter.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
+import { checkCleanTree } from "../lib/clean-tree.js";
 
-export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean }) {
+export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean }) {
   const cwd = opts.cwd ?? process.cwd();
   try { await stat(join(cwd, ".claude-ds.json")); } catch { err(".claude-ds.json absent"); process.exit(2); }
+
+  // Clean-tree guard (PRD #325 / sub-issue #328). --dry-run never mutates so
+  // it bypasses the gate; the apply path refuses on a dirty tree unless the
+  // caller passes --allow-dirty (or heal forwards it).
+  if (!opts.dryRun) {
+    const guard = checkCleanTree({ command: "sync", cwd, allowDirty: opts.allowDirty });
+    if (!guard.ok) {
+      err(guard.message);
+      process.exit(2);
+    }
+  }
 
   // #84: apply migrateConfig before planning the pack-file sync, so syncPackFiles
   // plans against the post-migration cfg (correct app_dir / claude_md_target).

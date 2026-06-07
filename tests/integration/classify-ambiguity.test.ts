@@ -184,6 +184,78 @@ describe("classify ambiguity pass (issue #203)", () => {
   });
 });
 
+// PRD #325 sub-issue #327: the atom-vs-composite Ambiguity flows through the
+// Decision spine. Non-TTY without --answers fails loud (no silent default);
+// pre-supplied --answers resolves the Ambiguity headlessly.
+describe("classify ambiguity spine integration (PRD #325 / ADR-0016)", () => {
+  let dir: string;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    dir = await freshTmpDir();
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(join(dir, "design-system/atoms/twocomp.tsx"), AMBIGUOUS_ATOM);
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
+  });
+
+  afterEach(async () => {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+    await cleanup(dir);
+  });
+
+  it("non-TTY + no --answers: fails loud naming the Decision (no silent default)", async () => {
+    // No injected prompt, no TTY, no --answers. ADR-0016: an Ambiguity in
+    // these conditions must throw, not silently pick a default. The audit-fix
+    // pre-pass would have silently auto-deferred under ADR-0014; here we must
+    // exit non-zero with the Decision id surfaced.
+    await classifyCmd({ src: "src/components", cwd: dir });
+    expect(exitSpy).toHaveBeenCalledWith(2);
+    const errCalls = errSpy.mock.calls.map(c => c.map(String).join(" "));
+    const named = errCalls.find(c => c.includes("classify needs you"));
+    expect(named).toBeDefined();
+    expect(named).toMatch(/classify-ambiguity:design-system\/atoms\/twocomp\.tsx/);
+    // The file MUST stay untouched — we never silently moved or kept it.
+    expect(await readFile(join(dir, "design-system/atoms/twocomp.tsx"), "utf8")).toBe(AMBIGUOUS_ATOM);
+    // No exception silently written either.
+    await expect(readFile(join(dir, "design-system/exceptions.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("non-TTY + --answers move (option 1): relocates to composites/ without a TTY", async () => {
+    const answersPath = join(dir, ".answers.json");
+    await writeFile(answersPath, JSON.stringify({
+      "classify-ambiguity:design-system/atoms/twocomp.tsx": 1,
+    }));
+    await classifyCmd({ src: "src/components", cwd: dir, answers: answersPath });
+    // Moved to composites/ via the pre-supplied answer; no exit-loud.
+    expect(exitSpy).not.toHaveBeenCalledWith(2);
+    await expect(readFile(join(dir, "design-system/atoms/twocomp.tsx"), "utf8")).rejects.toThrow();
+    const moved = await readFile(join(dir, "design-system/composites/twocomp.tsx"), "utf8");
+    expect(moved).toMatch(/kind:\s*["']composite["']/);
+  });
+
+  it("non-TTY + --answers keep (option 0): leaves atom in place + writes the suppression exceptions", async () => {
+    const answersPath = join(dir, ".answers.json");
+    await writeFile(answersPath, JSON.stringify({
+      "classify-ambiguity:design-system/atoms/twocomp.tsx": 0,
+    }));
+    await classifyCmd({ src: "src/components", cwd: dir, answers: answersPath });
+    expect(exitSpy).not.toHaveBeenCalledWith(2);
+    expect(await readFile(join(dir, "design-system/atoms/twocomp.tsx"), "utf8")).toBe(AMBIGUOUS_ATOM);
+    const ex = JSON.parse(await readFile(join(dir, "design-system/exceptions.json"), "utf8"));
+    expect(ex.exceptions).toContainEqual(
+      expect.objectContaining({ rule: "DRIFT-MISPLACED", path: "design-system/atoms/twocomp.tsx" }),
+    );
+  });
+});
+
 // Issue #251: brownfield flow convergence — classify must converge without a TTY so
 // a subsequent audit finds zero DRIFT-MISPLACED / DRIFT-MISCLASSIFIED-ATOM on files
 // that classify was already confident about.

@@ -1,22 +1,31 @@
 /**
- * PRD #266 Phase C step 2 — command-level pre-pass + determinism of
+ * PRD #325 / ADR-0016 — command-level Decision pre-pass + determinism of
  * `fixerAsOperation(f).plan(ctx)`.
  *
  * What the pre-pass guarantees:
- *   - Non-TTY `audit --fix` never invokes a prompt; every interactive finding
- *     lands in `exceptions.json` with `reason: "auto-deferred: no TTY"` BEFORE
- *     any drift-fixer Op is constructed.
- *   - Per-finding answers (and the `"defer"` sentinel) live on
- *     `ctx.decisions.fixerChoices`, so the fixer is a pure function of
- *     `(finding, ctx)`. Running the same Op twice over the same ctx returns
- *     equal `Change[]` — the literal statement that `plan(ctx)` is pure.
+ *   - Non-TTY `audit --fix` never invokes a prompt. Every interactive finding's
+ *     decision points enumerate to Ambiguity Decisions; the resolver throws
+ *     `UnresolvedAmbiguityError` for any unanswered one, audit catches and
+ *     exits non-zero. ADR-0014's "every ambiguity gets a safe default in
+ *     non-TTY" path (auto-deferral to `exceptions.json`) is retired — the
+ *     agent no longer silently picks a project judgment that was the owner's
+ *     to make.
+ *   - Pre-supplied `--answers` (carried on `ctx.decisions.answers`) resolve
+ *     Ambiguities in non-TTY without a prompt and without throwing — the test
+ *     seam for the spine.
+ *   - `--except` overrides the pre-pass: remaining findings land in
+ *     `exceptions.json` via the explicit reason/issue flow, an explicit opt-in
+ *     for sanctioned drift.
+ *   - Per-finding answers live on `ctx.decisions.fixerChoices`, so the fixer
+ *     is a pure function of `(finding, ctx)`. Running the same Op twice over
+ *     the same ctx returns equal `Change[]`.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { makeFakeCtx } from "../helpers/fake-ctx";
 import { fixerAsOperation } from "../../src/lib/fix-pass";
 import { findingKey, type DriftFinding } from "../../src/lib/drift/index.js";
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 vi.mock("../../src/lib/log.js", () => ({
@@ -27,7 +36,12 @@ vi.mock("../../src/lib/log.js", () => ({
 }));
 
 import { auditCmd } from "../../src/commands/audit";
+import { err as errLog } from "../../src/lib/log.js";
 import { makeTtyPrompt } from "../../src/lib/drift/prompt.js";
+
+async function exists(p: string): Promise<boolean> {
+  try { await stat(p); return true; } catch { return false; }
+}
 
 describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
   let dir: string;
@@ -40,6 +54,11 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
     originalStdoutIsTTY = process.stdout.isTTY;
     originalStdinIsTTY = process.stdin.isTTY;
     exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
+    // The log mocks are module-level singletons — clear per-test so a prior
+    // run's err() / info() / exit() calls don't leak into this test's
+    // assertions (e.g. matching a previous test's named-decision message).
+    vi.mocked(errLog).mockClear();
+    exitSpy.mockClear();
   });
 
   afterEach(async () => {
@@ -62,13 +81,13 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
     });
   }
 
-  describe("non-TTY pre-pass routes interactive findings to exceptions.json", () => {
+  describe("non-TTY pre-pass fails loud on unresolved Ambiguities (ADR-0016)", () => {
     /**
      * Composite imports a symbol from `lib/api/` whose source file has its own
      * `features/auth/` domain dep. `canExtract` is false, `canConvertToProp`
      * is true → describeDecisions emits a `convert:...` decision point. In
-     * non-TTY the pre-pass records `"defer"` for every decision; the finding
-     * lands in `exceptions.json` and the fix never runs.
+     * non-TTY with no supplied answer the resolver throws — audit exits
+     * non-zero, no fix runs, no `auto-deferred` exception is written.
      */
     async function scaffoldInteractiveDsImports() {
       await writeFile(
@@ -94,26 +113,22 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
       ].join("\n"));
     }
 
-    it("DRIFT-DS-IMPORTS-FEATURE: auto-defers to exceptions.json in non-TTY mode", async () => {
+    it("DRIFT-DS-IMPORTS-FEATURE: fails loud (named exit) in non-TTY with no --answers", async () => {
       await scaffoldInteractiveDsImports();
       setNonTTY();
 
-      // Sanity: no exceptions before the run.
-      await expect(
-        readFile(join(dir, "design-system/exceptions.json"), "utf8"),
-      ).rejects.toThrow();
-
       await auditCmd({ fix: true, cwd: dir });
 
-      const ex = JSON.parse(
-        await readFile(join(dir, "design-system/exceptions.json"), "utf8"),
-      );
-      const autoDeferred = ex.exceptions.filter(
-        (e: { rule: string; reason?: string }) =>
-          e.rule === "DRIFT-DS-IMPORTS-FEATURE" && e.reason === "auto-deferred: no TTY",
-      );
-      expect(autoDeferred).toHaveLength(1);
-      expect(autoDeferred[0].path).toBe("design-system/composites/user-badge.tsx");
+      // Named exit, not a silent default — error message carries the Decision id
+      // and question so the operator can supply --answers and re-run.
+      const errCalls = vi.mocked(errLog).mock.calls.map(c => String(c[0]));
+      const named = errCalls.find(c => c.includes("audit needs you"));
+      expect(named).toBeDefined();
+      expect(named).toMatch(/DRIFT-DS-IMPORTS-FEATURE.*user-badge\.tsx/);
+      expect(exitSpy).toHaveBeenCalledWith(2);
+
+      // No exceptions.json is written — auto-deferral retired (ADR-0016).
+      expect(await exists(join(dir, "design-system/exceptions.json"))).toBe(false);
 
       // The fix never ran — the original import is still there.
       const composite = await readFile(
@@ -122,10 +137,10 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
       expect(composite).toContain("lib/api/client");
     });
 
-    it("DRIFT-INLINE-STATIC-STYLE: equidistant-token finding auto-defers in non-TTY", async () => {
+    it("DRIFT-INLINE-STATIC-STYLE: equidistant-token finding fails loud in non-TTY", async () => {
       // Two tokens equidistant from `padding: 12` → the only decision point
-      // for this finding is `token-tie:padding:12`. Non-TTY → "defer" → finding
-      // auto-deferred to exceptions.json; the inline style stays.
+      // for this finding is `token-tie:padding:12`. Non-TTY + no answer:
+      // resolver throws, audit exits non-zero, inline style stays.
       await writeFile(
         join(dir, ".claude-ds.json"),
         JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn" }),
@@ -143,19 +158,72 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
       setNonTTY();
       await auditCmd({ fix: true, cwd: dir });
 
-      const ex = JSON.parse(
-        await readFile(join(dir, "design-system/exceptions.json"), "utf8"),
-      );
-      const auto = ex.exceptions.filter(
-        (e: { rule: string; reason?: string }) =>
-          e.rule === "DRIFT-INLINE-STATIC-STYLE" && e.reason === "auto-deferred: no TTY",
-      );
-      expect(auto).toHaveLength(1);
+      const errCalls = vi.mocked(errLog).mock.calls.map(c => String(c[0]));
+      const named = errCalls.find(c => c.includes("audit needs you"));
+      expect(named).toBeDefined();
+      expect(named).toMatch(/token-tie:padding:12/);
+      expect(exitSpy).toHaveBeenCalledWith(2);
+
+      // No auto-deferred exceptions.json is written.
+      expect(await exists(join(dir, "design-system/exceptions.json"))).toBe(false);
 
       // Style was not rewritten — the deferred finding was never planned.
       const card = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
       expect(card).toContain("padding: 12");
       expect(card).not.toContain("spacing-");
+    });
+
+    it("pre-supplied --answers resolves the Ambiguity without prompting or throwing", async () => {
+      // The DRIFT-INLINE-STATIC-STYLE token-tie scenario, but with the answer
+      // pre-supplied via the spine's flat `--answers` bag. Resolver picks
+      // option 0 ("spacing-2") without prompting; fixer applies the rewrite.
+      await writeFile(
+        join(dir, ".claude-ds.json"),
+        JSON.stringify({ packVersion: "v0.9.0", pack: "next-react", mode: "warn" }),
+      );
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify({
+        spacing: { 2: "8", 4: "16" },
+      }));
+      await writeFile(join(dir, "design-system/atoms/card.tsx"), [
+        `export function Card() { return <div style={{ padding: 12 }}>x</div>; }`,
+        `export const meta = { kind: "atom" as const, examples: [] };`,
+        ``,
+      ].join("\n"));
+
+      // Spine id: `${ruleId}:${file}::${decisionKey}` (see fixer-adapter).
+      const answersPath = join(dir, ".answers.json");
+      const decisionId =
+        "DRIFT-INLINE-STATIC-STYLE:design-system/atoms/card.tsx::token-tie:padding:12";
+      await writeFile(answersPath, JSON.stringify({ [decisionId]: 0 }));
+
+      setNonTTY();
+      await auditCmd({ fix: true, cwd: dir, answers: answersPath });
+
+      // Resolver did not throw — no fail-loud exit.
+      const errCalls = vi.mocked(errLog).mock.calls.map(c => String(c[0]));
+      expect(errCalls.find(c => c.includes("audit needs you"))).toBeUndefined();
+      expect(exitSpy).not.toHaveBeenCalledWith(2);
+    });
+
+    it("--except still routes remaining findings to exceptions.json (sanctioned drift)", async () => {
+      // The explicit reason/issue path stays — the agent must opt in to write
+      // exceptions, instead of getting auto-deferral as a non-TTY side effect.
+      await scaffoldInteractiveDsImports();
+      setNonTTY();
+
+      await auditCmd({ fix: true, except: true, reason: "skip per agent", cwd: dir });
+
+      const ex = JSON.parse(
+        await readFile(join(dir, "design-system/exceptions.json"), "utf8"),
+      );
+      const flagged = ex.exceptions.filter(
+        (e: { rule: string; reason?: string }) =>
+          e.rule === "DRIFT-DS-IMPORTS-FEATURE",
+      );
+      expect(flagged).toHaveLength(1);
+      // The reason is the user-supplied one, not the retired "auto-deferred" tag.
+      expect(flagged[0].reason).toBe("skip per agent");
     });
 
     it("never constructs the TTY prompt module's readline interface in non-TTY mode", async () => {
