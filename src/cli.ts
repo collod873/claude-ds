@@ -128,16 +128,18 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("migrate")
-    .description("move one component into the scaffold and register exceptions")
+    .description("move one component into the scaffold (registers an exception only when --tier forces a misplacement)")
     .argument("<path>", "source component path")
-    .requiredOption("--reason <text>", "reason for exception")
+    .option("--reason <text>", "reason for exception (required only when --tier creates a misplacement)")
+    .option("--issue <ref>", "issue link (URL or #N) recorded on the exception (required only when --tier creates a misplacement)")
     .addOption(new Option("--tier <tier>", "force tier: atom or composite").choices(["atom", "composite"]))
     .option("--rename <name>", "destination filename override")
     .option("--yes", "skip confirmation prompt")
-    .action(async (source: string, opts: { reason: string; tier?: string; rename?: string; yes?: boolean }) => {
+    .action(async (source: string, opts: { reason?: string; issue?: string; tier?: string; rename?: string; yes?: boolean }) => {
       await migrateCmd({
         source,
         reason: opts.reason,
+        issue: opts.issue,
         tier: opts.tier as "atom" | "composite" | undefined,
         rename: opts.rename,
         yes: opts.yes,
