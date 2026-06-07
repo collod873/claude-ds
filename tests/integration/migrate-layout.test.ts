@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
-import { writeFile, mkdir, stat } from "node:fs/promises";
+import { writeFile, mkdir, stat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
@@ -170,6 +170,28 @@ describe("migrate-layout", () => {
     const r = await runCli(["migrate-layout", "--yes"], { cwd: dir });
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/--pack required/);
+  });
+
+  // #355: tokens.tsx showcase must never be renamed over canonical tokens.json
+  // (data loss — operator runs --yes and TSX source lands at the JSON path).
+  it("does not rename a .tsx candidate over a .json canonical (extension mismatch)", async () => {
+    await gitInit(dir);
+    await mkdir(join(dir, "design-system", "references"), { recursive: true });
+    const tsxSource = "import React from 'react';\nexport default function Tokens() { return null; }\n";
+    await writeFile(join(dir, "design-system", "references", "tokens.tsx"), tsxSource);
+    await gitAdd(dir, "design-system/references/tokens.tsx");
+    await gitCommit(dir, "seed showcase");
+
+    const r = await runCli(["migrate-layout", "--pack", "next-react", "--yes"], { cwd: dir });
+
+    expect(r.code).toBe(0);
+    // The TSX showcase stays put.
+    const stillThere = await readFile(join(dir, "design-system", "references", "tokens.tsx"), "utf8");
+    expect(stillThere).toBe(tsxSource);
+    // tokens.json must NOT be created from the TSX source.
+    await expect(stat(join(dir, "design-system", "tokens.json"))).rejects.toThrow();
+    // Plan must not propose the bogus rename.
+    expect(r.stdout).not.toMatch(/tokens\.tsx → design-system\/tokens\.json/);
   });
 
   it("git mv preserves history: git log --follow shows pre-move commit", async () => {
