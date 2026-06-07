@@ -166,6 +166,58 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
     expect(cfg.meta_kind_strict).toBe(true);
   }, 30000);
 
+  // Issue #343 / ADR-0018 — `heal` obtains its step order from the shared
+  // remediation planner, not a hardcoded sequence. The pre-#343 sequence
+  // hardcoded `sync → upgrade → classify → audit --fix` (prelude + loop);
+  // the planner mandates `upgrade → sync → repair → ... → classify →
+  // reconform → audit --fix`. This test pins the *external* signal of that
+  // wiring: the progress UI's `[*] phase` lines, written to stderr, appear
+  // in the planner's canonical order — specifically, `upgrade` (when it
+  // fires) precedes `sync`. The pre-#343 order had `sync` first.
+  it("dispatches steps in the planner's canonical order (upgrade before sync)", async () => {
+    // Pinned packVersion below the installed CLI → upgradeAvailable=true,
+    // so `upgrade` is in the plan. The base scaffold is absent → scaffold-
+    // Gap=true, so `sync` is also in the plan. The planner's canonical
+    // order puts upgrade first.
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await writeFile(
+      join(dir, "design-system/atoms/button.tsx"),
+      `export function Button() { return <span/>; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+    );
+
+    // Force a TTY so the progress UI emits the per-phase markers we
+    // observe to assert order. Non-TTY suppresses the spinner; the order
+    // would still be planner-driven but unobservable from outside.
+    const origTTY = process.stdout.isTTY;
+    Object.defineProperty(process.stdout, "isTTY", {
+      value: true,
+      writable: true,
+      configurable: true,
+    });
+    try {
+      const r = await runCli(["heal"], { cwd: dir });
+      expect(r.code).toBe(0);
+
+      // Both phases fire — the fixture has work for each.
+      const upgradeIdx = r.stderr.search(/\bupgrade\b/);
+      const syncIdx = r.stderr.search(/\bsync\b/);
+      expect(upgradeIdx).toBeGreaterThanOrEqual(0);
+      expect(syncIdx).toBeGreaterThanOrEqual(0);
+
+      // Planner order: upgrade BEFORE sync. The pre-#343 hardcoded order
+      // ran sync first; this assertion is the regression seam against a
+      // future change that re-introduces a second ordering brain.
+      expect(upgradeIdx).toBeLessThan(syncIdx);
+    } finally {
+      Object.defineProperty(process.stdout, "isTTY", {
+        value: origTTY,
+        writable: true,
+        configurable: true,
+      });
+    }
+  }, 30000);
+
   it("reports `converged` and exits 0 on an already-clean tree", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });

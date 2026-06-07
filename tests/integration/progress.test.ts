@@ -60,9 +60,13 @@ describe("heal progress UI (#332)", () => {
       const r = await runCli(["heal"], { cwd: dir });
       expect(r.code).toBe(0);
       // Per-phase markers land on stderr (so stdout stays clean for agents).
-      expect(r.stderr).toMatch(/sync/);
-      expect(r.stderr).toMatch(/classify/);
-      expect(r.stderr).toMatch(/audit/);
+      // The specific phases that fire are now planner-determined (#343 /
+      // ADR-0018): heal only dispatches loop members whose `ProjectState`
+      // signal fires, so a clean fixture won't necessarily exercise
+      // classify/audit. The integration contract this test pins is that
+      // *some* per-phase progress marker reaches stderr — the ora ✔ persist
+      // is the same line regardless of phase name.
+      expect(r.stderr).toMatch(/✔|✖/);
       // Iteration counter is anchored to the progress UI (acceptance #1).
       expect(r.stderr).toMatch(/iteration 1\/\d+/i);
     });

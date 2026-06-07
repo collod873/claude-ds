@@ -14,30 +14,34 @@ import {
   writePendingAnswersScaffold,
 } from "../lib/ops/pending-answers-scaffold.js";
 import type { PendingDecision } from "../lib/decision/index.js";
+import {
+  planRemediation,
+  type LoopStep,
+} from "../lib/remediation-planner.js";
+import { deriveProjectState } from "../lib/project-state.js";
 
 /**
  * `claude-ds heal` — drive a consumer tree to a fixed point in one command.
  *
- * Issue #265 closes the two-pass `classify → audit --fix → classify → audit --fix`
- * workaround the docs used to describe. Corrupt baselines (Crewops 72c6dde:
- * atoms whose import block was stripped) present with 0 imports at first
- * classify, get scored `atom`, then audit re-derives the import closure and
- * surfaces them as composites — but classify already ran and audit cannot
- * relocate (ADR-0015). A second classify is required, and a second audit --fix
- * to confirm the fixed point.
+ * Issue #343 (ADR-0018) rewires heal as the headless driver of the **shared
+ * remediation planner**. Each iteration:
+ *   1. `deriveProjectState` folds the same read-only scans `audit` /
+ *      `doctor` / the front door use into the planner's input booleans.
+ *   2. `planRemediation` returns the ordered subset of loop members that
+ *      have work to do — `upgrade → sync → repair → migrate-layout →
+ *      reconcile → classify → reconform → audit --fix`.
+ *   3. Heal dispatches each step in order.
+ * When the plan comes back empty, the project is at a fixed point and heal
+ * exits 0. The single ordering brain replaces the previous hardcoded
+ * `sync → upgrade → classify → audit --fix` sequence whose drift from the
+ * front-door dashboard's order was the v1.2.0 friction symptom #3.
  *
- * `heal` runs the documented sequence — `sync → upgrade → classify →
- * audit --fix` — in a loop until either:
- *   1. an iteration produces zero on-disk changes AND audit exits 0 (converged), or
- *   2. the iteration ceiling is hit (default 3; the issue's suggested guard).
+ * Boundary behavior is preserved: idempotency, clean-tree guard,
+ * `HEAL_EXIT_PENDING` (3) for partial fixed point, exit 1 for ceiling-hit,
+ * exit 2 for user-input error.
  *
- * Per the completeness principle (ADR-0003), this replaces the manual two-pass
- * workaround. Failure to converge within `maxIterations` exits non-zero with an
- * actionable error — never a silent infinite loop.
- *
- * Sub-commands' `process.exit` calls are trapped so a non-zero audit (findings
- * remain → iterate again) doesn't tear down the loop. Every sub-command's
- * exit becomes an iteration signal, not a hard stop.
+ * Sub-commands' `process.exit` calls are trapped so a non-zero audit
+ * (findings remain → iterate again) doesn't tear down the loop.
  */
 
 const DEFAULT_MAX_ITERATIONS = 3;
@@ -163,6 +167,68 @@ function treesEqual(a: Map<string, string>, b: Map<string, string>): boolean {
   return true;
 }
 
+interface DispatchOpts {
+  cwd: string;
+  answers: string | undefined;
+  pendingSink: PendingDecision[];
+}
+
+/**
+ * Map a planner `LoopStep` to the command that executes it.
+ *
+ * `repair` routes to `upgradeCmd` — the same code path that verifies and
+ * restores drifted migration end-states today (#300). ADR-0011 addendum
+ * splits the *verdicts* (upgrade vs repair) but the *machinery* — a
+ * dry-run of the verification chain followed by a re-apply — is shared,
+ * and `upgradeCmd` handles the `from === to` arm correctly.
+ *
+ * `migrate-layout`, `reconcile`, `reconform` have reserved slots in
+ * `CANONICAL_ORDER` (ADR-0018) but their state derivation is not yet
+ * wired (`deriveProjectState` returns `false` for them), so the planner
+ * cannot emit them and the switch arms are unreachable today. Future
+ * PRD-#340 sub-issues add detection + dispatch together — keeping the
+ * switch exhaustive now means a forgotten case is a compile error then.
+ */
+async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<number> {
+  const { cwd, answers, pendingSink } = opts;
+  switch (step) {
+    case "upgrade":
+    case "repair":
+      return runWithoutExit(() =>
+        upgradeCmd({ cwd, yes: true, allowDirty: true }),
+      );
+    case "sync":
+      return runWithoutExit(() =>
+        syncCmd({ cwd, yes: true, allowDirty: true }),
+      );
+    case "classify":
+      return runWithoutExit(() =>
+        classifyCmd({
+          cwd,
+          yes: true,
+          allowDirty: true,
+          answers,
+          pendingSink,
+        }),
+      );
+    case "audit --fix":
+      return runWithoutExit(() =>
+        auditCmd({
+          cwd,
+          fix: true,
+          allowDirty: true,
+          answers,
+          pendingSink,
+        }),
+      );
+    case "migrate-layout":
+    case "reconcile":
+    case "reconform":
+      // Reserved-but-unwired (see function comment).
+      return 0;
+  }
+}
+
 export async function healCmd(opts: HealOpts): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
@@ -195,13 +261,6 @@ export async function healCmd(opts: HealOpts): Promise<void> {
     process.exit(2);
   }
 
-  // sync + upgrade are deliberate one-shot preludes, not inner-loop steps.
-  // They write a timestamped `design-system/manifest.json` (via
-  // `scripts/build-manifest.ts`) and pack files whose bytes match upstream —
-  // running them every iteration churns the tree without changing it, which
-  // would defeat the snapshot-equality fixed-point check below. The
-  // convergence bug this command closes (#265) lives in the classify ↔
-  // audit --fix dance; that's what the loop guards.
   // Resumability hint (PRD #325 / sub-issue #328). TTY only — agent runs
   // (non-TTY) keep today's output verbatim. Heal is convergent and
   // idempotent (the #265 loop guarantee), so a mid-run Ctrl-C and re-invoke
@@ -211,24 +270,14 @@ export async function healCmd(opts: HealOpts): Promise<void> {
     info("heal: Ctrl-C and re-run is safe — this loop is idempotent.");
   }
 
-  info("heal: sync + upgrade (one-shot prelude)");
   // Live progress UI (PRD #325 / sub-issue #332). On non-TTY the controller
-  // is a no-op so today's plain log output above is the only thing the agent
+  // is a no-op so today's plain log output is the only thing the agent
   // sees; on TTY ora drives a per-phase spinner on stderr with the iteration
   // counter surfaced via `progress.info`.
   const progress = createProgress();
   try {
-    // allowDirty: true on every sub-command (#328). Heal owns the clean-tree
-    // contract at its boundary; the inner sync/upgrade/classify/audit must not
-    // refuse on the dirty state heal's previous iteration produced.
-    progress.start("sync (one-shot prelude)");
-    await runWithoutExit(() => syncCmd({ cwd, yes: true, allowDirty: true }));
-    progress.succeed("sync");
-    progress.start("upgrade (one-shot prelude)");
-    await runWithoutExit(() => upgradeCmd({ cwd, yes: true, allowDirty: true }));
-    progress.succeed("upgrade");
+    info(`heal: planner-driven loop (max ${maxIterations} iterations)`);
 
-    info(`heal: looping classify → audit --fix (max ${maxIterations} iterations)`);
     // Pending-decision sink (PRD #325 sub-issue #333). Passed by reference
     // into classify and audit so the resolver's `collect: true` arm pushes
     // unresolved Ambiguities here instead of throwing. Aggregated across
@@ -236,47 +285,41 @@ export async function healCmd(opts: HealOpts): Promise<void> {
     // exit names every Pending decision the run produced, not just the last
     // iteration's batch.
     const pendingSink: PendingDecision[] = [];
-    let lastPhase = "classify";
+
+    let lastStep: LoopStep | null = null;
+
     for (let iter = 1; iter <= maxIterations; iter++) {
       info(`heal: iteration ${iter}/${maxIterations}`);
       progress.info(`iteration ${iter}/${maxIterations}`);
+
+      // Plan from current state. Re-derived every iteration so steps the
+      // previous iteration completed drop out of the next plan — the same
+      // signal the front door consumes to decide what's still left.
+      const state = await deriveProjectState(cwd);
+      const plan = planRemediation(state);
+
+      if (plan.length === 0) {
+        info(`heal: converged in ${iter} iteration(s) — 0 changes, 0 findings`);
+        return;
+      }
+
       const before = await snapshotTree(cwd);
       const pendingBefore = pendingSink.length;
 
-      lastPhase = "classify";
-      progress.start("classify");
-      await runWithoutExit(() =>
-        classifyCmd({
+      for (const step of plan) {
+        lastStep = step;
+        progress.start(step);
+        await dispatchStep(step, {
           cwd,
-          yes: true,
-          allowDirty: true,
           answers: opts.answers,
           pendingSink,
-        }),
-      );
-      progress.succeed("classify");
-
-      lastPhase = "audit --fix";
-      progress.start("audit --fix");
-      const auditExit = await runWithoutExit(() =>
-        auditCmd({
-          cwd,
-          fix: true,
-          allowDirty: true,
-          answers: opts.answers,
-          pendingSink,
-        }),
-      );
-      progress.succeed("audit --fix");
+        });
+        progress.succeed(step);
+      }
 
       const after = await snapshotTree(cwd);
       const stable = treesEqual(before, after);
       const pendingThisIter = pendingSink.length - pendingBefore;
-
-      if (stable && auditExit === 0) {
-        info(`heal: converged in ${iter} iteration(s) — 0 changes, 0 findings`);
-        return;
-      }
 
       // Partial fixed point (PRD #325 sub-issue #333): bytes are stable but
       // findings remain because one or more Ambiguities were collected as
@@ -287,6 +330,23 @@ export async function healCmd(opts: HealOpts): Promise<void> {
       // scaffold the operator fills and re-runs.
       if (stable && pendingThisIter > 0) {
         await reportPendingAndExit(cwd, pendingSink, progress);
+        return;
+      }
+
+      // Fixed point reached: this iteration ran the planner's full plan and
+      // changed zero bytes. Two cases produce this:
+      //   (1) The plan was a "lingering" signal (e.g. upgrade fires because
+      //       the pin is behind the CLI but the migration chain between
+      //       from→to is empty, so upgradeCmd's no-chain branch verifies and
+      //       returns without bumping the pin — #300's shape).
+      //   (2) The dispatchers genuinely settled.
+      // In both cases there is no further work the loop can do without
+      // operator input, and the next iteration's plan would be identical.
+      // Without this check the planner would re-emit the lingering signal
+      // forever and heal would hit the ceiling exit (1) on a project that
+      // is in fact converged.
+      if (stable && pendingThisIter === 0) {
+        info(`heal: converged in ${iter} iteration(s) — 0 changes, 0 findings`);
         return;
       }
     }
@@ -304,8 +364,9 @@ export async function healCmd(opts: HealOpts): Promise<void> {
     // failure (auto-fixers couldn't reach a fixed point on their own).
     // Surface the failing phase in the progress UI so the user sees WHICH
     // step was running when convergence ran out, not just "the loop failed
-    // somewhere" (acceptance criterion #5).
-    progress.fail(`${lastPhase} — did not converge after ${maxIterations} iterations`);
+    // somewhere".
+    const phase = lastStep ?? "unknown";
+    progress.fail(`${phase} — did not converge after ${maxIterations} iterations`);
     err(
       `heal: did not converge after ${maxIterations} iterations — run \`claude-ds audit\` for the remaining findings`,
     );
