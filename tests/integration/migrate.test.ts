@@ -61,9 +61,13 @@ describe("migrate", () => {
 
   it("honors --tier override, bypassing classification (#220)", async () => {
     await mkdir(join(dir, "src/components"), { recursive: true });
-    // Source would classify as feature, but --tier forces composite.
+    // Source would classify as feature, but --tier forces composite — that's a real
+    // post-migration DRIFT-MISPLACED, so --issue is required (#361).
     await writeFile(join(dir, "src/components/forced.tsx"), `import { foo } from "@/features/dash/data";\nexport const Forced = () => null;`);
-    const r = await runCli(["migrate", "src/components/forced.tsx", "--tier", "composite", "--reason", "ok", "--yes"], { cwd: dir });
+    const r = await runCli(
+      ["migrate", "src/components/forced.tsx", "--tier", "composite", "--reason", "ok", "--issue", "#1", "--yes"],
+      { cwd: dir },
+    );
     expect(r.code).toBe(0);
     await stat(join(dir, "design-system/composites/forced.tsx"));
   });
@@ -75,5 +79,54 @@ describe("migrate", () => {
     const r = await runCli(["migrate", "src/components/button.tsx", "--reason","x","--yes"], { cwd: dir });
     expect(r.code).not.toBe(0);
     expect(r.stderr).toMatch(/collision|exists/i);
+  });
+
+  it("does not register a DRIFT-MISPLACED exception for a correctly-placed file (#361)", async () => {
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    await writeFile(join(dir, "src/components/lonely.tsx"), `export const Lonely = () => null;`);
+    const r = await runCli(["migrate", "src/components/lonely.tsx", "--reason", "ok", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    await stat(join(dir, "design-system/atoms/lonely.tsx"));
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.exceptions).toEqual([]);
+  });
+
+  it("does not require --reason when no exception is needed (#361)", async () => {
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    await writeFile(join(dir, "src/components/quiet.tsx"), `export const Quiet = () => null;`);
+    const r = await runCli(["migrate", "src/components/quiet.tsx", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    await stat(join(dir, "design-system/atoms/quiet.tsx"));
+  });
+
+  it("registers DRIFT-MISPLACED exception with --issue link when --tier forces a real misplacement (#361)", async () => {
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    // No DS or domain imports → classifier says atom; --tier composite forces composites/ → real DRIFT-MISPLACED would fire.
+    await writeFile(join(dir, "src/components/forced-atom.tsx"), `export const ForcedAtom = () => null;`);
+    const r = await runCli(
+      ["migrate", "src/components/forced-atom.tsx", "--tier", "composite", "--reason", "app shell singleton", "--issue", "#999", "--yes"],
+      { cwd: dir },
+    );
+    expect(r.code).toBe(0);
+    await stat(join(dir, "design-system/composites/forced-atom.tsx"));
+    const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.exceptions).toHaveLength(1);
+    expect(parsed.exceptions[0].rule).toBe("DRIFT-MISPLACED");
+    expect(parsed.exceptions[0].path).toBe("design-system/composites/forced-atom.tsx");
+    expect(parsed.exceptions[0].issue).toBe("#999");
+    expect(parsed.exceptions[0].reason).toBe("app shell singleton");
+  });
+
+  it("refuses --tier override that creates a misplacement without --issue (#361)", async () => {
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    await writeFile(join(dir, "src/components/forced-atom.tsx"), `export const ForcedAtom = () => null;`);
+    const r = await runCli(
+      ["migrate", "src/components/forced-atom.tsx", "--tier", "composite", "--reason", "x", "--yes"],
+      { cwd: dir },
+    );
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/--issue/);
   });
 });
