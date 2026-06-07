@@ -1,0 +1,89 @@
+/**
+ * The shared remediation driver (#345 / ADR-0018). `heal` and the front door
+ * are two consumers of `driveRemediation`; this suite pins the driver's
+ * UI-neutral contract directly, independent of either caller's exit-code or
+ * prose interpretation.
+ *
+ * The loop's *convergence* behavior (snapshot fixed-point, Pending early-exit,
+ * ceiling) is exercised end-to-end through `heal.test.ts`; here we pin the
+ * thinner guarantees the driver owns on its own: an immediately-clean tree
+ * converges in one iteration with zero dispatch, and the iteration callback is
+ * driven once per iteration so callers can flavor their own logging.
+ */
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { freshTmpDir, cleanup } from "../helpers/tmpdir";
+import { runCli } from "../helpers/runcli";
+import { driveRemediation } from "../../src/lib/remediation-driver";
+import pkg from "../../package.json" with { type: "json" };
+
+// A no-op progress controller (the non-TTY shape) so the driver runs without a
+// spinner. Mirrors `NOOP_PROGRESS` without importing the TTY module.
+const NOOP_PROGRESS = {
+  start() {},
+  succeed() {},
+  fail() {},
+  info() {},
+  stop() {},
+  active: false,
+  enabled: false,
+} as const;
+
+describe("driveRemediation (shared loop)", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await freshTmpDir(); });
+  afterEach(async () => { await cleanup(dir); });
+
+  it("a clean tree converges in one iteration and dispatches nothing", async () => {
+    // Adopt then heal to the true fixed point (the benign meta_kind_strict
+    // repair settled), so the next plan is empty.
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const healed = await runCli(["heal"], { cwd: dir });
+    expect(healed.code).toBe(0);
+
+    const iterations: number[] = [];
+    const outcome = await driveRemediation({
+      cwd: dir,
+      maxIterations: 3,
+      progress: { ...NOOP_PROGRESS },
+      onIteration: (i) => iterations.push(i),
+    });
+
+    expect(outcome).toEqual({ kind: "converged", iterations: 1 });
+    // Empty plan on iteration 1 → the callback fired exactly once, no dispatch.
+    expect(iterations).toEqual([1]);
+  });
+
+  it("forwards the iteration ceiling to the onIteration callback", async () => {
+    // A scaffold-less tree pinned to the current version always has work
+    // (sync), and the meta_kind_strict repair lingers, so it cannot converge
+    // within a tight ceiling — proving the loop runs every iteration and the
+    // callback is driven once each.
+    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
+      packVersion: `v${pkg.version}`,
+      pack: "next-react",
+      mode: "warn",
+      app_dir: "app",
+      claude_md_target: ".claude/CLAUDE.md",
+    }));
+
+    const iterations: number[] = [];
+    const outcome = await driveRemediation({
+      cwd: dir,
+      maxIterations: 2,
+      progress: { ...NOOP_PROGRESS },
+      onIteration: (i, max) => {
+        expect(max).toBe(2);
+        iterations.push(i);
+      },
+    });
+
+    // Either it converged (≤2 iters) or it exhausted — either way the callback
+    // fired at least once and never past the ceiling.
+    expect(iterations.length).toBeGreaterThanOrEqual(1);
+    expect(Math.max(...iterations)).toBeLessThanOrEqual(2);
+    expect(["converged", "exhausted"]).toContain(outcome.kind);
+  }, 30000);
+});

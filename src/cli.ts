@@ -71,7 +71,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
         return;
       }
       if (isTTY()) {
-        await frontDoorCmd({ cwd });
+        // Forward `--answers` so the interactive driver can resolve genuine
+        // Ambiguities it pauses on without a second invocation (ADR-0016).
+        await frontDoorCmd({ cwd, answers: opts.answers });
       } else {
         program.outputHelp();
       }
