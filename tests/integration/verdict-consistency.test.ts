@@ -78,6 +78,18 @@ describe("doctor → Next breadcrumb (#349 F21)", () => {
     expect(r.code).toBe(1);
     expect(r.stdout).toMatch(/→ Next:.*sync/);
   });
+
+  it("pre-adopt doctor does not say 'All clear' + 'run npm run build' while body recommends adopt", async () => {
+    // F9-style internal-contradiction guard for pre-adopt mode: the
+    // markdown body says "Run `adopt` to install the scaffold." — the
+    // verdict + breadcrumb must agree, not contradict with "All clear" +
+    // "verify the build."
+    const r = await runCli(["doctor", "--pack", "next-react"], { cwd: dir });
+    expect(r.stdout).toMatch(/Run `adopt`/);
+    expect(r.stdout).not.toMatch(/✓ All clear/);
+    expect(r.stdout).not.toMatch(/→ Next:.*verify everything compiles/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds adopt/);
+  });
 });
 
 describe("doctor verdict aggregation (#349 F16)", () => {

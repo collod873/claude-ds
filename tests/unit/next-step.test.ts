@@ -145,6 +145,12 @@ describe("printNextStep", () => {
     expect(logged.some(l => l.includes("→ Next:"))).toBe(true);
   });
 
+  it("routes doctor's → Next at adopt when pre-adopt is the verdict (#349 F9/F21)", () => {
+    printNextStep("doctor", { doctorVerdict: "pre-adopt" });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds adopt");
+  });
+
   it("routes doctor's → Next at sync when scaffold-gap is the verdict", () => {
     printNextStep("doctor", { doctorVerdict: "scaffold-gap" });
     const line = logged.find(l => l.includes("→ Next:"))!;

@@ -713,34 +713,48 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
   // Picks the doctor's "verdict kind" (used by the breadcrumb below) by
   // the same priority `recommendNextStep` uses for the dashboard: scaffold
   // first, then root-dupes, then upgrade/repair, then clean.
+  //
+  // Pre-adopt mode collapses to a single "Not yet adopted" verdict —
+  // saying "✓ All clear" + "run npm run build" while renderMarkdown
+  // already says "Run adopt to install the scaffold" is the F9-style
+  // contradiction this PR closes for audit. Same shape, doctor edition.
   const verdictLines: string[] = ["## Verdict", ""];
-  if (hasLookalikes) verdictLines.push("- ✗ Lookalikes detected — rename or re-adopt");
-  if (hasMissingManaged) {
-    verdictLines.push(`- ✗ Scaffold gap: ${result.drift?.missing.length ?? 0} managed file(s) missing`);
-  }
-  if (hasRootDupes) verdictLines.push(`- ✗ Root-level duplicates: ${rootDupes.length}`);
-  if (repairNeeded > 0) verdictLines.push(`- ⚠ Repair needed: ${repairNeeded} regressed migration end-state(s)`);
-  if (upgradeAvailable && ctx.kind === "adopted") {
-    verdictLines.push(`- ⚠ Upgrade available: pinned ${ctx.cfg.packVersion} < installed v${pkg.version}`);
-  }
-  if (openExceptions > 0) verdictLines.push(`- ℹ Open exceptions: ${openExceptions}`);
+  if (ctx.kind !== "adopted") {
+    verdictLines.push("- ⚠ Not yet adopted — `.claude-ds.json` absent");
+    if (hasLookalikes) verdictLines.push("- ✗ Lookalikes detected — rename before `adopt`");
+    if (hasRootDupes) verdictLines.push(`- ✗ Root-level duplicates: ${rootDupes.length}`);
+  } else {
+    if (hasLookalikes) verdictLines.push("- ✗ Lookalikes detected — rename or re-adopt");
+    if (hasMissingManaged) {
+      verdictLines.push(`- ✗ Scaffold gap: ${result.drift?.missing.length ?? 0} managed file(s) missing`);
+    }
+    if (hasRootDupes) verdictLines.push(`- ✗ Root-level duplicates: ${rootDupes.length}`);
+    if (repairNeeded > 0) verdictLines.push(`- ⚠ Repair needed: ${repairNeeded} regressed migration end-state(s)`);
+    if (upgradeAvailable) {
+      verdictLines.push(`- ⚠ Upgrade available: pinned ${ctx.cfg.packVersion} < installed v${pkg.version}`);
+    }
+    if (openExceptions > 0) verdictLines.push(`- ℹ Open exceptions: ${openExceptions}`);
 
-  const everythingClean =
-    !hasLookalikes &&
-    !hasMissingManaged &&
-    !hasRootDupes &&
-    repairNeeded === 0 &&
-    !upgradeAvailable;
-  if (everythingClean) verdictLines.push("- ✓ All clear");
+    const everythingClean =
+      !hasLookalikes &&
+      !hasMissingManaged &&
+      !hasRootDupes &&
+      repairNeeded === 0 &&
+      !upgradeAvailable;
+    if (everythingClean) verdictLines.push("- ✓ All clear");
+  }
   verdictLines.push("");
   process.stdout.write(verdictLines.join("\n"));
 
   // #349 F21: every command ends with a → Next breadcrumb. Pick the route
   // the same way the verdict ordered the concerns. Scaffold and lookalike
   // issues outrank version concerns — you do not upgrade onto a broken
-  // baseline.
+  // baseline. Pre-adopt routes through `adopt` regardless: even a
+  // lookalike rename is a pre-`adopt` step, not a `migrate-layout` (which
+  // is an adopted-project remediation).
   const buildCmd = await detectBuildCommand(cwd);
-  const verdict: "clean" | "scaffold-gap" | "root-dupes" | "lookalikes" | "repair-needed" | "upgrade-available" =
+  const verdict: "clean" | "pre-adopt" | "scaffold-gap" | "root-dupes" | "lookalikes" | "repair-needed" | "upgrade-available" =
+    ctx.kind !== "adopted" ? "pre-adopt" :
     hasMissingManaged ? "scaffold-gap" :
     hasRootDupes ? "root-dupes" :
     hasLookalikes ? "lookalikes" :

@@ -56,6 +56,7 @@ interface NextStepContext {
    */
   doctorVerdict?:
     | "clean"
+    | "pre-adopt"
     | "scaffold-gap"
     | "root-dupes"
     | "lookalikes"
@@ -118,6 +119,9 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
       // upgrade-available — picks which action to name. The pre-adopt path
       // (no .claude-ds.json) routes through `adopt`.
       switch (ctx.doctorVerdict) {
+        case "pre-adopt":
+          message = "run 'claude-ds adopt' to install the scaffold";
+          break;
         case "scaffold-gap":
           message = "run 'claude-ds sync' to restore the missing managed file(s)";
           break;
