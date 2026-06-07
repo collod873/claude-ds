@@ -17,6 +17,8 @@ import { reconcileCmd } from "./commands/reconcile.js";
 import { upgradeCmd } from "./commands/upgrade.js";
 import { classifyCmd } from "./commands/classify.js";
 import { healCmd } from "./commands/heal.js";
+import { frontDoorCmd } from "./commands/front-door.js";
+import { isTTY } from "./lib/render/index.js";
 
 export interface ProgramDefaults {
   cwd?: string;
@@ -25,6 +27,19 @@ export interface ProgramDefaults {
 export function buildProgram(defaults: ProgramDefaults = {}): Command {
   const program = new Command();
   program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`, "-V");
+
+  // Bare `claude-ds` default action (PRD #325 sub-issue #331). In a TTY we run
+  // the state-aware front door: compose doctor structural state + a read-only
+  // audit pass into the dashboard. Non-TTY callers (agents, automation, CI)
+  // keep today's commander help output — the dashboard is a human surface and
+  // must not appear on the agent contract path.
+  program.action(async () => {
+    if (isTTY()) {
+      await frontDoorCmd({ cwd: defaults.cwd });
+    } else {
+      program.outputHelp();
+    }
+  });
 
   program
     .command("version")
