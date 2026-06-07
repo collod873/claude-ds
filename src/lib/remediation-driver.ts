@@ -270,6 +270,14 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
     const plan = planRemediation(state);
 
     if (plan.length === 0) {
+      // Empty plan + `unresolvableFindings` means no loop member can clear the
+      // finding (PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT, …). Reporting
+      // `converged` here would be the silent-success #379 set out to prevent —
+      // surface it as non-convergence so heal exits loudly and the operator
+      // sees the audit findings instead of a "Tree is clean" message.
+      if (state.unresolvableFindings) {
+        return { kind: "exhausted", lastStep: null };
+      }
       return { kind: "converged", iterations: iter };
     }
 

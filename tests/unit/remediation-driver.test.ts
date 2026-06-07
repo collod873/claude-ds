@@ -56,6 +56,34 @@ describe("driveRemediation (shared loop)", () => {
     expect(iterations).toEqual([1]);
   });
 
+  it("empty plan + unresolvableFindings does NOT silently converge (#379)", async () => {
+    // Adopt + heal to a fixed point, then introduce a ROLE-NO-CONTRACT finding
+    // (an atom with `meta.role="tabs"` — no shipped contract). Its rule is
+    // `fixable: false` AND `classifyRelocatable: false`, so `deriveProjectState`
+    // sets only `unresolvableFindings` and `planRemediation` returns []. Before
+    // this guard the driver's early-exit treated empty plan as `converged`,
+    // re-introducing the exact silent-success regression #379 set out to
+    // prevent. Surface it as non-convergence so heal exits loudly.
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+    const healed = await runCli(["heal"], { cwd: dir });
+    expect(healed.code).toBe(0);
+
+    await writeFile(
+      join(dir, "design-system/atoms/tabs.tsx"),
+      `export function Tabs() { return <div/>; }
+export const meta = { kind: "atom" as const, role: "tabs" as const, examples: [] };
+`,
+    );
+
+    const outcome = await driveRemediation({
+      cwd: dir,
+      maxIterations: 2,
+      progress: { ...NOOP_PROGRESS },
+    });
+    expect(outcome).toEqual({ kind: "exhausted", lastStep: null });
+  }, 60000);
+
   it("forwards the iteration ceiling to the onIteration callback", async () => {
     // A scaffold-less tree pinned to the current version always has work
     // (sync), and the meta_kind_strict repair lingers, so it cannot converge
