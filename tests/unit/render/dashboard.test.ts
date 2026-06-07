@@ -49,6 +49,34 @@ const WITH_FINDINGS: DashboardState = {
   },
 };
 
+const INCOMPLETE_SCAFFOLD: DashboardState = {
+  cwd: "/repo/example-app",
+  mode: "adopted",
+  scaffold: { present: 9, total: 12 },
+  findings: [],
+  recommendedNext: {
+    command: "claude-ds sync",
+    description: "restore 3 missing managed file(s)",
+  },
+};
+
+const INCOMPLETE_SCAFFOLD_WITH_FINDINGS: DashboardState = {
+  cwd: "/repo/example-app",
+  mode: "adopted",
+  scaffold: { present: 9, total: 12 },
+  findings: [
+    {
+      ruleId: "DRIFT-RAW-PRIMITIVE",
+      file: "design-system/atoms/button.tsx",
+      message: "color #336699 has no token equivalent",
+    },
+  ],
+  recommendedNext: {
+    command: "claude-ds sync",
+    description: "restore 3 missing managed file(s)",
+  },
+};
+
 const PRE_ADOPT: DashboardState = {
   cwd: "/repo/fresh-app",
   mode: "pre-adopt",
@@ -77,6 +105,32 @@ describe("renderDashboard (pure)", () => {
         "Scaffold: 12/12 ✓",
         "What's wrong: 3 findings",
         "→ Next: claude-ds audit --fix — auto-repair the 3 findings",
+      ]
+    `);
+  });
+
+  it("an incomplete scaffold with zero findings is NOT 'tree is clean'", () => {
+    // Pinning the dashboard's truth-in-advertising: a `Scaffold: 9/12` line
+    // co-existing with "tree is clean" would let the recommendation
+    // (claude-ds sync — restore N missing managed file(s)) contradict the
+    // human-readable summary. PR #335 / sub-issue #331.
+    expect(renderDashboard(INCOMPLETE_SCAFFOLD)).toMatchInlineSnapshot(`
+      [
+        "Where you are: adopted (/repo/example-app)",
+        "Scaffold: 9/12",
+        "What's wrong: scaffold incomplete",
+        "→ Next: claude-ds sync — restore 3 missing managed file(s)",
+      ]
+    `);
+  });
+
+  it("merges scaffold incomplete with finding count when both fire", () => {
+    expect(renderDashboard(INCOMPLETE_SCAFFOLD_WITH_FINDINGS)).toMatchInlineSnapshot(`
+      [
+        "Where you are: adopted (/repo/example-app)",
+        "Scaffold: 9/12",
+        "What's wrong: scaffold incomplete + 1 finding",
+        "→ Next: claude-ds sync — restore 3 missing managed file(s)",
       ]
     `);
   });

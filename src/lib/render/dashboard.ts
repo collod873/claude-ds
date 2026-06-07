@@ -42,14 +42,25 @@ export function renderDashboard(state: DashboardState): string[] {
     lines.push(`Scaffold: ${present}/${total}${tick}`);
   }
 
+  const scaffoldIncomplete =
+    state.scaffold !== undefined && state.scaffold.present !== state.scaffold.total;
+  const findingsCount = state.findings.length;
+
   if (state.mode === "pre-adopt") {
     lines.push("What's wrong: no scaffold installed yet");
-  } else if (state.findings.length === 0) {
+  } else if (!scaffoldIncomplete && findingsCount === 0) {
     lines.push("What's wrong: nothing — tree is clean");
   } else {
-    const n = state.findings.length;
-    const noun = n === 1 ? "finding" : "findings";
-    lines.push(`What's wrong: ${n} ${noun}`);
+    // An incomplete scaffold and audit findings are both "what's wrong" signals.
+    // Surfacing only one of them would let a `Scaffold: 0/12` line co-exist with
+    // a "tree is clean" claim, which is what the renderer must not say.
+    const parts: string[] = [];
+    if (scaffoldIncomplete) parts.push("scaffold incomplete");
+    if (findingsCount > 0) {
+      const noun = findingsCount === 1 ? "finding" : "findings";
+      parts.push(`${findingsCount} ${noun}`);
+    }
+    lines.push(`What's wrong: ${parts.join(" + ")}`);
   }
 
   if (state.recommendedNext) {
