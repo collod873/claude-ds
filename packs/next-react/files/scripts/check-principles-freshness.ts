@@ -3,9 +3,12 @@
  * check-principles-freshness.ts — Reads design-system/contracts.md.
  * Looks for footer line matching "Last reviewed: YYYY-MM-DD".
  *
- * Exit 0 fresh, 1 self-error (file missing or malformed), 2 stale (>90 days).
+ * Exit-code protocol (matches src/lib/checks/run-check-scripts.ts):
+ *   0 = clean / fresh
+ *   1 = self-error (the check itself could not run — e.g. file unreadable)
+ *   2 = violation(s) emitted on stderr in `<file>:<line>: <RULE-ID>: <hint>` shape
  *
- * PRIN-000: missing "Last reviewed:" line (misformatted file)
+ * PRIN-000: missing or malformed "Last reviewed:" footer (incl. missing file)
  * PRIN-001: date >90 days old
  */
 
@@ -19,15 +22,15 @@ function main(): void {
   const contractsPath = join(cwd, "design-system", "contracts.md");
 
   if (!existsSync(contractsPath)) {
-    process.stderr.write(`${contractsPath}:0: PRIN-000: design-system/contracts.md not found\n`);
-    process.exit(1);
+    process.stderr.write(`${contractsPath}:0: PRIN-000: design-system/contracts.md not found; create it with a "Last reviewed: YYYY-MM-DD" footer\n`);
+    process.exit(2);
   }
 
   let content: string;
   try {
     content = readFileSync(contractsPath, "utf8");
   } catch {
-    process.stderr.write(`${contractsPath}:0: PRIN-000: failed to read contracts.md\n`);
+    process.stderr.write(`check-principles-freshness: failed to read ${contractsPath}\n`);
     process.exit(1);
   }
 
@@ -36,7 +39,7 @@ function main(): void {
     process.stderr.write(
       `${contractsPath}:0: PRIN-000: missing "Last reviewed: YYYY-MM-DD" footer line; add it to the end of contracts.md\n`
     );
-    process.exit(1);
+    process.exit(2);
   }
 
   const dateStr = match[1];
@@ -45,7 +48,7 @@ function main(): void {
     process.stderr.write(
       `${contractsPath}:0: PRIN-000: "Last reviewed: ${dateStr}" is not a valid date\n`
     );
-    process.exit(1);
+    process.exit(2);
   }
 
   const now = new Date();
