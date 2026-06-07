@@ -46,7 +46,8 @@ Eight workflows. Each gets a full section in [Part 4](#part-4--the-workflows).
 | --- | ------------------------------------------------------ | ------------------------------------------------ | --------------------------------------------------------------------- |
 | 1   | [To Issues](#41-to-issues)                             | issue labeled `agent:to-issues`                  | Decompose a PRD into a flat list of native sub-issues.                |
 | 2   | [Implement (single issue)](#42-implement-single-issue) | issue labeled `agent:implement`                  | Implement one standalone issue and open a PR.                         |
-| 3   | [Implement PRD](#43-implement-prd)                     | issue labeled `agent:implement` (has sub-issues) | Implement the next open sub-issue, chaining until the PRD is done.    |
+| 3   | [Implement PRD](#43-implement-prd)                     | issue labeled `agent:implement` (has sub-issues) | Fan out: promote every open sub-issue to `agent:implement` for parallel implementation. |
+| 3b  | [Close Completed PRD](#43-implement-prd)               | any issue **closed**                             | Close the parent PRD once its last sub-issue closes.                 |
 | 4   | [Review](#44-review)                                   | PR labeled `agent:review`                        | Review and actively improve a PR; post a review + inline comments.    |
 | 5   | [Implement PR](#45-implement-pr)                       | PR labeled `agent:implement`                     | Address unresolved reviewer feedback on a PR.                         |
 | 6   | [Update Branch](#46-update-branch)                     | PR labeled `agent:update-branch`                 | Merge the base branch in, resolving conflicts (agent only if needed). |
@@ -65,13 +66,12 @@ flowchart TD
     PRD["PRD issue created<br/>(human or Architecture Review)"]
     PRD -->|"label agent:to-issues"| TOISSUES["①  To Issues"]
     TOISSUES -->|"creates flat sub-issues"| PRDREADY["PRD with sub-issues"]
-    PRDREADY -->|"label agent:implement"| IMPLPRD["③ Implement PRD"]
-    IMPLPRD -->|"implement next sub-issue,<br/>close it, re-label to chain"| IMPLPRD
-    IMPLPRD -->|"last sub-issue done"| PRD_REVIEW["PR labeled agent:review"]
+    PRDREADY -->|"label agent:implement"| IMPLPRD["③ Implement PRD (fan-out)"]
+    IMPLPRD -->|"promote every open<br/>sub-issue to agent:implement"| IMPL["② Implement"]
 
     ISSUE["Standalone issue"]
-    ISSUE -->|"label agent:implement"| IMPL["② Implement"]
-    IMPL -->|"opens draft PR,<br/>labels agent:review"| PRD_REVIEW
+    ISSUE -->|"label agent:implement"| IMPL
+    IMPL -->|"opens draft PR,<br/>labels agent:review"| PRD_REVIEW["PR labeled agent:review"]
 
     QUEUED["Issue labeled agent:queued<br/>(human, has blockers)"]
     BLOCKER["blocker issue closes"] -->|"⑦ Promote Queued"| QUEUED
@@ -117,8 +117,8 @@ stateDiagram-v2
 
     implement --> in_progress: ②/③ accepted
     implement --> blocked: ②/③ refused (preflight)
-    in_progress --> review: ②/③ opened PR → agent:review
-    in_progress --> implement: ③ re-label to chain next sub-issue
+    in_progress --> review: ② opened PR → agent:review
+    in_progress --> [*]: ③ fanned out sub-issues (PRD idle, awaits sub-issue closes)
     in_progress --> blocked: run failed
 
     review --> in_progress: ④ accepted
@@ -280,7 +280,7 @@ correct — but the downstream workflow does not auto-start. A human re-adding t
 | Group                                       | Members                             | Purpose                                                                                        |
 | ------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `agent-mutate-pr-${PR_NUMBER}`              | Review, Implement PR, Update Branch | All three push to the PR branch — serialise them so they never race each other on the same PR. |
-| `agent-implement-prd-issue-${ISSUE_NUMBER}` | Implement PRD                       | One PRD chain at a time.                                                                       |
+| `agent-implement-prd-issue-${ISSUE_NUMBER}` | Implement PRD                       | One fan-out dispatch per PRD at a time.                                                        |
 | `agent-implement-issue-${ISSUE_NUMBER}`     | Implement (single)                  | One run per issue.                                                                             |
 | `agent-to-issues-prd-issue-${ISSUE_NUMBER}` | To Issues                           | One decomposition per PRD.                                                                     |
 | `architecture-review`                       | Architecture Review                 | One daily pass at a time.                                                                      |
@@ -436,7 +436,9 @@ choice** (safe to extend later). Do not "fix" the invariants.
 - **`agent:queued` is human-applied only.** Promote Queued is the _exit ramp_, not the
   entrance. There is no guard that auto-downgrades a wrongly-applied `agent:implement` on a
   blocked issue — if you mislabel, the run happens and likely fails.
-- **One sub-issue per PRD run**, then re-label to chain the next.
+- **PRD sub-issues run in parallel.** Implement PRD fans every open sub-issue out to its own
+  `agent:implement` run (one branch, one PR each); the PRD closes when its last sub-issue
+  closes. See [ADR-0019](../adr/0019-parallel-prd-fan-out.md).
 - **To Issues only runs on a PRD with zero existing sub-issues.**
 
 **Non-goals**
@@ -605,13 +607,15 @@ capped 256> --body-file pr_description.txt`; capture PR number.
 
 ## 4.3 Implement PRD
 
-**Purpose.** Implement a PRD as a **chain** of single-sub-issue runs, all committing to one
-shared branch, opening (and reusing) one PR, until every sub-issue is closed.
+**Purpose.** Fan a PRD out for **parallel** implementation: promote every open sub-issue to
+`agent:implement` so [Implement (single)](#42-implement-single-issue) picks each up
+independently — one branch, one PR per sub-issue. This workflow is a **dispatcher**; it runs no
+agent and writes no code. See [ADR-0019](../adr/0019-parallel-prd-fan-out.md).
 
 **Trigger.** `issues: [labeled]`, gated on `agent:implement` (proceeds only when the issue has
 sub-issues).
 **Concurrency.** `agent-implement-prd-issue-${ISSUE_NUMBER}`, no cancel.
-**Permissions.** `contents: write`, `issues: write`, `pull-requests: write`.
+**Permissions.** `contents: read`, `issues: write`.
 
 **Preconditions & refusals.** Compute a richer shape (sub-issues + parent + per-child shape):
 
@@ -621,51 +625,52 @@ sub-issues).
 | Has sub-issues **and** has a parent  | `refuse-nested-prd`   | blocked + comment "flatten".                                            |
 | Any sub-issue has its own sub-issues | `refuse-nested-child` | blocked + comment naming the offending child.                           |
 | All sub-issues already closed        | `refuse-all-closed`   | blocked + comment "nothing to implement".                               |
-| Otherwise                            | `run`                 | target = first still-open sub-issue, in sub-issue API order.            |
+| Otherwise                            | `run`                 | fan out all still-open sub-issues.                                      |
 
 **Step sequence (run mode).**
 
-1. Transition the PRD: remove `agent:implement` + `agent:blocked`, add `agent:in-progress`.
-2. Compute branch `agent/prd-<n>-<slug>`.
-3. Checkout `main` (`fetch-depth: 0`, `AGENT_PAT || GITHUB_TOKEN`). **Resume or create** the
-   branch: if `origin/<branch>` exists, `git checkout -B <branch> origin/<branch>` (`is_first=false`);
-   else `git checkout -b <branch>` (`is_first=true`).
-4. Node + deps + agent runner.
-5. Run the **implement-prd** agent (env adds `SUB_ISSUE_NUMBER`, `SUB_ISSUE_TITLE`). **No
-   commit assertion** — a sub-issue may already be satisfied by earlier work, and zero new
-   commits is legitimate; the run must still proceed to close it and advance.
-6. `git push origin "$BRANCH"` — **plain push, never force** (the branch accumulates).
-7. Close the completed sub-issue: `gh issue close $SUB --comment "Implemented in <sha>. Part of #$PRD."`.
-8. Look up an existing open PR for the branch (`gh pr list --head "$BRANCH" --state open`).
-9. **Only if no PR exists yet:** run the **write-prd-pr** agent → title/description framed
-   around the _whole PRD_; open a draft PR.
-10. Re-check remaining open sub-issues.
-    - **>0 remaining:** re-add `agent:implement` to the **PRD** (PAT-or-fallback) → re-fires
-      this workflow for the next sub-issue (**the chain**).
-    - **0 remaining:** add `agent:review` to the PR → hand off to [Review](#44-review).
-11. `always()`: remove `agent:in-progress` from the PRD.
+1. Transition the PRD: remove `agent:implement` + `agent:blocked`, add `agent:in-progress`
+   (a marker that the PRD's work is underway; the PRD itself implements nothing).
+2. For each open sub-issue, add `agent:implement` via **`AGENT_PAT` (PAT-or-fallback)** so the
+   label fires [Implement (single)](#42-implement-single-issue). Each sub-issue then runs as an
+   ordinary issue: own branch `agent/issue-<n>`, own draft PR, own review.
+3. Comment on the PRD summarising the fan-out (count of promoted sub-issues).
 
-**Agent-runner contract.**
+Promotion is **idempotent**: a sub-issue already carrying `agent:implement` (or in-progress) is
+harmlessly re-labelled. Retrying a partly-fanned-out PRD picks up only the stragglers.
 
-- **implement-prd agent.** _Inputs:_ `PRD_NUMBER`, `PRD_TITLE`, `SUB_ISSUE_NUMBER`,
-  `SUB_ISSUE_TITLE`, `BRANCH`. Implements **only** the named sub-issue; must **not** rebase or
-  rewrite existing branch history; commits include `Part of #<PRD>` and **no `Closes`**; does
-  not push or close. _Output:_ none structured.
-- **write-prd-pr agent.** Single-pass; same output schema as write-pr, but the description
-  describes the whole PRD, lists every sub-issue, and ends with `Closes #<PRD>`.
+**No agent-runner.** This workflow calls no LLM agent — it only reads issue shape and writes
+labels. (The former `implement-prd` and `write-prd-pr` agent runners are unused under fan-out.)
 
-**Side-effects.** Commits on the shared branch; one sub-issue closed per run; one draft PR
-created then reused; chain re-label or review hand-off.
+**Side-effects.** Labels every open sub-issue `agent:implement`; moves the PRD to in-progress;
+one summary comment.
 
-**Failure handling.** Per [§3.7](#37-failure-handling), keyed to the sub-issue being
-implemented; comments on **both** the PRD and the sub-issue. Retry = remove `agent:blocked` +
-re-add `agent:implement`; the run recomputes the first open sub-issue, so it resumes where it
-stopped.
+**Failure handling.** If the fan-out step fails partway, the PRD is marked `agent:blocked` with
+a comment. Retry = remove `agent:blocked` + re-add `agent:implement`; idempotent promotion skips
+already-labelled sub-issues.
 
-**Chaining.** Self (next sub-issue) **or** → [Review](#44-review).
+**PRD closure.** The PRD has no `Closes #` of its own. [Close Completed PRD](#431-close-completed-prd)
+cascades: when the last sub-issue closes, it closes the parent PRD.
 
-**Prompt skeletons:** [`prompts/implement-prd.prompt.md`](./prompts/implement-prd.prompt.md),
-[`prompts/write-prd-pr.prompt.md`](./prompts/write-prd-pr.prompt.md).
+**Chaining.** → many parallel [Implement (single)](#42-implement-single-issue) runs.
+
+---
+
+### 4.3.1 Close Completed PRD
+
+**Purpose.** Finish a fanned-out PRD. Each sub-issue closes via its own merged PR; this cascade
+closes the parent once the last sibling is done.
+
+**Trigger.** `issues: [closed]`, skipped when `state_reason == not_planned` (a wontfix close
+shouldn't count as the PRD being done).
+**Permissions.** `issues: write`.
+
+**Step sequence.** Look up the closed issue's parent. If it has none, exit. Otherwise count the
+parent's still-open sub-issues; if zero and the parent is still open, remove `agent:in-progress`
+from the parent and `gh issue close` it with a completion comment.
+
+**Chaining.** Closing the PRD fires `issues: closed` again, which drives
+[Promote Queued](#47-promote-queued) for anything that declared the PRD as a blocker.
 
 ---
 
@@ -1019,27 +1024,26 @@ A feature from idea to merge, showing every hop:
 2. **Decompose.** A maintainer reads #910, agrees, and labels it `agent:to-issues`.
    [To Issues](#41-to-issues) drafts 3 vertical slices and attaches them as native sub-issues
    **#911, #912, #913** (each with a checklist, `## Parent PRD #910`, no `Closes`).
-3. **Implement, slice 1.** The maintainer labels **#910** `agent:implement`.
-   [Implement PRD](#43-implement-prd) sees sub-issues → it's a PRD; targets the first open
-   sub-issue **#911**; creates branch `agent/prd-910-extract-a-deliverablestatus-state-machine`;
-   the agent does TDD, commits `Part of #911`-tagged work; the orchestrator pushes (plain),
-   closes **#911**, runs write-prd-pr, opens **draft PR #914** (`Closes #910`), and — sub-issues
-   remain — re-adds `agent:implement` to **#910** via `AGENT_PAT`.
-4. **Chain, slices 2-3.** The re-label fires Implement PRD again for **#912**, then **#913**,
-   each committing to the same branch and reusing **PR #914**. After **#913** closes, no
-   sub-issues remain → the orchestrator labels **PR #914** `agent:review`.
-5. **Review.** [Review](#44-review) fetches the diff + #910 (the spec) + the (empty)
-   conversation, finds an edge case, writes a failing test, fixes it, commits
-   `RALPH: Review - …`, pushes race-safely, posts a review (`event: COMMENT`) with one inline
-   comment, and marks PR #914 **ready for review**.
-6. **Human feedback.** The maintainer leaves an inline comment asking for a rename and labels
-   PR #914 `agent:implement`. [Implement PR](#45-implement-pr) reads the unresolved thread,
-   renames, commits, pushes, and replies in-thread "Renamed in <sha>."
-7. **Conflict.** `main` has since moved; PR #914 now conflicts. The maintainer labels it
+3. **Fan out.** The maintainer labels **#910** `agent:implement`.
+   [Implement PRD](#43-implement-prd) sees sub-issues → it's a PRD; it implements nothing
+   itself, moves #910 to `agent:in-progress`, and promotes **#911, #912, #913** to
+   `agent:implement` via `AGENT_PAT`, then comments the fan-out on #910.
+4. **Implement in parallel.** Each promotion fires its own [Implement (single)](#42-implement-single-issue)
+   run concurrently: **#911 → branch `agent/issue-911-…` → draft PR #914 (`Closes #911`)**,
+   **#912 → PR #915**, **#913 → PR #916** — each then labelled `agent:review`.
+5. **Review.** [Review](#44-review) runs on each PR independently — fetching that PR's diff + its
+   sub-issue (the spec), improving the code, and marking the PR ready for review.
+6. **Human feedback.** On PR #914 the maintainer leaves an inline comment asking for a rename and
+   labels it `agent:implement`. [Implement PR](#45-implement-pr) reads the unresolved thread,
+   renames, commits, pushes, and replies in-thread "Renamed in <sha>." (PRs #915/#916 proceed on
+   their own.)
+7. **Conflict.** `main` has since moved; PR #915 now conflicts. The maintainer labels it
    `agent:update-branch`. [Update Branch](#46-update-branch) merges `main` in; conflicts exist,
    so the agent resolves them, commits the merge, and comments what it did.
-8. **Merge.** The maintainer approves and **merges PR #914** (the only human-gated step).
-   `Closes #910` closes the PRD.
+8. **Merge.** The maintainer approves and **merges PRs #914, #915, #916** (the only human-gated
+   step). Each `Closes #<sub-issue>` closes its sub-issue. When the last one closes,
+   [Close Completed PRD](#431-close-completed-prd) sees every sub-issue of #910 is done and
+   closes the PRD.
 9. **Unblock.** A separate queued issue **#920** had declared #910 as a blocker and was sitting
    at `agent:queued`. #910 closing fires [Promote Queued](#47-promote-queued); #920's last
    blocker is now clear, so it's flipped to `agent:implement` — and the cycle begins again at

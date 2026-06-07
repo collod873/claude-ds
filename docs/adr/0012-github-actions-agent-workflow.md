@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. The PRD-sequencing decision (sequential chaining) is superseded by [ADR-0019](./0019-parallel-prd-fan-out.md), which fans PRD sub-issues out in parallel. Everything else here still holds.
 
 ## Date
 
