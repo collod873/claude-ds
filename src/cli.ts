@@ -151,9 +151,10 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .command("classify")
     .option("--src <dir>", "opt-in: pull design-system parts from this source dir into design-system/ (omit to only reorganize within design-system/)")
     .option("--dry-run", "show classification plan without moving any files")
-    .option("--yes", "skip per-domain-bucket prompts for feature relocations")
-    .action(async (opts: { src?: string; dryRun?: boolean; yes?: boolean }) => {
-      await classifyCmd({ src: opts.src, dryRun: opts.dryRun, yes: opts.yes, cwd: defaults.cwd });
+    .option("--yes", "skip the apply-moves commitment-gate (ADR-0016)")
+    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016)")
+    .action(async (opts: { src?: string; dryRun?: boolean; yes?: boolean; answers?: string }) => {
+      await classifyCmd({ src: opts.src, dryRun: opts.dryRun, yes: opts.yes, answers: opts.answers, cwd: defaults.cwd });
     });
 
   program

@@ -16,7 +16,7 @@ import {
 import { scanDriftAndIntegrity, type AuditFinding } from "../lib/reports/drift-integrity-scan.js";
 import { formatFindings, formatScorecard } from "../lib/reports/findings-format.js";
 import { runAuditFix } from "../lib/checks/audit-fix.js";
-import { loadAnswersFile } from "../lib/decision/index.js";
+import { loadAnswersFile, UnresolvedAmbiguityError } from "../lib/decision/index.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -125,18 +125,32 @@ export async function auditCmd(opts: AuditOpts) {
     f => !suppressedSet.has(suppressedKey(f.ruleId, f.file)),
   );
 
-  const fixSummary = await runAuditFix(ctx, {
-    unexpected,
-    driftTierDirs: driftIntegrity.tierDirs,
-    exceptions,
-    suppressedSet,
-    activeFindings: initialActive,
-    fix: opts.fix ?? false,
-    except: opts.except ?? false,
-    reason: opts.reason,
-    issue: opts.issue,
-    permanent: opts.permanent,
-  });
+  let fixSummary;
+  try {
+    fixSummary = await runAuditFix(ctx, {
+      unexpected,
+      driftTierDirs: driftIntegrity.tierDirs,
+      exceptions,
+      suppressedSet,
+      activeFindings: initialActive,
+      fix: opts.fix ?? false,
+      except: opts.except ?? false,
+      reason: opts.reason,
+      issue: opts.issue,
+      permanent: opts.permanent,
+    });
+  } catch (e) {
+    // ADR-0016: a genuine Ambiguity hit a non-TTY caller with no pre-supplied
+    // answer. Print a named, plain-language exit so the operator knows which
+    // Decision id to put in `--answers` and re-run with.
+    if (e instanceof UnresolvedAmbiguityError) {
+      err(`audit needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`);
+      err(`Re-run with --answers <file> mapping "${e.decisionId}" to an option index, or --except to register an exception.`);
+      process.exit(2);
+      return;
+    }
+    throw e;
+  }
 
   warningCount += fixSummary.warningCount;
   const activeFindings = fixSummary.remainingFindings;

@@ -2,7 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { basename, join } from "node:path";
 import picomatch from "picomatch";
-import { info, err, confirm, printNextStep } from "../lib/log.js";
+import { info, err, printNextStep } from "../lib/log.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, type Tier } from "../lib/classifier.js";
 import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
@@ -14,6 +14,13 @@ import type { Operation } from "../lib/operation.js";
 import type { ExtractInlineOutcome } from "../lib/ops/extract-inline-components.js";
 import type { BackfillAtomHelpersOutcome } from "../lib/ops/backfill-atom-helpers.js";
 import type { ProposeMetaRoleOutcome } from "../lib/ops/propose-meta-role.js";
+import {
+  loadAnswersFile,
+  resolveDecisions,
+  UnresolvedAmbiguityError,
+  type AnswerBag,
+  type Decision,
+} from "../lib/decision/index.js";
 
 const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
@@ -104,6 +111,25 @@ function tierToDir(tier: "atom" | "composite"): string {
   return tier === "atom" ? "design-system/atoms" : "design-system/composites";
 }
 
+/**
+ * TTY prompt for the single classify commitment-gate. Maps a [y/N] answer onto
+ * the [Apply, Skip] options the spine resolver expects (index 0 = Apply, 1 =
+ * Skip). `[s]`/blank/no = Skip; anything starting with `y` = Apply. The full
+ * preview is printed by the caller before the gate; this helper only owns the
+ * yes/no read.
+ */
+async function confirmGate(question: string, _options: unknown): Promise<number> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const ans = await rl.question(`${question} [y/N] `);
+    const v = ans.trim().toLowerCase();
+    return v === "y" || v === "yes" ? 0 : 1;
+  } finally {
+    rl.close();
+  }
+}
+
 interface MovePlan {
   srcRel: string;
   destRel: string;
@@ -123,6 +149,13 @@ export async function classifyCmd(opts: {
   yes?: boolean;
   cwd?: string;
   /**
+   * Path to a JSON file mapping Decision id → answer index (or `"defer"`).
+   * Resolves classify's Ambiguity Decisions (atom-vs-composite per ambiguous
+   * file) ahead of any prompt — both the agent-supply path and the test seam
+   * for non-TTY runs (PRD #325 / ADR-0016).
+   */
+  answers?: string;
+  /**
    * Override the ambiguity prompt (keep/move/skip). Tests inject a stub; the CLI
    * leaves it undefined and classify builds a TTY prompt when interactive (issue #203).
    */
@@ -133,6 +166,17 @@ export async function classifyCmd(opts: {
   const yes = opts.yes ?? false;
   const srcRel = opts.src;
   const hasSrc = typeof srcRel === "string" && srcRel.length > 0;
+
+  let suppliedAnswers: AnswerBag = {};
+  if (opts.answers) {
+    try {
+      suppliedAnswers = await loadAnswersFile(opts.answers);
+    } catch (e) {
+      err(e instanceof Error ? e.message : String(e));
+      process.exit(2);
+      return;
+    }
+  }
 
   // Require .claude-ds.json (post-adopt state)
   let ctx: ProjectContext;
@@ -276,25 +320,57 @@ export async function classifyCmd(opts: {
       return;
     }
 
-    // Determine which feature buckets to proceed with (prompt once per bucket)
-    const confirmedBuckets = new Set<string>();
-    for (const [bucket, group] of byBucket) {
-      if (yes) {
-        confirmedBuckets.add(bucket);
-      } else {
-        info(`\n${group.length} file${group.length === 1 ? "" : "s"} would move to ${bucket}/:`);
-        for (const f of group) info(`  ${basename(f.srcRel)}`);
-        const ok = await confirm(`Move these to ${bucket}/?`);
-        if (ok) confirmedBuckets.add(bucket);
-      }
-    }
-
-    // Add confirmed feature moves to the plan
+    // Stage every planned move under a single commitment-gate Decision
+    // (ADR-0016 / PRD #325). The former per-bucket confirms — one prompt per
+    // feature bucket plus the implicit "apply atoms/composites" path —
+    // collapsed into ONE approve per command. TTY shows the preview-and-
+    // approve gate; non-TTY auto-applies (git is the undo); --yes skips.
     for (const f of features) {
       const bucket = f.domainBucket ?? "features/unknown";
-      if (!confirmedBuckets.has(bucket)) continue;
       const destRel = `${bucket}/${basename(f.srcRel)}`;
       tierPlans.push({ srcRel: f.srcRel, destRel, label: "feature" });
+    }
+
+    // The single commitment-gate. `[Apply]` is index 0 (the default the
+    // resolver auto-picks in non-TTY); `[Skip]` is index 1.
+    if (tierPlans.length > 0) {
+      info(`\nReady to apply ${tierPlans.length} move${tierPlans.length === 1 ? "" : "s"}:`);
+      for (const p of tierPlans) {
+        info(`  ${p.srcRel} → ${p.destRel} (${p.label})`);
+      }
+      const gate: Decision = {
+        id: "classify:apply-moves",
+        kind: "commitment-gate",
+        question: `Apply ${tierPlans.length} planned move${tierPlans.length === 1 ? "" : "s"}?`,
+        options: [
+          { label: "Apply", description: "move every listed file through the Runner" },
+          { label: "Skip", description: "leave every file in place" },
+        ],
+      };
+      const ttyForGate = !yes && process.stdout.isTTY === true;
+      let gateAnswer: number;
+      try {
+        const result = await resolveDecisions(
+          [gate],
+          { ...suppliedAnswers, ...(yes ? { [gate.id]: 0 } : {}) },
+          {
+            isTTY: ttyForGate,
+            prompt: ttyForGate ? async (q, options) => await confirmGate(q, options) : undefined,
+          },
+        );
+        gateAnswer = result.answers[gate.id] as number;
+      } catch (e) {
+        if (e instanceof UnresolvedAmbiguityError) {
+          err(`classify needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`);
+          process.exit(2);
+          return;
+        }
+        throw e;
+      }
+      if (gateAnswer !== 0) {
+        info("classify: aborted — no files moved");
+        return;
+      }
     }
 
     // Apply all planned moves through the Runner
@@ -453,9 +529,13 @@ export async function classifyCmd(opts: {
   // re-run case: audit flagged a misplaced composite, user re-runs classify to
   // resolve it, but src is already migrated).
   async function applyAmbiguityPass(): Promise<{ moved: number; kept: number }> {
-    // Ambiguous-band prompt — only available when interactive.
+    // Ambiguous-band prompt source: a test-injected `opts.prompt` overrides
+    // everything; otherwise the TTY prompt is used iff stdout is a TTY. Used
+    // as the resolver's TTY callback below — the spine drives the question;
+    // this callback only owns the read.
     const ambiguityPrompt: FixerPrompt | null =
-      opts.prompt ?? (!yes && process.stdout.isTTY === true ? makeTtyPrompt() : null);
+      opts.prompt ?? (process.stdout.isTTY === true ? makeTtyPrompt() : null);
+    const promptAvailable = ambiguityPrompt !== null;
 
     let movedCount = 0;
     let keptCount = 0;
@@ -468,6 +548,20 @@ export async function classifyCmd(opts: {
     }
     const exceptionsToAdd: Exception[] = [];
     const ambiguityMoves: MovePlan[] = [];
+
+    // Two phases:
+    //   1. Walk atoms/, auto-move confident composites, collect the
+    //      genuinely-ambiguous ones as Ambiguity Decisions.
+    //   2. Route the collected Decisions through the spine resolver — TTY
+    //      prompts, non-TTY with a supplied answer reads it, non-TTY without
+    //      throws (ADR-0016 fail-loud; no silent default).
+    interface AmbiguousAtom {
+      decision: Decision;
+      atomRel: string;
+      fileName: string;
+    }
+    const ambiguousAtoms: AmbiguousAtom[] = [];
+
     for (const e of atomEntries) {
       if (!e.isFile() || !e.name.endsWith(".tsx")) continue;
       if (COMPANION_SUFFIXES.some(s => e.name.endsWith(s))) continue;
@@ -493,46 +587,87 @@ export async function classifyCmd(opts: {
         continue;
       }
 
-      // Genuinely ambiguous band (1-2 DS imports): only prompt when interactive.
-      if (!ambiguityPrompt) continue;
-
+      // Genuinely ambiguous band (1-2 DS imports): build an Ambiguity Decision
+      // and let the spine resolver decide TTY vs supplied-answer vs fail-loud.
       const fileName = e.name.replace(/\.tsx$/, "");
-      const answer = await ambiguityPrompt(
-        `${fileName} is in atoms/ but imports multiple design-system components. Is it a simple building block (atom) or does it combine multiple components (composite)?`,
-        [
-          { label: "Keep as atom", description: "It is a self-contained building block" },
-          { label: "Move to composites", description: "It combines other components and belongs in composites/" },
-        ],
-      );
+      ambiguousAtoms.push({
+        atomRel,
+        fileName,
+        decision: {
+          id: `classify-ambiguity:${atomRel}`,
+          kind: "ambiguity",
+          question: `${fileName} is in atoms/ but imports multiple design-system components. Is it a simple building block (atom) or does it combine multiple components (composite)?`,
+          options: [
+            { label: "Keep as atom", description: "It is a self-contained building block" },
+            { label: "Move to composites", description: "It combines other components and belongs in composites/" },
+          ],
+        },
+      });
+    }
 
-      if (answer === 1) {
-        const destRel = `design-system/composites/${e.name}`;
-        ambiguityMoves.push({ srcRel: atomRel, destRel, label: "composite — user confirmed" });
-      } else if (answer === 0) {
-        // Keep as atom — suppress audit's ambiguity findings for this file
-        // going forward. Above COMPOSITE_CONFIDENCE_THRESHOLD the classifier
-        // verdict is "composite" (unambiguous), so both DRIFT-MISPLACED and
-        // DRIFT-MISCLASSIFIED-ATOM would fire on subsequent audits — the
-        // user's "keep" decision overrides both (PRD #241 / #244: one
-        // boundary, both rules use it).
-        const reason = "classify: user confirmed atom despite multiple component imports";
-        exceptionsToAdd.push({
-          rule: "DRIFT-MISPLACED",
-          path: atomRel,
-          reason,
-          permanent: true,
-        });
-        exceptionsToAdd.push({
-          rule: "DRIFT-MISCLASSIFIED-ATOM",
-          path: atomRel,
-          reason,
-          permanent: true,
-        });
-        keptCount++;
-        info(`classify: ${atomRel} — kept as atom (suppressing future ambiguity findings)`);
-      } else {
-        // "defer"/skip — leave the file untouched; audit will surface it again next run.
-        info(`classify: ${atomRel} — skipped (will be flagged again on next audit)`);
+    if (ambiguousAtoms.length > 0) {
+      let resolved: Record<string, number | "defer">;
+      try {
+        const result = await resolveDecisions(
+          ambiguousAtoms.map(a => a.decision),
+          suppliedAnswers,
+          {
+            // The resolver gates on `isTTY` ANDed with a non-null `prompt` —
+            // treating injected prompts (test path) as TTY keeps the spine the
+            // single switchboard while still honouring `opts.prompt`.
+            isTTY: promptAvailable,
+            prompt: ambiguityPrompt
+              ? async (q, o) => ambiguityPrompt(q, o)
+              : undefined,
+          },
+        );
+        resolved = result.answers;
+      } catch (e) {
+        if (e instanceof UnresolvedAmbiguityError) {
+          err(`classify needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`);
+          err(`Re-run with --answers <file> mapping "${e.decisionId}" to 0 (keep) or 1 (move).`);
+          process.exit(2);
+          return { moved: 0, kept: 0 };
+        }
+        throw e;
+      }
+
+      for (const a of ambiguousAtoms) {
+        const answer = resolved[a.decision.id];
+        if (answer === 1) {
+          const destRel = `design-system/composites/${basename(a.atomRel)}`;
+          ambiguityMoves.push({
+            srcRel: a.atomRel,
+            destRel,
+            label: "composite — user confirmed",
+          });
+        } else if (answer === 0) {
+          // Keep as atom — suppress audit's ambiguity findings for this file
+          // going forward. Above the confidence threshold the classifier
+          // verdict is "composite" (unambiguous), so both DRIFT-MISPLACED and
+          // DRIFT-MISCLASSIFIED-ATOM would fire on subsequent audits; the
+          // user's "keep" decision overrides both (PRD #241 / #244).
+          const reason =
+            "classify: user confirmed atom despite multiple component imports";
+          exceptionsToAdd.push({
+            rule: "DRIFT-MISPLACED",
+            path: a.atomRel,
+            reason,
+            permanent: true,
+          });
+          exceptionsToAdd.push({
+            rule: "DRIFT-MISCLASSIFIED-ATOM",
+            path: a.atomRel,
+            reason,
+            permanent: true,
+          });
+          keptCount++;
+          info(`classify: ${a.atomRel} — kept as atom (suppressing future ambiguity findings)`);
+        } else {
+          // "defer"/skip — leave the file untouched; audit will surface it
+          // again next run.
+          info(`classify: ${a.atomRel} — skipped (will be flagged again on next audit)`);
+        }
       }
     }
 

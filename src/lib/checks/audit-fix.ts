@@ -272,115 +272,87 @@ export async function runAuditFix(
 
     // Phase 2: drift fixers — skip files that still fail integrity.
     const isTTY = process.stdout.isTTY === true;
-    let driftFindings = activeFindings.filter(
+    const driftFindings = activeFindings.filter(
       (f): f is DriftFinding =>
         !f.ruleId.startsWith("INTEGRITY-") && !stillBrokenFiles.has(f.file),
     );
 
-    // PRD #266 Phase C step 2: interactive-finding pre-pass.
+    // PRD #325 / ADR-0016 — command-level Decision pre-pass.
     //
-    // For every interactive drift finding (`isInteractive(ruleId)`), enumerate
-    // its decision points via the rule's pure `describeDecisions` hook, then
-    // record an answer per decision into `ctx.decisions.fixerChoices`:
+    // Every interactive drift finding (`isInteractive(ruleId)`) enumerates its
+    // decision points via the rule's pure `describeDecisions` hook. Each point
+    // is an **Ambiguity** Decision (the Simple-question-test was the gate that
+    // promoted it to fixer-pre-pass status — ADR-0016 amends ADR-0014). The
+    // resolver implements the three-kind matrix:
     //
-    //   - TTY: ask via `makeTtyPrompt()` (the user sees the same question text
-    //     + labels + [s] skip key as before).
-    //   - Non-TTY: record `"defer"` without prompting.
+    //   - TTY: prompt via `makeTtyPrompt()` (one prompt per Decision).
+    //   - Non-TTY with a pre-supplied answer (`--answers` / `ctx.decisions`):
+    //     use the supplied answer, no prompt.
+    //   - Non-TTY with no supplied answer: **fail loud** — the resolver throws
+    //     `UnresolvedAmbiguityError`, the audit command catches it and prints
+    //     a plain-language "decision X needs you, supply via --answers" exit.
     //
     // The fixer's `fix()` body reads `ctx.decisions.fixerChoices[key]` instead
-    // of calling `opts.prompt` — so `plan(ctx)` is now a pure function of ctx.
+    // of calling `opts.prompt` — so `plan(ctx)` is a pure function of ctx.
     //
-    // A finding whose every decision point landed on `"defer"` is routed
-    // straight to `exceptions.json` here (`reason: "auto-deferred: no TTY"`)
-    // and dropped from the active set BEFORE drift-fix Ops are built — that
-    // replaces the post-hoc cleanup block that used to walk fix results
-    // looking for the same "deferred interactive in non-TTY" pattern.
-    // `--except` overrides this so the explicit reason/issue flow at the
-    // bottom handles every remaining finding.
-    // The audit-fix pre-pass is the first command-level consumer of the
-    // Decision spine (PRD #325 / ADR-0016). Each `FixerDecisionPoint` is
-    // adapted to an Ambiguity Decision via `decisionFromFixerPoint`; the
-    // resolver implements the three-kind matrix (TTY prompts, non-TTY
-    // collects), and the answers unfold back into `ctx.decisions.fixerChoices`
-    // so existing fixer bodies keep working unchanged.
-    //
-    // Audit runs the resolver in `collect: true` mode so that non-TTY
-    // ambiguities accumulate as Pending decisions and are then mapped to
-    // `"defer"` in `fixerChoices` — preserving today's behavior
-    // (auto-deferred-to-exceptions.json) until the front door (PRD #325
-    // slice 3) takes over reporting.
+    // ADR-0014's "every ambiguity gets a safe default in non-TTY" auto-defer
+    // path (writing `auto-deferred: no TTY` entries into `exceptions.json`) is
+    // retired here — those project judgments were Collin's to make, and the
+    // agent silently picking a default was the failure ADR-0016 closes.
+    // `--except` still routes remaining findings to exceptions.json via the
+    // explicit `reason`/`issue` flow at the bottom of this function, so
+    // sanctioned drift continues to land there with an explicit opt-in.
     const fixerChoices: Record<FindingKey, Record<DecisionKey, DecisionAnswer>> =
       ctx.decisions.fixerChoices ?? {};
     ctx.decisions.fixerChoices = fixerChoices;
     const ttyPrompt = isTTY ? makeTtyPrompt() : null;
     const topAnswers: AnswerBag = ctx.decisions.answers ?? {};
-    const fullyDeferredKeys = new Set<string>();
 
-    for (const finding of driftFindings) {
-      if (!isInteractive(finding.ruleId)) continue;
-      const describe = getDescribeDecisions(finding.ruleId);
-      if (!describe) continue;
-      let source: string;
-      try { source = await readFile(join(cwd, finding.file), "utf8"); } catch { continue; }
-      const points = describe(finding, source, { ctx });
-      if (points.length === 0) continue;
+    // `--except` is the explicit "register exceptions, ask no questions" path
+    // (sanctioned drift). Skip the Decision pre-pass entirely so a non-TTY
+    // `--except` run doesn't hit the Ambiguity fail-loud — the fixer will read
+    // empty `choices` for each interactive finding, every per-symbol decision
+    // defaults to `"defer"` inside the fix() body, and the `--except` block at
+    // the bottom records the still-active findings as exceptions with the
+    // user-supplied reason/issue.
+    if (!except) {
+      for (const finding of driftFindings) {
+        if (!isInteractive(finding.ruleId)) continue;
+        const describe = getDescribeDecisions(finding.ruleId);
+        if (!describe) continue;
+        let source: string;
+        try { source = await readFile(join(cwd, finding.file), "utf8"); } catch { continue; }
+        const points = describe(finding, source, { ctx });
+        if (points.length === 0) continue;
 
-      const key = findingKey(finding);
-      const perFinding: Record<DecisionKey, DecisionAnswer> = fixerChoices[key] ?? {};
+        const key = findingKey(finding);
+        const perFinding: Record<DecisionKey, DecisionAnswer> = fixerChoices[key] ?? {};
 
-      const decisions: Decision[] = points.map(p => decisionFromFixerPoint(key, p));
-      const supplied: AnswerBag = { ...topAnswers };
-      for (const p of points) {
-        if (p.key in perFinding) {
-          supplied[fixerDecisionId(key, p)] = perFinding[p.key] as SpineDecisionAnswer;
+        const decisions: Decision[] = points.map(p => decisionFromFixerPoint(key, p));
+        const supplied: AnswerBag = { ...topAnswers };
+        for (const p of points) {
+          if (p.key in perFinding) {
+            supplied[fixerDecisionId(key, p)] = perFinding[p.key] as SpineDecisionAnswer;
+          }
         }
-      }
 
-      const result = await resolveDecisions(decisions, supplied, {
-        isTTY,
-        prompt: ttyPrompt ? (q, o) => ttyPrompt(q, o) : undefined,
-        collect: true,
-      });
+        // `collect: false` (the default) → non-TTY Ambiguities with no
+        // supplied answer throw `UnresolvedAmbiguityError`. The audit command
+        // catches and prints a plain-language exit naming the decision id.
+        const result = await resolveDecisions(decisions, supplied, {
+          isTTY,
+          prompt: ttyPrompt ? (q, o) => ttyPrompt(q, o) : undefined,
+        });
 
-      for (const p of points) {
-        const id = fixerDecisionId(key, p);
-        if (id in result.answers) {
-          perFinding[p.key] = result.answers[id] as DecisionAnswer;
+        for (const p of points) {
+          const id = fixerDecisionId(key, p);
+          if (id in result.answers) {
+            perFinding[p.key] = result.answers[id] as DecisionAnswer;
+          }
         }
-      }
-      // Non-TTY pending → record "defer" so `fix()` reads the same value
-      // it used to get from the inline non-TTY branch.
-      for (const pending of result.pending) {
-        const found = points.find(p => fixerDecisionId(key, p) === pending.id);
-        if (found) perFinding[found.key] = "defer";
-      }
 
-      fixerChoices[key] = perFinding;
-      const anyAnswered = points.some(p => perFinding[p.key] !== undefined && perFinding[p.key] !== "defer");
-      if (!anyAnswered) fullyDeferredKeys.add(suppressedKey(finding.ruleId, finding.file));
-    }
-
-    if (!isTTY && !except && fullyDeferredKeys.size > 0) {
-      const autoDeferred: Exception[] = [];
-      const stillActive: AuditFinding[] = [];
-      for (const f of activeFindings) {
-        if (fullyDeferredKeys.has(suppressedKey(f.ruleId, f.file))) {
-          autoDeferred.push({ rule: f.ruleId, path: f.file, reason: "auto-deferred: no TTY" });
-        } else {
-          stillActive.push(f);
-        }
+        fixerChoices[key] = perFinding;
       }
-      if (autoDeferred.length > 0) {
-        const merged = [...exceptions, ...autoDeferred];
-        await run(ctx, [appendExceptions(merged)], "apply");
-        info(`${autoDeferred.length} finding(s) auto-deferred to exceptions.json (non-TTY mode)`);
-        exceptions = merged;
-        for (const ex of autoDeferred) suppressedSet.add(suppressedKey(ex.rule, ex.path));
-      }
-      activeFindings = stillActive;
-      driftFindings = driftFindings.filter(
-        f => !fullyDeferredKeys.has(suppressedKey(f.ruleId, f.file)),
-      );
     }
 
     const fixPassResult = await runFixPass(ctx, driftFindings, {});
@@ -491,8 +463,6 @@ export async function runAuditFix(
       }
     }
 
-    // Non-TTY auto-deferral now happens in the pre-pass above, before any Op
-    // is built — no post-hoc cleanup needed (PRD #266 Phase C step 2).
   }
 
   // --except: write exception entries for all remaining active findings.
