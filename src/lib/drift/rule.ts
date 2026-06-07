@@ -127,12 +127,17 @@ export type DescribeDecisions = (
  * One drift rule, co-locating its detect + (optional) fix + metadata.
  *
  * Discriminated on `fixable`: a `fixable: false` rule MUST NOT declare
- * `fix`/`priority`/`interactive`. A `fixable: true` rule splits further on
- * `interactive` — the `interactive: true` arm additionally requires
- * `describeDecisions` (the pre-pass hook), and the `interactive: false` arm
- * forbids it. Forgetting `describeDecisions` on a new interactive rule is a
- * compile error — the same shape that prevents silently-unfixable rules from
- * shipping now also prevents silently-prompting ones.
+ * `fix`/`priority`/`interactive`, but MUST declare `classifyRelocatable` —
+ * the answer to "if audit can't fix this, can `classify` make progress on
+ * it?" Required so `deriveProjectState` can distinguish 'classify can
+ * relocate this' from 'unfixable, no remedy' by construction (#379). A
+ * `fixable: true` rule splits further on `interactive` — the `interactive:
+ * true` arm additionally requires `describeDecisions` (the pre-pass hook),
+ * and the `interactive: false` arm forbids it. Forgetting
+ * `describeDecisions` on a new interactive rule, or `classifyRelocatable`
+ * on a new unfixable rule, is a compile error — the same shape that
+ * prevents silently-unfixable rules from shipping also prevents silently-
+ * unresolvable ones from masquerading as classify work.
  */
 export type DriftRule =
   | {
@@ -141,6 +146,20 @@ export type DriftRule =
       description: string;
       detect: (input: DriftRuleInput) => DriftFinding | null;
       fixable: false;
+      /**
+       * True when `classify` is the owning remedy for findings of this rule
+       * (it relocates the file, flips meta.kind, or proposes meta.role —
+       * MISPLACED, MISCLASSIFIED-*, SMART-PART-NO-ROLE). False when no
+       * shipped step in the canonical loop can clear the finding —
+       * PATTERN-NO-SLOTS, PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT — and
+       * the consumer must hand-edit, register an exception, or wait for the
+       * pack to ship support. Read by `deriveProjectState` to keep heal's
+       * convergence honest: classify-relocatable findings drive
+       * `classifyNeeded`; truly-unresolvable findings drive the
+       * `unresolvableFindings` signal instead so heal cannot silently
+       * declare convergence with real ERROR findings outstanding.
+       */
+      classifyRelocatable: boolean;
     }
   | {
       id: DriftRuleId;

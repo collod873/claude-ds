@@ -248,6 +248,14 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
     const plan = planRemediation(state);
 
     if (plan.length === 0) {
+      // Empty plan + `unresolvableFindings` means no loop member can clear the
+      // finding (PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT, …). Reporting
+      // `converged` here would be the silent-success #379 set out to prevent —
+      // surface it as non-convergence so heal exits loudly and the operator
+      // sees the audit findings instead of a "Tree is clean" message.
+      if (state.unresolvableFindings) {
+        return { kind: "exhausted", lastStep: null };
+      }
       return { kind: "converged", iterations: iter };
     }
 
@@ -279,7 +287,13 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
     // unresolved findings — but real unfixable findings (classify/autoFix that
     // the dispatchers could not clear) keep the loop going to the ceiling,
     // which is honestly "did not converge" rather than silent success.
-    const findingsRemain = state.classifyNeeded || state.autoFixNeeded;
+    // `unresolvableFindings` is the post-#379 signal for unfixable findings no
+    // loop step can clear (PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT,
+    // INTEGRITY-UNRESOLVABLE-IMPORT): without it the deriver had to fold them
+    // into `classifyNeeded` to keep the convergence check honest, embedding
+    // the false assumption that classify owns every unfixable rule.
+    const findingsRemain =
+      state.classifyNeeded || state.autoFixNeeded || state.unresolvableFindings;
     if (stable && pendingThisIter === 0 && !findingsRemain) {
       return { kind: "converged", iterations: iter };
     }

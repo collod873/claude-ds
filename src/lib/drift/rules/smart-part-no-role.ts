@@ -39,4 +39,9 @@ export const smartPartNoRoleRule: DriftRule = {
     "Smart DS part (uses state/effect/context) declares no meta.role; gated by role_contracts_strict",
   detect,
   fixable: false,
+  // classify's role-proposer pass (PRD #301 / #312) writes meta.role when a
+  // shipped contract anchor matches; the unmatched arms route to candidate-
+  // feature / tracked-exception, which still flow through classify as the
+  // owning step.
+  classifyRelocatable: true,
 };

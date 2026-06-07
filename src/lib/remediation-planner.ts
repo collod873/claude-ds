@@ -82,6 +82,18 @@ export interface ProjectState {
   reconformNeeded: boolean;
   /** Auto-fixable drift or integrity findings remain. */
   autoFixNeeded: boolean;
+  /**
+   * Unfixable findings remain whose remedy no canonical-order step owns
+   * (DRIFT-PATTERN-NO-SLOTS, DRIFT-PATTERN-IMPORTS-PATTERN,
+   * DRIFT-ROLE-NO-CONTRACT, INTEGRITY-UNRESOLVABLE-IMPORT — anything with
+   * `fixable: false` and `classifyRelocatable: false`). Does NOT drive a
+   * step in the plan — there is no loop member that can resolve them —
+   * but the headless driver reads this signal so heal does not silently
+   * declare convergence with real ERROR findings outstanding (#379). The
+   * remedies live outside the loop: hand-edit, `exceptions.json`, or
+   * waiting for the pack to ship machinery.
+   */
+  unresolvableFindings: boolean;
 }
 
 /**

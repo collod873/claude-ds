@@ -38,4 +38,6 @@ export const misplacedRule: DriftRule = {
   description: "File lives in a folder that disagrees with its classifier-computed tier",
   detect,
   fixable: false,
+  // `classify` literally exists to fix this — it's the canonical example.
+  classifyRelocatable: true,
 };

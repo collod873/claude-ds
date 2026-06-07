@@ -20,11 +20,13 @@ import { checkVersionCurrency } from "./version-currency.js";
 import { scanScaffoldPresence } from "./reports/scaffold-presence.js";
 import { scanDriftAndIntegrity } from "./reports/drift-integrity-scan.js";
 import {
+  isClassifyRelocatable,
   isExtractionNeededFinding,
   isFixable,
   type DriftRuleId,
 } from "./drift/index.js";
 import {
+  isIntegrityClassifyRelocatable,
   isIntegrityFixable,
   type IntegrityRuleId,
 } from "./integrity/index.js";
@@ -140,8 +142,19 @@ async function deriveFromCtx(ctx: ProjectContext): Promise<ProjectState> {
     f => !suppressed.has(`${f.ruleId}:${f.file}`),
   );
 
+  // `classifyNeeded` is the "classify has work to do" signal that lands the
+  // step in the plan; `unresolvableFindings` is the "real findings remain
+  // but no loop step can clear them" signal the driver consults for
+  // convergence. Before #379 every unfixable finding folded into
+  // `classifyNeeded`, embedding the assumption *unfixable ⇒ classify can
+  // relocate it*. That holds for today's unfixable rules (MISPLACED,
+  // MISCLASSIFIED-*) but not for future ones (PATTERN-IMPORTS-PATTERN,
+  // ROLE-NO-CONTRACT) — heal could then declare convergence while real
+  // ERROR findings remain. The rule shape's `classifyRelocatable` field
+  // (compile-time required on unfixable rules) drives the split here.
   let classifyNeeded = false;
   let autoFixNeeded = false;
+  let unresolvableFindings = false;
   for (const f of active) {
     if (isExtractionNeededFinding(f)) {
       // Extraction is classify's job, not audit's (ADR-0015).
@@ -149,22 +162,27 @@ async function deriveFromCtx(ctx: ProjectContext): Promise<ProjectState> {
       continue;
     }
     if (f.ruleId.startsWith("INTEGRITY-")) {
-      if (isIntegrityFixable(f.ruleId as IntegrityRuleId)) {
+      const id = f.ruleId as IntegrityRuleId;
+      if (isIntegrityFixable(id)) {
         autoFixNeeded = true;
-      } else {
-        // An unfixable integrity finding can't be auto-resolved — but the
-        // shape of the tree may need classify to move the file (the
-        // corrupt-baseline / DRIFT-MISCLASSIFIED-ATOM round trip, #265).
+      } else if (isIntegrityClassifyRelocatable(id)) {
         classifyNeeded = true;
+      } else {
+        unresolvableFindings = true;
       }
       continue;
     }
-    if (isFixable(f.ruleId as DriftRuleId)) {
+    const id = f.ruleId as DriftRuleId;
+    if (isFixable(id)) {
       autoFixNeeded = true;
-    } else {
-      // Unfixable drift findings (DRIFT-MISCLASSIFIED-ATOM, etc.) need
-      // classify to relocate; audit refuses to (ADR-0015).
+    } else if (isClassifyRelocatable(id)) {
       classifyNeeded = true;
+    } else {
+      // Unfixable AND not classify-relocatable (PATTERN-IMPORTS-PATTERN,
+      // ROLE-NO-CONTRACT, …). The remedy lives outside the loop —
+      // hand-edit or exceptions.json — but the finding is real, so heal
+      // must NOT report convergence (#379).
+      unresolvableFindings = true;
     }
   }
 
@@ -179,5 +197,6 @@ async function deriveFromCtx(ctx: ProjectContext): Promise<ProjectState> {
     reconformNeeded: false,
     classifyNeeded,
     autoFixNeeded,
+    unresolvableFindings,
   };
 }

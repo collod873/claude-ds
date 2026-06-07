@@ -38,6 +38,17 @@ export function isIntegrityFixable(id: IntegrityRuleId): boolean {
 }
 
 /**
+ * Mirrors `isClassifyRelocatable` on the drift side (#379). True when
+ * `classify` is the owning remedy for findings of this unfixable integrity
+ * rule. Fixable rules return `false` — the question is meaningless for
+ * them (audit owns the remedy via `isIntegrityFixable`).
+ */
+export function isIntegrityClassifyRelocatable(id: IntegrityRuleId): boolean {
+  const rule = INTEGRITY_RULES_BY_ID[id];
+  return rule.fixable ? false : rule.classifyRelocatable;
+}
+
+/**
  * True if the integrity rule gates downstream drift evaluation. Defaults to
  * `true`; only rules declaring `blocking: false` (today: UNRESOLVABLE-IMPORT)
  * are non-blocking. Centralises the `blocking !== false` coalescing so callers

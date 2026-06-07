@@ -43,4 +43,8 @@ export const roleNoContractRule: DriftRule = {
     "DS file declares a meta.role for which the pack ships no contract; document via exceptions.json",
   detect,
   fixable: false,
+  // The remedy is upstream (pack ships the contract) or downstream
+  // (consumer registers a tracked exception); no loop step touches the
+  // consumer's file to resolve it.
+  classifyRelocatable: false,
 };

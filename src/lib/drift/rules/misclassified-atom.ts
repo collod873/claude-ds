@@ -34,4 +34,6 @@ export const misclassifiedAtomRule: DriftRule = {
   description: "File declares meta.kind=atom but classifier says otherwise",
   detect,
   fixable: false,
+  // classify owns the relocate-or-flip-meta.kind decision (ADR-0015).
+  classifyRelocatable: true,
 };
