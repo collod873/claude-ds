@@ -33,6 +33,7 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   const abs = resolve(cwd, opts.source);
   const rel = relative(resolve(cwd), abs);
   if (!rel || rel.startsWith("..")) { err("source outside project root"); process.exit(2); }
+  if (!(await ctx.exists(abs))) { err(`source not found: ${opts.source}`); process.exit(2); }
   const s = await stat(abs);
   if (s.isDirectory()) { err("source is a directory"); process.exit(2); }
   if (!abs.endsWith(".tsx")) { err("only .tsx components are supported at v1"); process.exit(2); }

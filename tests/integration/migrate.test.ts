@@ -94,6 +94,13 @@ describe("migrate", () => {
     expect(r.stdout).toMatch(/→ Next:.*lonely\.showcase\.tsx/);
   });
 
+  it("emits friendly error when source path does not exist (#360)", async () => {
+    const r = await runCli(["migrate", "src/components/missing.tsx", "--reason", "t", "--yes"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/source not found: src\/components\/missing\.tsx/);
+    expect(r.stderr).not.toMatch(/ENOENT/);
+  });
+
   it("refuses on collision without --rename", async () => {
     await mkdir(join(dir, "src/components"), { recursive: true });
     await writeFile(join(dir, "src/components/button.tsx"), `export const Button = () => null;`);
