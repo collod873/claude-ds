@@ -71,10 +71,9 @@ describe("frontDoorCmd (TTY dashboard + commitment gate)", () => {
   it("adopted + clean tree: nothing to remediate, routes to the build command", async () => {
     const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
-    // `adopt` at the current pack version leaves one benign repair pending
-    // (`meta_kind_strict` not yet flipped — a tracked product defect, see the PR
-    // notes); heal drives it to the true fixed point so this test isolates the
-    // genuinely-clean front-door surface.
+    // #382: adopt now lands at the verification chain's fixed point, so heal is
+    // a no-op here. The call is retained as a belt-and-braces guard against a
+    // future migration that adds another end-state adopt doesn't yet seed.
     const healed = await runCli(["heal"], { cwd: dir });
     expect(healed.code).toBe(0);
     await writeFile(join(dir, "package.json"), JSON.stringify({ scripts: { build: "next build" } }));
