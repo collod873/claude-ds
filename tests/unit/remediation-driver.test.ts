@@ -99,13 +99,18 @@ describe("snapshotTree (convergence detector)", () => {
     await writeFile(abs, content);
   }
 
-  it("snapshots DS-managed files but skips build/generated dirs (#384)", async () => {
+  it("snapshots DS-managed files but skips build/generated dirs (#384, #385)", async () => {
     // A DS-managed file the loop mutates — MUST be watched for convergence.
     await seed("design-system/atoms/button.tsx", "export const Button = () => null;\n");
     // Build/generated output the loop never touches — MUST be skipped (OOM on
-    // real trees walks the gigabyte .next cache twice per iteration).
+    // real trees walks the gigabyte .next cache twice per iteration). The
+    // Vite/Nuxt/Parcel caches are the #385 retrigger: pre-consolidation
+    // SNAPSHOT_SKIP only knew about .next.
     await seed(".next/cache/huge.txt", "build cache");
     await seed(".next/static/chunk.js", "chunk");
+    await seed(".nuxt/dist/server.mjs", "nuxt build");
+    await seed(".vite/deps/_metadata.json", "vite cache");
+    await seed(".parcel-cache/blob", "parcel cache");
     await seed("dist/bundle.js", "bundle");
     await seed("coverage/lcov.info", "coverage");
 
@@ -113,7 +118,7 @@ describe("snapshotTree (convergence detector)", () => {
 
     expect(snap.has(join("design-system", "atoms", "button.tsx"))).toBe(true);
 
-    const skipped = [".next", "dist", "coverage"];
+    const skipped = [".next", ".nuxt", ".vite", ".parcel-cache", "dist", "coverage"];
     for (const key of snap.keys()) {
       const segments = key.split(/[/\\]/);
       for (const dirName of skipped) {

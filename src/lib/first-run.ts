@@ -18,6 +18,7 @@
  */
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { SCAN_SKIP_DIRS } from "./build-outputs.js";
 import type { Decision } from "./decision/index.js";
 
 /** Stable id used as the `--answers` key for the greet's Ambiguity Decision. */
@@ -38,17 +39,6 @@ export interface FirstRunState {
   /** True when at least one `.tsx` / `.jsx` consumer component file exists. */
   hasExistingComponents: boolean;
 }
-
-const SKIP_DIRS = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  "build",
-  ".next",
-  "out",
-  ".turbo",
-  "coverage",
-]);
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -116,7 +106,7 @@ async function hasAnyComponentFile(cwd: string): Promise<boolean> {
       return false;
     }
     for (const e of entries) {
-      if (SKIP_DIRS.has(e.name)) continue;
+      if (SCAN_SKIP_DIRS.has(e.name)) continue;
       if (e.name.startsWith(".")) continue; // .git, .next handled above; skip all dotdirs
       if (e.isFile()) {
         if (e.name.endsWith(".tsx") || e.name.endsWith(".jsx")) return true;
