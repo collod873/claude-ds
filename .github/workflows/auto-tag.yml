@@ -21,10 +21,14 @@ name: auto-tag
 # can't lag the release, and a migration-bearing release without Crewops
 # verification is mechanically refused (ADR-0011 + 0002).
 #
-# If any release-path step fails (test gate, ADR-0011 gate, tag-push, Release-
-# create, README-pin), the workflow opens a GitHub issue with a link to the
-# failing run — silent red runs are #383's other half. The no-op re-trigger
-# path can't fire that step (its guard requires `exists == 'false'`).
+# If any release-path step that can hard-fail (test gate, ADR-0011 gate,
+# tag-push, README-pin) fails, the workflow opens a GitHub issue with a link
+# to the failing run — silent red runs are #383's other half. The no-op
+# re-trigger path can't fire that step (its guard requires `exists == 'false'`).
+# `GitHub Release from CHANGELOG` deliberately swallows its error into a
+# workflow warning so the README-pin step still runs (the tag is already the
+# canonical release artifact); a Release-create hiccup therefore stays as a
+# log-only warning, not an issue.
 
 on:
   push:
@@ -157,11 +161,14 @@ jobs:
 
       - name: Open release-failure issue on any prior step failure
         # Fires when this run attempted a release (steps.check.outputs.exists
-        # was 'false') and any prior step failed — test gate, ADR-0011 gate,
-        # tag-push, Release-create, or README-pin. The pre-#383 behaviour was
-        # a silent red workflow run that nobody saw until the next release
-        # noticed `main` hadn't moved. Opening a GitHub issue surfaces the
-        # failure on the maintainer's radar without needing email/Slack wiring.
+        # was 'false') and any prior step hard-failed — test gate, ADR-0011
+        # gate, tag-push, or README-pin. (The `GitHub Release from CHANGELOG`
+        # step intentionally swallows its error to a `::warning::` so README-
+        # pin still runs; that path stays as a log-only warning, not an issue.)
+        # The pre-#383 behaviour was a silent red workflow run that nobody saw
+        # until the next release noticed `main` hadn't moved. Opening a GitHub
+        # issue surfaces the failure on the maintainer's radar without needing
+        # email/Slack wiring.
         #
         # On the post-release re-trigger run (after the README-pin push), the
         # check step succeeds (tag now exists), nothing else runs, failure()
