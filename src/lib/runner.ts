@@ -44,7 +44,14 @@ function isBinary(buf: Buffer): boolean {
   return false;
 }
 
-function renderDiff(opName: string, c: Change): string {
+/**
+ * The unified-ish diff a single Change renders to in `dry-run` output. Pure —
+ * no I/O — so the render module (PRD #325 sub-issue #330) can re-use it for
+ * commitment-gate previews and apply color at the render layer rather than
+ * inside the Runner. The Runner itself still writes the uncolored output
+ * to stdout in dry-run mode (existing behavior pinned by `runner.test.ts`).
+ */
+export function renderDiff(opName: string, c: Change): string {
   const header = `[${opName}] ${c.kind === "rename" ? `${c.path} -> ${c.after}` : c.path}`;
   const lines: string[] = [];
   if (c.kind === "write") {
