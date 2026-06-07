@@ -34,7 +34,11 @@ export type DriftRuleId =
   | "DRIFT-INLINE-STATIC-STYLE"
   | "DRIFT-META-EXAMPLES-DUPLICATE"
   | "DRIFT-META-EXAMPLES-CORRUPT"
-  | "DRIFT-STALE-DS-IMPORT";
+  | "DRIFT-STALE-DS-IMPORT"
+  // Token-parity rule (PRD #340 / sub-issue #347; ADR-0017 addendum). Required
+  // before OWNED-TOKEN-LINT can legitimately claim supersession of a hand-rolled
+  // JSON↔CSS token-parity guard.
+  | "DRIFT-TOKEN-PARITY";
 
 export interface DriftFinding {
   ruleId: DriftRuleId;
@@ -66,6 +70,17 @@ export interface DriftRuleInput {
    *  Mirrors `metaKindStrict` — default false on fresh adoption, flipped after
    *  classify backfill (PRD #301 / #311). */
   roleContractsStrict?: boolean;
+  /** Flat map of CSS variable name → raw value string, pre-parsed by the audit
+   *  pre-pass from the consumer's tokens-CSS file (commonly `app/globals.css`).
+   *  Keys are the variable name *without* the leading `--` (e.g.
+   *  `"color-primary"`); values are the raw declaration text. Required for
+   *  DRIFT-TOKEN-PARITY to fire — when absent, the rule short-circuits to null
+   *  rather than misreporting. See `src/lib/drift/rules/token-parity.ts`. */
+  cssVariables?: Record<string, string>;
+  /** Project-relative path the `cssVariables` map came from — surfaced in the
+   *  DRIFT-TOKEN-PARITY finding message and read again by the fixer to update
+   *  the same file. */
+  cssVariablesFile?: string;
 }
 
 export interface FixResult {
