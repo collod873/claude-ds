@@ -36,8 +36,18 @@ export const TOKENS_PATH = "design-system/tokens.json";
 
 const DEFAULT_CSS_CANDIDATES = ["app/globals.css", "src/app/globals.css", "styles/globals.css"];
 
-const CSS_VAR_DECL_RE = /--([a-zA-Z_][\w-]*)\s*:\s*([^;]+);/g;
+// `:root` is the canonical token-declaration block. `.dark { --x: y }`-style
+// theme overrides live in other selectors and are deliberate variations, not
+// the source-of-truth value — both parsing and rewriting are confined to
+// `:root` so the rule does not flag overrides as drift or silently rewrite
+// them when --fix runs.
 const ROOT_BLOCK_RE = /(:root\s*\{)([\s\S]*?)(\})/;
+const ROOT_BLOCK_RE_G = /(:root\s*\{)([\s\S]*?)(\})/g;
+const CSS_VAR_DECL_RE_G = /--([a-zA-Z_][\w-]*)\s*:\s*([^;]+);/g;
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -65,13 +75,21 @@ function parseTokensJson(source: string): Record<string, string> | null {
   return flattenTokens(parsed as JsonValue);
 }
 
-/** Extract `--name: value;` declarations from CSS source. Trims values. */
+/** Extract `--name: value;` declarations from `:root` blocks in CSS source.
+ *  Theme-override blocks (`.dark { --x: y }`, `:root[data-theme=light]`, etc.)
+ *  are intentionally skipped — they are variations, not the canonical token
+ *  value, and treating them as drift would corrupt the consumer's theming. */
 export function parseCssVariables(source: string): Record<string, string> {
   const out: Record<string, string> = {};
-  CSS_VAR_DECL_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = CSS_VAR_DECL_RE.exec(source)) !== null) {
-    out[m[1]] = m[2].trim();
+  const blockRe = new RegExp(ROOT_BLOCK_RE_G.source, "g");
+  let bm: RegExpExecArray | null;
+  while ((bm = blockRe.exec(source)) !== null) {
+    const body = bm[2];
+    const declRe = new RegExp(CSS_VAR_DECL_RE_G.source, "g");
+    let dm: RegExpExecArray | null;
+    while ((dm = declRe.exec(body)) !== null) {
+      out[dm[1]] = dm[2].trim();
+    }
   }
   return out;
 }
@@ -186,12 +204,18 @@ function appendDeclarationsToRoot(css: string, additions: { name: string; value:
 }
 
 function rewriteDeclarationValues(css: string, mismatches: { name: string; jsonValue: string }[]): string {
-  let result = css;
-  for (const { name, jsonValue } of mismatches) {
-    const re = new RegExp(`(--${name}\\s*:\\s*)([^;]+)(;)`, "g");
-    result = result.replace(re, `$1${jsonValue}$3`);
-  }
-  return result;
+  // Confine rewrites to `:root` blocks so theme overrides (`.dark { --x: y }`
+  // and friends) keep their distinct values. Without this scope, a value
+  // mismatch on `--color-primary` would also overwrite `.dark`'s override and
+  // silently break the consumer's dark mode.
+  return css.replace(ROOT_BLOCK_RE_G, (_, head: string, body: string, close: string) => {
+    let next = body;
+    for (const { name, jsonValue } of mismatches) {
+      const re = new RegExp(`(--${escapeRegex(name)}\\s*:\\s*)([^;]+)(;)`, "g");
+      next = next.replace(re, `$1${jsonValue}$3`);
+    }
+    return `${head}${next}${close}`;
+  });
 }
 
 async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResult> {

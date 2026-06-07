@@ -260,4 +260,34 @@ describe("DRIFT-TOKEN-PARITY fix", () => {
     expect(result.fixed).toBe(false);
     expect(result.message).toMatch(/tokens\.json|not found|could not/i);
   });
+
+  it("preserves theme-override blocks when rewriting :root values", async () => {
+    // `.dark { --color-primary: ... }` is a deliberate theme variation, not
+    // drift — the rewrite must be confined to `:root` so consumers' theming
+    // survives `audit --fix`. A v1 of this rule that used a global regex
+    // would silently rewrite both blocks and nuke dark mode.
+    await seedTokens();
+    await seedCss(
+      ":root {\n" +
+      "  --color-background: #ffffff;\n" +
+      "  --color-foreground: #111111;\n" +
+      "  --color-primary: #999999;\n" + // mismatched vs JSON (#0070f3)
+      "  --z-dropdown: 1000;\n" +
+      "}\n" +
+      ".dark {\n" +
+      "  --color-primary: #00ffff;\n" + // deliberate theme override
+      "}\n",
+    );
+
+    const fixer = getFixer("DRIFT-TOKEN-PARITY")!;
+    const result = await fixer(makeFinding(), makeFakeCtx(dir));
+    expect(result.fixed).toBe(true);
+    await applyChanges(dir, result.changes);
+
+    const css = await readFile(join(dir, CSS_PATH), "utf8");
+    // `:root` was rewritten to JSON value.
+    expect(css).toContain("--color-primary: #0070f3");
+    // `.dark` override is untouched — the consumer's dark theme survives.
+    expect(css).toContain("--color-primary: #00ffff");
+  });
 });
