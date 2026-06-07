@@ -1,0 +1,122 @@
+name: auto-tag
+
+# Bumping `version` in `package.json` IS the release action.
+#
+# On every push to `main`:
+#   1. Read `version` from `package.json` (cheap, ~2s).
+#   2. If tag `v<version>` already exists → no-op. Most pushes hit this path.
+#   3. If the tag is missing → this is a release:
+#      - ADR-0011 verification gate: migration-bearing releases
+#        (`src/lib/ops/migrations/v<v>/` present) refuse to tag until
+#        `pack/versions/<v>/verification.md` exists.
+#      - Test gate: `npm test` must pass.
+#      - Create + push the annotated tag.
+#      - Cut a GitHub Release using the matching `## [x.y.z]` CHANGELOG section.
+#
+# Net effect: a forgotten tag is no longer possible, and a migration-bearing
+# release without Crewops verification is mechanically refused (ADR-0011 + 0002).
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  auto-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $version (tag v$version)."
+
+      - name: Check existing tag
+        id: check
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+          if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
+            echo "Tag $tag already exists — no-op."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag $tag missing — this is a release."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: ADR-0011 verification gate
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          mig_dir="src/lib/ops/migrations/v$version"
+          verif_file="pack/versions/$version/verification.md"
+          if [ -d "$mig_dir" ]; then
+            echo "Release v$version carries migrations ($mig_dir present)."
+            if [ ! -s "$verif_file" ]; then
+              echo "::error::Refusing to tag v$version: migration-bearing release without a filled $verif_file."
+              echo "::error::Per ADR-0011, run \`claude-ds upgrade\` against Crewops, record the result in $verif_file, commit, then re-push."
+              exit 1
+            fi
+            echo "Verification note present at $verif_file — gate satisfied."
+          else
+            echo "Release v$version is non-migration (no $mig_dir) — clean CI/audit is sufficient proof (ADR-0011 addendum)."
+          fi
+
+      - name: Setup Node
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        if: steps.check.outputs.exists == 'false'
+        run: npm ci
+
+      - name: Test gate
+        if: steps.check.outputs.exists == 'false'
+        run: npm test
+
+      - name: Tag and push
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Release $tag"
+          git push origin "$tag"
+          echo "Tagged and pushed $tag from $(git rev-parse HEAD)."
+
+      - name: GitHub Release from CHANGELOG
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          tag="${{ steps.version.outputs.tag }}"
+          # Extract the body between `## [<version>]` and the next `## [` header.
+          body=$(awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]"                  { capture=1; next }
+            capture && /^## \[[0-9]+\.[0-9]+\.[0-9]+/ { exit }
+            capture                                    { print }
+          ' CHANGELOG.md)
+          # Trim leading/trailing blank lines.
+          body=$(printf '%s\n' "$body" | awk 'NF{f=1} f' | awk '{ a[NR]=$0 } END { for (i=NR; i>0; i--) if (a[i] != "") { last=i; break } for (i=1; i<=last; i++) print a[i] }')
+          if [ -z "$body" ]; then
+            body="No changelog entry found for $version."
+          fi
+          gh release create "$tag" --title "$tag" --notes "$body" \
+            || echo "::warning::\`gh release create\` failed — the tag pushed, but the Release was not cut. Create it manually if needed."

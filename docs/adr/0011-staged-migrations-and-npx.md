@@ -121,3 +121,34 @@ Crewops the canonical test bed and keeps claude-ds honest at every step.
   being a lie at v0.8.0 release.
 - Future ADRs that introduce breaking changes follow the same model: a
   numbered version, migration Ops, Crewops verification, release.
+
+## Addendum (2026-06-07) — verification gate scoped to migration-bearing releases
+
+This ADR's release rule as originally written is absolute: *"a version without
+a filled `verification.md` is not released."* In practice that absolute
+collides with non-migration releases like v1.1.0 and v1.2.0 (no
+`pack/versions/<v>/migrations/` shipped), where there is no consumer upgrade
+path for Crewops to exercise — the verification.md becomes a ceremonial file
+about "I read the diff," not the intended end-to-end Crewops check. v1.2.0
+proved this: a careful agent and a careful human both forgot the note,
+because the underlying mechanism (Crewops upgrade) didn't fire for that
+release.
+
+The hard verification gate is hereby scoped to **migration-bearing**
+releases — i.e., releases where `src/lib/ops/migrations/v<v>/` exists.
+(The ADR body above sketches `pack/versions/<v>/migrations/`, but that
+pack-side layout was never adopted: migrations are TypeScript Ops the CLI
+imports via `src/lib/migration-registry.ts`, not pack files. The gate
+keys off the directory that actually exists.) Non-migration releases are
+released under a softer proof: a clean `audit` / CI on `main`, which
+`.github/workflows/auto-tag.yml` already runs before tagging (issue #338).
+The gate is encoded mechanically in that workflow:
+
+- `src/lib/ops/migrations/v<v>/` exists  → refuse to tag until
+  `pack/versions/<v>/verification.md` is present.
+- `src/lib/ops/migrations/v<v>/` absent  → tag freely (still gated on
+  `npm test`).
+
+The intent of the original rule — *Crewops is the canonical test bed for
+anything that touches a consumer's existing tree* — is preserved. The
+addendum just stops requiring proof of an upgrade that never had to run.
