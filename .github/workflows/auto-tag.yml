@@ -20,6 +20,11 @@ name: auto-tag
 # Net effect: a forgotten tag is no longer possible, the README install command
 # can't lag the release, and a migration-bearing release without Crewops
 # verification is mechanically refused (ADR-0011 + 0002).
+#
+# If any release-path step fails (test gate, ADR-0011 gate, tag-push, Release-
+# create, README-pin), the workflow opens a GitHub issue with a link to the
+# failing run — silent red runs are #383's other half. The no-op re-trigger
+# path can't fire that step (its guard requires `exists == 'false'`).
 
 on:
   push:
@@ -31,6 +36,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      issues: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -148,3 +154,41 @@ jobs:
           # Re-triggers this workflow; it no-ops because the tag now exists.
           git push origin HEAD:main
           echo "Re-pinned README to $tag and pushed to main."
+
+      - name: Open release-failure issue on any prior step failure
+        # Fires when this run attempted a release (steps.check.outputs.exists
+        # was 'false') and any prior step failed — test gate, ADR-0011 gate,
+        # tag-push, Release-create, or README-pin. The pre-#383 behaviour was
+        # a silent red workflow run that nobody saw until the next release
+        # noticed `main` hadn't moved. Opening a GitHub issue surfaces the
+        # failure on the maintainer's radar without needing email/Slack wiring.
+        #
+        # On the post-release re-trigger run (after the README-pin push), the
+        # check step succeeds (tag now exists), nothing else runs, failure()
+        # stays false — so this step does NOT fire on no-op re-triggers.
+        if: failure() && steps.check.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          tag="${{ steps.version.outputs.tag }}"
+          short_sha="${GITHUB_SHA:0:7}"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          title="release: auto-tag failed for ${tag} (${short_sha})"
+          body=$(cat <<EOF
+\`auto-tag.yml\` failed during a release attempt.
+
+- **Intended tag**: \`${tag}\`
+- **Version**: \`${version}\`
+- **Commit**: \`${GITHUB_SHA}\`
+- **Workflow run**: ${run_url}
+
+Likely cause: the test gate or ADR-0011 verification gate failed before \`Tag and push\`. Open the run log, fix forward on \`main\`, and push again — \`auto-tag.yml\` will retry on the next push.
+
+Auto-opened by \`.github/workflows/auto-tag.yml\` (#383). Close when fixed.
+EOF
+)
+          # If the issue can't be opened (transient API hiccup, permission
+          # drift), surface a workflow warning instead of swallowing the
+          # error — better noisy than silent (the whole point of this step).
+          gh issue create --title "$title" --body "$body" \
+            || echo "::warning::\`gh issue create\` failed — auto-tag failure was not surfaced as an issue. Check the run log directly: ${run_url}"

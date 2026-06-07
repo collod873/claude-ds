@@ -1,0 +1,36 @@
+name: forgot-to-bump
+
+# Forgot-to-bump detector (#383). Pairs with auto-tag.yml.
+#
+# auto-tag.yml only releases when `v$version` is missing — so a contributor
+# who lands a `feat` or `fix` without bumping `package.json` produces a
+# silent green: nothing ever cuts a tag, and `main` quietly accumulates
+# unreleased changes. This workflow catches that case and fails loudly
+# with a clear remediation message.
+#
+# Logic lives in `scripts/check-version-bump.sh` (unit-tested at
+# `tests/unit/check-version-bump.test.ts`). Workflow is a thin shim so the
+# detector can be exercised locally too: `bash scripts/check-version-bump.sh`.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Need full history + tags so `git tag --list 'v*'` and
+          # `git log v$X.Y.Z..HEAD` resolve. Shallow clones would
+          # truncate both.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check for missed version bump
+        run: bash scripts/check-version-bump.sh
