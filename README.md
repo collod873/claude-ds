@@ -2,7 +2,27 @@
 
 Shared design-system governance and scaffold CLI. Installs a consistent `design-system/` layout, Claude Code hooks, and contracts into any consumer project — then keeps them in sync across releases.
 
-## Install
+## Just run `claude-ds`
+
+The bare command with no subcommand is the front door. `cd` into any project and run:
+
+```sh
+npx github:collod873/claude-ds#v1.1.0
+```
+
+It routes itself:
+
+- **First run** (no `.claude-ds.json` yet) → the **greet**: detects your framework and whether you have existing components, asks one question, and dispatches to `init` (greenfield) or `adopt` (brownfield) for you. You don't have to know which onramp you need.
+- **Already adopted** (config exists) → the **dashboard**: a read-only health view (`doctor` structural state + drift/integrity scan) with `[Enter]` to run the recommended next command.
+- **Non-interactive** (agent/CI, no TTY) → prints help. The dashboard is a human surface; an adopted project's automation contract stays byte-stable.
+
+From the greet you land in the scaffold; from there `heal` (below) drives it to a fixed point. Everything else in this README is what runs *under* the front door — you usually just type the bare command.
+
+Pin every invocation to a release tag. The CLI never auto-updates.
+
+## Install (explicit onramps)
+
+If you'd rather skip the greet and call the onramp directly:
 
 ```sh
 # Greenfield — bootstrap a new project with the full scaffold
@@ -11,8 +31,6 @@ npx github:collod873/claude-ds#v1.1.0 init --pack next-react
 # Brownfield — adopt into an existing project
 npx github:collod873/claude-ds#v1.1.0 adopt --pack next-react
 ```
-
-Pin every invocation to a release tag. The CLI never auto-updates.
 
 ## Commands
 
