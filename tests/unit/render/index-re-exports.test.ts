@@ -27,5 +27,8 @@ describe("render barrel", () => {
     expect(typeof render.colorizeDiffLines).toBe("function");
     expect(typeof render.identityColor).toBe("object");
     expect(typeof render.isTTY).toBe("function");
+    // #344: summary-default renderer for mutating commands.
+    expect(typeof render.renderChangeSummary).toBe("function");
+    expect(typeof render.renderChangesJson).toBe("function");
   });
 });

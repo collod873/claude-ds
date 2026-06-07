@@ -169,8 +169,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
     .option("--verify-hooks", "invoke each pack-registered hook with a pass fixture and report results")
     .option("--completeness", "verify consumer has zero local DS infrastructure outside pack-managed scaffold")
-    .action(async (opts: { pack?: string; ignore?: string; verifyHooks?: boolean; completeness?: boolean }) => {
-      await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks, completeness: opts.completeness, cwd: defaults.cwd });
+    .option("--json", "emit machine output (suppresses the human markdown checklist)")
+    .action(async (opts: { pack?: string; ignore?: string; verifyHooks?: boolean; completeness?: boolean; json?: boolean }) => {
+      await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks, completeness: opts.completeness, json: opts.json, cwd: defaults.cwd });
     });
 
   program
@@ -212,8 +213,10 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--dry-run", "preview migration changes without applying them")
     .option("--yes", "skip confirmation prompt")
     .option("--allow-dirty", "bypass the clean-tree guard")
-    .action(async (opts: { to?: string; dryRun?: boolean; yes?: boolean; allowDirty?: boolean }) => {
-      await upgradeCmd({ to: opts.to, dryRun: opts.dryRun, yes: opts.yes, allowDirty: opts.allowDirty, cwd: defaults.cwd });
+    .option("--diff", "render the full unified diff instead of the one-line-per-file summary")
+    .option("--json", "emit machine output and suppress the human render")
+    .action(async (opts: { to?: string; dryRun?: boolean; yes?: boolean; allowDirty?: boolean; diff?: boolean; json?: boolean }) => {
+      await upgradeCmd({ to: opts.to, dryRun: opts.dryRun, yes: opts.yes, allowDirty: opts.allowDirty, diff: opts.diff, json: opts.json, cwd: defaults.cwd });
     });
 
   program

@@ -14,10 +14,56 @@ import {
 } from "../lib/migration-framework.js";
 import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
 import { run } from "../lib/runner.js";
+import { renderDiff } from "../lib/runner.js";
 import { finalizeUpgrade } from "../lib/ops/finalize-upgrade.js";
 import { syncCmd } from "./sync.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
+import {
+  renderChangeSummary,
+  renderChangesJson,
+  type SummaryEntry,
+} from "../lib/render/index.js";
+import type { RunReport } from "../lib/runner.js";
 import pkg from "../../package.json" with { type: "json" };
+
+/**
+ * Output mode for upgrade's planned-Change preview (PRD #340 sub-issue #344).
+ *
+ * - `summary` (default): one line per changed file with substantive config
+ *   flag flips called out first. Replaces the 30k-line full-file diff dump
+ *   that used to bury the one decision that mattered.
+ * - `diff`: the Runner's full unified diff (the old default), kept for
+ *   reviewers who want to read every byte.
+ * - `json`: machine surface — suppresses the human render entirely.
+ */
+type UpgradeRenderMode = "summary" | "diff" | "json";
+
+function collectSummaryEntries(report: RunReport): SummaryEntry[] {
+  const entries: SummaryEntry[] = [];
+  for (const opReport of report.ops) {
+    for (const change of opReport.changes) {
+      entries.push({ opName: opReport.name, change });
+    }
+  }
+  return entries;
+}
+
+function renderUpgradePreview(report: RunReport, mode: UpgradeRenderMode): void {
+  const entries = collectSummaryEntries(report);
+  if (mode === "json") {
+    process.stdout.write(renderChangesJson(entries) + "\n");
+    return;
+  }
+  if (mode === "diff") {
+    for (const { opName, change } of entries) {
+      process.stdout.write(renderDiff(opName, change) + "\n");
+    }
+    return;
+  }
+  for (const line of renderChangeSummary(entries)) {
+    process.stdout.write(line + "\n");
+  }
+}
 
 /**
  * Verify end-states of every migration that should already be applied at the
@@ -36,16 +82,19 @@ import pkg from "../../package.json" with { type: "json" };
 async function verifyEndStates(
   ctx: Awaited<ReturnType<typeof loadProject>>,
   packVersion: string,
-  opts: { dryRun?: boolean; yes?: boolean },
+  opts: { dryRun?: boolean; yes?: boolean; renderMode: UpgradeRenderMode },
 ): Promise<number> {
   const verifyChain = computeVerificationChain(packVersion, MIGRATION_REGISTRY);
   if (verifyChain.length === 0) return 0;
 
-  const dryReport = await runMigrations(ctx, verifyChain, "dry-run");
+  const dryReport = await runMigrations(ctx, verifyChain, "dry-run", { quiet: true });
   const driftedOps = dryReport.ops.filter((o) => o.changes.length > 0);
   if (driftedOps.length === 0) return 0;
 
-  info(`migration end-state drift detected: ${driftedOps.map((o) => o.name).join(", ")}`);
+  if (opts.renderMode !== "json") {
+    info(`migration end-state drift detected: ${driftedOps.map((o) => o.name).join(", ")}`);
+  }
+  renderUpgradePreview(dryReport, opts.renderMode);
 
   if (opts.dryRun) return driftedOps.length;
 
@@ -69,9 +118,21 @@ export async function upgradeCmd(opts: {
   yes?: boolean;
   /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). */
   allowDirty?: boolean;
+  /**
+   * Output mode for the planned-Change preview (PRD #340 sub-issue #344).
+   * Defaults to `summary` — one line per changed file, substantive flag flips
+   * surfaced first. `diff` opts back into the full unified diff; `json` is
+   * the machine surface (suppresses the human `info()` chatter).
+   */
+  diff?: boolean;
+  json?: boolean;
   cwd?: string;
 }) {
   const cwd = opts.cwd ?? process.cwd();
+  const renderMode: UpgradeRenderMode = opts.json ? "json" : opts.diff ? "diff" : "summary";
+  const humanLog = (msg: string): void => {
+    if (renderMode !== "json") info(msg);
+  };
 
   // Clean-tree guard. --dry-run is non-destructive so it skips; the apply
   // path refuses on a dirty tree unless --allow-dirty (or heal forwards it).
@@ -93,25 +154,28 @@ export async function upgradeCmd(opts: {
   const to = opts.to ?? `v${pkg.version}`;
 
   if (from === to) {
-    info(`already at ${to}`);
-    await verifyEndStates(ctx, from, opts);
+    humanLog(`already at ${to}`);
+    await verifyEndStates(ctx, from, { ...opts, renderMode });
     return;
   }
 
   const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
 
   if (chain.length === 0) {
-    info(`no registered migrations between ${from} and ${to}`);
-    info(`pack is at ${from}`);
-    await verifyEndStates(ctx, from, opts);
+    humanLog(`no registered migrations between ${from} and ${to}`);
+    humanLog(`pack is at ${from}`);
+    await verifyEndStates(ctx, from, { ...opts, renderMode });
     return;
   }
 
-  info(`upgrading from ${from} → ${to}`);
-  info(`migration chain: ${chain.map((mv) => mv.version).join(" → ")}`);
+  humanLog(`upgrading from ${from} → ${to}`);
+  humanLog(`migration chain: ${chain.map((mv) => mv.version).join(" → ")}`);
 
-  // Dry-run to preview changes (Runner prints diffs to stdout)
-  const dryReport = await runMigrations(ctx, chain, "dry-run");
+  // Dry-run with quiet:true so the Runner does NOT dump full file diffs to
+  // stdout — we render the preview ourselves based on `renderMode` (summary /
+  // diff / json). Pre-#344 the Runner's verbose dump landed twice for every
+  // file under any migration that rewrote bodies.
+  const dryReport = await runMigrations(ctx, chain, "dry-run", { quiet: true });
 
   const planErrors = dryReport.ops.filter((o) => o.error);
   if (planErrors.length > 0) {
@@ -119,18 +183,20 @@ export async function upgradeCmd(opts: {
     process.exit(2);
   }
 
+  renderUpgradePreview(dryReport, renderMode);
+
   const totalChanges = dryReport.ops.reduce((n, o) => n + o.changes.length, 0);
   if (totalChanges === 0) {
-    info("no file changes planned");
+    humanLog("no file changes planned");
   }
 
   if (opts.dryRun) {
-    info("dry-run complete");
+    humanLog("dry-run complete");
     return;
   }
 
   if (!opts.yes && !(await confirm("Apply migrations?"))) {
-    info("aborted");
+    humanLog("aborted");
     return;
   }
 
@@ -150,11 +216,11 @@ export async function upgradeCmd(opts: {
     process.exit(2);
   }
   if (detectedImports.length > 0) {
-    info(`auto-detected allowed_imports: ${detectedImports.join(", ")}`);
+    humanLog(`auto-detected allowed_imports: ${detectedImports.join(", ")}`);
   }
-  info(`upgrade complete → ${to}`);
+  humanLog(`upgrade complete → ${to}`);
 
-  info("running sync to deliver pack files…");
+  humanLog("running sync to deliver pack files…");
   // Once upgrade applied bytes the tree is dirty — pass --allow-dirty through
   // to the embedded sync so it doesn't refuse on the very state upgrade just
   // produced (PRD #325 / sub-issue #328).
@@ -170,10 +236,10 @@ export async function upgradeCmd(opts: {
         cwd,
         timeout: 30_000,
       });
-      info("regenerated design-system/manifest.generated.ts");
+      humanLog("regenerated design-system/manifest.generated.ts");
     } catch (e: unknown) {
       const exitCode = (e as { code?: number }).code ?? "?";
-      info(`warning: build-manifest failed (exit ${exitCode}). Run manually: node --experimental-strip-types scripts/build-manifest.ts`);
+      humanLog(`warning: build-manifest failed (exit ${exitCode}). Run manually: node --experimental-strip-types scripts/build-manifest.ts`);
     }
   }
 }

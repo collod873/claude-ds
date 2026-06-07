@@ -1,6 +1,6 @@
 import type { Operation } from "./operation.js";
 import type { ProjectContext } from "./project.js";
-import { run, type RunMode, type RunReport } from "./runner.js";
+import { run, type RunMode, type RunOptions, type RunReport } from "./runner.js";
 
 export interface MigrationVersion {
   version: string;
@@ -70,7 +70,8 @@ export async function runMigrations(
   ctx: ProjectContext,
   chain: MigrationVersion[],
   mode: RunMode,
+  options: RunOptions = {},
 ): Promise<RunReport> {
   const allOps: Operation[] = chain.flatMap((mv) => mv.ops);
-  return run(ctx, allOps, mode);
+  return run(ctx, allOps, mode, options);
 }
