@@ -225,8 +225,13 @@ guards is a silent false-negative (false "✓ Completeness OK"), so when unsure 
 flags and the consumer dismisses via a tracked Exception. `doctor` prints which
 Owned concerns it checked, so coverage is honest, not assumed — the residual
 blind spot is precisely "a DS concern not yet in the registry." Each finding is
-ADR-0013-actionable: "remove `scripts/lint-tokens.ts` — superseded by
-`DRIFT-RAW-PRIMITIVE`."
+ADR-0013-actionable, but removal advice is **gated on real coverage** (ADR-0017
+addendum, issue #348): completeness recommends "remove `scripts/lint-tokens.ts` —
+superseded by `DRIFT-TOKEN-PARITY`" only because the pack now ships
+`DRIFT-TOKEN-PARITY`. When a concern names no shipped capability
+(`supersededBy: null`), completeness flags "possible shadow DS infra" and never
+advises deletion — the prior `DRIFT-RAW-PRIMITIVE` claim was the false-delete
+defect the gate exists to kill.
 _Note_: distinct from **Managed roots**, which answer *"what does the pack own
 and overwrite?"* (the safety north star). Owned concern answers *"what counts as
 DS infrastructure?"* (completeness). Conflating the two is the original ADR-0003

@@ -18,7 +18,13 @@ export interface OwnedConcernScannerFinding {
   file: string;
   line: number;
   concernId: OwnedConcernId;
-  supersededBy: SupersedingRuleId;
+  /**
+   * The shipped capability that covers this concern's failure mode, or `null`
+   * when no shipped pack rule does. `null` is the "possible shadow DS infra"
+   * path: completeness flags the file but never recommends deletion (ADR-0017
+   * addendum, issue #348).
+   */
+  supersededBy: SupersedingRuleId | null;
   message: string;
 }
 

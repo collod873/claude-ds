@@ -96,9 +96,12 @@ describe("scanOwnedConcerns", () => {
     const f = findings[0];
     expect(f.file).toBe("scripts/lint-tokens.ts");
     expect(f.concernId).toBe("OWNED-TOKEN-LINT");
-    expect(f.supersededBy).toBe("DRIFT-RAW-PRIMITIVE");
+    expect(f.supersededBy).toBe("DRIFT-TOKEN-PARITY");
     expect(typeof f.line).toBe("number");
-    expect(f.message).toMatch(/DRIFT-RAW-PRIMITIVE/);
+    // The detect message describes the detection. The supersession +
+    // remove-or-flag recommendation lives in formatOwnedConcernFinding,
+    // the chokepoint that enforces issue #348's gate.
+    expect(f.message).toContain("scripts/lint-tokens.ts");
   });
 
   it("excludes pack-managed paths (manifest.files[]) before detection", async () => {
@@ -186,7 +189,7 @@ describe("scanOwnedConcerns", () => {
 
     expect(findings.map(f => f.file)).toEqual(["scripts/lint-tokens.ts"]);
     expect(findings[0].concernId).toBe("OWNED-TOKEN-LINT");
-    expect(findings[0].supersededBy).toBe("DRIFT-RAW-PRIMITIVE");
+    expect(findings[0].supersededBy).toBe("DRIFT-TOKEN-PARITY");
   });
 
   it("findings carry { file, line, concernId, supersededBy, message }", async () => {

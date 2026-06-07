@@ -8,9 +8,13 @@ import type {
  * OWNED-TOKEN-LINT — flag a hand-rolled design-token linter.
  *
  * The motivating Crewops miss: `scripts/lint-tokens.ts`, a script that
- * walks tier files flagging raw color and spacing values. The pack already
- * does this through `DRIFT-RAW-PRIMITIVE` plus the design-system-ignore
- * pragma, so the local script is shadow infra that should be deleted.
+ * walks tier files flagging values that should come from `tokens.json` and
+ * cross-checks the JSON tokens against the emitted CSS variables. The pack
+ * covers the same failure mode through `DRIFT-TOKEN-PARITY` (ADR-0017
+ * addendum / issue #348 — the prior `DRIFT-RAW-PRIMITIVE` claim was false:
+ * raw-primitive detection covers HTML element use, not JSON↔CSS token parity,
+ * and following that claim would silently delete the consumer's only
+ * token-parity guard).
  *
  * The detector is content-signature, not filename — a renamed
  * `style-guard.ts` is the same defect. It keys on the combination of:
@@ -87,15 +91,15 @@ function detect(input: OwnedConcernInput): OwnedConcernFinding | null {
   return {
     concernId: "OWNED-TOKEN-LINT",
     file,
-    supersededBy: "DRIFT-RAW-PRIMITIVE",
-    message: `hand-rolled design-token linter in ${file} — superseded by DRIFT-RAW-PRIMITIVE (delete this file; the pack's audit catches raw color/spacing values)`,
+    supersededBy: "DRIFT-TOKEN-PARITY",
+    message: `hand-rolled design-token linter in ${file}`,
   };
 }
 
 export const ownedTokenLintRule: OwnedConcern = {
   id: "OWNED-TOKEN-LINT",
   description:
-    "Consumer hand-rolled a design-token linter (raw color/spacing flagger) — superseded by DRIFT-RAW-PRIMITIVE",
-  supersededBy: "DRIFT-RAW-PRIMITIVE",
+    "Consumer hand-rolled a design-token linter (raw color/spacing flagger + JSON↔CSS parity) — superseded by DRIFT-TOKEN-PARITY",
+  supersededBy: "DRIFT-TOKEN-PARITY",
   detect,
 };
