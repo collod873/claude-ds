@@ -204,9 +204,10 @@ An entry in `design-system/exceptions.json` sanctioning a specific drift
 rule on a specific path with a `reason` and a linked upstream `issue`. By
 default, every exception must reference a live issue — it's a tracked
 workaround with a removal trigger. Exceptions marked `permanent: true`
-skip issue-link validation and appear as informational in doctor output;
-these represent intentional architectural decisions (e.g. an app-chrome
-singleton exceeding atom-import limits).
+skip issue-link validation, appear as informational in doctor output,
+and do not count toward `enforce_threshold` (issue #362) — they're
+intentional architectural decisions (e.g. an app-chrome singleton
+exceeding atom-import limits), not the live drift the gate is rationing.
 
 ### Owned concern
 A DS job claude-ds ships machinery for — paired with a content **detector** that
