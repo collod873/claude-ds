@@ -33,7 +33,14 @@ async function configExists(cwd: string): Promise<boolean> {
 
 export function buildProgram(defaults: ProgramDefaults = {}): Command {
   const program = new Command();
-  program.name("claude-ds").description("claude-ds CLI").version(`v${pkg.version}`, "-V");
+  program
+    .name("claude-ds")
+    .description(
+      "Design-system governance & scaffold CLI.\n" +
+        "Run `claude-ds` with no command to start: first run greets and routes you to init/adopt;\n" +
+        "an adopted project shows a health dashboard. The commands below are the explicit onramps.",
+    )
+    .version(`v${pkg.version}`, "-V");
 
   // Positional-options mode means an option declared on the parent (`--answers`
   // on the bare action below) only consumes its value when it appears BEFORE
@@ -72,6 +79,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("version")
+    .description("print installed vs. latest version")
     .option("--offline", "skip remote latest-tag lookup")
     .option("--check", "compare pinned version in .claude-ds.json to installed; exit non-zero if different")
     .action(async (opts: { offline?: boolean; check?: boolean }) => {
@@ -80,6 +88,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("init")
+    .description("greenfield bootstrap — full scaffold, hooks in BLOCK mode")
     .requiredOption("--pack <name>", "pack to install")
     .option("--yes", "skip confirmation prompt")
     .action(async (opts: { pack: string; yes?: boolean }) => {
@@ -88,6 +97,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("audit")
+    .description("read-only conformance report (--fix auto-remediates deterministic issues)")
     .option("--pack <name>", "pack to audit against")
     .option("--suggest-removals", "suggest ad-hoc files for removal")
     .option("--fix", "auto-fix fixable drift findings")
@@ -104,6 +114,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("adopt")
+    .description("brownfield install — scaffold + hooks in WARN mode")
     .option("--pack <name>", "pack to adopt (auto-detected when only one pack is available)")
     .option("--yes", "skip confirmation prompt (no-op, kept for back-compat)")
     .option("--dry-run", "preview what adopt would do without applying changes")
@@ -115,6 +126,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("migrate")
+    .description("move one component into the scaffold and register exceptions")
     .argument("<path>", "source component path")
     .requiredOption("--reason <text>", "reason for exception")
     .addOption(new Option("--tier <tier>", "force tier: atom or composite").choices(["atom", "composite"]))
@@ -133,6 +145,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("enforce")
+    .description("flip hooks WARN → BLOCK (gated on exception-count threshold)")
     .option("--yes", "skip confirmation prompt")
     .action(async (opts: { yes?: boolean }) => {
       await enforceCmd({ yes: opts.yes, cwd: defaults.cwd });
@@ -140,6 +153,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("sync")
+    .description("update managed files to the pinned release (diff + confirm)")
     .option("--offline-fixture <path>", "use local pack directory instead of fetching upstream")
     .option("-y, --yes", "skip confirmation prompt (no-op, kept for back-compat)")
     .option("--dry-run", "preview what sync would do without applying changes")
@@ -150,6 +164,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("doctor")
+    .description("health check — lookalikes, drift, hook verification")
     .option("--pack <name>", "pack to check against")
     .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
     .option("--verify-hooks", "invoke each pack-registered hook with a pass fixture and report results")
@@ -160,6 +175,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("migrate-layout")
+    .description("rename lookalike files to canonical paths (git mv)")
     .option("--pack <name>", "pack to migrate layout for")
     .option("--yes", "skip confirmation prompt")
     .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
@@ -170,6 +186,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("reconform")
+    .description("fill missing companion files and run conformance checks")
     .option("--dry-run", "report what would happen without mutating anything")
     .option("--backfill-meta", "audit and backfill missing meta exports + run classification audit")
     .option("--fix", "write meta stubs and move misclassified files (requires --backfill-meta)")
@@ -181,6 +198,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("reconcile")
+    .description("prune orphaned/deprecated files")
     .option("--dry-run", "report orphans and collisions without deleting anything")
     .option("--force", "delete all findings without prompting")
     .action(async (opts: { dryRun?: boolean; force?: boolean }) => {
@@ -189,6 +207,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("upgrade")
+    .description("bump the pinned version in .claude-ds.json")
     .option("--to <version>", "target pack version (default: installed CLI version)")
     .option("--dry-run", "preview migration changes without applying them")
     .option("--yes", "skip confirmation prompt")
@@ -199,6 +218,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("classify")
+    .description("categorize existing files into DS tiers")
     .option("--src <dir>", "opt-in: pull design-system parts from this source dir into design-system/ (omit to only reorganize within design-system/)")
     .option("--dry-run", "show classification plan without moving any files")
     .option("--yes", "skip the apply-moves commitment-gate (ADR-0016)")

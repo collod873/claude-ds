@@ -6,6 +6,22 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [1.2.0] — 2026-06-07
+
+Ships the interactive front door the README already advertised. The bare `claude-ds` command is now the entry point: first run greets and routes to `init`/`adopt`, an adopted project renders a state-aware health dashboard, and a Decision spine (ADR-0016) gives every prompt the same TTY / non-TTY (`--answers`) semantics. No breaking changes; no v1.2.0 migration set. Cut to close the gap where v1.1.0 was tagged five-plus commits behind the shipped UX — `npx …#v1.1.0` was installing pre-front-door code.
+
+### Added
+- **Bare-command front door** (#325/#331/#334). No-subcommand `claude-ds` detects first-run vs. adopted state and dispatches in-process: greet → `init`/`adopt`, or the dashboard with `[Enter]` to run the recommended next command. Non-TTY keeps stable help output.
+- **Upgrade-available surfacing on the dashboard** (#337) and the state-aware front-door overhaul + Decision spine (#335, ADR-0016).
+- **Behavior as the fourth scaffold concern** (#322/#323). Role contracts via `meta.role`; `doctor` completeness is now capability-scoped via Owned concerns, not location-scoped.
+- **Subcommand help descriptions.** Every command now carries a one-line `.description()`, so `--help` and the non-TTY fallback read as a real command index instead of a blank wall.
+
+### Changed
+- Documented the bare-command front door in the README ("Just run `claude-ds`") and moved the explicit `init`/`adopt` examples under "Install (explicit onramps)".
+- Bumped vitest 1.x → 4.x to clear dev-toolchain CVEs.
+
+---
+
 ## [1.1.0] — 2026-06-05
 
 The brownfield onboarding flow reaches "0 to hero with no thinking about fixes." `adopt → heal` takes any existing project — corrupt baseline or not — to a fully scaffolded, converged, idempotent tree with zero manual intervention. No breaking changes and no v1.1.0 migration set; a consumer pinned at v1.0.0 runs zero migrations on upgrade. Verified PASS against the Crewops baseline in a real TTY (6/6 acceptance items, 0 interventions, idempotent — `pack/versions/1.1.0/verification.md`).
