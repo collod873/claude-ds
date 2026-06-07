@@ -48,4 +48,3 @@ export async function emitStubHint(ctx: ProjectContext): Promise<void> {
   lines.push("");
   process.stdout.write(lines.join("\n") + "\n");
 }
-

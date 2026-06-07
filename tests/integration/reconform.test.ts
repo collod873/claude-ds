@@ -13,7 +13,10 @@ async function scaffoldProject(dir: string) {
   await mkdir(join(dir, "design-system", "atoms"), { recursive: true });
   await mkdir(join(dir, "design-system", "composites"), { recursive: true });
   await writeFile(join(dir, "design-system", "exceptions.json"), JSON.stringify({ exceptions: [] }));
-  // stub contracts + tokens with enough lines to avoid stub-warning (≥25)
+  // Filler bytes that differ from the pack seed so emitStubHint (#366) stays
+  // silent by default — the hint fires only while contracts.md / tokens.json
+  // are byte-identical to packs/next-react/files/design-system/*. Tests that
+  // need the hint to fire overwrite these files with the pack seed.
   const lines25 = Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join("\n");
   await writeFile(join(dir, "design-system", "contracts.md"), lines25);
   await writeFile(join(dir, "design-system", "tokens.json"), JSON.stringify(Object.fromEntries(
