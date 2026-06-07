@@ -409,6 +409,24 @@ describe("adopt", () => {
     expect(markerCount).toBe(1);
   });
 
+  // #382: a freshly-adopted tree must land at the verification chain's fixed
+  // point. The v0.9.0 `meta-kind-hard` migration's end-state is
+  // `meta_kind_strict: true`; if adopt leaves the flag at its default `false`,
+  // `deriveProjectState`'s repair probe flags the just-adopted tree as needing
+  // repair and the front-door commitment gate shows a phantom step on a clean
+  // adopt.
+  it("#382 adopt sets meta_kind_strict so the verification chain emits no repair", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+    expect(cfg.meta_kind_strict).toBe(true);
+
+    const { deriveProjectState } = await import("../../src/lib/project-state.js");
+    const state = await deriveProjectState(dir);
+    expect(state.repairNeeded).toBe(false);
+  });
+
   it("#86 reconform idempotent re-plan returns empty plan after adopt against markerless CLAUDE.md", async () => {
     await writeFile(join(dir, "CLAUDE.md"), "# My Project\n\nUser notes here.\n");
 

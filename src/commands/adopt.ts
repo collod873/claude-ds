@@ -201,6 +201,13 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     removed: [],
     app_dir: appDir,
     claude_md_target: claudeMdTarget,
+    // #382: land at the verification chain's fixed point on a fresh adopt. The
+    // meta-kind-hard@v0.9.0 migration's end-state is meta_kind_strict: true;
+    // without it the repair probe in deriveProjectState plans a flip on a
+    // just-adopted tree (and the front door shows a phantom "1 step: repair").
+    // Safe to seed eagerly: adopt's own classify pass guarantees backfill, and
+    // the migration the flag gates was authored for this end-state.
+    meta_kind_strict: true,
   };
   if (flagGlobs.length > 0) cfg.lookalike_ignore = flagGlobs;
   await writeBootstrapClaudeDsConfig(cwd, cfg);
