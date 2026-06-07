@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
-import { info, err, confirm } from "../lib/log.js";
+import { info, err, confirm, printNextStep } from "../lib/log.js";
 
 const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
@@ -94,7 +94,12 @@ export async function upgradeCmd(opts: {
 
   if (from === to) {
     info(`already at ${to}`);
-    await verifyEndStates(ctx, from, opts);
+    const drifted = await verifyEndStates(ctx, from, opts);
+    // #349 F21: every command ends with a → Next breadcrumb. The "already at
+    // target" path used to fall through silent — telling the consumer they
+    // were current without naming the next move violated the CONTEXT.md
+    // mandate.
+    printNextStep("upgrade", { upgradeOutcome: drifted > 0 ? "repaired" : "no-op" });
     return;
   }
 
@@ -103,7 +108,8 @@ export async function upgradeCmd(opts: {
   if (chain.length === 0) {
     info(`no registered migrations between ${from} and ${to}`);
     info(`pack is at ${from}`);
-    await verifyEndStates(ctx, from, opts);
+    const drifted = await verifyEndStates(ctx, from, opts);
+    printNextStep("upgrade", { upgradeOutcome: drifted > 0 ? "repaired" : "no-op" });
     return;
   }
 

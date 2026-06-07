@@ -13,7 +13,7 @@ export async function detectBuildCommand(cwd: string): Promise<string> {
   return "your build (e.g. npm run build)";
 }
 
-type NextStepCommand = "adopt" | "classify" | "audit" | "audit-fix" | "sync" | "reconcile" | "doctor";
+type NextStepCommand = "adopt" | "classify" | "audit" | "audit-fix" | "sync" | "reconcile" | "doctor" | "upgrade";
 
 interface NextStepContext {
   hasFindings?: boolean;
@@ -40,6 +40,35 @@ interface NextStepContext {
    * audit flow.
    */
   brownfield?: boolean;
+  /**
+   * Count of actionable warnings (orphans, deprecated-path matches) that the
+   * read-only audit surfaced (#349 F9). When > 0 with no errors, the breadcrumb
+   * routes to `audit --fix` instead of "verify the build" — telling the
+   * consumer their build compiles while orphans linger is the inconsistent
+   * verdict F9 closes. `audit --fix` runs reconcile as a pre-step (#171), so a
+   * single command handles every actionable warning the read-only pass listed.
+   */
+  hasActionableWarnings?: boolean;
+  /**
+   * For `doctor` (#349 F21): what kind of remaining concern the verdict
+   * carries. Picks the verb in the breadcrumb so doctor's `→ Next` names the
+   * actual fix, not a generic "run something."
+   */
+  doctorVerdict?:
+    | "clean"
+    | "scaffold-gap"
+    | "root-dupes"
+    | "lookalikes"
+    | "repair-needed"
+    | "upgrade-available"
+    | "completeness-findings";
+  /**
+   * For `upgrade` (#349 F21): differentiates the post-action breadcrumb.
+   * `applied` ran a migration chain and bumped the pin; `no-op` was already
+   * at the target with nothing to do; `repaired` re-applied a regressed
+   * end-state at the current version.
+   */
+  upgradeOutcome?: "applied" | "no-op" | "repaired";
 }
 
 export function printNextStep(command: NextStepCommand, ctx: NextStepContext): void {
@@ -61,6 +90,12 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
         message = "run 'claude-ds classify' to address findings audit can't auto-repair";
       } else if (ctx.hasFindings) {
         message = "run 'claude-ds audit --fix' to auto-repair, or 'claude-ds audit --except' to register exceptions";
+      } else if (ctx.hasActionableWarnings) {
+        // #349 F9: warnings (orphans, deprecated-path matches) are actionable
+        // even though they're not errors — route to the command that resolves
+        // them rather than telling the consumer to verify a build while the
+        // listed action goes undone.
+        message = "run 'claude-ds audit --fix' to resolve the warnings listed above";
       } else {
         message = `run ${buildCmd} to verify everything compiles`;
       }
@@ -77,7 +112,50 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
       message = "run 'claude-ds audit' to check for drift";
       break;
     case "doctor":
-      return;
+      // #349 F21: doctor previously printed no breadcrumb, violating the
+      // CONTEXT.md "every command ends with a verdict and a → Next" mandate.
+      // The verdict it carries — clean, scaffold-gap, repair-needed,
+      // upgrade-available — picks which action to name. The pre-adopt path
+      // (no .claude-ds.json) routes through `adopt`.
+      switch (ctx.doctorVerdict) {
+        case "scaffold-gap":
+          message = "run 'claude-ds sync' to restore the missing managed file(s)";
+          break;
+        case "root-dupes":
+          message = "run 'claude-ds audit --fix' to resolve the root-level duplicate(s)";
+          break;
+        case "lookalikes":
+          message = "run 'claude-ds migrate-layout' to rename the lookalike(s) to canonical paths";
+          break;
+        case "repair-needed":
+          message = "run 'claude-ds upgrade' to re-apply the regressed migration end-state(s)";
+          break;
+        case "upgrade-available":
+          message = "run 'claude-ds upgrade' to install the newer pack version";
+          break;
+        case "completeness-findings":
+          message = "review the findings above — delete superseded files, link issues to exceptions, or mark permanent";
+          break;
+        case "clean":
+        default:
+          message = `run ${buildCmd} to verify everything compiles`;
+          break;
+      }
+      break;
+    case "upgrade":
+      switch (ctx.upgradeOutcome) {
+        case "repaired":
+          message = "run 'claude-ds audit' to verify the restored baseline";
+          break;
+        case "no-op":
+          message = "run 'claude-ds audit' to check for drift";
+          break;
+        case "applied":
+        default:
+          message = "run 'claude-ds audit' to check for new drift after the upgrade";
+          break;
+      }
+      break;
   }
 
   if (message) info(`→ Next: ${message}`);

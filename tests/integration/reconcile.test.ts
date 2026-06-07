@@ -366,7 +366,7 @@ describe("audit — deprecated-path orphan reporting", () => {
   beforeEach(async () => { dir = await freshTmpDir(); });
   afterEach(async () => { await cleanup(dir); });
 
-  it("reports deprecated-path orphans present on disk", async () => {
+  it("reports deprecated-path orphans present on disk and routes the breadcrumb to audit --fix (#349 F9)", async () => {
     // Need .claude-ds.json for audit to infer the pack
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
       version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
@@ -377,7 +377,12 @@ describe("audit — deprecated-path orphan reporting", () => {
     const r = await runCli(["audit"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/orphan.*deprecated.*contracts\.md/);
-    expect(r.stdout).toContain("reconcile");
+    // Reconcile was folded into `audit --fix` (#171); the F9 verdict-
+    // consistency fix updates this guidance accordingly. The verdict at the
+    // tail of audit must name `audit --fix`, never "no action required" +
+    // "run reconcile" at the same time.
+    expect(r.stdout).toContain("audit --fix");
+    expect(r.stdout).not.toMatch(/no action required/i);
   });
 
   it("does not report orphan noise when deprecated paths are absent", async () => {
