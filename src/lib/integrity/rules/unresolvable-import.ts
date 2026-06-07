@@ -114,4 +114,8 @@ export const unresolvableImportRule: IntegrityRule = {
   blocking: false,
   detect,
   fixable: false,
+  // classify does not invent missing files; an unresolvable import either
+  // means the target was never written, was deleted, or the import is a
+  // typo. None of those have a remediation owned by the loop steps.
+  classifyRelocatable: false,
 };

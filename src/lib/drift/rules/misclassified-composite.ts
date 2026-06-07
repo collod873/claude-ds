@@ -33,4 +33,6 @@ export const misclassifiedCompositeRule: DriftRule = {
   description: "File declares meta.kind=composite but classifier says otherwise",
   detect,
   fixable: false,
+  // Symmetric with DRIFT-MISCLASSIFIED-ATOM — classify owns the remedy.
+  classifyRelocatable: true,
 };

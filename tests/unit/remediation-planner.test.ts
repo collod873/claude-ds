@@ -39,6 +39,7 @@ function cleanState(): ProjectState {
     classifyNeeded: false,
     reconformNeeded: false,
     autoFixNeeded: false,
+    unresolvableFindings: false,
   };
 }
 
@@ -69,6 +70,7 @@ describe("planRemediation — canonical order", () => {
       classifyNeeded: true,
       reconformNeeded: true,
       autoFixNeeded: true,
+      unresolvableFindings: true,
     };
     expect(planRemediation(allSet)).toEqual([
       "upgrade",
@@ -104,6 +106,19 @@ describe("planRemediation — representative states", () => {
     expect(planRemediation({ ...cleanState(), autoFixNeeded: true })).toEqual([
       "audit --fix",
     ]);
+  });
+
+  it("unresolvableFindings does NOT add a loop step (#379)", () => {
+    // The post-#379 deriver routes unfixable findings whose remedy no loop
+    // step owns (PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT, …) into
+    // `unresolvableFindings` rather than misleading `classifyNeeded`. The
+    // planner must NOT emit a step for it — there is no canonical-order
+    // member that resolves these. The driver consumes the signal directly
+    // for its convergence gate; the planner stays unchanged so it can't
+    // recommend a step that will spin without progress.
+    expect(
+      planRemediation({ ...cleanState(), unresolvableFindings: true }),
+    ).toEqual([]);
   });
 
   it("mixed (behind-version + scaffold-gap + classify + audit) → ordered subset", () => {
@@ -157,6 +172,7 @@ describe("planRemediation — ordering regression", () => {
       "classifyNeeded",
       "reconformNeeded",
       "autoFixNeeded",
+      "unresolvableFindings",
     ];
     for (let mask = 0; mask < 1 << keys.length; mask++) {
       const s = cleanState();
@@ -188,6 +204,7 @@ describe("planRemediation — purity", () => {
       classifyNeeded: true,
       reconformNeeded: false,
       autoFixNeeded: true,
+      unresolvableFindings: false,
     };
     const snapshot = { ...state };
     planRemediation(state);

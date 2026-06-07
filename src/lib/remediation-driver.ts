@@ -301,7 +301,13 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
     // unresolved findings — but real unfixable findings (classify/autoFix that
     // the dispatchers could not clear) keep the loop going to the ceiling,
     // which is honestly "did not converge" rather than silent success.
-    const findingsRemain = state.classifyNeeded || state.autoFixNeeded;
+    // `unresolvableFindings` is the post-#379 signal for unfixable findings no
+    // loop step can clear (PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT,
+    // INTEGRITY-UNRESOLVABLE-IMPORT): without it the deriver had to fold them
+    // into `classifyNeeded` to keep the convergence check honest, embedding
+    // the false assumption that classify owns every unfixable rule.
+    const findingsRemain =
+      state.classifyNeeded || state.autoFixNeeded || state.unresolvableFindings;
     if (stable && pendingThisIter === 0 && !findingsRemain) {
       return { kind: "converged", iterations: iter };
     }

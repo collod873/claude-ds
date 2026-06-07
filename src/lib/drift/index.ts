@@ -66,6 +66,19 @@ export function isFixable(id: DriftRuleId): boolean {
   return DRIFT_RULES_BY_ID[id].fixable;
 }
 
+/**
+ * True if `classify` is the owning remedy for findings of this rule (#379).
+ * Defined only for `fixable: false` rules — fixable rules answer "audit can
+ * remedy this" via `isFixable`, so this predicate is meaningless for them
+ * and returns `false`. Read by `deriveProjectState` to distinguish 'classify
+ * can relocate this' from 'unfixable, no remedy', so heal's convergence
+ * check can stay honest as new unfixable rules ship.
+ */
+export function isClassifyRelocatable(id: DriftRuleId): boolean {
+  const rule = DRIFT_RULES_BY_ID[id];
+  return rule.fixable ? false : rule.classifyRelocatable;
+}
+
 /** The rule's fixer if fixable, else `null`. */
 export function getFixer(id: DriftRuleId): DriftFixer | null {
   const rule = DRIFT_RULES_BY_ID[id];

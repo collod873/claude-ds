@@ -21,4 +21,8 @@ export const patternNoSlotsRule: DriftRule = {
   description: "Pattern-tier file does not export children or named slot props",
   detect,
   fixable: false,
+  // Adding slot exports is a hand-authoring decision about the pattern's
+  // shape; no loop step rewrites the file. Consumer hand-edit or
+  // exceptions.json entry, not classify.
+  classifyRelocatable: false,
 };

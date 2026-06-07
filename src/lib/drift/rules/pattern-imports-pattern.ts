@@ -18,4 +18,8 @@ export const patternImportsPatternRule: DriftRule = {
   description: "Pattern-tier file imports from another pattern, violating the no-nested-patterns rule",
   detect,
   fixable: false,
+  // Breaking the cycle is a refactoring call (extract the shared shell,
+  // demote one pattern, switch composition style); no loop step makes that
+  // decision. Consumer hand-edit or exceptions.json.
+  classifyRelocatable: false,
 };

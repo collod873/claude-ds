@@ -62,6 +62,19 @@ export type IntegrityRule =
         ctx?: ProjectContext,
       ) => IntegrityFinding[] | Promise<IntegrityFinding[]>;
       fixable: false;
+      /**
+       * Mirrors `DriftRule.classifyRelocatable` (#379). True when `classify`
+       * is the owning remedy for findings of this integrity rule (e.g. an
+       * unresolved symbol that a tier move would heal as classify rewrites
+       * importers). False when no shipped step in the canonical loop can
+       * clear the finding — UNRESOLVABLE-IMPORT today, since classify does
+       * not invent missing files. `deriveProjectState` reads this to keep
+       * heal's convergence check honest: a non-relocatable unfixable
+       * integrity finding sets `unresolvableFindings` rather than the
+       * misleading `classifyNeeded`, so the loop never silently converges
+       * with the finding outstanding.
+       */
+      classifyRelocatable: boolean;
     }
   | {
       id: IntegrityRuleId;
