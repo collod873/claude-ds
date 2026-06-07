@@ -6,6 +6,15 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [1.3.1] — 2026-06-07
+
+Patch: fixes a release-blocking out-of-memory crash that hit any real consumer on the very first remediation iteration. The fix is a one-directory-set change in the convergence detector — no behavior change for clean trees, no migration set.
+
+### Fixed
+- **`snapshotTree` OOM on real consumer trees** (#384). The remediation loop's convergence detector read every file under the tree into memory, skipping only `node_modules`/`.git` — so it slurped the entire `.next/` build cache (gigabytes), twice per iteration, and blew the V8 heap at `iteration 1/3` on any adopted app with a populated build cache. It now skips build/generated output dirs (`.next`, `.vercel`, `.turbo`, `dist`, `build`, `out`, `coverage`, `.cache`, `test-results`, `playwright-report`). These are dirs the loop never mutates, so skipping them is correctness, not optimization. A regression test seeds a build dir and asserts the snapshot excludes it, guarding the class. (Follow-up #385 tracks consolidating the codebase's divergent build-output denylists so a Vite/Nuxt consumer can't re-trigger the same crash.)
+
+---
+
 ## [1.3.0] — 2026-06-07
 
 One shared remediation planner now backs every surface that changes files. `heal`, the front door, and mutating commands previously each reasoned about "what needs fixing" their own way; this release routes them all through a single pure planner (#342) gated by one commitment point (#345). The visible payoff: mutating commands default to a concise summary, with `--diff` and `--json` for the full picture or machine consumption (#344). Audit enforcement is now alias-agnostic, which lets the separate `rewrite-ds-imports` command retire. No migration set; a consumer pinned at v1.2.0 runs zero migrations on upgrade. Cut to close the 21-commit gap where `npx …#v1.2.0` was installing pre-planner code.
