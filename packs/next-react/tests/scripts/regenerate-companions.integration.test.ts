@@ -181,6 +181,73 @@ describe("regenerate-companions.sh [integration]", () => {
     expect(validatorMatch.length).toBeGreaterThan(0);
   });
 
+  // ── Alias-agnostic CLASS-001: @ds/* must trigger just like @/design-system/* ──
+  // ADR-0009 addendum / PRD #340 / sub-issue #346. After retiring
+  // `rewrite-ds-imports`, both spellings live side-by-side and the validator
+  // must flag either form. Otherwise CLASS-001 silently blinds on consumer
+  // code that prefers the `@ds/*` spelling.
+
+  it("exits non-zero with CLASS-001 when atom imports @ds/* (alias-agnostic)", async () => {
+    await scaffold(dir, FIXTURE_VALID_ATOM);
+
+    const atomPath = join(dir, "design-system", "atoms", "badge.tsx");
+    await writeFile(
+      atomPath,
+      [
+        `import React from "react";`,
+        `import { Icon } from "@ds/atoms/icon";`,
+        ``,
+        `export function Badge() { return <span><Icon name="check" /></span>; }`,
+        ``,
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }] };`,
+        ``,
+      ].join("\n"),
+      "utf8",
+    );
+
+    const r = spawnSync(
+      "bash",
+      [
+        "-c",
+        `source scripts/lib/ds-validators.sh && ds_check_classification design-system/atoms/badge.tsx`,
+      ],
+      { cwd: dir, encoding: "utf8", timeout: 5_000 },
+    );
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/CLASS-001/);
+  });
+
+  it("does NOT flag CLASS-001 for an atom that only has a type-only import from @ds/types/meta", async () => {
+    await scaffold(dir, FIXTURE_VALID_ATOM);
+
+    const atomPath = join(dir, "design-system", "atoms", "badge.tsx");
+    await writeFile(
+      atomPath,
+      [
+        `import React from "react";`,
+        `import type { Meta } from "@ds/types/meta";`,
+        ``,
+        `export function Badge() { return <span>x</span>; }`,
+        `export const meta: Meta = { kind: "atom", examples: [{ name: "default", props: {} }] };`,
+        ``,
+      ].join("\n"),
+      "utf8",
+    );
+
+    const r = spawnSync(
+      "bash",
+      [
+        "-c",
+        `source scripts/lib/ds-validators.sh && ds_check_classification design-system/atoms/badge.tsx`,
+      ],
+      { cwd: dir, encoding: "utf8", timeout: 5_000 },
+    );
+
+    expect(r.status).toBe(0);
+    expect(r.stderr ?? "").not.toMatch(/CLASS-001/);
+  });
+
   // ── Type-only imports do NOT trigger CLASS-001 (issue #76) ────────────────
 
   it("does NOT flag CLASS-001 for an atom that only has a type-only import from @/design-system/*", async () => {

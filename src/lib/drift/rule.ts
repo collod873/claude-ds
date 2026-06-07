@@ -34,11 +34,15 @@ export type DriftRuleId =
   | "DRIFT-INLINE-STATIC-STYLE"
   | "DRIFT-META-EXAMPLES-DUPLICATE"
   | "DRIFT-META-EXAMPLES-CORRUPT"
-  | "DRIFT-STALE-DS-IMPORT"
   // Token-parity rule (PRD #340 / sub-issue #347; ADR-0017 addendum). Required
   // before OWNED-TOKEN-LINT can legitimately claim supersession of a hand-rolled
   // JSON↔CSS token-parity guard.
   | "DRIFT-TOKEN-PARITY";
+// DRIFT-STALE-DS-IMPORT was retired with the ADR-0009 addendum
+// (alias-agnostic enforcement). The rule flagged `@/design-system/*` as
+// "stale" relative to `@ds/*` — i.e. the same forced canonical-form rewrite
+// that motivated retiring the `rewrite-ds-imports` migration. Both alias
+// spellings are now valid; nothing should normalize one to the other.
 
 export interface DriftFinding {
   ruleId: DriftRuleId;

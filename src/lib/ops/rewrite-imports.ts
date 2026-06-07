@@ -4,11 +4,18 @@ import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 
 /**
- * Match `from "...@/design-system/<tier>/..."` — but exclude `types/meta`. The
- * `Meta` type import is structural, not a real DS-module dependency, and would
- * otherwise promote every atom to composite the moment we backfill meta.
+ * Match a DS-module import via either canonical spelling — `@/design-system/`
+ * or `@ds/`. ADR-0009 addendum: both resolve to the same files in
+ * `tsconfig.json` paths, so CLASS-001 (and every other rule that keys on
+ * "is this a runtime DS import?") must recognize either form. Pinning the
+ * regex to `@/design-system/` only is what silently blinded CLASS-001 when
+ * `rewrite-ds-imports` rewrote consumer trees to the alias spelling.
+ *
+ * `types/meta` is excluded under either spelling: the `Meta` type import is
+ * structural, not a real DS-module dependency, and would otherwise promote
+ * every atom to composite the moment we backfill meta.
  */
-const DS_IMPORT_RE = /from\s+["'][^"']*@\/design-system\/(?!types\/meta)/;
+const DS_IMPORT_RE = /from\s+["'][^"']*(?:@\/design-system|@ds)\/(?!types\/meta)/;
 
 export function fileImportsDsModule(source: string): boolean {
   return DS_IMPORT_RE.test(source);
