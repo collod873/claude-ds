@@ -20,6 +20,8 @@ From the greet you land in the scaffold; from there `heal` (below) drives it to 
 
 Pin every invocation to a release tag. The CLI never auto-updates.
 
+> **Dev/preview only.** The maintainer can run `npx github:collod873/claude-ds#main` to test unreleased work against a sandbox project. Consumers should always pin a tag — `#main` is a moving target and has no version contract.
+
 ## Install (explicit onramps)
 
 If you'd rather skip the greet and call the onramp directly:
