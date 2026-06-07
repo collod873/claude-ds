@@ -36,8 +36,9 @@ describe("driveRemediation (shared loop)", () => {
   afterEach(async () => { await cleanup(dir); });
 
   it("a clean tree converges in one iteration and dispatches nothing", async () => {
-    // Adopt then heal to the true fixed point (the benign meta_kind_strict
-    // repair settled), so the next plan is empty.
+    // #382: adopt lands at the verification chain's fixed point, so the
+    // following heal is a no-op. The call is kept as a guard against a future
+    // migration adding an end-state adopt doesn't yet seed.
     const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
     const healed = await runCli(["heal"], { cwd: dir });
@@ -58,9 +59,8 @@ describe("driveRemediation (shared loop)", () => {
 
   it("forwards the iteration ceiling to the onIteration callback", async () => {
     // A scaffold-less tree pinned to the current version always has work
-    // (sync), and the meta_kind_strict repair lingers, so it cannot converge
-    // within a tight ceiling — proving the loop runs every iteration and the
-    // callback is driven once each.
+    // (sync), so the loop runs at least one iteration before it can converge —
+    // enough to prove the callback is driven and the ceiling is forwarded.
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
       packVersion: `v${pkg.version}`,
       pack: "next-react",

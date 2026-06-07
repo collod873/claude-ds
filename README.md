@@ -43,7 +43,7 @@ npx github:collod873/claude-ds#v1.3.1 adopt --pack next-react
 | `heal` | Self-converging brownfield loop — `sync → upgrade → classify → audit --fix` to a fixed point |
 | `audit` | Read-only conformance report. `--fix` auto-remediates deterministic issues |
 | `classify` | Categorize existing files into DS tiers |
-| `migrate <path>` | Move one component into the scaffold and register exceptions |
+| `migrate <path>` | Move one component into the scaffold (registers an exception only when `--tier` forces a misplacement) |
 | `migrate-layout` | Rename lookalike files to canonical paths (`git mv`) |
 | `enforce` | Flip WARN → BLOCK (gated on exception count threshold) |
 | `sync` | Update managed files to the pinned release (diff + confirm) |

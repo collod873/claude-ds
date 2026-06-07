@@ -1,11 +1,13 @@
 import { parseConfig } from "../lib/config.js";
 import { parseLsRemote } from "../lib/tags.js";
 import { semverLt } from "../lib/version-currency.js";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import pkg from "../../package.json" with { type: "json" };
+
+const DEFAULT_REMOTE = "https://github.com/collod873/claude-ds";
 
 async function readIfExistsLocal(p: string): Promise<string | null> {
   try {
@@ -52,6 +54,37 @@ export function extractChangelogSections(changelog: string, pinned: string, inst
   return sections;
 }
 
+export type LatestTagResult =
+  | { ok: true; tag: string | null }
+  | { ok: false; reason: string };
+
+export interface SpawnRunResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error?: Error;
+}
+
+export type GitRunner = (cmd: string, args: string[]) => SpawnRunResult;
+
+const defaultRunner: GitRunner = (cmd, args) => {
+  const r = spawnSync(cmd, args, { encoding: "utf8" });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, error: r.error };
+};
+
+/** Resolve the latest v-prefixed semver tag at a remote. Caller distinguishes
+ *  network/CLI failure (ok:false) from "remote has no v-tags" (ok:true, tag:null). */
+export function fetchLatestTag(remote: string, runner: GitRunner = defaultRunner): LatestTagResult {
+  const r = runner("git", ["ls-remote", "--tags", remote]);
+  if (r.error) return { ok: false, reason: r.error.message };
+  if (r.status !== 0) {
+    const detail = r.stderr.trim() || `(no stderr)`;
+    return { ok: false, reason: `git ls-remote exited ${r.status ?? "null"}: ${detail}` };
+  }
+  const tags = parseLsRemote(r.stdout);
+  return { ok: true, tag: tags[tags.length - 1] ?? null };
+}
+
 export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
   const raw = await readIfExistsLocal(join(cwd, ".claude-ds.json"));
@@ -72,9 +105,11 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
     console.log(`pinned: ${pinned}  installed: ${installedVer}`);
     console.log("");
 
-    // Load CHANGELOG from package root (works in both dev and installed contexts)
-    const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-    const changelogPath = join(pkgRoot, "CHANGELOG.md");
+    // Resolve CHANGELOG.md via the same relative URL pattern the package.json
+    // import already uses — `../../CHANGELOG.md` from src|dist/commands/version.{ts,js}
+    // lands at the package root in dev, dist, and installed layouts. The previous
+    // `dirname(dirname(...))` approach mis-landed at dist/ (issue #357).
+    const changelogPath = fileURLToPath(new URL("../../CHANGELOG.md", import.meta.url));
     const changelog = await readIfExistsLocal(changelogPath);
 
     if (changelog) {
@@ -90,16 +125,28 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
       }
     }
 
-    console.log("Run `claude-ds reconcile` to clean stale paths.");
+    console.log("Run `claude-ds upgrade` to apply pending migrations.");
     process.exit(1);
   }
 
-  const installed = pinned ?? "(none)";
-  let latest = "unknown";
-  if (!opts.offline) {
-    const r = spawnSync("git", ["ls-remote","--tags","https://github.com/collod873/claude-ds"], { encoding: "utf8" });
-    if (r.status === 0) { const tags = parseLsRemote(r.stdout); latest = tags[tags.length - 1] ?? "unknown"; }
+  // Default mode. `installed` is the CLI binary version (consistent with
+  // --check — issue #367). `pinned` is .claude-ds.json#packVersion, or
+  // `(none)` when no config is present. `latest` is the highest tag at the
+  // remote; failures print a hint on stderr instead of silently rendering
+  // `latest: unknown` (issue #368).
+  console.log(`installed: ${installedVer}`);
+  console.log(`pinned: ${pinned ?? "(none)"}`);
+
+  if (opts.offline) {
+    console.log(`latest: unknown`);
+    return;
   }
-  console.log(`installed: ${installed}`);
-  console.log(`latest: ${latest}`);
+
+  const result = fetchLatestTag(DEFAULT_REMOTE);
+  if (result.ok) {
+    console.log(`latest: ${result.tag ?? "unknown"}`);
+  } else {
+    console.log(`latest: unknown`);
+    console.error(`(latest tag check failed: ${result.reason}; pass --offline to skip)`);
+  }
 }

@@ -11,7 +11,7 @@ import { moveTierFile } from "../lib/ops/move-tier-file.js";
 import { appendExceptions } from "../lib/ops/append-exceptions.js";
 import { showcaseStub, toPascalCase } from "../lib/ops/backfill-companions.js";
 
-export async function migrateCmd(opts: { source: string; tier?: "atom"|"composite"; rename?: string; reason: string; yes?: boolean; cwd?: string }) {
+export async function migrateCmd(opts: { source: string; tier?: "atom"|"composite"; rename?: string; reason?: string; issue?: string; yes?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
   let ctx = await loadProject(cwd);
 
@@ -38,13 +38,16 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   if (s.isDirectory()) { err("source is a directory"); process.exit(2); }
   if (!abs.endsWith(".tsx")) { err("only .tsx components are supported at v1"); process.exit(2); }
   const src = await readFile(abs, "utf8");
+  // Always classify — we need the verdict to (a) pick a tier when no override
+  // is given, and (b) decide if --tier forces a real misplacement post-move
+  // (#361). DRIFT-MISPLACED fires when locationTier ≠ classifier verdict, so
+  // an exception is only needed when those disagree.
+  const { domainRoots, dsAliases, allowedImports } = ctx.auditConfig;
+  const verdict = classifySource(src, domainRoots, allowedImports, dsAliases);
   let tier: "atom"|"composite";
   if (opts.tier) {
     tier = opts.tier;
   } else {
-    // Classify with the same 5-tier engine as `classify` and the drift rules (#220).
-    const { domainRoots, dsAliases, allowedImports } = ctx.auditConfig;
-    const verdict = classifySource(src, domainRoots, allowedImports, dsAliases);
     if (verdict.tier !== "atom" && verdict.tier !== "composite") {
       err(`${opts.source} classifies as ${verdict.tier} — migrate only handles atom/composite. Run \`claude-ds classify\`, or pass \`--tier atom|composite\` to override.`);
       process.exit(2);
@@ -56,6 +59,29 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   const destRel = join("design-system", tier === "atom" ? "atoms" : "composites", destName);
   const dest = join(cwd, destRel);
   if (await ctx.exists(dest)) { err(`destination exists: ${dest} (pass --rename to override)`); process.exit(2); }
+
+  // Post-migration DRIFT-MISPLACED triggers when (locationTier=tier) ≠
+  // (classifier verdict), and the verdict is neither pattern nor ambiguous
+  // (see src/lib/drift/rules/misplaced.ts). Only then is an exception needed
+  // — a correctly-placed file gets none (#361).
+  const willMisplace =
+    verdict.tier !== tier &&
+    verdict.tier !== "pattern" &&
+    !verdict.ambiguous;
+
+  if (willMisplace) {
+    if (!opts.reason) {
+      err(`migrating with --tier ${tier} would leave the file as DRIFT-MISPLACED (classifier says ${verdict.tier}) — re-run with --reason <text> --issue <number-or-url> to register the sanctioning exception.`);
+      process.exit(2);
+      return;
+    }
+    if (!opts.issue) {
+      err(`migrating with --tier ${tier} would leave the file as DRIFT-MISPLACED (classifier says ${verdict.tier}) — re-run with --issue <number-or-url> so the registered exception passes lint.`);
+      process.exit(2);
+      return;
+    }
+  }
+
   if (!opts.yes && !(await confirm(`Migrate ${opts.source} → ${dest}?`))) { err("aborted"); process.exit(130); }
 
   // #369: the pre-fix stub was a bare `export default function Showcase(){ return null; }`
@@ -76,17 +102,21 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
     },
   };
 
-  const exPath = join(cwd, "design-system/exceptions.json");
-  const cur = parseExceptions(await readFile(exPath, "utf8"));
-  cur.push({ rule: "DRIFT-MISPLACED", path: destRel, reason: opts.reason });
+  const ops: Operation[] = [moveTierFile(rel, destRel), writeShowcaseStub];
+  if (willMisplace) {
+    const exPath = join(cwd, "design-system/exceptions.json");
+    const cur = parseExceptions(await readFile(exPath, "utf8"));
+    cur.push({ rule: "DRIFT-MISPLACED", path: destRel, reason: opts.reason, issue: opts.issue });
+    ops.push(appendExceptions(cur));
+  }
 
-  const report = await run(
-    ctx,
-    [moveTierFile(rel, destRel), writeShowcaseStub, appendExceptions(cur)],
-    "apply",
-  );
+  const report = await run(ctx, ops, "apply");
   if (report.failed) { err(`migrate failed: ${report.failed.error}`); process.exit(2); }
 
-  info(`migrated → ${dest} (tier=${tier}), exception registered (add an issue link to satisfy lint)`);
+  if (willMisplace) {
+    info(`migrated → ${dest} (tier=${tier}), DRIFT-MISPLACED exception registered (issue=${opts.issue})`);
+  } else {
+    info(`migrated → ${dest} (tier=${tier})`);
+  }
   info(`→ Next: fill ${showcaseRel} with real meta.examples — see docs/adr/0004-design-system-tiers.md`);
 }
