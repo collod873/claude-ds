@@ -37,6 +37,11 @@ export interface DashboardInput {
   unfixableCount: number;
   /** Detected build command — what the clean-tree recommendation invokes. */
   buildCmd: string;
+  /** Pinned `packVersion` is older than the installed CLI (#336). Pre-adopt
+   *  callers and up-to-date projects pass `false`; the brain only surfaces
+   *  the signal in adopted mode. Defaults to `false` so callers not yet
+   *  wired to version currency keep today's behavior. */
+  upgradeAvailable?: boolean;
 }
 
 export function composeDashboardState(input: DashboardInput): DashboardState {
@@ -50,6 +55,8 @@ export function composeDashboardState(input: DashboardInput): DashboardState {
     mode: input.mode,
     scaffold: input.scaffold,
     findings,
+    upgradeAvailable:
+      input.mode === "adopted" && input.upgradeAvailable === true,
     recommendedNext: recommendNextStep(input),
   };
 }
@@ -101,6 +108,18 @@ function recommendNextStep(input: DashboardInput): DashboardRecommendation | nul
     return {
       command: "claude-ds audit --fix",
       description: `auto-repair the ${n} ${noun}`,
+    };
+  }
+
+  // Rank 6 — version currency. Inserted *below* structural-integrity and
+  // audit triage (you do not upgrade onto a broken baseline) and *above* the
+  // clean-tree build hint (a stale pack version is more actionable than
+  // "everything compiles"). Mirrors the ADR-0003 heal-loop ordering
+  // (sync → upgrade → classify → audit). #336.
+  if (input.upgradeAvailable) {
+    return {
+      command: "claude-ds upgrade",
+      description: "pack version is behind the installed CLI",
     };
   }
 

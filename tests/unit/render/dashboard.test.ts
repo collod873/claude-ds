@@ -77,6 +77,18 @@ const INCOMPLETE_SCAFFOLD_WITH_FINDINGS: DashboardState = {
   },
 };
 
+const UPGRADE_AVAILABLE: DashboardState = {
+  cwd: "/repo/example-app",
+  mode: "adopted",
+  scaffold: { present: 12, total: 12 },
+  findings: [],
+  upgradeAvailable: true,
+  recommendedNext: {
+    command: "claude-ds upgrade",
+    description: "pack version is behind the installed CLI",
+  },
+};
+
 const PRE_ADOPT: DashboardState = {
   cwd: "/repo/fresh-app",
   mode: "pre-adopt",
@@ -131,6 +143,17 @@ describe("renderDashboard (pure)", () => {
         "Scaffold: 9/12",
         "What's wrong: scaffold incomplete + 1 finding",
         "→ Next: claude-ds sync — restore 3 missing managed file(s)",
+      ]
+    `);
+  });
+
+  it("surfaces upgrade-available on an otherwise clean tree (#336)", () => {
+    expect(renderDashboard(UPGRADE_AVAILABLE)).toMatchInlineSnapshot(`
+      [
+        "Where you are: adopted (/repo/example-app)",
+        "Scaffold: 12/12 ✓",
+        "What's wrong: upgrade available",
+        "→ Next: claude-ds upgrade — pack version is behind the installed CLI",
       ]
     `);
   });
