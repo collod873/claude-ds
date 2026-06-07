@@ -69,9 +69,14 @@ export function parseExceptions(raw: string): Exception[] {
   return result;
 }
 
-/** Count of all registered exceptions (exceptions have no expiry; removal is via issue closure). */
+/**
+ * Count of *open* (gate-bearing) exceptions. Permanent ones are informational
+ * (CONTEXT.md "Exception" entry: they appear as informational in doctor output),
+ * not tracked workarounds with a removal trigger — so they don't count against
+ * `enforce_threshold`. Issue #362.
+ */
 export function openCount(ex: Exception[]): number {
-  return ex.length;
+  return ex.filter(e => !e.permanent).length;
 }
 
 /** Throw ExceptionError if the exception count exceeds threshold. */

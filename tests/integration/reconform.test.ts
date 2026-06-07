@@ -13,7 +13,10 @@ async function scaffoldProject(dir: string) {
   await mkdir(join(dir, "design-system", "atoms"), { recursive: true });
   await mkdir(join(dir, "design-system", "composites"), { recursive: true });
   await writeFile(join(dir, "design-system", "exceptions.json"), JSON.stringify({ exceptions: [] }));
-  // stub contracts + tokens with enough lines to avoid stub-warning (≥25)
+  // Filler bytes that differ from the pack seed so emitStubHint (#366) stays
+  // silent by default — the hint fires only while contracts.md / tokens.json
+  // are byte-identical to packs/next-react/files/design-system/*. Tests that
+  // need the hint to fire overwrite these files with the pack seed.
   const lines25 = Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join("\n");
   await writeFile(join(dir, "design-system", "contracts.md"), lines25);
   await writeFile(join(dir, "design-system", "tokens.json"), JSON.stringify(Object.fromEntries(
@@ -131,16 +134,65 @@ describe("reconform", () => {
     }
   });
 
-  it("stub warning: contracts.md and tokens.json under threshold → warning printed", async () => {
+  it("#366: stub hint fires when contracts.md / tokens.json are the verbatim pack seed (no operator touch yet)", async () => {
     await scaffoldProject(dir);
-    // Overwrite the full-length files with short stubs (< 25 lines)
-    await writeFile(join(dir, "design-system", "contracts.md"), "# stub\n");
-    await writeFile(join(dir, "design-system", "tokens.json"), "{}");
+    // Overwrite the scaffold's filler with the actual pack-seeded content so
+    // the file matches what `adopt` would have written. The hint must fire.
+    const { readFile: rf } = await import("node:fs/promises");
+    const { fileURLToPath } = await import("node:url");
+    const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
+    const seedContracts = await rf(join(projectRoot, "packs", "next-react", "files", "design-system", "contracts.md"), "utf8");
+    const seedTokens = await rf(join(projectRoot, "packs", "next-react", "files", "design-system", "tokens.json"), "utf8");
+    await writeFile(join(dir, "design-system", "contracts.md"), seedContracts);
+    await writeFile(join(dir, "design-system", "tokens.json"), seedTokens);
 
     const r = await runCli(["reconform"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/stub|WARNING/i);
-    expect(r.stdout).toMatch(/contracts\.md|tokens\.json/i);
+    // Hint frames as actionable next-step (not a "WARNING"), names the file,
+    // and tells the operator how to silence it (editing).
+    expect(r.stdout).toMatch(/→ Next/);
+    expect(r.stdout).toMatch(/contracts\.md/);
+    expect(r.stdout).toMatch(/tokens\.json/);
+    expect(r.stdout).toMatch(/edit/i);
+    // No misleading "WARNING" caps — it contradicted the preceding "check pass".
+    expect(r.stdout).not.toMatch(/WARNING: stub files detected/);
+  });
+
+  it("#366: stub hint does NOT fire after the operator edits the file (the edit IS the acknowledge path)", async () => {
+    await scaffoldProject(dir);
+    // Seed the file with the pack's verbatim content, then mutate it by one byte.
+    const { readFile: rf } = await import("node:fs/promises");
+    const { fileURLToPath } = await import("node:url");
+    const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
+    const seedContracts = await rf(join(projectRoot, "packs", "next-react", "files", "design-system", "contracts.md"), "utf8");
+    const seedTokens = await rf(join(projectRoot, "packs", "next-react", "files", "design-system", "tokens.json"), "utf8");
+    await writeFile(join(dir, "design-system", "contracts.md"), seedContracts + "\n## My team's overrides\n- foo\n");
+    await writeFile(join(dir, "design-system", "tokens.json"), seedTokens);  // tokens still seeded
+
+    const r = await runCli(["reconform"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // tokens.json still untouched → mentioned. contracts.md edited → not mentioned.
+    expect(r.stdout).toMatch(/tokens\.json/);
+    expect(r.stdout).not.toMatch(/contracts\.md.*untouched seed/);
+  });
+
+  it("#366: stub hint fires for an absent seeded file (covers operator deletion)", async () => {
+    await scaffoldProject(dir);
+    const { rm } = await import("node:fs/promises");
+    await rm(join(dir, "design-system", "contracts.md"));
+
+    const r = await runCli(["reconform"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/contracts\.md.*missing/);
+  });
+
+  it("#366: stub hint stays silent when both seeded files have been touched", async () => {
+    await scaffoldProject(dir);
+    // scaffoldProject writes filler content that differs from the pack seed,
+    // so by definition neither file is the verbatim seed — hint must not fire.
+    const r = await runCli(["reconform"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/→ Next: consolidate/);
   });
 
   it("check phase: invokes project-local scripts/check-*.ts (not pack-internal)", async () => {
@@ -159,6 +211,42 @@ describe("reconform", () => {
     const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
     // dry-run prints violations it found without prompting
     expect(r.stdout).toMatch(/sentinel violation|TST-001/i);
+  });
+
+  it("#358: a script that exits 2 with a well-formed stderr line surfaces as a violation (not as self-error)", async () => {
+    // Regression for the false-negative: reconform must NOT collapse a real
+    // violation into a "self-error, skipping" warning. The exit-code protocol
+    // is documented in run-check-scripts.ts — 1 = self-error, 2 = findings.
+    await scaffoldProject(dir);
+    await mkdir(join(dir, "scripts"), { recursive: true });
+    const checkScript = [
+      `process.stderr.write("design-system/contracts.md:0: PRIN-000: missing \\"Last reviewed: YYYY-MM-DD\\" footer line\\n");`,
+      `process.exit(2);`,
+    ].join("\n");
+    await writeFile(join(dir, "scripts", "check-principles-freshness.ts"), checkScript);
+
+    // Non-interactive run: skip the exception-review prompt with "S\n".
+    const r = await runCli(["reconform"], { cwd: dir, stdin: "S\n" });
+    // Violation must surface — both as the stdout reviewer line and in the
+    // final summary count. The old broken behavior reported "0 violation(s)
+    // reviewed" and dropped the finding entirely.
+    expect(r.stdout).toMatch(/PRIN-000/);
+    expect(r.stdout).not.toMatch(/self-error.*check-principles-freshness/);
+    expect(r.stdout).not.toMatch(/0 violation\(s\) reviewed/);
+  });
+
+  it("#358: a script that exits 1 (self-error) is logged as a skip — exit-1 is reserved for genuine crashes", async () => {
+    await scaffoldProject(dir);
+    await mkdir(join(dir, "scripts"), { recursive: true });
+    // A script that genuinely cannot run: writes nothing parseable, exits 1.
+    const checkScript = [
+      `process.stderr.write("crashed: ENOENT some/file\\n");`,
+      `process.exit(1);`,
+    ].join("\n");
+    await writeFile(join(dir, "scripts", "check-broken.ts"), checkScript);
+
+    const r = await runCli(["reconform"], { cwd: dir });
+    expect(r.stdout).toMatch(/check-broken\.ts self-error \(exit 1\), skipping/);
   });
 
   // ── Meta-export validation (issue #40) ─────────────────────────────────────
@@ -621,5 +709,42 @@ describe("reconform", () => {
     expect(r.stdout).toMatch(/CLASS-002/);
     // But not CLASS-001 (no auto-move queued)
     expect(r.stdout).not.toMatch(/CLASS-001.*plain|plain.*CLASS-001/i);
+  });
+
+  // ── #365: silent-no-op flag combinations ──────────────────────────────────
+
+  it("#365: --demote-composites without --fix is refused at the boundary", async () => {
+    await scaffoldProject(dir);
+
+    const r = await runCli(["reconform", "--demote-composites"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/--demote-composites requires --fix/);
+  });
+
+  it("#365: --backfill-meta without --fix prints an audit-only banner so the no-op is visible", async () => {
+    await scaffoldProject(dir);
+    await writeFile(
+      join(dir, "design-system", "atoms", "card.tsx"),
+      `export function Card() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--backfill-meta"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // The banner must call out that no writes will happen, mention the
+    // operator's remedy (--fix), and surface ahead of normal phase output.
+    expect(r.stdout).toMatch(/audit-only/i);
+    expect(r.stdout).toMatch(/--fix/);
+  });
+
+  it("#365: --backfill-meta with --dry-run does not print the audit-only banner (dry-run preview is the documented behavior)", async () => {
+    await scaffoldProject(dir);
+    await writeFile(
+      join(dir, "design-system", "atoms", "card.tsx"),
+      `export function Card() { return null; }\n`
+    );
+
+    const r = await runCli(["reconform", "--backfill-meta", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/audit-only/i);
   });
 });

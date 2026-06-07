@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
+import { showcaseStub, toPascalCase } from "../../src/lib/ops/backfill-companions";
 import { join } from "node:path";
 
 async function adopted(dir: string) {
@@ -66,6 +67,38 @@ describe("migrate", () => {
     const r = await runCli(["migrate", "src/components/forced.tsx", "--tier", "composite", "--reason", "ok", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
     await stat(join(dir, "design-system/composites/forced.tsx"));
+  });
+
+  it("seeds the canonical mirror-shaped showcase stub (#369) and points the operator at it", async () => {
+    // The pre-#369 stub was `export default function Showcase(){ return null; }` with no
+    // import of the migrated component and no `→ Next:` breadcrumb. The fix routes
+    // through the same `showcaseStub` helper backfillCompanions uses so the seeded
+    // file matches the canonical mirror form (TODO marker + module import + namespaced
+    // default export) and the operator sees a Next breadcrumb naming the file to fill.
+    await mkdir(join(dir, "src/components"), { recursive: true });
+    await writeFile(join(dir, "src/components/lonely.tsx"), `export const Lonely = () => null;`);
+
+    const r = await runCli(["migrate", "src/components/lonely.tsx", "--reason", "ok", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const showcasePath = "design-system/atoms/lonely.showcase.tsx";
+    const bytes = await readFile(join(dir, showcasePath), "utf8");
+    expect(bytes).toBe(showcaseStub(toPascalCase("lonely"), "lonely"));
+
+    // Sanity: TODO marker + import + named default export are all present.
+    expect(bytes).toContain("TODO(claude-ds)");
+    expect(bytes).toContain(`import * as Mod from "./lonely"`);
+    expect(bytes).toContain("LonelyShowcase");
+
+    // Operator-facing signal: a breadcrumb naming the file they need to fill.
+    expect(r.stdout).toMatch(/→ Next:.*lonely\.showcase\.tsx/);
+  });
+
+  it("emits friendly error when source path does not exist (#360)", async () => {
+    const r = await runCli(["migrate", "src/components/missing.tsx", "--reason", "t", "--yes"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/source not found: src\/components\/missing\.tsx/);
+    expect(r.stderr).not.toMatch(/ENOENT/);
   });
 
   it("refuses on collision without --rename", async () => {

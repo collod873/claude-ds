@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { parseManifest, type Manifest } from "../lib/manifest.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { detectLookalikes } from "../lib/lookalike.js";
-import { info, err, confirm } from "../lib/log.js";
+import { info, err, confirm, printNextStep } from "../lib/log.js";
 import { run } from "../lib/runner.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 import type { Change, Operation } from "../lib/operation.js";
@@ -25,9 +25,11 @@ export async function migrateLayoutCmd(opts: {
 }) {
   const cwd = opts.cwd ?? process.cwd();
 
-  // Refuse if not inside a git repo. migrate-layout commits its result so a
-  // git repo is a hard precondition — the shared clean-tree guard treats a
-  // missing repo as "cannot check" and proceeds, which would be wrong here.
+  // Refuse if not inside a git repo. migrate-layout relies on `git mv` to
+  // preserve history on the renames, and the clean-tree guard upstream gives
+  // the consumer "git is the undo" by default (ADR-0016). A git repo is the
+  // hard precondition — the shared clean-tree guard treats a missing repo as
+  // "cannot check" and proceeds, which would silently break that affordance.
   try {
     await execFile("git", ["rev-parse", "--is-inside-work-tree"], { cwd });
   } catch {
@@ -129,8 +131,13 @@ export async function migrateLayoutCmd(opts: {
     process.exit(2);
   }
 
-  // Commit the renames
-  await execFile("git", ["commit", "-m", `migrate-layout: rename lookalikes to canonical paths (pack=${pack})`], { cwd });
-
-  info(`migrated ${renames.length} file(s) — re-run adopt to proceed`);
+  // #359: do NOT auto-commit. The Runner's `git mv` stages the renames in the
+  // index, so the consumer can review `git status`, amend, or back out with a
+  // single `git reset` — the "git is the undo" affordance the clean-tree
+  // guard exists to provide. Baking the renames into history immediately (the
+  // old behavior) defeated that and required `git reset --hard HEAD~1` to
+  // back out, which is exactly the destructive operation we steer consumers
+  // away from.
+  info(`migrated ${renames.length} file(s) — renames are staged in the git index; review with 'git status' and commit when ready`);
+  printNextStep("migrate-layout", { projectKind: ctx.kind });
 }

@@ -1,5 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join, extname } from "node:path";
+import { SCAN_SKIP_DIRS } from "../build-outputs.js";
 import { isManifestOrKeepfile } from "../manifest.js";
 import { OWNED_CONCERNS } from "./registry.js";
 import type {
@@ -38,30 +39,6 @@ export interface ScanOwnedConcernsOptions {
 }
 
 /**
- * Directories the scanner never descends into: dependency caches, build
- * outputs, VCS metadata, IDE state. Mirrors `lookalike.ts`'s SKIP_DIRS but
- * is broader — completeness scans the whole tree, so misses here become
- * silent false-negatives.
- */
-const SKIP_DIRS: ReadonlySet<string> = new Set([
-  "node_modules",
-  ".git",
-  ".hg",
-  ".svn",
-  "dist",
-  "build",
-  "out",
-  ".next",
-  ".nuxt",
-  ".vercel",
-  ".turbo",
-  ".cache",
-  "coverage",
-  ".vite",
-  ".parcel-cache",
-]);
-
-/**
  * Extensions worth reading. An allowlist (not a binary blocklist) keeps
  * the scanner bounded — huge unknown blobs do not get slurped into memory.
  * Covers script-shaped languages plus prose; expand on demand if a real
@@ -93,7 +70,7 @@ async function walkRepo(cwd: string): Promise<string[]> {
     }
     for (const e of entries) {
       if (e.isDirectory()) {
-        if (SKIP_DIRS.has(e.name)) continue;
+        if (SCAN_SKIP_DIRS.has(e.name)) continue;
         const childRel = rel ? `${rel}/${e.name}` : e.name;
         await walk(childRel);
         continue;

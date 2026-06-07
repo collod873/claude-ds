@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
-import { writeFile, mkdir, stat } from "node:fs/promises";
+import { writeFile, mkdir, stat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
@@ -47,6 +47,65 @@ describe("migrate-layout", () => {
     // Plan printed to stdout
     expect(r.stdout).toContain("design-tokens.json");
     expect(r.stdout).toContain("design-system/tokens.json");
+  });
+
+  it("does not auto-commit: HEAD stays at the pre-migrate commit; renames are staged", async () => {
+    // #359: migrate-layout used to bake the renames into git history with a
+    // hardcoded `git commit`, defeating the "git is the undo" affordance the
+    // clean-tree guard exists to provide. The renames should be left staged in
+    // the index so the consumer reviews and commits them on their terms.
+    await gitInit(dir);
+    await writeFile(join(dir, "design-tokens.json"), "{}");
+    await gitAdd(dir, "design-tokens.json");
+    await gitCommit(dir, "initial");
+
+    const { stdout: headBefore } = await execFile("git", ["rev-parse", "HEAD"], { cwd: dir });
+
+    const r = await runCli(["migrate-layout", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+
+    const { stdout: headAfter } = await execFile("git", ["rev-parse", "HEAD"], { cwd: dir });
+    expect(headAfter.trim()).toBe(headBefore.trim());
+
+    // The renames should appear in the staged index (`git mv` stages them).
+    const { stdout: staged } = await execFile("git", ["diff", "--cached", "--name-status"], { cwd: dir });
+    expect(staged).toMatch(/design-system\/tokens\.json/);
+  });
+
+  it("post-success message points at adopt when there is no .claude-ds.json (pre-adopt)", async () => {
+    await gitInit(dir);
+    await writeFile(join(dir, "design-tokens.json"), "{}");
+    await gitAdd(dir, "design-tokens.json");
+    await gitCommit(dir, "initial");
+
+    const r = await runCli(["migrate-layout", "--pack", "next-react", "--yes"], { cwd: dir });
+
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("→ Next:");
+    expect(r.stdout).toContain("claude-ds adopt");
+    // The old "re-run adopt to proceed" copy is gone.
+    expect(r.stdout).not.toMatch(/re-run adopt to proceed/);
+  });
+
+  it("post-success message points at heal when invoked post-adopt", async () => {
+    // #359: in an already-adopted project the next step is heal/sync, not
+    // adopt. The old breadcrumb told the consumer to "re-run adopt", which
+    // doesn't apply once `.claude-ds.json` exists.
+    await gitInit(dir);
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }),
+    );
+    await writeFile(join(dir, "design-tokens.json"), "{}");
+    await gitAdd(dir, ".claude-ds.json", "design-tokens.json");
+    await gitCommit(dir, "initial");
+
+    const r = await runCli(["migrate-layout", "--yes"], { cwd: dir });
+
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("→ Next:");
+    expect(r.stdout).toContain("claude-ds heal");
+    expect(r.stdout).not.toMatch(/re-run adopt to proceed/);
   });
 
   it("dirty tree refusal: exits 2, no files moved", async () => {
@@ -113,6 +172,28 @@ describe("migrate-layout", () => {
     expect(r.stderr).toMatch(/--pack required/);
   });
 
+  // #355: tokens.tsx showcase must never be renamed over canonical tokens.json
+  // (data loss — operator runs --yes and TSX source lands at the JSON path).
+  it("does not rename a .tsx candidate over a .json canonical (extension mismatch)", async () => {
+    await gitInit(dir);
+    await mkdir(join(dir, "design-system", "references"), { recursive: true });
+    const tsxSource = "import React from 'react';\nexport default function Tokens() { return null; }\n";
+    await writeFile(join(dir, "design-system", "references", "tokens.tsx"), tsxSource);
+    await gitAdd(dir, "design-system/references/tokens.tsx");
+    await gitCommit(dir, "seed showcase");
+
+    const r = await runCli(["migrate-layout", "--pack", "next-react", "--yes"], { cwd: dir });
+
+    expect(r.code).toBe(0);
+    // The TSX showcase stays put.
+    const stillThere = await readFile(join(dir, "design-system", "references", "tokens.tsx"), "utf8");
+    expect(stillThere).toBe(tsxSource);
+    // tokens.json must NOT be created from the TSX source.
+    await expect(stat(join(dir, "design-system", "tokens.json"))).rejects.toThrow();
+    // Plan must not propose the bogus rename.
+    expect(r.stdout).not.toMatch(/tokens\.tsx → design-system\/tokens\.json/);
+  });
+
   it("git mv preserves history: git log --follow shows pre-move commit", async () => {
     await gitInit(dir);
     await writeFile(join(dir, "design-tokens.json"), "{}");
@@ -121,6 +202,11 @@ describe("migrate-layout", () => {
 
     const r = await runCli(["migrate-layout", "--pack", "next-react", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
+
+    // #359: migrate-layout no longer auto-commits — the consumer reviews the
+    // staged renames and commits on their terms. Commit explicitly here to
+    // verify that `git mv`'s history-preserving rename survives a real commit.
+    await gitCommit(dir, "rename tokens");
 
     const { stdout: log } = await execFile(
       "git",

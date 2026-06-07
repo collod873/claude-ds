@@ -67,6 +67,11 @@ function stem(name: string): string {
  *  "components" (dist=4 from "composites") that share no semantic relationship. */
 function isLookalike(canonicalBase: string, candidateBase: string): boolean {
   if (canonicalBase === candidateBase) return false; // exact match handled separately
+  // Extensions must match exactly — otherwise migrate-layout would `git mv` a
+  // .tsx showcase over a canonical .json path and corrupt consumer data (#355).
+  // A canonical without an extension (directory-style) only matches candidates
+  // that also have no extension.
+  if (extname(canonicalBase) !== extname(candidateBase)) return false;
   const dist = levenshtein(canonicalBase, candidateBase);
   if (dist <= 3) return true;
   // Full-name substring containment

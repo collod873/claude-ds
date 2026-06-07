@@ -9,6 +9,7 @@ import type { Change, Operation } from "../lib/operation.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { moveTierFile } from "../lib/ops/move-tier-file.js";
 import { appendExceptions } from "../lib/ops/append-exceptions.js";
+import { showcaseStub, toPascalCase } from "../lib/ops/backfill-companions.js";
 
 export async function migrateCmd(opts: { source: string; tier?: "atom"|"composite"; rename?: string; reason: string; yes?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
@@ -32,6 +33,7 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   const abs = resolve(cwd, opts.source);
   const rel = relative(resolve(cwd), abs);
   if (!rel || rel.startsWith("..")) { err("source outside project root"); process.exit(2); }
+  if (!(await ctx.exists(abs))) { err(`source not found: ${opts.source}`); process.exit(2); }
   const s = await stat(abs);
   if (s.isDirectory()) { err("source is a directory"); process.exit(2); }
   if (!abs.endsWith(".tsx")) { err("only .tsx components are supported at v1"); process.exit(2); }
@@ -56,8 +58,17 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   if (await ctx.exists(dest)) { err(`destination exists: ${dest} (pass --rename to override)`); process.exit(2); }
   if (!opts.yes && !(await confirm(`Migrate ${opts.source} → ${dest}?`))) { err("aborted"); process.exit(130); }
 
+  // #369: the pre-fix stub was a bare `export default function Showcase(){ return null; }`
+  // with no import of the migrated component and no operator-facing pointer. A showcase
+  // that returns null defeats the showcase-as-mirror contract (CONTEXT.md), and a silent
+  // stub leaves the operator no signal it needs filling. Route through the same
+  // showcaseStub helper backfillCompanions uses so the seeded file carries the TODO
+  // marker, the module import, and a namespaced default export — the canonical mirror
+  // shape every other entry point produces.
   const showcaseRel = destRel.replace(/\.tsx$/, ".showcase.tsx");
-  const showcaseContent = `// auto-generated showcase stub for ${destName}\nexport default function Showcase(){ return null; }\n`;
+  const fileBase = destName.replace(/\.tsx$/, "");
+  const displayName = toPascalCase(fileBase);
+  const showcaseContent = showcaseStub(displayName, fileBase);
   const writeShowcaseStub: Operation = {
     name: "migrate-showcase-stub",
     async plan(): Promise<Change[]> {
@@ -77,4 +88,5 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   if (report.failed) { err(`migrate failed: ${report.failed.error}`); process.exit(2); }
 
   info(`migrated → ${dest} (tier=${tier}), exception registered (add an issue link to satisfy lint)`);
+  info(`→ Next: fill ${showcaseRel} with real meta.examples — see docs/adr/0004-design-system-tiers.md`);
 }

@@ -111,13 +111,13 @@ describe("detectLookalikes", () => {
 
   it("ignoreGlobs suppresses one candidate but still returns another non-ignored lookalike", async () => {
     await mkdir(join(dir, ".vercel"), { recursive: true });
-    await writeFile(join(dir, ".vercel", "README.txt"), "auto-generated");
-    await writeFile(join(dir, "README.txt"), "local readme");
-    // Both are lookalikes for README.md; .vercel/README.txt ignored, README.txt not
+    await writeFile(join(dir, ".vercel", "README-old.md"), "auto-generated");
+    await writeFile(join(dir, "README-old.md"), "local readme");
+    // Both are lookalikes for README.md; .vercel/README-old.md ignored, README-old.md not
     const findings = await detectLookalikes(dir, ["README.md"], [".vercel/**"]);
     expect(findings[0].present).toBe(false);
-    // README.txt (not in .vercel) should still be reported
-    expect(findings[0].lookalike).toBe("README.txt");
+    // README-old.md (not in .vercel) should still be reported
+    expect(findings[0].lookalike).toBe("README-old.md");
   });
 
   it("ignoreGlobs with _actions pattern suppresses CRM action file", async () => {
@@ -129,5 +129,31 @@ describe("detectLookalikes", () => {
     // import.ts wouldn't match README.md anyway, but the glob should still work without error
     expect(findingsIgnored[0].lookalike).toBeNull();
     expect(findingsNoIgnore[0].lookalike).toBeNull();
+  });
+
+  // #355: extension mismatch must be rejected — otherwise migrate-layout
+  // would `git mv` a .tsx showcase over a canonical .json path (data loss).
+  it("rejects extension mismatch — tokens.tsx is not a lookalike for tokens.json", async () => {
+    await mkdir(join(dir, "design-system", "references"), { recursive: true });
+    await writeFile(join(dir, "design-system", "references", "tokens.tsx"), "import React from 'react';");
+    const findings = await detectLookalikes(dir, ["design-system/tokens.json"]);
+    expect(findings[0].present).toBe(false);
+    expect(findings[0].lookalike).toBeNull();
+  });
+
+  it("rejects extension mismatch even when stems match exactly", async () => {
+    await writeFile(join(dir, "tokens.md"), "# tokens");
+    await writeFile(join(dir, "tokens.sh"), "#!/bin/sh");
+    const findings = await detectLookalikes(dir, ["tokens.json"]);
+    expect(findings[0].present).toBe(false);
+    expect(findings[0].lookalike).toBeNull();
+  });
+
+  it("rejects file candidate (with extension) for directory-style canonical (no extension)", async () => {
+    // canonical "design-system/atoms" is a directory; "atoms.tsx" file should not match
+    await writeFile(join(dir, "atoms.tsx"), "");
+    const findings = await detectLookalikes(dir, ["design-system/atoms"]);
+    expect(findings[0].present).toBe(false);
+    expect(findings[0].lookalike).toBeNull();
   });
 });

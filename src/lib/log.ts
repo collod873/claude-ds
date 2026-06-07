@@ -13,7 +13,7 @@ export async function detectBuildCommand(cwd: string): Promise<string> {
   return "your build (e.g. npm run build)";
 }
 
-type NextStepCommand = "adopt" | "classify" | "audit" | "audit-fix" | "sync" | "reconcile" | "doctor" | "upgrade";
+type NextStepCommand = "adopt" | "classify" | "audit" | "audit-fix" | "sync" | "reconcile" | "doctor" | "upgrade" | "migrate-layout";
 
 interface NextStepContext {
   hasFindings?: boolean;
@@ -70,6 +70,13 @@ interface NextStepContext {
    * end-state at the current version.
    */
   upgradeOutcome?: "applied" | "no-op" | "repaired";
+  /**
+   * For `migrate-layout` (#359): keys the post-success breadcrumb on whether
+   * the consumer is pre-adopt or already adopted. The old "re-run adopt to
+   * proceed" copy was wrong post-adopt — once `.claude-ds.json` exists, the
+   * unblocking action is `heal`, not a second `adopt`.
+   */
+  projectKind?: "adopted" | "pre-adopt";
 }
 
 export function printNextStep(command: NextStepCommand, ctx: NextStepContext): void {
@@ -145,6 +152,16 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
           message = `run ${buildCmd} to verify everything compiles`;
           break;
       }
+      break;
+    case "migrate-layout":
+      // #359: pre-adopt projects continue on to `adopt`; an already-adopted
+      // project's next move is `heal` (the self-converging command), not a
+      // second `adopt`. The auto-commit and the "re-run adopt to proceed" copy
+      // were a single defect — both telling the consumer the wrong thing for
+      // the post-adopt path.
+      message = ctx.projectKind === "adopted"
+        ? "run 'claude-ds heal' to converge the project to clean"
+        : "run 'claude-ds adopt' to install the scaffold";
       break;
     case "upgrade":
       switch (ctx.upgradeOutcome) {

@@ -28,6 +28,7 @@ import { syncCmd } from "../commands/sync.js";
 import { upgradeCmd } from "../commands/upgrade.js";
 import { classifyCmd } from "../commands/classify.js";
 import { auditCmd } from "../commands/audit.js";
+import { SCAN_SKIP_DIRS } from "./build-outputs.js";
 import type { PendingDecision } from "./decision/index.js";
 import { deriveProjectState } from "./project-state.js";
 import { planRemediation, type LoopStep } from "./remediation-planner.js";
@@ -72,38 +73,15 @@ export async function runWithoutExit(fn: () => Promise<void>): Promise<number> {
 }
 
 /**
- * Directory names skipped while snapshotting the tree. The remediation loop's
- * commands (upgrade/repair/sync/classify/audit) only ever mutate DS-managed
- * files — never build or generated output — so reading these dirs buys nothing
- * but risk: a churning cache produces false "tree changed" non-convergence,
- * and on real adopted apps the gigabyte `.next/` cache OOMs V8 when read into
- * the snapshot Map twice per iteration. Ref issue #384. NOT shared with
- * `lookalike_ignore`, which excludes `src/app/**` — a path the loop DOES mutate
- * and must keep watching for convergence.
- */
-const SNAPSHOT_SKIP = new Set([
-  "node_modules",
-  ".git",
-  ".next",
-  ".vercel",
-  ".turbo",
-  "dist",
-  "build",
-  "out",
-  "coverage",
-  ".cache",
-  "test-results",
-  "playwright-report",
-]);
-
-/**
  * Snapshot every text file under `root`, skipping build/generated output and
- * VCS/dependency dirs (see `SNAPSHOT_SKIP`) — the loop never mutates those, so
- * reading them only risks false non-convergence or OOM on real trees (#384).
- * Two snapshots compare equal when the iteration changed zero bytes — the
- * fixed-point signal the loop uses to decide convergence. Binary content
- * (read errors) is skipped; consumer trees don't include binaries the loop
- * would mutate.
+ * VCS/dependency dirs (see `SCAN_SKIP_DIRS`) — the loop never mutates those,
+ * so reading them only risks false non-convergence or OOM on real trees
+ * (#384, #385). Two snapshots compare equal when the iteration changed zero
+ * bytes — the fixed-point signal the loop uses to decide convergence. Binary
+ * content (read errors) is skipped; consumer trees don't include binaries
+ * the loop would mutate. NOT shared with `lookalike_ignore`, which excludes
+ * `src/app/**` — a path the loop DOES mutate and must keep watching for
+ * convergence.
  */
 export async function snapshotTree(root: string): Promise<Map<string, string>> {
   const result = new Map<string, string>();
@@ -115,7 +93,7 @@ export async function snapshotTree(root: string): Promise<Map<string, string>> {
       return;
     }
     for (const e of entries) {
-      if (SNAPSHOT_SKIP.has(e.name)) continue;
+      if (SCAN_SKIP_DIRS.has(e.name)) continue;
       const abs = join(absDir, e.name);
       if (e.isDirectory()) {
         await walk(abs);
