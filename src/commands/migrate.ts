@@ -87,5 +87,5 @@ export async function migrateCmd(opts: { source: string; tier?: "atom"|"composit
   if (report.failed) { err(`migrate failed: ${report.failed.error}`); process.exit(2); }
 
   info(`migrated → ${dest} (tier=${tier}), exception registered (add an issue link to satisfy lint)`);
-  info(`→ Next: fill ${showcaseRel} with real meta.examples — see docs/adr/0001-personal-tool-scope.md`);
+  info(`→ Next: fill ${showcaseRel} with real meta.examples — see docs/adr/0004-design-system-tiers.md`);
 }
