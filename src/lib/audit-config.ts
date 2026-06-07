@@ -18,6 +18,10 @@ import { detectAppDir } from "./paths.js";
 export interface ResolvedAuditConfig {
   domainRoots: string[];
   metaKindStrict: boolean;
+  /** When true, `DRIFT-SMART-PART-NO-ROLE` fires on smart DS parts that declare no role.
+   *  Mirrors `metaKindStrict`: default false on fresh adoption, flipped by the v-next
+   *  migration after a `classify` pass assigns roles (ADR-0016 / PRD #301). */
+  roleContractsStrict: boolean;
   allowedImports: string[];
   dsAliases: string[];
   tsconfigPaths: Record<string, string[]>;
@@ -53,6 +57,7 @@ export async function resolveAuditConfig(
 
   const domainRoots = cfg?.domain_roots ?? DEFAULT_DOMAIN_ROOTS;
   const metaKindStrict = cfg?.meta_kind_strict ?? false;
+  const roleContractsStrict = cfg?.role_contracts_strict ?? false;
   const allowedImports = cfg?.allowed_imports ?? [];
 
   const cfgDsAliases = cfg?.ds_aliases ?? [];
@@ -68,6 +73,7 @@ export async function resolveAuditConfig(
   return {
     domainRoots,
     metaKindStrict,
+    roleContractsStrict,
     allowedImports,
     dsAliases,
     tsconfigPaths,

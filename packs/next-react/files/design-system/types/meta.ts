@@ -8,6 +8,8 @@
  * Hand-editing generated files is disallowed; reconform detects drift.
  */
 
+import type { Role } from "../contracts/roles/index";
+
 /** Named example for atoms and composites. */
 export interface Example {
   name: string;
@@ -56,6 +58,18 @@ export type Meta =
       examples: Example[];
       /** CVA variant combos to suppress in auto-expansion. */
       skip?: string[];
+      /**
+       * Standard interaction-pattern role this part conforms to (ADR-0016).
+       * Drawn from the closed WAI-ARIA APG vocabulary in `contracts/roles/`.
+       * Declaring a role binds the component to that role's shipped contract,
+       * which the runner exercises against every entry in `examples` through
+       * the rendered DOM. Omit for presentational parts and for smart parts
+       * still mid-classification (the audit rule
+       * `DRIFT-SMART-PART-NO-ROLE` is gated by `role_contracts_strict`).
+       * Reserved for `atom` / `composite` — the `pattern` and `reference`
+       * arms intentionally do not carry roles.
+       */
+      role?: Role;
     }
   | {
       kind: "pattern";

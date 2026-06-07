@@ -73,6 +73,45 @@ is gated by the `meta_kind_strict` flag in `.claude-ds.json` — default
 `false` for fresh projects, flipped to `true` by the v0.9.0 `meta-kind-hard`
 migration once `classify` has guaranteed every component carries one.
 
+### Role
+The standard interaction pattern a DS atom/composite conforms to, taken
+from the WAI-ARIA Authoring Practices vocabulary (`combobox`, `listbox`,
+`tabs`, `dialog`, …). Declared on the component via the optional
+`meta.role` field — a closed union; a value not in the union is a compile
+error. Behavior is the fourth scaffold concern (ADR-0016): a declared
+role binds the component to the pack's shipped **role contract** for that
+role.
+_Avoid_: `pattern` (reserved for the tier above — a *patterns-tier* file
+defines a page-level skeleton via slots; a *role* is the ARIA interaction
+shape of an atom/composite, orthogonal to which tier it lives in. A
+combobox atom is not a patterns-tier file). Also avoid: widget,
+behavior-kind, interaction-kind.
+
+### Role contract
+The shared, spec-derived behavioral test suite the pack ships per role
+(ADR-0016). Authored against the external WAI-ARIA standard, in the pack,
+with no access to any consumer's code — so the oracle lives outside the
+component body and catches wrong-from-day-one bugs, not just regressions
+(the F3 trap a per-component `.test.tsx` falls into). Drives the
+component purely through the rendered DOM by ARIA role and ARIA state, so
+one contract serves every implementation of that role; the same property
+subsumes a11y verification. Runs in the consumer's existing vitest +
+jsdom runtime (#297) against the component's `meta.examples`. Today the
+pack ships exactly one — combobox; further contracts ship only when a
+real consumer component demands them (ADR-0016's anti-speculative-infra
+constraint).
+_Avoid_: pattern contract, behavioral spec, a11y test, snapshot.
+
+### Smart part
+A DS atom or composite whose body uses React state, effect, or context —
+the mechanical predicate that makes a role required when
+`role_contracts_strict` is on (ADR-0016). A presentational part (pure
+render of props) carries no role and is fully covered by the showcase
+mirror; a smart part with no shipped contract is triaged
+(presentational, tracked exception, or relocate to `features/`), never
+silently ungoverned.
+_Avoid_: stateful component, interactive atom, behavioral component.
+
 ### Feature
 A domain-bound component that imports from `features/` or `lib/` (or
 another configured domain root). Features live in `features/<domain>/`, NOT
@@ -329,6 +368,52 @@ is a pure function of `ctx`.
 renders a unified diff (dry-run) or applies the Changes (apply). Single place that
 knows how to write/delete/rename — including `git mv` detection when `.git` is
 present and the path is tracked. Lives in `src/lib/runner.ts`.
+
+---
+
+## Interaction model (PRD #TBD — interactive UX)
+
+### Decision
+A structured, addressable choice the CLI surfaces before applying `Change[]`:
+`{ id, kind, question, options }`. `id` is stable and keyable (like a Drift
+rule id); `question` and `options` are plain-language and pass the **Simple
+question test**. Generalizes the fixer-only `FixerDecisionPoint` to every
+command. A Decision is resolved exactly one way — a pre-supplied **Decision
+answer**, a TTY prompt, or a kind-specific fallback — and never silently
+inside `plan()`.
+_Avoid_: prompt, gate, question (when the structured object is meant).
+
+### Decision kind
+Two interactive kinds plus the non-interactive default. The kind, not the
+command, picks the TTY/non-TTY behavior:
+- **Commitment gate** — a whole-batch "apply these Changes?" approval. **One
+  per command** (collapses `classify`'s former per-bucket confirms into a
+  single approve). TTY: colorized diff, then a single approve. Non-TTY:
+  auto-apply — git history is the undo. `--yes` skips it; `--dry-run`
+  previews without writing.
+- **Ambiguity** — a genuine project judgment that passes the Simple question
+  test (atom-vs-composite band, token tie-break, extract/convert/defer,
+  keep-which-file). TTY: prompt. Non-TTY with no Decision answer: **fail
+  loud** — a named, non-zero exit, never a silent default.
+- **Automatable** — the tool decides; safe default, recorded, never prompts.
+  Not surfaced as a Decision. The bulk of every run stays here.
+
+### Decision answer
+A pre-supplied resolution keyed by Decision `id`, carried in `ctx.decisions`
+(today's `fixerChoices`, generalized) and loadable from an `--answers` file.
+Two payoffs: an agent (or Collin) can answer up front, and the interactive
+path becomes **testable without a TTY** — feed answers and assert outcomes,
+snapshot the pure render separately. The absence of a Decision answer in
+non-TTY is what triggers an Ambiguity's fail-loud.
+
+### Pending decision
+An Ambiguity a headless run could not resolve (no TTY, no Decision answer).
+`heal` does **not** halt on the first one: it converges everything Automatable
+to a partial fixed point, **collects** the Pending decisions, and exits
+non-zero with an "N decisions need you" report plus an `--answers` scaffold to
+fill and re-run. This supersedes ADR-0014's "every ambiguity gets a safe
+default" for genuine Ambiguities — the agent no longer makes project decisions
+that were Collin's to make. See ADR-0016.
 
 ---
 

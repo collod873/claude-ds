@@ -44,11 +44,19 @@ describe("reconform", () => {
     const r = await runCli(["reconform"], { cwd: dir });
     expect(r.code).toBe(0);
 
-    // Each flat atom should now have sibling .showcase.tsx and .test.tsx
+    // Each flat atom now has a sibling .showcase.tsx. The per-component
+    // `.test.tsx` mint was retired by ADR-0016 / sub-issue #313 — behavior
+    // is verified by shared role contracts shipped in the pack.
     for (const name of ["button", "badge"]) {
       const base = join(dir, "design-system", "atoms", name);
       await stat(`${base}.showcase.tsx`);
-      await stat(`${base}.test.tsx`);
+      try {
+        await stat(`${base}.test.tsx`);
+        throw new Error(`reconform should not mint ${base}.test.tsx`);
+      } catch (err: unknown) {
+        const e = err as NodeJS.ErrnoException;
+        if (e.code !== "ENOENT") throw err;
+      }
     }
 
     // Showcase stub should contain the TODO marker
@@ -57,13 +65,6 @@ describe("reconform", () => {
       "utf8"
     );
     expect(showcaseContent).toMatch(/TODO\(claude-ds\):/);
-
-    // Test stub should contain the TODO marker
-    const testContent = await readFile(
-      join(dir, "design-system", "atoms", "button.test.tsx"),
-      "utf8"
-    );
-    expect(testContent).toMatch(/TODO\(claude-ds\):/);
   });
 
   it("dry-run: no files written, exit 0", async () => {
@@ -80,7 +81,6 @@ describe("reconform", () => {
       try { await stat(join(atomsDir, name)); return true; } catch { return false; }
     };
     expect(await companionExists("card.showcase.tsx")).toBe(false);
-    expect(await companionExists("card.test.tsx")).toBe(false);
   });
 
   it("precondition failure: no .claude-ds.json → exit 2 with message", async () => {
@@ -90,7 +90,7 @@ describe("reconform", () => {
     expect(r.stderr).toMatch(/\.claude-ds\.json/i);
   });
 
-  it("kebab-case filename → PascalCase identifiers in stubs, kebab in import path", async () => {
+  it("kebab-case filename → PascalCase identifiers in showcase stub, kebab in import path", async () => {
     await scaffoldProject(dir);
     // Add a kebab-case component (the bug case)
     await writeFile(
@@ -120,17 +120,15 @@ describe("reconform", () => {
     expect(showcaseContent).not.toContain("{ top-bar }");
     expect(showcaseContent).not.toContain("top-barShowcase");
 
-    const testContent = await readFile(
-      join(dir, "design-system", "atoms", "top-bar.test.tsx"),
-      "utf8"
-    );
-    expect(testContent).toContain(`import * as Mod from "./top-bar"`);
-    expect(testContent).toContain(`expect(Mod).toBeDefined()`);
-    expect(testContent).toContain(`describe("TopBar"`);
-    // new stub must NOT import testing-library or use render
-    expect(testContent).not.toContain("@testing-library");
-    expect(testContent).not.toContain("render");
-    expect(testContent).not.toContain("{ top-bar }");
+    // Per-component `.test.tsx` is retired (ADR-0016 / sub-issue #313):
+    // no `.test.tsx` is ever minted by reconform.
+    try {
+      await stat(join(dir, "design-system", "atoms", "top-bar.test.tsx"));
+      throw new Error("reconform must not mint top-bar.test.tsx");
+    } catch (err: unknown) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code !== "ENOENT") throw err;
+    }
   });
 
   it("stub warning: contracts.md and tokens.json under threshold → warning printed", async () => {

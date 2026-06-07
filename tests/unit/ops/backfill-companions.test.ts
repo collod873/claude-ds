@@ -36,17 +36,21 @@ async function scaffold(): Promise<void> {
 }
 
 describe("backfillCompanions op", () => {
-  it("first-run: missing companions emit 2 write Changes per component", async () => {
+  it("first-run: missing companion emits 1 write Change per component (showcase only)", async () => {
+    // PRD #301 / sub-issue #313: per-component `.test.tsx` is retired (ADR-0016).
+    // Behavior is verified by shared role contracts in the pack, not by
+    // hand-authored test stubs minted next to each component.
     await scaffold();
     await writeFile(join(cwd, "design-system", "atoms", "button.tsx"), `export const button = () => null;\n`);
 
     const changes = await backfillCompanions.plan(fakeCtx());
-    expect(changes).toHaveLength(2);
+    expect(changes).toHaveLength(1);
     const paths = changes.map(c => (c.kind === "write" ? c.path : "")).sort();
     expect(paths).toEqual([
       "design-system/atoms/button.showcase.tsx",
-      "design-system/atoms/button.test.tsx",
     ]);
+    // No `.test.tsx` may be minted.
+    expect(changes.some(c => c.kind === "write" && c.path.endsWith(".test.tsx"))).toBe(false);
     // All creates (before === null)
     for (const c of changes) {
       expect(c.kind).toBe("write");
@@ -73,7 +77,7 @@ describe("backfillCompanions op", () => {
     const ctx = fakeCtx();
     const report = await run(ctx, [backfillCompanions], "apply");
     expect(report.failed).toBeUndefined();
-    expect(report.applied).toHaveLength(2);
+    expect(report.applied).toHaveLength(1);
 
     const second = await backfillCompanions.plan(ctx);
     expect(second).toEqual([]);
@@ -83,7 +87,10 @@ describe("backfillCompanions op", () => {
     await scaffold();
     await writeFile(join(cwd, "design-system", "atoms", "button.tsx"), `x`);
     await writeFile(join(cwd, "design-system", "atoms", "button.showcase.tsx"), `x`);
+    // Pre-existing `.test.tsx` / `.stories.tsx` are still recognised as companions
+    // (scanner exclusion stays) even though the mint list no longer emits them.
     await writeFile(join(cwd, "design-system", "atoms", "button.test.tsx"), `x`);
+    await writeFile(join(cwd, "design-system", "atoms", "button.stories.tsx"), `x`);
     await writeFile(join(cwd, "design-system", "atoms", "index.ts"), `x`);
     await writeFile(join(cwd, "design-system", "atoms", "helper.logic.ts"), `x`);
 
@@ -96,7 +103,7 @@ describe("backfillCompanions op", () => {
     await writeFile(join(cwd, "design-system", "atoms", "a.tsx"), `x`);
     await writeFile(join(cwd, "design-system", "composites", "c.tsx"), `x`);
     const changes = await backfillCompanions.plan(fakeCtx());
-    expect(changes).toHaveLength(4);
+    expect(changes).toHaveLength(2);
     expect(changes.some(c => c.kind === "write" && c.path.startsWith("design-system/atoms/"))).toBe(true);
     expect(changes.some(c => c.kind === "write" && c.path.startsWith("design-system/composites/"))).toBe(true);
   });
@@ -109,6 +116,9 @@ describe("backfillCompanions op", () => {
   it("partial companions present: only missing ones emit Changes", async () => {
     await scaffold();
     await writeFile(join(cwd, "design-system", "atoms", "badge.tsx"), `x`);
+    // A pre-existing `.test.tsx` doesn't trigger any backfill — the mint list
+    // dropped it (sub-issue #313) and the scanner still recognises it as a
+    // companion so it isn't treated as a component source.
     await writeFile(join(cwd, "design-system", "atoms", "badge.test.tsx"), `pre-existing`);
 
     const changes = await backfillCompanions.plan(fakeCtx());
@@ -123,20 +133,14 @@ describe("backfillCompanions op", () => {
     expect(t).toBe("pre-existing");
   });
 
-  // #293: test stubs must seed a DOM test runtime — per-file vitest-environment
-  // jsdom docblock so consumer-fleshed render() calls have a `document` available
-  // without flipping the global vitest environment (which would break node-side tests).
-  // Built from substrings so vitest doesn't see a real docblock in *this* file.
-  it("test stub carries the per-file jsdom environment docblock", async () => {
+  // PRD #301 / sub-issue #313: per-component `.test.tsx` is retired. The mint
+  // list emits only `.showcase.tsx`; behavior lives in shipped role contracts.
+  it("never emits a .test.tsx companion (retired by ADR-0016)", async () => {
     await scaffold();
     await writeFile(join(cwd, "design-system", "atoms", "button.tsx"), `export const x = 1;\n`);
     const changes = await backfillCompanions.plan(fakeCtx());
-    const test = changes.find(c => c.kind === "write" && c.path.endsWith(".test.tsx"));
-    expect(test?.kind).toBe("write");
-    if (test?.kind === "write") {
-      const bytes = test.after.toString("utf8");
-      const expected = "// @" + "vitest-environment jsdom";
-      expect(bytes.split("\n")[0]).toBe(expected);
-    }
+    expect(changes.some(c => c.kind === "write" && c.path.endsWith(".test.tsx"))).toBe(false);
+    expect(changes.some(c => c.kind === "write" && c.path.endsWith(".stories.tsx"))).toBe(false);
+    expect(changes.some(c => c.kind === "write" && /\.snapshot\./.test(c.path))).toBe(false);
   });
 });

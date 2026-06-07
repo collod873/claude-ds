@@ -12,6 +12,8 @@ import { misplacedRule } from "./rules/misplaced.js";
 import { patternImportsPatternRule } from "./rules/pattern-imports-pattern.js";
 import { patternNoSlotsRule } from "./rules/pattern-no-slots.js";
 import { rawPrimitiveRule } from "./rules/raw-primitive.js";
+import { roleNoContractRule } from "./rules/role-no-contract.js";
+import { smartPartNoRoleRule } from "./rules/smart-part-no-role.js";
 import { staleDsImportRule } from "./rules/stale-ds-import.js";
 import { staleMetaStatesRule } from "./rules/stale-meta-states.js";
 
@@ -23,6 +25,8 @@ import { staleMetaStatesRule } from "./rules/stale-meta-states.js";
  */
 export const DRIFT_RULES_BY_ID: Record<DriftRuleId, DriftRule> = {
   "DRIFT-META-KIND-MISSING": metaKindMissingRule,
+  "DRIFT-SMART-PART-NO-ROLE": smartPartNoRoleRule,
+  "DRIFT-ROLE-NO-CONTRACT": roleNoContractRule,
   "DRIFT-MISPLACED": misplacedRule,
   "DRIFT-MISCLASSIFIED-ATOM": misclassifiedAtomRule,
   "DRIFT-MISCLASSIFIED-COMPOSITE": misclassifiedCompositeRule,
