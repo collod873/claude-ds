@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
-import { writeFile, mkdir, stat } from "node:fs/promises";
+import { writeFile, mkdir, stat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
@@ -127,8 +127,7 @@ describe("migrate-layout", () => {
 
     expect(r.code).toBe(0);
     // The TSX showcase stays put.
-    const { default: fs } = await import("node:fs/promises");
-    const stillThere = await fs.readFile(join(dir, "design-system", "references", "tokens.tsx"), "utf8");
+    const stillThere = await readFile(join(dir, "design-system", "references", "tokens.tsx"), "utf8");
     expect(stillThere).toBe(tsxSource);
     // tokens.json must NOT be created from the TSX source.
     await expect(stat(join(dir, "design-system", "tokens.json"))).rejects.toThrow();
