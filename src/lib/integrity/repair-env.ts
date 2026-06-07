@@ -1,12 +1,12 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import ts from "typescript";
+import { SCAN_SKIP_DIRS } from "../build-outputs.js";
 import type { ProjectContext } from "../project.js";
 import type { RepairEnv, SymbolSource } from "./repair-symbols.js";
 
 const SCAN_DIRS = ["src", "design-system", "app", "components", "lib"];
 const SCAN_EXTS = new Set([".ts", ".tsx", ".js", ".jsx"]);
-const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
 
 async function walk(root: string): Promise<string[]> {
   const out: string[] = [];
@@ -19,7 +19,7 @@ async function walk(root: string): Promise<string[]> {
     }
     for (const e of entries) {
       if (e.isDirectory()) {
-        if (SKIP_DIRS.has(e.name)) continue;
+        if (SCAN_SKIP_DIRS.has(e.name)) continue;
         await recurse(join(dir, e.name));
       } else if (e.isFile()) {
         const dot = e.name.lastIndexOf(".");
