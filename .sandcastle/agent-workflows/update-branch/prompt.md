@@ -8,7 +8,7 @@ Read `CONTEXT.md` and any relevant ADRs under `docs/adr/` before resolving anyth
 
 <pr-view>
 
-!`gh pr view {{PR_NUMBER}}`
+!`gh pr view {{PR_NUMBER}} --json number,title,body,url,headRefName,baseRefName,state`
 
 </pr-view>
 
