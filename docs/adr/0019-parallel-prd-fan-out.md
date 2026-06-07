@@ -8,6 +8,19 @@ Accepted (supersedes the PRD-sequencing decision in [ADR-0012](./0012-github-act
 
 2026-06-07
 
+## Revision — 2026-06-07: dependency-aware fan-out
+
+The original decision below assumed all sub-issues are independent and promoted
+*every* open sub-issue at once. Real PRDs (e.g. #340) have layered dependencies.
+The dispatcher now reads **native GitHub blocked-by relations** and promotes only
+sub-issues with **zero open blockers**; blocked ones are parked as `agent:queued`
+and released by `agent-promote-queued` as each blocker closes (wave-based
+parallelism). This keeps the "no planner, no merge-agent, no shared branch"
+property — dependencies are declared data (native relations), not computed by an
+agent. `/to-issues-project` must create these native relations going forward;
+prose-only `## Depends on` is invisible to the dispatcher and must be backfilled.
+The amended sections below reflect this.
+
 ## Context
 
 ADR-0012 implemented PRD work as a **sequential chain**: `agent-implement-prd`
@@ -29,9 +42,10 @@ Make PRD implementation **fan out in parallel**, without reintroducing the
 fragile machinery ADR-0012 rejected.
 
 - `agent-implement-prd` becomes a **dispatcher**: on `agent:implement`, it
-  promotes *every open sub-issue* to `agent:implement` (via `AGENT_PAT` so the
-  labels fire downstream), moves the PRD to `agent:in-progress`, and implements
-  nothing itself.
+  promotes every open sub-issue with **zero open blockers** to `agent:implement`
+  (via `AGENT_PAT` so the labels fire downstream), parks blocked sub-issues as
+  `agent:queued`, moves the PRD to `agent:in-progress`, and implements nothing
+  itself. (Revised — original promoted *every* open sub-issue.)
 - `agent-implement` (the existing, proven single-issue workflow) handles each
   sub-issue exactly as it handles a standalone issue: own branch
   `agent/issue-<n>`, own draft PR, own review. The only change is that it no
@@ -41,15 +55,20 @@ fragile machinery ADR-0012 rejected.
 
 Crucially, this is **not** the RALPH planner:
 
-- **No dependency planner.** Slices are assumed independent (the decomposition
-  skill's job). No graph is computed.
+- **No dependency planner agent.** Dependencies are *declared data* — native
+  GitHub blocked-by relations on the sub-issues — read directly by the
+  dispatcher and `agent-promote-queued`. No agent computes a graph; the workflow
+  just queries `blockedBy` and counts open blockers. `agent-promote-queued`
+  already spoke these relations for standalone issues; the only change is it no
+  longer refuses sub-issues, so PRD waves cascade through the same exit ramp.
 - **No merge-resolution agent and no shared branch.** Each sub-issue is an
   independent PR off `main`. Conflicts between sibling PRs are absorbed by the
   existing review / auto-merge / `update-branch` rebase robots — the same
   machinery that already handles every other PR.
 
-So the failure surface added over the sequential model is one new
-list-and-label step plus one new close-cascade — not a planner or a merger.
+So the failure surface added over the sequential model is one
+query-and-label-or-queue step plus one close-cascade, reusing the existing
+`agent-promote-queued` release ramp — not a planner or a merger.
 
 ## Consequences
 

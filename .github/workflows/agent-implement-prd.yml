@@ -1,9 +1,12 @@
 name: Agent Implement PRD
 
-# Fan-out dispatcher. When a PRD (an issue that has sub-issues) is labeled
-# `agent:implement`, this promotes EVERY open sub-issue to `agent:implement` so
+# Dependency-aware fan-out dispatcher. When a PRD (an issue that has sub-issues)
+# is labeled `agent:implement`, this promotes every open sub-issue that has zero
+# OPEN blockers (native GitHub blocked-by relations) to `agent:implement` so
 # `agent-implement.yml` picks each up and implements it in parallel — one branch
-# and one PR per sub-issue. The PRD itself implements nothing; it moves to
+# and one PR per sub-issue. Blocked sub-issues are parked as `agent:queued`;
+# agent-promote-queued.yml releases each as its last open blocker closes
+# (wave-based parallelism). The PRD itself implements nothing; it moves to
 # `agent:in-progress` and closes automatically once its last sub-issue closes
 # (see agent-close-completed-prd.yml).
 #
@@ -116,13 +119,15 @@ jobs:
           gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
           gh issue comment "$PRD_NUMBER" --body "Refused to run: all sub-issues are already closed; nothing to implement. If you want to do more work on this PRD, reopen or add a sub-issue first."
 
-      - name: Fan out — promote every open sub-issue to agent:implement
+      - name: Fan out — promote unblocked sub-issues, queue the rest
         if: steps.shape.outputs.mode == 'run'
         env:
           OPEN_SUBS: ${{ steps.shape.outputs.open_subs }}
           GITHUB_TOKEN_FALLBACK: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          owner="${GH_REPO%/*}"
+          repo="${GH_REPO#*/}"
 
           # The PRD is the dispatcher — it implements nothing. Move it to
           # in-progress so it reads as "work underway" while sub-issue PRs land.
@@ -130,9 +135,26 @@ jobs:
           gh issue edit "$PRD_NUMBER" --remove-label "agent:blocked" || true
           gh issue edit "$PRD_NUMBER" --add-label "agent:in-progress" || true
 
-          count=0
+          # Dependency-aware fan-out (ADR-0019): a sub-issue runs now only if it
+          # has zero OPEN blockers (native GitHub blocked-by relations). Blocked
+          # sub-issues are parked as agent:queued; agent-promote-queued.yml
+          # releases each as its last open blocker closes (wave-based parallelism).
+          promoted=0
+          queued=0
           for sub in $OPEN_SUBS; do
-            echo "Promoting sub-issue #$sub"
+            open_blockers=$(gh api graphql \
+              -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { blockedBy(first: 100) { nodes { number state } } } } }' \
+              -f owner="$owner" -f repo="$repo" -F num="$sub" \
+              --jq '[.data.repository.issue.blockedBy.nodes[] | select(.state == "OPEN")] | length' 2>/dev/null || echo "0")
+
+            if [ "$open_blockers" -gt 0 ]; then
+              echo "Queuing sub-issue #$sub ($open_blockers open blocker(s))"
+              gh issue edit "$sub" --add-label "agent:queued" || true
+              queued=$((queued + 1))
+              continue
+            fi
+
+            echo "Promoting sub-issue #$sub (unblocked)"
             set +e
             if [ -n "${AGENT_PAT:-}" ]; then
               GH_TOKEN="$AGENT_PAT" gh issue edit "$sub" --add-label "agent:implement"
@@ -145,10 +167,10 @@ jobs:
               GH_TOKEN="$GITHUB_TOKEN_FALLBACK" gh issue edit "$sub" --add-label "agent:implement"
             fi
             set -e
-            count=$((count + 1))
+            promoted=$((promoted + 1))
           done
 
-          gh issue comment "$PRD_NUMBER" --body "Fanned out — promoted ${count} open sub-issue(s) to \`agent:implement\`. Each is implemented in parallel as its own PR. This PRD closes automatically when the last sub-issue closes."
+          gh issue comment "$PRD_NUMBER" --body "Fanned out — promoted ${promoted} unblocked sub-issue(s) to \`agent:implement\`, parked ${queued} blocked sub-issue(s) as \`agent:queued\`. Unblocked work runs in parallel now; each queued sub-issue is released as its last open blocker closes. This PRD closes automatically when the last sub-issue closes."
 
       - name: Mark blocked on failure
         if: steps.shape.outputs.mode == 'run' && failure()
