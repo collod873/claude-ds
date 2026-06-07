@@ -1,17 +1,28 @@
 /**
- * PRD #325 sub-issue #331 — the bare-`claude-ds` front door.
+ * The bare-`claude-ds` front door (PRD #325 sub-issue #331; rewired in #345 /
+ * ADR-0018 to be the **interactive driver of the shared remediation planner**).
  *
- * In a TTY, the bare invocation auto-runs read-only `doctor` structural state
- * + a read-only drift/integrity scan, composes them through the pure
- * `composeDashboardState` brain, prints the rendered dashboard, and offers
- * `[Enter]` to dispatch the recommended next command in-process. Non-TTY
- * bare invocation keeps today's help-output behavior — the cli.ts entry
- * gates on `isTTY()` so this file is only entered on the interactive path.
+ * In a TTY the bare invocation:
+ *   1. Runs the read-only `doctor` structural scan + drift/integrity scan and
+ *      prints the "where you are / what's wrong" dashboard.
+ *   2. Derives `ProjectState` and computes the remediation plan via the *same*
+ *      `planRemediation` brain `heal` uses — there is no second ordering brain.
+ *   3. If the plan is non-empty, presents **one commitment gate**: a preview
+ *      rendered from the real planned `Change[]` (so preview counts equal what
+ *      runs — F11) and a single `[Enter]`.
+ *   4. On approval, **auto-advances to clean** via the shared `driveRemediation`
+ *      loop with live progress, pausing inline only for genuine Ambiguities
+ *      (the Decision resolver prompts on a TTY; `--answers` resolves silently).
  *
- * Dispatch is in-process: we re-enter `buildProgram()` with the
- * recommendation's argv rather than shelling out. That keeps the front door
- * one keystroke away from the next right action without spawning a fresh
- * Node process or breaking the `defaults.cwd` test seam.
+ * After the first `[Enter]` the operator never types another `claude-ds`
+ * command. The retired `recommendedNext` recommender — the flat single-shot
+ * `→ Next: <type this>` breadcrumb that was a second, mis-ordered brain — is
+ * gone (ADR-0018).
+ *
+ * Non-TTY bare invocation keeps today's help-output behavior — the cli.ts entry
+ * gates on `isTTY()` so this file's interactive path is only entered there. The
+ * `--answers`/`interactive:false` path exists so automation (and tests) can
+ * drive the loop headlessly without a pseudo-TTY.
  */
 import { createInterface } from "node:readline/promises";
 import { readFile, stat } from "node:fs/promises";
@@ -32,7 +43,11 @@ import { resolveManifestPath } from "../lib/paths.js";
 import { detectBuildCommand } from "../lib/log.js";
 import { composeDashboardState } from "../lib/dashboard.js";
 import { renderDashboard } from "../lib/render/index.js";
-import { printLines } from "../lib/render/tty-layer.js";
+import { printLines, createProgress } from "../lib/render/tty-layer.js";
+import { deriveProjectState } from "../lib/project-state.js";
+import { planRemediation } from "../lib/remediation-planner.js";
+import { driveRemediation } from "../lib/remediation-driver.js";
+import { buildCommitmentGate } from "../lib/gate-preview.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -40,11 +55,26 @@ async function exists(p: string): Promise<boolean> {
 
 const DEFAULT_PACK = "next-react";
 
+/** Iteration ceiling for the front door's auto-advance — same guard heal uses. */
+const DEFAULT_MAX_ITERATIONS = 3;
+
 export interface FrontDoorOpts {
   cwd?: string;
-  /** When false, skip the [Enter]-to-dispatch readline so tests can capture
-   *  the rendered output without hanging on stdin. Defaults to true. */
+  /** When false, skip the `[Enter]` commitment gate readline (so automation and
+   *  tests don't hang on stdin). Non-interactive runs render the dashboard and
+   *  the gate preview and then stop *unless* `yes` authorizes the drive —
+   *  the preview alone changes nothing. Defaults to true. */
   interactive?: boolean;
+  /** Non-interactive authorization: with `interactive: false`, drive the loop
+   *  without the `[Enter]` prompt (the headless automation path). Ignored when
+   *  `interactive` is true — there the `[Enter]` gate is the authorization. */
+  yes?: boolean;
+  /** Path to an `--answers` JSON file (Decision id → option index / `"defer"`).
+   *  Forwarded to the drive loop so the front door converges without a TTY —
+   *  the no-pseudo-TTY automation path (ADR-0016). */
+  answers?: string;
+  /** Override the auto-advance iteration ceiling. Tests use it; default 3. */
+  maxIterations?: number;
 }
 
 export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
@@ -174,38 +204,92 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 
   printLines(renderDashboard(state));
 
-  if (interactive && state.recommendedNext) {
-    await offerEnterToDispatch(state.recommendedNext.command, { cwd });
+  // Pre-adopt is an Entry point, not a planner state (ADR-0018): `adopt` hands
+  // the project *into* the loop, it isn't a loop member, and `deriveProjectState`
+  // needs a loaded config the project doesn't have yet. Surface the one command
+  // that gets them in and stop — there is no plan to drive.
+  if (ctx.kind !== "adopted") {
+    printLines([`→ Run \`claude-ds adopt --pack ${pack}\` to install the design-system scaffold.`]);
+    return;
+  }
+
+  // The interactive driver of the shared planner (ADR-0018). Same brain heal
+  // runs headlessly: derive state → plan. An empty plan means a fixed point.
+  const projectState = await deriveProjectState(cwd);
+  const plan = planRemediation(projectState);
+
+  if (plan.length === 0) {
+    printLines([
+      "",
+      "Nothing to remediate — the tree is clean.",
+      `→ Run \`${buildCmd}\` to verify everything compiles.`,
+    ]);
+    return;
+  }
+
+  // Commitment gate: a preview rendered from the real planned Change[] (so the
+  // counts the operator approves equal what runs — F11), then a single [Enter].
+  // `unfixableCount` already subsumes extraction, so it is classify's whole
+  // non-overlapping share; the remainder is audit --fix's auto-fixable set.
+  const gateLines = await buildCommitmentGate(ctx, plan, {
+    classifyCount: unfixableCount,
+    autoFixableCount: findings.length - unfixableCount,
+  });
+  printLines(gateLines);
+
+  if (interactive) {
+    const approved = await awaitCommitment();
+    if (!approved) {
+      printLines(["", "Cancelled — nothing changed."]);
+      return;
+    }
+  } else if (!opts.yes) {
+    // Non-interactive without explicit authorization: the gate preview above is
+    // the whole output. Driving would mutate the tree behind the operator's
+    // back, so stop — `yes: true` opts into the headless drive.
+    return;
+  }
+
+  // Auto-advance to clean. No `pendingSink` → the Decision resolver prompts
+  // inline on a TTY for genuine Ambiguities, resolves silently when `--answers`
+  // is supplied, and fails loud non-TTY otherwise (ADR-0016). Live progress on
+  // stderr; the loop never pauses for mechanical work.
+  const progress = createProgress();
+  try {
+    const outcome = await driveRemediation({
+      cwd,
+      maxIterations: opts.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+      answers: opts.answers,
+      progress,
+    });
+    if (outcome.kind === "converged") {
+      printLines(["", "✓ Tree is clean."]);
+    } else if (outcome.kind === "exhausted") {
+      printLines([
+        "",
+        "Some findings still need attention — run `claude-ds audit` to see what remains.",
+      ]);
+    }
+  } finally {
+    progress.stop();
   }
 }
 
 /**
- * Ask the user whether to run the recommendation. Empty input ([Enter]) →
- * dispatch; any other input → exit silently. Non-claude-ds recommendations
- * (the build command on a clean tree) are surfaced but never dispatched —
- * that's the user's tool, not ours.
+ * The single commitment gate. Empty input (`[Enter]`) approves the whole plan;
+ * any other input cancels. One prompt for the entire remediation — after it,
+ * the auto-advance loop pauses only for genuine Ambiguities, never for the
+ * mechanical work the gate already covered.
  */
-async function offerEnterToDispatch(
-  command: string,
-  ctxOpts: { cwd: string },
-): Promise<void> {
-  if (!command.startsWith("claude-ds ")) return;
-
+async function awaitCommitment(): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   let answer: string;
   try {
-    answer = await rl.question(`[Enter] to run \`${command}\`, anything else to cancel: `);
+    answer = await rl.question("[Enter] to run all, anything else to cancel: ");
   } catch {
     answer = "x";
   } finally {
     rl.close();
   }
-  if (answer.trim() !== "") return;
-
-  // In-process dispatch: re-enter buildProgram() with the recommendation's
-  // argv minus the "claude-ds" prefix. Going through commander preserves the
-  // defaults.cwd seam and the existing exitOverride path the test runner sets.
-  const argv = command.split(/\s+/).slice(1);
-  const { buildProgram } = await import("../cli.js");
-  await buildProgram({ cwd: ctxOpts.cwd }).parseAsync(["node", "claude-ds", ...argv]);
+  return answer.trim() === "";
 }

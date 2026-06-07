@@ -25,7 +25,6 @@ export { renderChangeSummary, renderChangesJson } from "./summary.js";
 export type {
   DashboardFinding,
   DashboardMode,
-  DashboardRecommendation,
   DashboardState,
 } from "./dashboard.js";
 export { renderDashboard } from "./dashboard.js";

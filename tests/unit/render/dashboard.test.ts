@@ -4,9 +4,10 @@
  * state. Snapshot tests guard the human-facing surface so a later slice
  * cannot regress it unnoticed.
  *
- * The state shape is the seam the front-door slice will fill in (`doctor` +
- * read-only `audit` composed into one struct); this slice just pins the
- * pure-function contract and the representative-fixture outputs.
+ * #345 (ADR-0018) retired the third "→ Next" section: the flat `recommendedNext`
+ * recommender was a second ordering brain. The dashboard is now two sections —
+ * "where you are / what's wrong" — and the front door drives the shared planner
+ * for "what to do next" (one commitment gate, not a recommended string).
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -19,7 +20,6 @@ const CLEAN: DashboardState = {
   mode: "adopted",
   scaffold: { present: 12, total: 12 },
   findings: [],
-  recommendedNext: null,
 };
 
 const WITH_FINDINGS: DashboardState = {
@@ -43,10 +43,6 @@ const WITH_FINDINGS: DashboardState = {
       message: "TS2304: Cannot find name 'cn'",
     },
   ],
-  recommendedNext: {
-    command: "claude-ds audit --fix",
-    description: "auto-repair the 3 findings",
-  },
 };
 
 const INCOMPLETE_SCAFFOLD: DashboardState = {
@@ -54,10 +50,6 @@ const INCOMPLETE_SCAFFOLD: DashboardState = {
   mode: "adopted",
   scaffold: { present: 9, total: 12 },
   findings: [],
-  recommendedNext: {
-    command: "claude-ds sync",
-    description: "restore 3 missing managed file(s)",
-  },
 };
 
 const INCOMPLETE_SCAFFOLD_WITH_FINDINGS: DashboardState = {
@@ -71,10 +63,6 @@ const INCOMPLETE_SCAFFOLD_WITH_FINDINGS: DashboardState = {
       message: "color #336699 has no token equivalent",
     },
   ],
-  recommendedNext: {
-    command: "claude-ds sync",
-    description: "restore 3 missing managed file(s)",
-  },
 };
 
 const UPGRADE_AVAILABLE: DashboardState = {
@@ -83,20 +71,12 @@ const UPGRADE_AVAILABLE: DashboardState = {
   scaffold: { present: 12, total: 12 },
   findings: [],
   upgradeAvailable: true,
-  recommendedNext: {
-    command: "claude-ds upgrade",
-    description: "pack version is behind the installed CLI",
-  },
 };
 
 const PRE_ADOPT: DashboardState = {
   cwd: "/repo/fresh-app",
   mode: "pre-adopt",
   findings: [],
-  recommendedNext: {
-    command: "claude-ds adopt",
-    description: "install the design-system scaffold",
-  },
 };
 
 describe("renderDashboard (pure)", () => {
@@ -110,28 +90,24 @@ describe("renderDashboard (pure)", () => {
     `);
   });
 
-  it("renders the with-findings adopted state with a recommended next step", () => {
+  it("renders the with-findings adopted state (no recommended-next line)", () => {
     expect(renderDashboard(WITH_FINDINGS)).toMatchInlineSnapshot(`
       [
         "Where you are: adopted (/repo/example-app)",
         "Scaffold: 12/12 ✓",
         "What's wrong: 3 findings",
-        "→ Next: claude-ds audit --fix — auto-repair the 3 findings",
       ]
     `);
   });
 
   it("an incomplete scaffold with zero findings is NOT 'tree is clean'", () => {
     // Pinning the dashboard's truth-in-advertising: a `Scaffold: 9/12` line
-    // co-existing with "tree is clean" would let the recommendation
-    // (claude-ds sync — restore N missing managed file(s)) contradict the
-    // human-readable summary. PR #335 / sub-issue #331.
+    // must not co-exist with "tree is clean" (PR #335 / sub-issue #331).
     expect(renderDashboard(INCOMPLETE_SCAFFOLD)).toMatchInlineSnapshot(`
       [
         "Where you are: adopted (/repo/example-app)",
         "Scaffold: 9/12",
         "What's wrong: scaffold incomplete",
-        "→ Next: claude-ds sync — restore 3 missing managed file(s)",
       ]
     `);
   });
@@ -142,7 +118,6 @@ describe("renderDashboard (pure)", () => {
         "Where you are: adopted (/repo/example-app)",
         "Scaffold: 9/12",
         "What's wrong: scaffold incomplete + 1 finding",
-        "→ Next: claude-ds sync — restore 3 missing managed file(s)",
       ]
     `);
   });
@@ -153,17 +128,15 @@ describe("renderDashboard (pure)", () => {
         "Where you are: adopted (/repo/example-app)",
         "Scaffold: 12/12 ✓",
         "What's wrong: upgrade available",
-        "→ Next: claude-ds upgrade — pack version is behind the installed CLI",
       ]
     `);
   });
 
-  it("renders the pre-adopt state with the adopt next step", () => {
+  it("renders the pre-adopt state (the front door adds the adopt guidance)", () => {
     expect(renderDashboard(PRE_ADOPT)).toMatchInlineSnapshot(`
       [
         "Where you are: pre-adopt (/repo/fresh-app)",
         "What's wrong: no scaffold installed yet",
-        "→ Next: claude-ds adopt — install the design-system scaffold",
       ]
     `);
   });

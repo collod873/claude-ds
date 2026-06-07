@@ -715,9 +715,10 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
   const openExceptions = result.drift?.open_exceptions ?? 0;
 
   // #349 F16: render the health verdict — one line per aggregated signal.
-  // Picks the doctor's "verdict kind" (used by the breadcrumb below) by
-  // the same priority `recommendNextStep` uses for the dashboard: scaffold
-  // first, then root-dupes, then upgrade/repair, then clean.
+  // Picks the doctor's "verdict kind" (used by the breadcrumb below) by a
+  // scaffold-first priority: scaffold, then root-dupes, then upgrade/repair,
+  // then clean — the same structural-integrity-before-version ordering the
+  // shared remediation planner (`planRemediation`, ADR-0018) sequences.
   //
   // Pre-adopt mode collapses to a single "Not yet adopted" verdict —
   // saying "✓ All clear" + "run npm run build" while renderMarkdown

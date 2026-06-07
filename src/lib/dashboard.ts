@@ -1,18 +1,24 @@
 /**
  * The dashboard brain (PRD #325 sub-issue #331). Pure: it folds doctor
  * structural state + a read-only audit's findings into the renderable
- * `DashboardState`, picking the recommended next command the same way
- * `printNextStep` does — the dashboard is that breadcrumb engine promoted
- * from "after a command" to "the front door."
+ * `DashboardState` — the "where you are / what's wrong" summary the front door
+ * prints above its commitment gate.
  *
- * The brain lives separately from the renderer so non-TTY callers can
- * request the same shape (a future `--json` dashboard surface) and so the
- * state-→-recommendation table stays out of the orchestration code.
+ * The flat single-shot `recommendNextStep` recommender that used to live here
+ * was retired in #345 (ADR-0018): it was a second ordering brain that diverged
+ * from `heal`'s loop (it ranked `upgrade` last instead of first) and computed
+ * "next step" counts independently of what the command would actually do (F11).
+ * The front door now drives the shared `planRemediation` planner directly, so
+ * there is exactly one ordering brain and the gate preview is the real planned
+ * `Change[]`, never a recommended string.
+ *
+ * The brain lives separately from the renderer so non-TTY callers can request
+ * the same shape (a future `--json` dashboard surface) without dragging in the
+ * orchestration code.
  */
 
 import type {
   DashboardFinding,
-  DashboardRecommendation,
   DashboardState,
 } from "./render/dashboard.js";
 
@@ -57,74 +63,5 @@ export function composeDashboardState(input: DashboardInput): DashboardState {
     findings,
     upgradeAvailable:
       input.mode === "adopted" && input.upgradeAvailable === true,
-    recommendedNext: recommendNextStep(input),
-  };
-}
-
-function recommendNextStep(input: DashboardInput): DashboardRecommendation | null {
-  if (input.mode === "pre-adopt") {
-    return {
-      command: `claude-ds adopt --pack ${input.pack}`,
-      description: "install the design-system scaffold",
-    };
-  }
-
-  // Scaffold-integrity issues outrank audit findings: `sync` and `reconcile`
-  // restore the structural baseline audit assumes. Mirrors the doctor →
-  // sync/reconcile order the breadcrumb engine already encodes for those
-  // commands.
-  if (input.missingManaged > 0) {
-    return {
-      command: "claude-ds sync",
-      description: `restore ${input.missingManaged} missing managed file(s)`,
-    };
-  }
-  if (input.rootDupes > 0) {
-    return {
-      command: "claude-ds reconcile",
-      description: `resolve ${input.rootDupes} root-level duplicate(s)`,
-    };
-  }
-
-  // Audit-finding triage matches `printNextStep("audit", ...)`'s priority:
-  // extraction > unfixable > auto-fixable > clean. Same input → same command.
-  if (input.extractionCount > 0) {
-    const n = input.extractionCount;
-    const noun = n === 1 ? "component" : "components";
-    return {
-      command: "claude-ds classify",
-      description: `extract ${n} inline ${noun}`,
-    };
-  }
-  if (input.unfixableCount > 0) {
-    return {
-      command: "claude-ds classify",
-      description: "address findings audit can't auto-repair",
-    };
-  }
-  if (input.findings.length > 0) {
-    const n = input.findings.length;
-    const noun = n === 1 ? "finding" : "findings";
-    return {
-      command: "claude-ds audit --fix",
-      description: `auto-repair the ${n} ${noun}`,
-    };
-  }
-
-  // Rank 6 — version currency. Inserted *below* structural-integrity and
-  // audit triage (you do not upgrade onto a broken baseline) and *above* the
-  // clean-tree build hint (a stale pack version is more actionable than
-  // "everything compiles"). Mirrors the ADR-0003 heal-loop ordering
-  // (sync → upgrade → classify → audit). #336.
-  if (input.upgradeAvailable) {
-    return {
-      command: "claude-ds upgrade",
-      description: "pack version is behind the installed CLI",
-    };
-  }
-
-  return {
-    command: input.buildCmd,
-    description: "verify everything compiles",
   };
 }

@@ -1,13 +1,16 @@
 /**
  * The dashboard renderer (PRD #325 sub-issue #330). Pure: it takes a
- * resolved `DashboardState` and returns a `string[]`. The front-door slice
- * fills the state in (composing `doctor` structural state + a read-only
- * `audit` run); this slice pins the renderer contract and the
- * representative-fixture outputs.
+ * resolved `DashboardState` and returns a `string[]`. The front door fills the
+ * state in (composing `doctor` structural state + a read-only `audit` run);
+ * this module pins the renderer contract and the representative-fixture outputs.
  *
- * The shape is intentionally minimal — three sections the PRD names ("where
- * you are / what's wrong / recommended next step") — so later slices can
- * extend it without reshaping the renderer's printout.
+ * The shape is now two sections — "where you are / what's wrong". The third,
+ * "recommended next step", was the flat single-shot `recommendedNext`
+ * recommender, retired in #345 (ADR-0018): the front door no longer hands the
+ * user a `→ Next: <type this>` breadcrumb. It drives the shared remediation
+ * planner directly, presenting one commitment gate (rendered from the real
+ * planned `Change[]`) and auto-advancing to clean. "What to do next" is the
+ * gate, not a recommended string.
  */
 
 export type DashboardMode = "pre-adopt" | "adopted" | "fresh";
@@ -18,11 +21,6 @@ export interface DashboardFinding {
   message: string;
 }
 
-export interface DashboardRecommendation {
-  command: string;
-  description: string;
-}
-
 export interface DashboardState {
   cwd: string;
   mode: DashboardMode;
@@ -30,11 +28,10 @@ export interface DashboardState {
   findings: DashboardFinding[];
   /** Pinned `packVersion` is older than the installed CLI (#336). Renderer
    *  folds this into the "What's wrong" line so a stale-but-healthy project
-   *  still surfaces a signal that explains the `claude-ds upgrade`
-   *  recommendation. Optional so callers not yet wired to version currency
-   *  keep today's behavior. */
+   *  still surfaces a signal that explains why the gate will run `upgrade`.
+   *  Optional so callers not yet wired to version currency keep today's
+   *  behavior. */
   upgradeAvailable?: boolean;
-  recommendedNext: DashboardRecommendation | null;
 }
 
 export function renderDashboard(state: DashboardState): string[] {
@@ -72,12 +69,6 @@ export function renderDashboard(state: DashboardState): string[] {
     }
     if (upgradeAvailable) parts.push("upgrade available");
     lines.push(`What's wrong: ${parts.join(" + ")}`);
-  }
-
-  if (state.recommendedNext) {
-    lines.push(
-      `→ Next: ${state.recommendedNext.command} — ${state.recommendedNext.description}`,
-    );
   }
 
   return lines;
