@@ -6,6 +6,29 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [1.3.0] — 2026-06-07
+
+One shared remediation planner now backs every surface that changes files. `heal`, the front door, and mutating commands previously each reasoned about "what needs fixing" their own way; this release routes them all through a single pure planner (#342) gated by one commitment point (#345). The visible payoff: mutating commands default to a concise summary, with `--diff` and `--json` for the full picture or machine consumption (#344). Audit enforcement is now alias-agnostic, which lets the separate `rewrite-ds-imports` command retire. No migration set; a consumer pinned at v1.2.0 runs zero migrations on upgrade. Cut to close the 21-commit gap where `npx …#v1.2.0` was installing pre-planner code.
+
+### Added
+- **Pure remediation planner** (#342/#353). A single side-effect-free planner computes the remediation graph; `heal` (#378) and the front door (#345/#380) both drive it through one commitment gate instead of each sequencing fixes independently.
+- **Summary-default mutating output with `--diff` and `--json`** (#344/#377). Commands that change files now print a concise summary by default; `--diff` shows the full patch, `--json` emits a machine-readable plan.
+- **`DRIFT-TOKEN-PARITY` rule** (#373). Flags raw values that should resolve to design tokens.
+- **Pack declares test devDeps** (F8, #351/#354). The pack writes its test devDependencies via a hybrid `package.json` edit, so consumers don't hand-roll test tooling — another local-infra concern moved into the pack (ADR-0003).
+
+### Changed
+- **Alias-agnostic DS enforcement** (#371). `audit` enforces design-system imports regardless of the consumer's path-alias configuration.
+- **Consistent, complete command verdicts** (#375). Every command's final verdict line reports the same shape.
+- **Owned-concerns supersession corrected; completeness removal gated on real coverage** (#348/#376).
+
+### Removed
+- **`rewrite-ds-imports`** (#371). Obsolete now that audit enforcement is alias-agnostic.
+
+### Fixed
+- **`classify` feature-bucketing + dirty-tree unblock** (F7, #372).
+
+---
+
 ## [1.2.0] — 2026-06-07
 
 Ships the interactive front door the README already advertised. The bare `claude-ds` command is now the entry point: first run greets and routes to `init`/`adopt`, an adopted project renders a state-aware health dashboard, and a Decision spine (ADR-0016) gives every prompt the same TTY / non-TTY (`--answers`) semantics. No breaking changes; no v1.2.0 migration set. Cut to close the gap where v1.1.0 was tagged five-plus commits behind the shipped UX — `npx …#v1.1.0` was installing pre-front-door code.
