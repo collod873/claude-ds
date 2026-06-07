@@ -63,6 +63,25 @@ function mergeScripts(
 }
 
 /**
+ * Namespace-aware merge of two `devDependencies` objects.
+ *
+ * The pack-seeded test files (vitest.setup.ts, the role-contract runner) import
+ * `@testing-library/react` and `@testing-library/jest-dom`; without those deps
+ * declared, `npm test` fails on a fresh adopt — the F8 friction ADR-0003 says
+ * the consumer must not heal by hand. Pack-owned deps are *every key upstream
+ * ships*: upstream's value wins so the consumer rides the pack's tested
+ * versions, while every non-pack devDep the consumer added survives untouched.
+ * Pure spread = always idempotent: re-running on already-merged output is a
+ * no-op.
+ */
+function mergeDevDependencies(
+  upstreamDeps: Record<string, unknown>,
+  currentDeps: Record<string, unknown>
+): Record<string, unknown> {
+  return { ...currentDeps, ...upstreamDeps };
+}
+
+/**
  * Represents a single inner hook entry (the objects inside a matcher's `hooks[]` array).
  */
 interface HookEntry {
@@ -256,6 +275,11 @@ export function mergeJsonKeys(upstream: string, current: string, ownedKeys: stri
       const upstreamScripts = (upstreamObj["scripts"] ?? {}) as Record<string, unknown>;
       const currentScripts = (currentObj["scripts"] ?? {}) as Record<string, unknown>;
       merged["scripts"] = mergeScripts(upstreamScripts, currentScripts);
+    } else if (key === "devDependencies") {
+      // Namespace-aware merge: user devDeps survive, pack devDeps declared idempotently (F8 / #351)
+      const upstreamDeps = (upstreamObj["devDependencies"] ?? {}) as Record<string, unknown>;
+      const currentDeps = (currentObj["devDependencies"] ?? {}) as Record<string, unknown>;
+      merged["devDependencies"] = mergeDevDependencies(upstreamDeps, currentDeps);
     } else {
       // Wholesale replace for all other owned keys
       if (Object.prototype.hasOwnProperty.call(upstreamObj, key)) {

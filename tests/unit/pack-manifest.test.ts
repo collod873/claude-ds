@@ -37,4 +37,24 @@ describe("next-react manifest", () => {
     expect(config?.category).toBe("seeded");
     expect(setup?.category).toBe("seeded");
   });
+
+  // #351: pack-seeded test files declare their devDeps via the package.json
+  // hybrid edit, so `npm test` works on a fresh adopt without the operator
+  // hand-adding @testing-library/* deps.
+  it("manifest declares devDependencies as a hybrid owned_key on package.json", async () => {
+    const raw = await readFile("packs/next-react/manifest.json", "utf8");
+    const m = parseManifest(raw);
+    const pkg = m.files.find((f) => f.path === "package.json");
+    expect(pkg?.category).toBe("hybrid");
+    expect(pkg?.owned_keys).toContain("devDependencies");
+  });
+
+  it("package.json.seed ships the test devDeps the seeded test files import", async () => {
+    const seed = JSON.parse(await readFile("packs/next-react/files/package.json.seed", "utf8"));
+    // vitest.setup.ts imports @testing-library/jest-dom/vitest and @testing-library/react.
+    // role-contracts.test.tsx imports @testing-library/react. The hybrid edit copies
+    // these into the consumer's package.json so the seeded tests can actually run.
+    expect(seed.devDependencies?.["@testing-library/react"]).toBeDefined();
+    expect(seed.devDependencies?.["@testing-library/jest-dom"]).toBeDefined();
+  });
 });

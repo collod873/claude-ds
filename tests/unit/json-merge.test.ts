@@ -120,6 +120,108 @@ describe("mergeJsonKeys — scripts namespace-aware merge", () => {
   });
 });
 
+describe("mergeJsonKeys — devDependencies namespace-aware merge (F8)", () => {
+  // The pack-seeded test files (vitest.setup.ts, role-contracts.test.tsx) import
+  // @testing-library/react and @testing-library/jest-dom. Without those deps in
+  // package.json, `npm test` fails on a fresh adopt — exactly the F8 friction
+  // ADR-0003 forbids the consumer from healing by hand. This merge declares the
+  // pack's test devDeps idempotently, alongside any user-owned deps.
+
+  it("pack devDeps added when consumer lacks them", () => {
+    const upstream = JSON.stringify({
+      devDependencies: {
+        "@testing-library/react": "^15.0.0",
+        "@testing-library/jest-dom": "^6.4.0",
+        "jsdom": "^24.0.0",
+      },
+    });
+    const current = JSON.stringify({
+      name: "my-app",
+      devDependencies: { typescript: "^5.0.0" },
+    });
+    const result = mergeJsonKeys(upstream, current, ["devDependencies"]);
+    const parsed = JSON.parse(result);
+    expect(parsed.devDependencies["@testing-library/react"]).toBe("^15.0.0");
+    expect(parsed.devDependencies["@testing-library/jest-dom"]).toBe("^6.4.0");
+    expect(parsed.devDependencies["jsdom"]).toBe("^24.0.0");
+    // user dep preserved
+    expect(parsed.devDependencies["typescript"]).toBe("^5.0.0");
+    // other top-level keys untouched
+    expect(parsed.name).toBe("my-app");
+  });
+
+  it("idempotent — re-running on already-merged output yields stable result", () => {
+    const upstream = JSON.stringify({
+      devDependencies: {
+        "@testing-library/react": "^15.0.0",
+        "@testing-library/jest-dom": "^6.4.0",
+      },
+    });
+    const current = JSON.stringify({
+      devDependencies: { typescript: "^5.0.0" },
+    });
+    const first = mergeJsonKeys(upstream, current, ["devDependencies"]);
+    const second = mergeJsonKeys(upstream, first, ["devDependencies"]);
+    expect(JSON.parse(second)).toEqual(JSON.parse(first));
+  });
+
+  it("verdict skip when pack devDeps already match current (no churn on re-sync)", () => {
+    const upstream = JSON.stringify({
+      devDependencies: {
+        "@testing-library/react": "^15.0.0",
+        "@testing-library/jest-dom": "^6.4.0",
+      },
+    });
+    const current = JSON.stringify({
+      devDependencies: {
+        "@testing-library/react": "^15.0.0",
+        "@testing-library/jest-dom": "^6.4.0",
+        typescript: "^5.0.0",
+      },
+    });
+    const result = mergeJsonKeys(upstream, current, ["devDependencies"]);
+    expect(JSON.parse(result).devDependencies).toEqual(JSON.parse(current).devDependencies);
+  });
+
+  it("missing devDependencies on current side — pack devDeps installed", () => {
+    const upstream = JSON.stringify({
+      devDependencies: { "@testing-library/react": "^15.0.0" },
+    });
+    const current = JSON.stringify({ name: "my-app" });
+    const result = mergeJsonKeys(upstream, current, ["devDependencies"]);
+    const parsed = JSON.parse(result);
+    expect(parsed.devDependencies["@testing-library/react"]).toBe("^15.0.0");
+    expect(parsed.name).toBe("my-app");
+  });
+
+  it("user's non-pack devDeps preserved alongside pack-owned ones", () => {
+    const upstream = JSON.stringify({
+      devDependencies: { "@testing-library/react": "^15.0.0" },
+    });
+    const current = JSON.stringify({
+      devDependencies: { lodash: "^4.0.0", "@types/node": "^20.0.0" },
+    });
+    const result = mergeJsonKeys(upstream, current, ["devDependencies"]);
+    const parsed = JSON.parse(result);
+    expect(parsed.devDependencies["lodash"]).toBe("^4.0.0");
+    expect(parsed.devDependencies["@types/node"]).toBe("^20.0.0");
+    expect(parsed.devDependencies["@testing-library/react"]).toBe("^15.0.0");
+  });
+
+  it("pack version of a shared dep wins (so consumers ride pack's tested versions)", () => {
+    const upstream = JSON.stringify({
+      devDependencies: { "@testing-library/react": "^15.0.0" },
+    });
+    const current = JSON.stringify({
+      devDependencies: { "@testing-library/react": "^13.0.0", typescript: "^5.0.0" },
+    });
+    const result = mergeJsonKeys(upstream, current, ["devDependencies"]);
+    const parsed = JSON.parse(result);
+    expect(parsed.devDependencies["@testing-library/react"]).toBe("^15.0.0");
+    expect(parsed.devDependencies["typescript"]).toBe("^5.0.0");
+  });
+});
+
 describe("mergeJsonKeys — hooks namespace-aware merge (CrewOps regression)", () => {
   // The pack's two hooks live under .claude/hooks/ namespace
   const packUpstream = JSON.stringify({
