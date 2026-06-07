@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveAuditConfig, type ResolvedAuditConfig } from "./audit-config.js";
 import type { Config } from "./config.js";
+import type { AnswerBag } from "./decision/types.js";
 import type { DecisionAnswer, DecisionKey, FindingKey } from "./drift/decisions.js";
 import { parseManifest, type Manifest } from "./manifest.js";
 import { loadConfig } from "./paths.js";
@@ -47,6 +48,14 @@ export interface ProjectContext {
      * the slot exists but nothing reads it (PRD #266 Phase C step 1).
      */
     fixerChoices?: Record<FindingKey, Record<DecisionKey, DecisionAnswer>>;
+    /**
+     * The Decision spine's flat answer bag (PRD #325 / ADR-0016). Loaded from
+     * `--answers <file>` and consulted by `resolveDecisions` before any
+     * prompt fires. Keys are stable `Decision.id`s (e.g.
+     * `"DRIFT-RAW-PRIMITIVE:design-system/atoms/x.tsx::extract:Sidebar"`).
+     * Subsumes `fixerChoices` as more sites migrate to the spine.
+     */
+    answers?: AnswerBag;
   };
 }
 

@@ -16,6 +16,7 @@ import {
 import { scanDriftAndIntegrity, type AuditFinding } from "../lib/reports/drift-integrity-scan.js";
 import { formatFindings, formatScorecard } from "../lib/reports/findings-format.js";
 import { runAuditFix } from "../lib/checks/audit-fix.js";
+import { loadAnswersFile } from "../lib/decision/index.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -28,6 +29,10 @@ export interface AuditOpts {
   issue?: string;
   permanent?: boolean;
   verbose?: boolean;
+  /** Path to a JSON file mapping Decision id → answer index (or `"defer"`).
+   * Loaded into `ctx.decisions.answers` before the audit-fix pre-pass runs
+   * (PRD #325 / ADR-0016). */
+  answers?: string;
   cwd?: string;
 }
 
@@ -39,9 +44,18 @@ export async function auditCmd(opts: AuditOpts) {
   let cfg: Config | null = null;
   let ctx: ProjectContext;
   const cfgPath = join(cwd, ".claude-ds.json");
+  const decisions: ProjectContext["decisions"] = {};
+  if (opts.answers) {
+    try {
+      decisions.answers = await loadAnswersFile(opts.answers);
+    } catch (e) {
+      err(e instanceof Error ? e.message : String(e));
+      process.exit(2);
+    }
+  }
   if (!pack) {
     if (!(await exists(cfgPath))) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
-    ctx = await loadProject(cwd);
+    ctx = await loadProject(cwd, decisions);
     cfg = ctx.cfg;
     pack = cfg.pack;
   } else {
@@ -51,7 +65,7 @@ export async function auditCmd(opts: AuditOpts) {
     }
     const packDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../packs", pack);
     const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
-    ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
+    ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest }, decisions);
   }
   const { manifest } = ctx;
   // #47/#34: honor app_dir + claude_md_target when checking presence.

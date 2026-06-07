@@ -15,6 +15,14 @@ import {
   type FindingKey,
 } from "../drift/index.js";
 import {
+  decisionFromFixerPoint,
+  fixerDecisionId,
+  resolveDecisions,
+  type AnswerBag,
+  type Decision,
+  type DecisionAnswer as SpineDecisionAnswer,
+} from "../decision/index.js";
+import {
   evaluateIntegrity,
   isIntegrityBlocking,
   isIntegrityFixable,
@@ -289,10 +297,23 @@ export async function runAuditFix(
     // looking for the same "deferred interactive in non-TTY" pattern.
     // `--except` overrides this so the explicit reason/issue flow at the
     // bottom handles every remaining finding.
+    // The audit-fix pre-pass is the first command-level consumer of the
+    // Decision spine (PRD #325 / ADR-0016). Each `FixerDecisionPoint` is
+    // adapted to an Ambiguity Decision via `decisionFromFixerPoint`; the
+    // resolver implements the three-kind matrix (TTY prompts, non-TTY
+    // collects), and the answers unfold back into `ctx.decisions.fixerChoices`
+    // so existing fixer bodies keep working unchanged.
+    //
+    // Audit runs the resolver in `collect: true` mode so that non-TTY
+    // ambiguities accumulate as Pending decisions and are then mapped to
+    // `"defer"` in `fixerChoices` — preserving today's behavior
+    // (auto-deferred-to-exceptions.json) until the front door (PRD #325
+    // slice 3) takes over reporting.
     const fixerChoices: Record<FindingKey, Record<DecisionKey, DecisionAnswer>> =
       ctx.decisions.fixerChoices ?? {};
     ctx.decisions.fixerChoices = fixerChoices;
     const ttyPrompt = isTTY ? makeTtyPrompt() : null;
+    const topAnswers: AnswerBag = ctx.decisions.answers ?? {};
     const fullyDeferredKeys = new Set<string>();
 
     for (const finding of driftFindings) {
@@ -305,22 +326,37 @@ export async function runAuditFix(
       if (points.length === 0) continue;
 
       const key = findingKey(finding);
-      const answers: Record<DecisionKey, DecisionAnswer> = fixerChoices[key] ?? {};
-      let anyAnswered = false;
+      const perFinding: Record<DecisionKey, DecisionAnswer> = fixerChoices[key] ?? {};
+
+      const decisions: Decision[] = points.map(p => decisionFromFixerPoint(key, p));
+      const supplied: AnswerBag = { ...topAnswers };
       for (const p of points) {
-        if (p.key in answers) {
-          if (answers[p.key] !== "defer") anyAnswered = true;
-          continue;
-        }
-        if (ttyPrompt) {
-          const a = await ttyPrompt(p.question, p.options);
-          answers[p.key] = a;
-          if (a !== "defer") anyAnswered = true;
-        } else {
-          answers[p.key] = "defer";
+        if (p.key in perFinding) {
+          supplied[fixerDecisionId(key, p)] = perFinding[p.key] as SpineDecisionAnswer;
         }
       }
-      fixerChoices[key] = answers;
+
+      const result = await resolveDecisions(decisions, supplied, {
+        isTTY,
+        prompt: ttyPrompt ? (q, o) => ttyPrompt(q, o) : undefined,
+        collect: true,
+      });
+
+      for (const p of points) {
+        const id = fixerDecisionId(key, p);
+        if (id in result.answers) {
+          perFinding[p.key] = result.answers[id] as DecisionAnswer;
+        }
+      }
+      // Non-TTY pending → record "defer" so `fix()` reads the same value
+      // it used to get from the inline non-TTY branch.
+      for (const pending of result.pending) {
+        const found = points.find(p => fixerDecisionId(key, p) === pending.id);
+        if (found) perFinding[found.key] = "defer";
+      }
+
+      fixerChoices[key] = perFinding;
+      const anyAnswered = points.some(p => perFinding[p.key] !== undefined && perFinding[p.key] !== "defer");
       if (!anyAnswered) fullyDeferredKeys.add(suppressedKey(finding.ruleId, finding.file));
     }
 
