@@ -179,4 +179,71 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/converged/);
   }, 15000);
+
+  // PRD #325 / sub-issue #328 — resumability hint.
+  //
+  // Heal is convergent and idempotent (the loop's whole point — #265), so a
+  // mid-run Ctrl-C and re-invocation is safe: the next invocation walks the
+  // same fixed-point and picks up where it left off. The hint surfaces that
+  // guarantee at the only moment a user might worry about it: when the loop
+  // is running and they're tempted to wait it out.
+  //
+  // TTY only — agent runs (non-TTY) get no decoration. The test toggles
+  // stdout.isTTY around runCli; restore in finally so the test runner's own
+  // reporter doesn't break.
+  describe("resumability hint (TTY only)", () => {
+    it("TTY: prints 'Ctrl-C and re-run is safe'", async () => {
+      await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(
+        join(dir, "design-system/atoms/button.tsx"),
+        `export function Button() { return <span/>; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+      );
+
+      const origTTY = process.stdout.isTTY;
+      Object.defineProperty(process.stdout, "isTTY", {
+        value: true,
+        writable: true,
+        configurable: true,
+      });
+      try {
+        const r = await runCli(["heal"], { cwd: dir });
+        expect(r.code).toBe(0);
+        expect(r.stdout).toMatch(/Ctrl-C and re-run is safe/);
+      } finally {
+        Object.defineProperty(process.stdout, "isTTY", {
+          value: origTTY,
+          writable: true,
+          configurable: true,
+        });
+      }
+    }, 15000);
+
+    it("non-TTY (agent run): the hint is suppressed — output is unchanged from today", async () => {
+      await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      await writeFile(
+        join(dir, "design-system/atoms/button.tsx"),
+        `export function Button() { return <span/>; }\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+      );
+
+      const origTTY = process.stdout.isTTY;
+      Object.defineProperty(process.stdout, "isTTY", {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+      try {
+        const r = await runCli(["heal"], { cwd: dir });
+        expect(r.code).toBe(0);
+        expect(r.stdout).not.toMatch(/Ctrl-C and re-run is safe/);
+      } finally {
+        Object.defineProperty(process.stdout, "isTTY", {
+          value: origTTY,
+          writable: true,
+          configurable: true,
+        });
+      }
+    }, 15000);
+  });
 });

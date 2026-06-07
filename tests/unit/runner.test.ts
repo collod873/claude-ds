@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { run } from "../../src/lib/runner";
@@ -311,6 +311,124 @@ describe("runner — Change.mode executable", () => {
     expect(report.failed).toBeUndefined();
     const s = await stat(join(dir, "hook.sh"));
     expect(s.mode & 0o777).toBe(0o755);
+  });
+});
+
+/**
+ * PRD #325 / sub-issue #328 — atomic-write contract and interrupt safety.
+ *
+ * The Runner is the single byte-mutation chokepoint (ADR-0014 / PRD #221).
+ * Every write goes through `writeFile(<path>.tmp)` then `rename(<path>.tmp,
+ * <path>)` within the same filesystem, so a process kill mid-batch leaves
+ * either the old bytes or the new bytes — never partial. These tests pin
+ * that contract from the outside: they don't probe runner.ts internals, they
+ * observe the disk state under controlled failure and assert the
+ * either-old-or-new invariant.
+ */
+describe("runner — atomic-write contract / interrupt safety (#328)", () => {
+  it("successful multi-write batch leaves NO .tmp files anywhere — recursive sweep", async () => {
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "write", path: "a.txt", before: null, after: Buffer.from("A") },
+      { kind: "write", path: "nested/b.txt", before: null, after: Buffer.from("B") },
+      { kind: "write", path: "nested/deep/c.txt", before: null, after: Buffer.from("C") },
+    ]);
+    const report = await run(ctx, [op], "apply");
+    expect(report.failed).toBeUndefined();
+
+    // Walk every dir and assert no `.tmp` files lurk. The atomic-write
+    // contract is that the staging file is replaced by a rename — never
+    // left on disk.
+    const stragglers: string[] = [];
+    async function walk(d: string): Promise<void> {
+      const entries = await readdir(d, { withFileTypes: true });
+      for (const e of entries) {
+        const abs = join(d, e.name);
+        if (e.isDirectory()) await walk(abs);
+        else if (e.name.endsWith(".tmp")) stragglers.push(abs);
+      }
+    }
+    await walk(dir);
+    expect(stragglers).toEqual([]);
+  });
+
+  it("mid-batch failure: prior writes are FULLY applied (atomic), no partial bytes, no .tmp lingers", async () => {
+    // Two successful writes, then a writes that fails (parent path is a file
+    // → mkdir cannot turn it into a directory). The two prior writes must be
+    // observable on disk with their full target bytes — never half-written.
+    await writeFile(join(dir, "existing.txt"), "OLD");
+    await writeFile(join(dir, "blocker"), "i am a file");
+    const ctx = makeCtx(dir);
+
+    const FULL_NEW = "FULL-NEW-CONTENT-THAT-MUST-NOT-BE-PARTIAL";
+    const FULL_CREATED = "FULL-CREATED-CONTENT-THAT-MUST-NOT-BE-PARTIAL";
+    const op = writeOp("op", [
+      { kind: "write", path: "existing.txt", before: Buffer.from("OLD"), after: Buffer.from(FULL_NEW) },
+      { kind: "write", path: "created.txt", before: null, after: Buffer.from(FULL_CREATED) },
+      { kind: "write", path: "blocker/child.txt", before: null, after: Buffer.from("WILL-FAIL") },
+    ]);
+    const report = await run(ctx, [op], "apply");
+    expect(report.failed).toBeDefined();
+
+    // Prior writes — atomic and complete.
+    expect(await readFile(join(dir, "existing.txt"), "utf8")).toBe(FULL_NEW);
+    expect(await readFile(join(dir, "created.txt"), "utf8")).toBe(FULL_CREATED);
+
+    // No staging files lingering at the top level (the prior writes' .tmp
+    // files were renamed away; the failing write never created one).
+    const top = await readdir(dir);
+    expect(top.filter(e => e.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("writeFile failure during a modify leaves the existing target file UNCHANGED (atomic-write commit point is rename)", async () => {
+    // Simulate an interrupt during the writeFile-to-.tmp step by making the
+    // parent directory read-only. The runner's writeFile to `<target>.tmp`
+    // hits EACCES; the rename never runs; the target file's bytes are the
+    // OLD bytes — never partially overwritten. This is the property that
+    // makes Ctrl-C-and-re-run safe: the user-visible target is either old
+    // or new, never torn.
+    const sub = join(dir, "locked");
+    await mkdir(sub);
+    await writeFile(join(sub, "f.txt"), "ORIGINAL-CONTENT-INTACT");
+    await chmod(sub, 0o555);
+    try {
+      const ctx = makeCtx(dir);
+      const op = writeOp("op", [
+        {
+          kind: "write",
+          path: "locked/f.txt",
+          before: Buffer.from("ORIGINAL-CONTENT-INTACT"),
+          after: Buffer.from("NEW-NEVER-VISIBLE"),
+        },
+      ]);
+      const report = await run(ctx, [op], "apply");
+      expect(report.failed).toBeDefined();
+      // Original bytes intact — atomic-write contract held even though the
+      // .tmp write failed.
+      expect(await readFile(join(sub, "f.txt"), "utf8")).toBe("ORIGINAL-CONTENT-INTACT");
+    } finally {
+      // Restore writability so afterEach cleanup can rm -rf the dir.
+      await chmod(sub, 0o755);
+    }
+  });
+
+  it("rollbackOnFailure unwind continues to work under the atomic-write path", async () => {
+    // PRD #221's rollback-on-failure mode unwinds applied Changes LIFO. The
+    // atomic-write tightening must not regress that property — this guards
+    // the interplay. Pinned alongside the new atomic-write tests so a
+    // refactor of either side is forced to consider both.
+    await writeFile(join(dir, "existing.txt"), "PRESERVED");
+    await writeFile(join(dir, "blocker"), "i am a file");
+    const ctx = makeCtx(dir);
+    const op = writeOp("op", [
+      { kind: "write", path: "existing.txt", before: Buffer.from("PRESERVED"), after: Buffer.from("MODIFIED") },
+      { kind: "write", path: "blocker/child.txt", before: null, after: Buffer.from("FAILS") },
+    ]);
+    const report = await run(ctx, [op], "apply", { rollbackOnFailure: true });
+    expect(report.failed).toBeDefined();
+    expect(await readFile(join(dir, "existing.txt"), "utf8")).toBe("PRESERVED");
+    const top = await readdir(dir);
+    expect(top.filter(e => e.endsWith(".tmp"))).toEqual([]);
   });
 });
 
