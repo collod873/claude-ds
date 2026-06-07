@@ -3,6 +3,7 @@ import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
+import pkg from "../../package.json" with { type: "json" };
 
 // Issue #265 — the two-pass `classify → audit --fix → classify → audit --fix`
 // workaround is a tracked completeness-principle defect (ADR-0003). `claude-ds
@@ -216,6 +217,49 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
         configurable: true,
       });
     }
+  }, 30000);
+
+  // Regression guard for the #343 lingering-signal convergence check.
+  //
+  // ADR-0018 added `stable + 0 pending = converged` to catch the #300 shape:
+  // upgrade fires forever because `upgradeCmd`'s no-chain branch can't bump
+  // the pin, but no findings remain. Without the check heal would hit the
+  // ceiling on a project that is in fact clean.
+  //
+  // The trap that check has to avoid: an unfixable finding the iteration's
+  // plan member can't address (e.g. DRIFT-PATTERN-NO-SLOTS — fixable:false,
+  // classify has no fixer for it) lingers like the upgrade signal *but* the
+  // findings-side state still has work. Pre-#343 heal hit the ceiling and
+  // exited 1, surfacing the finding. A naive `stable + 0 pending` accepted
+  // it as convergence and exited 0 with a "0 findings" message — directly
+  // contradicting what `claude-ds audit` would print the next second.
+  //
+  // Heal must gate convergence on the deriver's findings-side booleans:
+  // if classify/audit work remains (because the dispatcher could not clear
+  // it), it is NOT a fixed point.
+  it("does not silently converge when unfixable findings remain (#343)", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ ...BASE_CFG, packVersion: `v${pkg.version}` }),
+    );
+    await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+    // DRIFT-PATTERN-NO-SLOTS: pattern-tier file without children/slots. The
+    // rule is fixable:false; classify does not relocate it (it also fires
+    // DRIFT-MISPLACED but the file is structurally a leaf, so even classify's
+    // tier-move heuristic can't pick a destination automatically). Heal can
+    // never clear this without operator input — exit 1 (did not converge) is
+    // the correct surfacing.
+    await writeFile(
+      join(dir, "design-system/patterns/no-slots.tsx"),
+      `export function NoSlots() { return <div/>; }\nexport const meta = { kind: "pattern" as const, examples: [] };\n`,
+    );
+
+    const r = await runCli(["heal", "--max-iterations", "3"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/did not converge/);
+    // The lying happy path the fix prevents: a "0 findings" convergence
+    // message paired with non-zero `audit` output. Pin both signals.
+    expect(r.stdout).not.toMatch(/converged in \d+ iteration\(s\) — 0 changes, 0 findings/);
   }, 30000);
 
   it("reports `converged` and exits 0 on an already-clean tree", async () => {

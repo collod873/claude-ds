@@ -334,18 +334,27 @@ export async function healCmd(opts: HealOpts): Promise<void> {
       }
 
       // Fixed point reached: this iteration ran the planner's full plan and
-      // changed zero bytes. Two cases produce this:
-      //   (1) The plan was a "lingering" signal (e.g. upgrade fires because
-      //       the pin is behind the CLI but the migration chain between
-      //       from→to is empty, so upgradeCmd's no-chain branch verifies and
-      //       returns without bumping the pin — #300's shape).
-      //   (2) The dispatchers genuinely settled.
-      // In both cases there is no further work the loop can do without
-      // operator input, and the next iteration's plan would be identical.
-      // Without this check the planner would re-emit the lingering signal
-      // forever and heal would hit the ceiling exit (1) on a project that
-      // is in fact converged.
-      if (stable && pendingThisIter === 0) {
+      // changed zero bytes. The lingering-signal case (e.g. upgrade fires
+      // because the pin is behind the CLI but the migration chain between
+      // from→to is empty, so `upgradeCmd`'s no-chain branch verifies and
+      // returns without bumping the pin — #300's shape): the planner re-
+      // emits a step the dispatcher cannot clear in one pass, but the
+      // findings-side state IS clean. Without this check the planner would
+      // re-emit the lingering signal forever and heal would hit the ceiling
+      // exit (1) on a project that is in fact converged.
+      //
+      // Gate on the iteration's pre-derivation `state`: the snapshot equality
+      // proves the dispatch was a no-op, so the deriver's view of disk has
+      // not changed — its findings-side booleans still describe the tree
+      // accurately. If `classifyNeeded` or `autoFixNeeded` is set, real
+      // findings remain that the dispatchers could not address (e.g. a
+      // DRIFT-PATTERN-NO-SLOTS the deriver lumps under classify but classify
+      // does not relocate). Surfacing that as silent convergence would lie
+      // to sandcastle automation; let the loop continue and the ceiling
+      // catch it as "did not converge" — pre-#343 behavior on unfixable-
+      // findings stalls.
+      const findingsRemain = state.classifyNeeded || state.autoFixNeeded;
+      if (stable && pendingThisIter === 0 && !findingsRemain) {
         info(`heal: converged in ${iter} iteration(s) — 0 changes, 0 findings`);
         return;
       }
