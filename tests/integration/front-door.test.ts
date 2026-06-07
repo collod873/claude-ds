@@ -10,7 +10,7 @@
  * the rendered dashboard names the recommended next command the brain picked.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runCli } from "../helpers/runcli";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
@@ -118,6 +118,26 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
 
     expect(out).toMatch(/→ Next: claude-ds classify/);
     expect(out).not.toMatch(/→ Next: claude-ds audit --fix/);
+  });
+
+  it("adopted + stale packVersion (clean tree): recommendation routes to upgrade (#336)", async () => {
+    // Adopt with the current CLI version, then rewrite `packVersion` to an
+    // older value so the consumer is *structurally healthy* but version-stale.
+    // The brain must surface the upgrade-available signal and recommend
+    // `claude-ds upgrade` instead of falling through to the build command.
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    await writeFile(join(dir, "package.json"), JSON.stringify({ scripts: { build: "next build" } }));
+    const cfgPath = join(dir, ".claude-ds.json");
+    const cfg = JSON.parse(await readFile(cfgPath, "utf8"));
+    cfg.packVersion = "v0.0.1";
+    await writeFile(cfgPath, JSON.stringify(cfg));
+
+    const out = await captureFrontDoor({ cwd: dir });
+
+    expect(out).toMatch(/Where you are: adopted/);
+    expect(out).toMatch(/What's wrong: upgrade available/);
+    expect(out).toMatch(/→ Next: claude-ds upgrade — pack version is behind the installed CLI/);
   });
 
   it("adopted + missing managed files: recommendation routes to sync", async () => {

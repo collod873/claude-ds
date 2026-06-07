@@ -1,5 +1,6 @@
 import { parseConfig } from "../lib/config.js";
 import { parseLsRemote } from "../lib/tags.js";
+import { semverLt } from "../lib/version-currency.js";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -13,21 +14,6 @@ async function readIfExistsLocal(p: string): Promise<string | null> {
     if (e instanceof Error && (e as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw e;
   }
-}
-
-/** Parse a semver string like "v0.5.0" or "0.5.0" → [major, minor, patch] */
-function parseSemver(v: string): [number, number, number] {
-  const m = v.replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!m) return [0, 0, 0];
-  return [parseInt(m[1]), parseInt(m[2]), parseInt(m[3])];
-}
-
-function semverLt(a: string, b: string): boolean {
-  const [a1, a2, a3] = parseSemver(a);
-  const [b1, b2, b3] = parseSemver(b);
-  if (a1 !== b1) return a1 < b1;
-  if (a2 !== b2) return a2 < b2;
-  return a3 < b3;
 }
 
 /** Extract all version headings from CHANGELOG that fall between pinned (exclusive) and installed (inclusive). */

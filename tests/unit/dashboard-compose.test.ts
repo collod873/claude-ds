@@ -164,6 +164,91 @@ describe("composeDashboardState (pure brain)", () => {
     });
   });
 
+  it("adopted + stale packVersion (clean tree) → recommends upgrade", () => {
+    // PRD #336: version currency is the third brain input alongside doctor
+    // structural state and audit findings. A clean tree pinned to an older
+    // pack version no longer falls straight through to "verify everything
+    // compiles" — the dashboard surfaces the upgrade nudge first.
+    const state = composeDashboardState({
+      ...baseAdopted(),
+      upgradeAvailable: true,
+    });
+
+    expect(state.upgradeAvailable).toBe(true);
+    expect(state.recommendedNext).toEqual({
+      command: "claude-ds upgrade",
+      description: "pack version is behind the installed CLI",
+    });
+  });
+
+  it("upgrade-available outranks the clean-tree build recommendation only", () => {
+    // Structural and audit findings still win — you do not upgrade onto a
+    // broken baseline. With auto-fixable findings present the brain stays on
+    // `audit --fix` even though the pack is stale.
+    const state = composeDashboardState({
+      ...baseAdopted(),
+      upgradeAvailable: true,
+      findings: [{ ruleId: "DRIFT-RAW-PRIMITIVE", file: "a.tsx", message: "x" }],
+    });
+
+    expect(state.upgradeAvailable).toBe(true);
+    expect(state.recommendedNext).toEqual({
+      command: "claude-ds audit --fix",
+      description: "auto-repair the 1 finding",
+    });
+  });
+
+  it("missing managed files still outrank upgrade-available", () => {
+    const state = composeDashboardState({
+      ...baseAdopted(),
+      missingManaged: 2,
+      upgradeAvailable: true,
+    });
+
+    expect(state.recommendedNext).toEqual({
+      command: "claude-ds sync",
+      description: "restore 2 missing managed file(s)",
+    });
+  });
+
+  it("up-to-date adopted clean tree exposes no upgrade signal", () => {
+    // The absence of the input (or upgradeAvailable=false) means today's
+    // clean-tree behavior is preserved exactly.
+    const state = composeDashboardState({
+      ...baseAdopted(),
+      upgradeAvailable: false,
+    });
+
+    expect(state.upgradeAvailable).toBe(false);
+    expect(state.recommendedNext).toEqual({
+      command: "npm run build",
+      description: "verify everything compiles",
+    });
+  });
+
+  it("pre-adopt projects are unaffected by upgradeAvailable", () => {
+    // Pre-adopt has no .claude-ds.json, so no pinned packVersion exists to
+    // compare. The brain must still recommend adopt regardless.
+    const state = composeDashboardState({
+      cwd: "/repo/fresh-app",
+      mode: "pre-adopt",
+      pack: "next-react",
+      scaffold: { present: 0, total: 12 },
+      missingManaged: 0,
+      rootDupes: 0,
+      findings: [],
+      extractionCount: 0,
+      unfixableCount: 0,
+      buildCmd: "npm run build",
+      upgradeAvailable: true,
+    });
+
+    expect(state.recommendedNext).toEqual({
+      command: "claude-ds adopt --pack next-react",
+      description: "install the design-system scaffold",
+    });
+  });
+
   it("the rendered → Next line matches the recommendation fields", () => {
     // Pins the contract the integration test relies on: the brain picks the
     // command, and the renderer surfaces it on a `→ Next:` line. Together they

@@ -18,8 +18,10 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { parseConfig } from "../lib/config.js";
+import { parseConfig, type Config } from "../lib/config.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
+import { checkVersionCurrency } from "../lib/version-currency.js";
+import pkg from "../../package.json" with { type: "json" };
 import { parseExceptions, type Exception } from "../lib/exceptions.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import { scanDriftAndIntegrity } from "../lib/reports/drift-integrity-scan.js";
@@ -56,10 +58,11 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
   const cfgPath = join(cwd, ".claude-ds.json");
   const hasCfg = await exists(cfgPath);
   let pack = DEFAULT_PACK;
+  let parsedCfg: Config | null = null;
   if (hasCfg) {
     try {
-      const cfg = parseConfig(await readFile(cfgPath, "utf8"));
-      pack = cfg.pack;
+      parsedCfg = parseConfig(await readFile(cfgPath, "utf8"));
+      pack = parsedCfg.pack;
     } catch {
       // Fall back to default pack; the brain will recommend adopt anyway.
     }
@@ -141,6 +144,20 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 
   const buildCmd = await detectBuildCommand(cwd);
 
+  // Version currency: pinned packVersion (from .claude-ds.json) vs the
+  // installed CLI version (from this package's package.json). The check
+  // only matters in adopted mode — pre-adopt has no pinned version, and
+  // the brain's adopt recommendation wins regardless. We consume the
+  // extracted pure helper rather than shelling out to `version --check`
+  // (#336 acceptance).
+  let upgradeAvailable = false;
+  if (ctx.kind === "adopted" && parsedCfg) {
+    upgradeAvailable = checkVersionCurrency({
+      pinned: parsedCfg.packVersion,
+      installed: `v${pkg.version}`,
+    }).upgradeAvailable;
+  }
+
   const state = composeDashboardState({
     cwd,
     mode: ctx.kind === "adopted" ? "adopted" : "pre-adopt",
@@ -152,6 +169,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
     extractionCount,
     unfixableCount,
     buildCmd,
+    upgradeAvailable,
   });
 
   printLines(renderDashboard(state));
