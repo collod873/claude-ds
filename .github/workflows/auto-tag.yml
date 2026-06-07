@@ -7,7 +7,7 @@ name: auto-tag
 #   2. If tag `v<version>` already exists → no-op. Most pushes hit this path.
 #   3. If the tag is missing → this is a release:
 #      - ADR-0011 verification gate: migration-bearing releases
-#        (`pack/versions/<v>/migrations/` present) refuse to tag until
+#        (`src/lib/ops/migrations/v<v>/` present) refuse to tag until
 #        `pack/versions/<v>/verification.md` exists.
 #      - Test gate: `npm test` must pass.
 #      - Create + push the annotated tag.
@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ steps.version.outputs.version }}"
-          mig_dir="pack/versions/$version/migrations"
+          mig_dir="src/lib/ops/migrations/v$version"
           verif_file="pack/versions/$version/verification.md"
           if [ -d "$mig_dir" ]; then
             echo "Release v$version carries migrations ($mig_dir present)."

@@ -135,15 +135,18 @@ because the underlying mechanism (Crewops upgrade) didn't fire for that
 release.
 
 The hard verification gate is hereby scoped to **migration-bearing**
-releases — i.e., releases where `pack/versions/<v>/migrations/` exists.
-Non-migration releases are released under a softer proof: a clean
-`audit` / CI on `main`, which `.github/workflows/auto-tag.yml` already
-runs before tagging (issue #338). The gate is encoded mechanically in
-that workflow:
+releases — i.e., releases where `src/lib/ops/migrations/v<v>/` exists.
+(The ADR body above sketches `pack/versions/<v>/migrations/`, but that
+pack-side layout was never adopted: migrations are TypeScript Ops the CLI
+imports via `src/lib/migration-registry.ts`, not pack files. The gate
+keys off the directory that actually exists.) Non-migration releases are
+released under a softer proof: a clean `audit` / CI on `main`, which
+`.github/workflows/auto-tag.yml` already runs before tagging (issue #338).
+The gate is encoded mechanically in that workflow:
 
-- `pack/versions/<v>/migrations/` exists  → refuse to tag until
+- `src/lib/ops/migrations/v<v>/` exists  → refuse to tag until
   `pack/versions/<v>/verification.md` is present.
-- `pack/versions/<v>/migrations/` absent  → tag freely (still gated on
+- `src/lib/ops/migrations/v<v>/` absent  → tag freely (still gated on
   `npm test`).
 
 The intent of the original rule — *Crewops is the canonical test bed for
