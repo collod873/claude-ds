@@ -152,3 +152,41 @@ The gate is encoded mechanically in that workflow:
 The intent of the original rule — *Crewops is the canonical test bed for
 anything that touches a consumer's existing tree* — is preserved. The
 addendum just stops requiring proof of an upgrade that never had to run.
+
+## Addendum (2026-06-07) — `upgrade` and `repair` are distinct verbs
+
+`claude-ds upgrade` as originally specified does two different jobs under
+one name. Job one (the ADR body): advance a consumer to a **newer** pinned
+pack version by running that version's new migration Ops. Job two (added
+later via migration idempotency — see CONTEXT.md "Migration Op"): re-run
+every migration `<= packVersion` to restore an **end-state that silently
+regressed** (a flipped `meta_kind_strict`, a deleted managed file). Crewops
+v1.2.0 testing (friction report F4/F13/F2) showed the conflation is a UX
+defect: `upgrade` reports "no registered migrations between v1.0.0 and
+v1.2.0" and *in the same breath* applies three older migrations; the front
+door says "upgrade available" to a consumer that is already current; and
+after `sync`, the still-pending second job is silently dropped.
+
+**Decision:** split the two jobs into two verbs with single
+responsibilities.
+
+- **`upgrade`** — forward only. Fires, and the front door says "upgrade
+  available," **only when a newer pinned version exists**. Runs that
+  version's new migrations.
+- **`repair`** — end-state restoration on a consumer already at the current
+  version. Re-applies idempotent migrations `<= packVersion` whose end-state
+  regressed. The front door surfaces it as "repair needed: N settings
+  regressed," never as "upgrade."
+
+"Drift" is **not** used for either (it is reserved for the `DRIFT-` audit
+family); a missing managed file is a **Scaffold gap**, healed by `sync`. Both
+verbs end with a verdict and a `→ Next` breadcrumb, and both render via the
+summary-default policy (substantive changes — config-flag flips — surfaced
+first; `--diff` for full diff, `--json` for machine output). See CONTEXT.md
+*Upgrade*, *Repair*, *Scaffold gap*; the decision-kind / commitment-gate
+model is ADR-0016.
+
+Whether `repair` is a standalone command or a mode of `upgrade` is an
+implementation detail; what this ADR fixes is that the two states are named,
+verdicted, and surfaced **distinctly** — and that the front door, which
+routes the consumer to the right verb, keeps the memory burden at zero.

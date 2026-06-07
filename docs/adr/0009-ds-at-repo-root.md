@@ -60,3 +60,40 @@ two pack-owned pieces.
 - Future-Claude reading the layout cold will see `design-system/` at
   repo-root and may try to "fix" it by moving it into `src/`. This ADR is
   the answer to that suggestion.
+
+## Addendum (2026-06-07) — enforcement is alias-agnostic; the rewrite is retired
+
+The original Decision prescribed a single canonical import form
+("Components import from `@ds/atoms/button`, not `@/...`") and ADR-0011's
+staged plan shipped `rewrite-ds-imports` to mass-rewrite every consumer
+import to `@ds/*`. Crewops v1.2.0 testing (the friction report, F14/F20)
+exposed two problems with the *one-canonical-form* half of that decision:
+
+1. **The rewrite is behaviorally a no-op but contractually harmful.**
+   `tsconfig.json` maps **both** `@ds/*` and `@/design-system/*` to
+   `./design-system/*`, so the two forms resolve to the identical file —
+   the rewrite changes 34 files for zero runtime effect. Worse, the pack's
+   own classification hook (`design-system/CLAUDE.md`, CLASS-001) only fires
+   on imports from `@/design-system/*`. Rewriting those to `@ds/*` **blinds
+   CLASS-001** — atoms importing DS files via `@ds/*` silently stop being
+   promoted to composite. A migration that disables an enforcement rule is a
+   north-star violation.
+
+2. **Discoverability — the reason this ADR exists — does not require a
+   single import spelling.** The decision that matters (DS at repo-root,
+   reachable without moving the folder) is fully served by the `@ds/*`
+   alias *existing*. Nothing about it requires forbidding the equivalent
+   `@/design-system/*` form that tsconfig already supports.
+
+**Decision:** enforcement is **alias-agnostic**. Both `@ds/*` and
+`@/design-system/*` are valid, equal spellings of a DS import. Every rule
+that keys on the alias (CLASS-001, the `DRIFT-` import-direction rules, the
+completeness Owned-concern scan) must recognize **either** form. The
+`rewrite-ds-imports` migration is **retired** — there is no single canonical
+form to normalize toward, so it has no job. The `@ds/*` alias stays (it is
+what solves the `@/* → ./src/*` resolution conflict in the body above); we
+simply stop treating the non-`@ds` spelling as drift.
+
+Consequence: zero files rewritten on upgrade/repair for alias reasons, and
+CLASS-001 sees DS imports regardless of spelling. The pack's contract docs
+(`design-system/CLAUDE.md`) are updated to state both forms are accepted.

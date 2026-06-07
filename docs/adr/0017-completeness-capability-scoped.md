@@ -128,3 +128,33 @@ this ADR exists to prevent — see `#39`, `#44`, `#105`, `.states.json`.
 - **The residual gap is now nameable.** A false `✓ OK` can only come
   from a DS concern that has not yet been added to the registry. The
   next miss is evidence for the next entry, not a silent regression.
+
+## Addendum (2026-06-07) — the worked example was wrong; supersession must be real
+
+This ADR uses *"remove `scripts/lint-tokens.ts` — superseded by
+`DRIFT-RAW-PRIMITIVE`"* as its model finding. Crewops v1.2.0 testing
+(friction report F10) verified that supersession claim is **false**:
+`lint-tokens.ts` performs a JSON↔CSS **token-parity** check (the most
+expensive failure mode it guards), while `DRIFT-RAW-PRIMITIVE` detects raw
+`<button>`/`<input>` HTML. They cover unrelated failure modes. **No pack
+rule replaces `lint-tokens.ts` today.** Following the finding would silently
+delete the consumer's main token-drift guard — the over-flag bias, meant to
+kill false *negatives*, produced a false *supersession* instead.
+
+Two corrections:
+
+1. **The capability that supersedes must actually exist before completeness
+   claims it.** The pack ships a new drift rule **`DRIFT-TOKEN-PARITY`**
+   (JSON-defined tokens ↔ emitted CSS variables). Only then may
+   `OWNED-TOKEN-LINT`'s supersession point at it. Until a real superseding
+   capability ships, completeness must **not** advise deleting the
+   hand-rolled file.
+
+2. **A supersession must name a real, shipped rule.** `OWNED-TOKEN-LINT`'s
+   `supersededBy` is corrected from `DRIFT-RAW-PRIMITIVE` to
+   `DRIFT-TOKEN-PARITY`. This is the grow-on-demand path this ADR already
+   endorses — the real miss is the evidence for the new entry.
+
+The over-flag principle stands; what it may *say* tightens: it flags
+"possible shadow DS infra," but it may only recommend **removal** when it
+can name a shipped capability that genuinely covers the same failure mode.

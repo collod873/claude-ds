@@ -121,6 +121,9 @@ violations.
 
 ### Drift rule
 A named, stable identifier for an audit convention check. Prefix: `DRIFT-`.
+**"Drift" is reserved for this family.** A regressed migration end-state is a
+**Repair** concern, a missing managed file is a **Scaffold gap** — neither is
+"drift." Using the word for those is a labeling defect (the F17 overload).
 Examples: `DRIFT-MISPLACED`, `DRIFT-MISCLASSIFIED-ATOM`, `DRIFT-RAW-PRIMITIVE`,
 `DRIFT-PATTERN-NO-SLOTS`, `DRIFT-DS-IMPORTS-FEATURE`,
 `DRIFT-CVA-VARIANT-UNRENDERED`, `DRIFT-INLINE-STATIC-STYLE`. IDs are part of
@@ -245,6 +248,31 @@ config flags (e.g. `meta_kind_strict` silently flipping back, #300) or
 missing managed files. Without this pass, "migration was applied once at
 upgrade time" was wrongly assumed to imply "end state still holds today,"
 and a flipped flag could vanish forever.
+
+### Upgrade
+Forward movement to a **newer** Pack version: apply the migration Ops the
+consumer hasn't reached yet. `claude-ds upgrade` fires — and the front door
+says "upgrade available" — **only when a newer pinned version actually
+exists**. Being current with regressed settings is *not* an upgrade (the F4
+mislabel); that is **Repair**.
+_Avoid_: "upgrade available" for a current consumer.
+
+### Repair
+Restoration of a **past** migration's end-state on a consumer already at the
+current Pack version. Re-applies every idempotent migration `<= packVersion`
+whose end-state has silently regressed — a config flag flipped back
+(`meta_kind_strict`, #300), a managed file deleted — so the invariant the
+migration once established holds again. Distinct from **Upgrade** (no version
+advances) and from **drift** (which is the `DRIFT-` audit family only). The
+front door surfaces it as "repair needed: N settings regressed," never as
+"upgrade." A consumer that is current and un-regressed needs neither.
+_Avoid_: drift, downgrade, re-migrate.
+
+### Scaffold gap
+A managed Pack file that should be present in the consumer but is missing —
+what `doctor` checks under `drift: { missing: [...] }` today. Renamed off
+"drift" (the F17 overload): a missing managed file is a Scaffold gap, healed
+by `sync`, not a `DRIFT-` rule. `doctor`'s verdict names it as such.
 
 ### Pack version
 The semver tag (`0.8.0`, `0.9.0`, ...) a consumer is pinned to in its
@@ -426,6 +454,22 @@ answered branch dispatches to `initCmd` / `adoptCmd` in-process. When
 `.claude-ds.json` is present the greet is skipped and the dashboard front
 door (#331) runs. Detection logic lives in `src/lib/first-run.ts` so the
 front-door brain can share it.
+
+### Remediation plan
+The ordered sequence of commands that drives a not-clean project toward
+clean, computed by a **single shared planner** from project state. One brain,
+two drivers: `heal` runs it headlessly to a fixed point (collecting Pending
+decisions); the **front door** runs it interactively — one up-front
+commitment gate, then auto-advances with live progress (#332), pausing only
+for genuine Ambiguities. Canonical order:
+`upgrade → sync → repair → migrate-layout → reconcile → classify →
+reconform → audit --fix`, repeated to a fixed point. **Convergence** (`heal`)
+is this plan run to exhaustion; the front-door loop is the same plan with a
+human watching. The flat single-shot `recommendedNext` recommender that
+duplicated — and mis-ordered (upgrade last instead of first) — this plan is
+retired in favor of the shared planner.
+_Avoid_: breadcrumb chain (the retired hand-typed "→ Next: type this" model),
+recommendedNext (the single-shot field), two brains.
 
 ---
 
