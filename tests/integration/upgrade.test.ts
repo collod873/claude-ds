@@ -260,14 +260,14 @@ describe("upgrade", () => {
         join(dir, ".claude-ds.json"),
         JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }),
       );
-      // Seed a DS file with the @/design-system/* form so rewrite-ds-imports
+      // Seed a DS file with an inline portal style so rewrite-portal-styles
       // emits a real Change in the dry-run preview.
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });
       await writeFile(
         join(dir, "design-system/atoms/button.tsx"),
         [
-          "import { Foo } from '@/design-system/foo';",
-          "export const Button = () => <Foo />;",
+          'import { cn } from "@ds/utils/cn";',
+          'export const Button = () => <div className={cn("base")} style={{ display: "contents" }} />;',
           "",
         ].join("\n"),
         "utf8",
@@ -277,8 +277,8 @@ describe("upgrade", () => {
       // Summary line for the rewritten file — no full-body +/- diff
       expect(r.stdout).toContain("M design-system/atoms/button.tsx");
       // The bodies of changed files must NOT appear (no full diff dump)
-      expect(r.stdout).not.toContain("+export const Button = () => <Foo />;");
-      expect(r.stdout).not.toContain("-import { Foo } from '@/design-system/foo';");
+      expect(r.stdout).not.toContain("[rewrite-portal-styles@v0.9.0]");
+      expect(r.stdout).not.toContain('+import portalStyles from "@ds/utils/portal-scope.module.css";');
     });
 
     it("--diff: dry-run opts back into the full unified diff dump", async () => {
@@ -290,8 +290,8 @@ describe("upgrade", () => {
       await writeFile(
         join(dir, "design-system/atoms/button.tsx"),
         [
-          "import { Foo } from '@/design-system/foo';",
-          "export const Button = () => <Foo />;",
+          'import { cn } from "@ds/utils/cn";',
+          'export const Button = () => <div className={cn("base")} style={{ display: "contents" }} />;',
           "",
         ].join("\n"),
         "utf8",
@@ -299,9 +299,9 @@ describe("upgrade", () => {
       const r = await runCli(["upgrade", "--to", "v0.9.0", "--dry-run", "--diff"], { cwd: dir });
       expect(r.code).toBe(0);
       // Full unified diff present — pre-#344 default
-      expect(r.stdout).toMatch(/\[rewrite-ds-imports@v0\.9\.0\] design-system\/atoms\/button\.tsx \(modify\)/);
-      expect(r.stdout).toContain("-import { Foo } from '@/design-system/foo';");
-      expect(r.stdout).toContain("+import { Foo } from '@ds/foo';");
+      expect(r.stdout).toMatch(/\[rewrite-portal-styles@v0\.9\.0\] design-system\/atoms\/button\.tsx \(modify\)/);
+      expect(r.stdout).toContain('-export const Button = () => <div className={cn("base")} style={{ display: "contents" }} />;');
+      expect(r.stdout).toContain('+import portalStyles from "@ds/utils/portal-scope.module.css";');
     });
 
     it("--json: emits parseable changes array and suppresses human render", async () => {
@@ -313,8 +313,8 @@ describe("upgrade", () => {
       await writeFile(
         join(dir, "design-system/atoms/button.tsx"),
         [
-          "import { Foo } from '@/design-system/foo';",
-          "export const Button = () => <Foo />;",
+          'import { cn } from "@ds/utils/cn";',
+          'export const Button = () => <div className={cn("base")} style={{ display: "contents" }} />;',
           "",
         ].join("\n"),
         "utf8",

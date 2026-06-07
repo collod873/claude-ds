@@ -90,10 +90,16 @@ exposed two problems with the *one-canonical-form* half of that decision:
 that keys on the alias (CLASS-001, the `DRIFT-` import-direction rules, the
 completeness Owned-concern scan) must recognize **either** form. The
 `rewrite-ds-imports` migration is **retired** — there is no single canonical
-form to normalize toward, so it has no job. The `@ds/*` alias stays (it is
+form to normalize toward, so it has no job. The `DRIFT-STALE-DS-IMPORT`
+drift rule is **retired** for the same reason: it flagged `@/design-system/*`
+as "stale" whenever an `@ds/*` alias existed and auto-rewrote it, which is
+the same forced canonical-form normalization through a different code path —
+`audit --fix` (and the `heal` loop that wraps it) would have continued the
+rewrite even after pulling the migration. The `@ds/*` alias stays (it is
 what solves the `@/* → ./src/*` resolution conflict in the body above); we
 simply stop treating the non-`@ds` spelling as drift.
 
-Consequence: zero files rewritten on upgrade/repair for alias reasons, and
-CLASS-001 sees DS imports regardless of spelling. The pack's contract docs
-(`design-system/CLAUDE.md`) are updated to state both forms are accepted.
+Consequence: zero files rewritten on upgrade/repair/audit-fix for alias
+reasons, and CLASS-001 sees DS imports regardless of spelling. The pack's
+contract docs (`design-system/CLAUDE.md`) are updated to state both forms
+are accepted.

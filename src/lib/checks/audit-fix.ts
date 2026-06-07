@@ -139,7 +139,12 @@ export async function runAuditFix(
     }
     warningCount += orphanCount;
     if (orphanCount > 0) {
-      info(`${orphanCount} deprecated-path orphan(s) found — run \`claude-ds reconcile\` to remove`);
+      // #349 F9: route to `audit --fix` (which runs reconcile as a pre-step
+      // since #171) so the final verdict + breadcrumb point at the same
+      // command. Telling the consumer to run `reconcile` here while the
+      // bottom-of-output `→ Next:` named a build command was the
+      // internally-inconsistent verdict F9 closes.
+      info(`${orphanCount} deprecated-path orphan(s) found — run \`claude-ds audit --fix\` to remove`);
     }
   }
 

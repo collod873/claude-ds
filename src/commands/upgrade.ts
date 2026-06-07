@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
-import { info, err, confirm } from "../lib/log.js";
+import { info, err, confirm, printNextStep } from "../lib/log.js";
 
 const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
@@ -155,7 +155,13 @@ export async function upgradeCmd(opts: {
 
   if (from === to) {
     humanLog(`already at ${to}`);
-    await verifyEndStates(ctx, from, { ...opts, renderMode });
+    const drifted = await verifyEndStates(ctx, from, { ...opts, renderMode });
+    // #349 F21: every command ends with a → Next breadcrumb. #344's render
+    // policy suppresses all human output under --json, so gate the breadcrumb
+    // on the same renderMode rather than emitting it into the JSON surface.
+    if (renderMode !== "json") {
+      printNextStep("upgrade", { upgradeOutcome: drifted > 0 ? "repaired" : "no-op" });
+    }
     return;
   }
 
@@ -164,7 +170,10 @@ export async function upgradeCmd(opts: {
   if (chain.length === 0) {
     humanLog(`no registered migrations between ${from} and ${to}`);
     humanLog(`pack is at ${from}`);
-    await verifyEndStates(ctx, from, { ...opts, renderMode });
+    const drifted = await verifyEndStates(ctx, from, { ...opts, renderMode });
+    if (renderMode !== "json") {
+      printNextStep("upgrade", { upgradeOutcome: drifted > 0 ? "repaired" : "no-op" });
+    }
     return;
   }
 

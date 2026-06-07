@@ -20,13 +20,21 @@ export type OwnedConcernId = "OWNED-TOKEN-LINT";
  * The audit rule id that supersedes a hand-rolled instance of this concern.
  * Mechanically constrained to an existing drift or integrity rule so a
  * concern cannot point at a capability the pack does not actually ship.
+ *
+ * Nullable on `OwnedConcern` and `OwnedConcernFinding` (ADR-0017 addendum,
+ * issue #348): `null` means "the concern is detectable but no shipped
+ * capability covers the failure mode yet." Completeness flags such findings
+ * as "possible shadow DS infra" instead of recommending removal — the
+ * false-delete defect the addendum exists to kill (`scripts/lint-tokens.ts`
+ * was almost deleted under the false claim that DRIFT-RAW-PRIMITIVE covered
+ * its token-parity check).
  */
 export type SupersedingRuleId = DriftRuleId | IntegrityRuleId;
 
 export interface OwnedConcernFinding {
   concernId: OwnedConcernId;
   file: string;
-  supersededBy: SupersedingRuleId;
+  supersededBy: SupersedingRuleId | null;
   message: string;
 }
 
@@ -49,6 +57,6 @@ export interface OwnedConcernInput {
 export interface OwnedConcern {
   id: OwnedConcernId;
   description: string;
-  supersededBy: SupersedingRuleId;
+  supersededBy: SupersedingRuleId | null;
   detect: (input: OwnedConcernInput) => OwnedConcernFinding | null;
 }

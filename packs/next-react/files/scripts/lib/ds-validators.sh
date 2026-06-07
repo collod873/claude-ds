@@ -7,7 +7,10 @@
 # Source with: source "$(dirname "$0")/lib/ds-validators.sh"  (or adjust path)
 
 # ds_check_classification FILE
-# CLASS-001: atom file imports @/design-system/* → should be composite.
+# CLASS-001: atom file imports a DS module → should be composite.
+# Recognizes BOTH alias spellings (`@/design-system/...` and `@ds/...`) —
+# tsconfig maps them to the same files, so pinning to one form silently
+# blinds the rule on the other (ADR-0009 addendum / PRD #340 / #346).
 # Returns 2 if violation, 0 if clean.
 ds_check_classification() {
   local file="$1"
@@ -23,20 +26,21 @@ ds_check_classification() {
     *.showcase.tsx|*.test.tsx|*.stories.tsx) return 0 ;;
   esac
 
-  # Match `from '@/design-system/...'` but exclude type-only imports
-  # (`import type { ... } from '@/design-system/...'`). A type-only import
+  # Match either `from '@/design-system/...'` or `from '@ds/...'` but exclude
+  # type-only imports (`import type { ... } from '...'`). A type-only import
   # carries no runtime dependency, so it does not violate atom classification.
   # Lines starting with `import type` (optionally preceded by whitespace) are
   # filtered out before flagging.
-  if grep -nE 'from\s+["'"'"'][^"'"'"']*@/design-system/' "$file" 2>/dev/null \
+  local ds_import_re='from\s+["'"'"'][^"'"'"']*(@/design-system|@ds)/'
+  if grep -nE "$ds_import_re" "$file" 2>/dev/null \
        | grep -vE '^[0-9]+:\s*import\s+type\b' >/dev/null 2>&1; then
     while IFS=: read -r line _rest; do
-      local hint="CLASS-001: atom imports @/design-system/* — move to composites/ or run: npx claude-ds reconform --backfill-meta --fix"
+      local hint="CLASS-001: atom imports a DS module (@/design-system/* or @ds/*) — move to composites/ or run: npx claude-ds reconform --backfill-meta --fix"
       echo "$file:$line: CLASS-001: $hint" >&2
       if [ -f ".claude/hooks/lib/log-failure.sh" ]; then
         bash .claude/hooks/lib/log-failure.sh "CLASS-001" "$file" "$line" "$hint" || true
       fi
-    done < <(grep -nE 'from\s+["'"'"'][^"'"'"']*@/design-system/' "$file" \
+    done < <(grep -nE "$ds_import_re" "$file" \
                | grep -vE '^[0-9]+:\s*import\s+type\b')
     rc=2
   fi

@@ -564,7 +564,11 @@ describe("doctor --completeness", () => {
     expect(r.code).toBe(1);
     expect(r.stdout).toContain("OWNED-TOKEN-LINT");
     expect(r.stdout).toContain("scripts/lint-tokens.ts");
-    expect(r.stdout).toContain("DRIFT-RAW-PRIMITIVE");
+    // ADR-0017 addendum / issue #348: the supersession was corrected from
+    // DRIFT-RAW-PRIMITIVE (false claim) to DRIFT-TOKEN-PARITY (the rule that
+    // genuinely covers token-parity).
+    expect(r.stdout).toContain("DRIFT-TOKEN-PARITY");
+    expect(r.stdout).not.toContain("DRIFT-RAW-PRIMITIVE");
     // Coverage footer present on the failing path too — honest "what we checked"
     // is exactly as important when there ARE findings.
     expect(r.stdout).toMatch(/Owned concerns checked/i);

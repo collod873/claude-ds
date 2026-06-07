@@ -4,6 +4,12 @@ name: Agent Close Completed PRD
 # PR. The parent PRD has no "Closes #" reference of its own, so it would linger
 # open forever. This workflow is the cascade: when a sub-issue closes, if every
 # sibling sub-issue of its parent is now closed, close the parent PRD too.
+#
+# SECONDARY PATH ONLY. The common case — a sub-issue closed by agent-auto-merge
+# via GITHUB_TOKEN — does NOT fire this `issues:closed` trigger (GITHUB_TOKEN
+# events don't trigger workflows), so agent-auto-merge.yml inlines the same
+# parent-close cascade. This workflow covers the remaining case: a human closing
+# the last sub-issue by hand (a real PAT close, which does trigger).
 
 on:
   issues:

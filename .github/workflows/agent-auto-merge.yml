@@ -108,6 +108,28 @@ jobs:
               gh issue close "$issue" --reason completed
             fi
 
+            # Cascade parent-PRD close. If this issue is a sub-issue and every
+            # sibling is now closed, close the parent PRD too. The standalone
+            # agent-close-completed-prd.yml can't do this: it triggers on
+            # issues:closed, which the GITHUB_TOKEN close above never fires —
+            # the same limitation that forces the inline promotion cascade below.
+            parent=$(gh api graphql \
+              -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { parent { number } } } }' \
+              -f owner="$owner" -f repo="$repo" -F num="$issue" \
+              --jq '.data.repository.issue.parent.number // empty' 2>/dev/null || echo "")
+            if [ -n "$parent" ]; then
+              open_remaining=$(gh api "repos/${GH_REPO}/issues/${parent}/sub_issues" \
+                --jq '[.[] | select(.state == "open")] | length' 2>/dev/null || echo "0")
+              parent_state=$(gh issue view "$parent" --json state --jq '.state')
+              if [ "$open_remaining" = "0" ] && [ "$parent_state" = "OPEN" ]; then
+                echo "All sub-issues of #$parent are closed — closing the PRD."
+                gh issue edit "$parent" --remove-label "agent:in-progress" || true
+                gh issue close "$parent" --comment "All sub-issues complete — closing this PRD. Implemented across parallel sub-issue PRs."
+              else
+                echo "Parent #$parent: $open_remaining open sub-issue(s) remaining — leaving open."
+              fi
+            fi
+
             # Find dependents (issues this one is blocking)
             dependents=$(gh api graphql \
               -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { blocking(first: 100) { nodes { number state } } } } }' \

@@ -1,4 +1,5 @@
 import { OWNED_CONCERNS, OWNED_CONCERNS_BY_ID } from "./registry.js";
+import type { OwnedConcernScannerFinding } from "./scanner.js";
 import type {
   OwnedConcernFinding,
   OwnedConcernId,
@@ -46,9 +47,34 @@ export function ownedConcernDescription(id: OwnedConcernId): string {
   return OWNED_CONCERNS_BY_ID[id].description;
 }
 
-/** The audit rule id that supersedes a hand-rolled instance of this concern. */
+/**
+ * The audit rule id that supersedes a hand-rolled instance of this concern,
+ * or `null` when no shipped pack rule covers the failure mode yet (ADR-0017
+ * addendum, issue #348). Callers must branch on `null` and avoid recommending
+ * removal in that case — flag "possible shadow DS infra" instead.
+ */
 export function ownedConcernSupersededBy(
   id: OwnedConcernId,
-): SupersedingRuleId {
+): SupersedingRuleId | null {
   return OWNED_CONCERNS_BY_ID[id].supersededBy;
+}
+
+/**
+ * Render a scanner finding as a single markdown bullet for `doctor --completeness`.
+ *
+ * The chokepoint that enforces the gating rule from ADR-0017's addendum
+ * (issue #348): a finding may advise removal *only* when it can name a
+ * shipped capability that genuinely covers the same failure mode. When
+ * `supersededBy` is `null`, the output flags "possible shadow DS infra" and
+ * never says "delete" or "remove" — the false-delete defect motivated by the
+ * `scripts/lint-tokens.ts` near-miss.
+ */
+export function formatOwnedConcernFinding(
+  finding: OwnedConcernScannerFinding,
+): string {
+  const head = `- \`${finding.file}:${finding.line}\` (${finding.concernId}): ${finding.message}`;
+  if (finding.supersededBy !== null) {
+    return `${head} — superseded by ${finding.supersededBy} (remove this file; the pack's ${finding.supersededBy} covers the same failure mode)`;
+  }
+  return `${head} — possible shadow DS infra (no shipped pack capability covers this yet; review and dismiss via design-system/exceptions.json if not DS, or track upstream)`;
 }

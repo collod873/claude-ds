@@ -14,8 +14,8 @@ import { patternNoSlotsRule } from "./rules/pattern-no-slots.js";
 import { rawPrimitiveRule } from "./rules/raw-primitive.js";
 import { roleNoContractRule } from "./rules/role-no-contract.js";
 import { smartPartNoRoleRule } from "./rules/smart-part-no-role.js";
-import { staleDsImportRule } from "./rules/stale-ds-import.js";
 import { staleMetaStatesRule } from "./rules/stale-meta-states.js";
+import { tokenParityRule } from "./rules/token-parity.js";
 
 /**
  * The drift-rule registry indexed by id. Declared as `Record<DriftRuleId, DriftRule>`
@@ -38,8 +38,8 @@ export const DRIFT_RULES_BY_ID: Record<DriftRuleId, DriftRule> = {
   "DRIFT-CVA-VARIANT-UNRENDERED": cvaVariantUnrenderedRule,
   "DRIFT-META-EXAMPLES-DUPLICATE": metaExamplesDuplicateRule,
   "DRIFT-META-EXAMPLES-CORRUPT": metaExamplesCorruptRule,
-  "DRIFT-STALE-DS-IMPORT": staleDsImportRule,
   "DRIFT-STALE-META-STATES": staleMetaStatesRule,
+  "DRIFT-TOKEN-PARITY": tokenParityRule,
 };
 
 /**
@@ -57,7 +57,6 @@ export const DRIFT_RULES_BY_ID: Record<DriftRuleId, DriftRule> = {
  * META-KIND-MISSING, MISPLACED, MISCLASSIFIED-ATOM, MISCLASSIFIED-COMPOSITE,
  * DS-IMPORTS-FEATURE, PATTERN-NO-SLOTS, PATTERN-IMPORTS-PATTERN,
  * INLINE-STATIC-STYLE, RAW-PRIMITIVE, CVA-VARIANT-UNRENDERED,
- * META-EXAMPLES-DUPLICATE, META-EXAMPLES-CORRUPT, STALE-DS-IMPORT,
- * STALE-META-STATES.
+ * META-EXAMPLES-DUPLICATE, META-EXAMPLES-CORRUPT, STALE-META-STATES.
  */
 export const DRIFT_RULES: readonly DriftRule[] = Object.values(DRIFT_RULES_BY_ID);

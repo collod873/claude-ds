@@ -4,6 +4,7 @@ import {
   allOwnedConcernIds,
   ownedConcernDescription,
   ownedConcernSupersededBy,
+  formatOwnedConcernFinding,
   type OwnedConcernId,
 } from "../../src/lib/owned-concerns/index.js";
 
@@ -109,9 +110,14 @@ describe("owned-concern registry", () => {
     }
   });
 
-  it("OWNED-TOKEN-LINT is superseded by DRIFT-RAW-PRIMITIVE", () => {
+  // ADR-0017 addendum / PRD #340 friction F10. The original supersession
+  // claim ("DRIFT-RAW-PRIMITIVE") was false: lint-tokens.ts performs a
+  // JSON↔CSS token-parity check, not raw-primitive detection. The supersession
+  // must name the rule that genuinely covers the same failure mode now that
+  // DRIFT-TOKEN-PARITY ships.
+  it("OWNED-TOKEN-LINT is superseded by DRIFT-TOKEN-PARITY", () => {
     expect(ownedConcernSupersededBy("OWNED-TOKEN-LINT")).toBe(
-      "DRIFT-RAW-PRIMITIVE",
+      "DRIFT-TOKEN-PARITY",
     );
   });
 });
@@ -125,8 +131,12 @@ describe("OWNED-TOKEN-LINT detector", () => {
     const hit = findings.find(f => f.concernId === "OWNED-TOKEN-LINT");
     expect(hit).toBeDefined();
     expect(hit!.file).toBe("scripts/lint-tokens.ts");
-    expect(hit!.supersededBy).toBe("DRIFT-RAW-PRIMITIVE");
-    expect(hit!.message).toMatch(/DRIFT-RAW-PRIMITIVE/);
+    expect(hit!.supersededBy).toBe("DRIFT-TOKEN-PARITY");
+    // The detect message describes the detection; the supersession +
+    // remove-or-flag recommendation is constructed by formatOwnedConcernFinding
+    // (issue #348 gating). The corrected claim must not silently re-emerge as
+    // the original false claim anywhere in the rule.
+    expect(hit!.message).not.toMatch(/DRIFT-RAW-PRIMITIVE/);
   });
 
   it("keys on intent, not filename — flags even when renamed", () => {
@@ -175,6 +185,46 @@ describe("OWNED-TOKEN-LINT detector", () => {
     const a = evaluateOwnedConcerns(input);
     const b = evaluateOwnedConcerns(input);
     expect(a).toEqual(b);
+  });
+});
+
+describe("formatOwnedConcernFinding — completeness gating", () => {
+  // ADR-0017 addendum / issue #348. The over-flag bias stands; what
+  // completeness *recommends* tightens. A finding may advise removal only
+  // when its concern names a shipped capability that genuinely covers the
+  // same failure mode. Otherwise it flags "possible shadow DS infra" and
+  // leaves the deletion call to the consumer.
+
+  it("recommends removal when supersededBy names a shipped rule", () => {
+    const line = formatOwnedConcernFinding({
+      file: "scripts/lint-tokens.ts",
+      line: 1,
+      concernId: "OWNED-TOKEN-LINT",
+      supersededBy: "DRIFT-TOKEN-PARITY",
+      message: "hand-rolled design-token linter in scripts/lint-tokens.ts",
+    });
+    expect(line).toMatch(/scripts\/lint-tokens\.ts/);
+    expect(line).toMatch(/OWNED-TOKEN-LINT/);
+    expect(line).toMatch(/superseded by DRIFT-TOKEN-PARITY/);
+    expect(line).toMatch(/remove|delete/i);
+    expect(line).not.toMatch(/possible shadow DS infra/i);
+  });
+
+  it("flags 'possible shadow DS infra' when no shipped capability covers the concern", () => {
+    const line = formatOwnedConcernFinding({
+      file: "scripts/some-future-shadow.ts",
+      line: 1,
+      concernId: "OWNED-TOKEN-LINT",
+      supersededBy: null,
+      message: "hand-rolled design-token linter in scripts/some-future-shadow.ts",
+    });
+    expect(line).toMatch(/scripts\/some-future-shadow\.ts/);
+    expect(line).toMatch(/possible shadow DS infra/i);
+    // Critical: the false-delete defect the gate exists to kill — when the
+    // pack ships no covering capability, completeness must NOT advise
+    // deletion (PRD #340 F10, issue #348).
+    expect(line).not.toMatch(/\b(?:delete|remove)\b/i);
+    expect(line).not.toMatch(/superseded by/i);
   });
 });
 

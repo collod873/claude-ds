@@ -139,8 +139,51 @@ describe("printNextStep", () => {
     expect(logged.some(l => l.includes("claude-ds audit"))).toBe(true);
   });
 
-  it("does not print breadcrumb for doctor", () => {
+  it("prints a breadcrumb for doctor (#349 F21 — CONTEXT.md mandates every command end with a → Next)", () => {
     printNextStep("doctor", {});
-    expect(logged.length).toBe(0);
+    expect(logged.length).toBeGreaterThan(0);
+    expect(logged.some(l => l.includes("→ Next:"))).toBe(true);
+  });
+
+  it("routes doctor's → Next at adopt when pre-adopt is the verdict (#349 F9/F21)", () => {
+    printNextStep("doctor", { doctorVerdict: "pre-adopt" });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds adopt");
+  });
+
+  it("routes doctor's → Next at sync when scaffold-gap is the verdict", () => {
+    printNextStep("doctor", { doctorVerdict: "scaffold-gap" });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds sync");
+  });
+
+  it("routes doctor's → Next at upgrade when repair-needed is the verdict", () => {
+    printNextStep("doctor", { doctorVerdict: "repair-needed" });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds upgrade");
+  });
+
+  it("routes doctor's → Next at upgrade when upgrade-available is the verdict", () => {
+    printNextStep("doctor", { doctorVerdict: "upgrade-available" });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds upgrade");
+  });
+
+  it("routes upgrade's → Next at audit when applied is the outcome", () => {
+    printNextStep("upgrade", { upgradeOutcome: "applied" });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds audit");
+  });
+
+  it("routes upgrade's → Next at audit when no-op is the outcome", () => {
+    printNextStep("upgrade", { upgradeOutcome: "no-op" });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds audit");
+  });
+
+  it("routes audit's → Next at audit --fix when actionable warnings remain (#349 F9)", () => {
+    printNextStep("audit", { hasActionableWarnings: true });
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds audit --fix");
   });
 });
