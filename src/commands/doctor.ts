@@ -17,6 +17,14 @@ import {
   allOwnedConcernIds,
   type OwnedConcernScannerFinding,
 } from "../lib/owned-concerns/index.js";
+import { checkVersionCurrency } from "../lib/version-currency.js";
+import {
+  computeVerificationChain,
+  runMigrations,
+} from "../lib/migration-framework.js";
+import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
+import { printNextStep, detectBuildCommand } from "../lib/log.js";
+import pkg from "../../package.json" with { type: "json" };
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -249,6 +257,16 @@ async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Prom
   lines.push(`Owned concerns checked: ${ownedConcernsChecked.join(", ")}\n`);
 
   process.stdout.write(lines.join("\n"));
+
+  // #349 F21: every command — including doctor's completeness mode —
+  // ends with a → Next breadcrumb. Findings route to the per-finding
+  // remediation prose; a clean completeness check routes back to the
+  // day-to-day build hint.
+  const buildCmd = await detectBuildCommand(cwd);
+  printNextStep("doctor", {
+    doctorVerdict: totalFindings > 0 ? "completeness-findings" : "clean",
+    buildCmd,
+  });
 
   if (totalFindings > 0) process.exit(1);
 }
@@ -533,6 +551,14 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
     const table = renderVerifyTable(results);
     process.stdout.write(table);
     const anyFail = results.some(r => r.status === "FAIL");
+    // #349 F21: every command ends with a → Next breadcrumb. A failed hook
+    // means the scaffold is broken — sync re-installs the pack files; a
+    // clean hook-verify routes back to the day-to-day build hint.
+    const buildCmd = await detectBuildCommand(cwd);
+    printNextStep("doctor", {
+      doctorVerdict: anyFail ? "scaffold-gap" : "clean",
+      buildCmd,
+    });
     if (anyFail) process.exit(1);
     return;
   }
@@ -639,6 +665,38 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
     };
   }
 
+  // #349 F16: aggregate scaffold-gap + open-exceptions + repair-needed +
+  // upgrade-available into the health verdict so a clean all-clear isn't
+  // blind to what upgrade/repair would act on. Both signals require an
+  // adopted project (a parsed config carries `packVersion`); pre-adopt
+  // doctor leaves them at zero.
+  let upgradeAvailable = false;
+  let repairNeeded = 0;
+  if (ctx.kind === "adopted") {
+    upgradeAvailable = checkVersionCurrency({
+      pinned: ctx.cfg.packVersion,
+      installed: `v${pkg.version}`,
+    }).upgradeAvailable;
+
+    // Repair-needed = N regressed migration end-states at the current
+    // packVersion. Same dry-run check `upgrade` already uses — every
+    // migration's `plan()` is idempotent and re-emits its Changes when the
+    // end-state drifted (the meta_kind_strict regression #300 closed). A
+    // failure here is a doctor concern, not a hard exit, so swallow plan
+    // errors and report "0 repaired" rather than crashing the verdict.
+    try {
+      const verifyChain = computeVerificationChain(ctx.cfg.packVersion, MIGRATION_REGISTRY);
+      if (verifyChain.length > 0) {
+        const dryReport = await runMigrations(ctx, verifyChain, "dry-run");
+        repairNeeded = dryReport.ops.filter((o) => o.changes.length > 0).length;
+      }
+    } catch {
+      // Best-effort: keep doctor running even if the verification chain
+      // hits a plan error. The next `upgrade` invocation will surface the
+      // failure with its own error path.
+    }
+  }
+
   const md = renderMarkdown(result);
   const json = JSON.stringify(result, null, 2);
   const output = `${md}\n\`\`\`json\n${json}\n\`\`\`\n`;
@@ -647,9 +705,70 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
 
   // Exit 1 if any findings: lookalikes present, managed files missing, or root dupes detected (#23)
   const hasLookalikes = findings.some(f => !f.present && f.lookalike !== null);
-  const hasMissingManaged = result.drift && result.drift.missing.length > 0;
+  const hasMissingManaged = (result.drift && result.drift.missing.length > 0) === true;
   const hasRootDupes = rootDupes.length > 0;
+  const openExceptions = result.drift?.open_exceptions ?? 0;
 
+  // #349 F16: render the health verdict — one line per aggregated signal.
+  // Picks the doctor's "verdict kind" (used by the breadcrumb below) by
+  // the same priority `recommendNextStep` uses for the dashboard: scaffold
+  // first, then root-dupes, then upgrade/repair, then clean.
+  //
+  // Pre-adopt mode collapses to a single "Not yet adopted" verdict —
+  // saying "✓ All clear" + "run npm run build" while renderMarkdown
+  // already says "Run adopt to install the scaffold" is the F9-style
+  // contradiction this PR closes for audit. Same shape, doctor edition.
+  const verdictLines: string[] = ["## Verdict", ""];
+  if (ctx.kind !== "adopted") {
+    verdictLines.push("- ⚠ Not yet adopted — `.claude-ds.json` absent");
+    if (hasLookalikes) verdictLines.push("- ✗ Lookalikes detected — rename before `adopt`");
+    if (hasRootDupes) verdictLines.push(`- ✗ Root-level duplicates: ${rootDupes.length}`);
+  } else {
+    if (hasLookalikes) verdictLines.push("- ✗ Lookalikes detected — rename or re-adopt");
+    if (hasMissingManaged) {
+      verdictLines.push(`- ✗ Scaffold gap: ${result.drift?.missing.length ?? 0} managed file(s) missing`);
+    }
+    if (hasRootDupes) verdictLines.push(`- ✗ Root-level duplicates: ${rootDupes.length}`);
+    if (repairNeeded > 0) verdictLines.push(`- ⚠ Repair needed: ${repairNeeded} regressed migration end-state(s)`);
+    if (upgradeAvailable) {
+      verdictLines.push(`- ⚠ Upgrade available: pinned ${ctx.cfg.packVersion} < installed v${pkg.version}`);
+    }
+    if (openExceptions > 0) verdictLines.push(`- ℹ Open exceptions: ${openExceptions}`);
+
+    const everythingClean =
+      !hasLookalikes &&
+      !hasMissingManaged &&
+      !hasRootDupes &&
+      repairNeeded === 0 &&
+      !upgradeAvailable;
+    if (everythingClean) verdictLines.push("- ✓ All clear");
+  }
+  verdictLines.push("");
+  process.stdout.write(verdictLines.join("\n"));
+
+  // #349 F21: every command ends with a → Next breadcrumb. Pick the route
+  // the same way the verdict ordered the concerns. Scaffold and lookalike
+  // issues outrank version concerns — you do not upgrade onto a broken
+  // baseline. Pre-adopt routes through `adopt` regardless: even a
+  // lookalike rename is a pre-`adopt` step, not a `migrate-layout` (which
+  // is an adopted-project remediation).
+  const buildCmd = await detectBuildCommand(cwd);
+  const verdict: "clean" | "pre-adopt" | "scaffold-gap" | "root-dupes" | "lookalikes" | "repair-needed" | "upgrade-available" =
+    ctx.kind !== "adopted" ? "pre-adopt" :
+    hasMissingManaged ? "scaffold-gap" :
+    hasRootDupes ? "root-dupes" :
+    hasLookalikes ? "lookalikes" :
+    repairNeeded > 0 ? "repair-needed" :
+    upgradeAvailable ? "upgrade-available" :
+    "clean";
+  printNextStep("doctor", { doctorVerdict: verdict, buildCmd });
+
+  // F16: failing the verdict on upgrade-available or repair-needed would
+  // be more aggressive than F16 demands ("not blind to" ≠ "fail the
+  // exit"). Keep today's exit-1 gates (lookalikes / scaffold gap / root
+  // dupes) — those are project-defect signals — and let upgrade-available
+  // / repair-needed surface in the verdict + breadcrumb without flipping
+  // the exit code. Tests pin both behaviors.
   if (hasLookalikes || hasMissingManaged || hasRootDupes) {
     if (hasLookalikes) {
       process.stderr.write("If these matches are false positives, re-run with --ignore '<glob>,<glob>'\n");

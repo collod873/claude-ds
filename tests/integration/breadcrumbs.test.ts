@@ -148,9 +148,9 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
     expect(r.stdout).toMatch(/→ Next:.*claude-ds audit/);
   });
 
-  it("doctor does NOT print → Next:", async () => {
+  it("doctor prints → Next: (per #349 F21 — CONTEXT.md mandates every command end with a breadcrumb)", async () => {
     const r = await runCli(["doctor", "--pack", "next-react"], { cwd: dir });
-    expect(r.stdout).not.toMatch(/→ Next:/);
+    expect(r.stdout).toMatch(/→ Next:/);
   });
 
   it("adopt --dry-run does NOT print breadcrumb", async () => {

@@ -219,6 +219,15 @@ export async function auditCmd(opts: AuditOpts) {
   } else if (fixSummary.fixedCount > 0) {
     info("No action required.");
     printNextStep("audit-fix", { buildCmd });
+  } else if (warningCount > 0 && !opts.fix) {
+    // #349 F9: warnings (orphans, deprecated-path matches, strict-root
+    // unexpected files) are actionable even though they aren't errors. The
+    // verdict must not say "No action required" while the body of the report
+    // recommended a remediation — that internal contradiction is the F9
+    // defect. Acknowledge the warnings and route the breadcrumb at the
+    // command that resolves them (`audit --fix` runs reconcile inline).
+    info(`${warningCount} warning(s) — re-run with --fix to auto-resolve.`);
+    printNextStep("audit", { hasActionableWarnings: true, buildCmd });
   } else {
     info("No action required.");
     printNextStep("audit", { hasFindings: false, buildCmd });
