@@ -61,6 +61,12 @@ const BROWNFIELD_ATOM_COUNT = 15;
 export interface FrictionBaseline {
   /** Every currently-accepted friction key (the ratchet's ledger). */
   keys: string[];
+  /**
+   * key → the documented condition under which the key may be deleted
+   * (ADR-0003). Every key MUST carry a non-empty trigger; `keysMissingTriggers`
+   * enforces it so a finding can never enter the ledger without a burn-down.
+   */
+  removalTriggers: Record<string, string>;
 }
 
 /** The reconciliation verdict the gate asserts on. */
@@ -90,6 +96,16 @@ export interface RunFrictionGateOpts {
    * diff (PRD #439 user story 20).
    */
   goldenDir?: string;
+}
+
+/**
+ * Baseline keys with no non-empty removal trigger — a violation of the ADR-0003
+ * invariant that every accepted finding documents how it burns down. The gate
+ * fails on a non-empty result, so a key can never sit in the ledger without a
+ * fix plan. Pure — unit-testable.
+ */
+export function keysMissingTriggers(baseline: FrictionBaseline): string[] {
+  return baseline.keys.filter((k) => !baseline.removalTriggers[k]?.trim());
 }
 
 /** Reconcile a run's findings against a baseline. Pure — unit-testable. */
@@ -538,9 +554,13 @@ async function fingerprint(dir: string): Promise<string> {
 /** Read and parse the committed baseline file. */
 export async function readBaseline(path: string): Promise<FrictionBaseline> {
   const raw = await readFile(path, "utf8");
-  const parsed = JSON.parse(raw) as Partial<FrictionBaseline>;
+  const parsed = JSON.parse(raw) as { keys?: unknown; _removal_triggers?: unknown };
   if (!parsed || !Array.isArray(parsed.keys)) {
     throw new Error(`friction-gate: malformed baseline at ${path} — expected { keys: string[] }`);
   }
-  return { keys: parsed.keys };
+  const removalTriggers =
+    parsed._removal_triggers && typeof parsed._removal_triggers === "object"
+      ? (parsed._removal_triggers as Record<string, string>)
+      : {};
+  return { keys: parsed.keys as string[], removalTriggers };
 }

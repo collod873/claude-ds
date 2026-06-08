@@ -30,7 +30,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { runFrictionGate, readBaseline } from "./friction-gate.js";
+import { runFrictionGate, readBaseline, keysMissingTriggers } from "./friction-gate.js";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const DIST_CLI = resolve(REPO_ROOT, "dist", "cli.js");
@@ -39,6 +39,23 @@ const BASELINE = resolve(REPO_ROOT, "tests", "e2e", "friction-baseline.json");
 const GOLDEN_DIR = resolve(REPO_ROOT, "tests", "e2e", "golden");
 
 const hasDist = existsSync(DIST_CLI);
+
+// The ADR-0003 trigger invariant (#456): every accepted finding must document
+// how it burns down. Runs WITHOUT dist — it's a pure check on the committed
+// baseline file — so a missing trigger fails plain `vitest`, not just CI's
+// built e2e tier. Closes the gap where the baseline's own _comment claimed this
+// was enforced when no code checked it.
+describe("friction baseline integrity (#456)", () => {
+  it("every baseline key carries a non-empty removal trigger", async () => {
+    const baseline = await readBaseline(BASELINE);
+    const orphans = keysMissingTriggers(baseline);
+    expect(
+      orphans,
+      `Baseline keys with no _removal_triggers entry (ADR-0003 requires one per key):\n` +
+        orphans.map((k) => `  ${k}`).join("\n"),
+    ).toEqual([]);
+  });
+});
 
 describe.skipIf(!hasDist)("e2e friction gate: crewops-snapshot", () => {
   it("findings reconcile with the committed baseline (no regressions)", async () => {

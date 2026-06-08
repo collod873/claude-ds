@@ -14,6 +14,7 @@
 import { describe, it, expect } from "vitest";
 import {
   reconcile,
+  keysMissingTriggers,
   type FrictionBaseline,
 } from "../e2e/friction-gate.js";
 import type { FrictionFinding } from "../../src/lib/friction-detector.js";
@@ -23,8 +24,12 @@ function finding(key: string): FrictionFinding {
   return { kind: "jargon-unglossed", message: `synthetic ${key}`, key };
 }
 
+/** A baseline whose keys all carry a placeholder trigger (invariant satisfied). */
 function baseline(...keys: string[]): FrictionBaseline {
-  return { keys };
+  return {
+    keys,
+    removalTriggers: Object.fromEntries(keys.map((k) => [k, `fix ${k}`])),
+  };
 }
 
 describe("reconcile — the baseline ratchet", () => {
@@ -81,5 +86,29 @@ describe("reconcile — the baseline ratchet", () => {
       "jargon-unglossed:meta.kind",
     ]);
     expect(result.stale).toEqual(["jargon-unglossed:converge"]);
+  });
+});
+
+describe("keysMissingTriggers — the ADR-0003 trigger invariant (#456)", () => {
+  it("every key carrying a non-empty trigger ⇒ no violations", () => {
+    expect(
+      keysMissingTriggers(baseline("jargon-unglossed:scaffold", "self-block:sync->heal")),
+    ).toEqual([]);
+  });
+
+  it("a key absent from removalTriggers is a violation", () => {
+    const b: FrictionBaseline = {
+      keys: ["jargon-unglossed:scaffold", "jargon-unglossed:drift"],
+      removalTriggers: { "jargon-unglossed:drift": "reword drift" },
+    };
+    expect(keysMissingTriggers(b)).toEqual(["jargon-unglossed:scaffold"]);
+  });
+
+  it("a whitespace-only trigger counts as missing", () => {
+    const b: FrictionBaseline = {
+      keys: ["jargon-unglossed:scaffold"],
+      removalTriggers: { "jargon-unglossed:scaffold": "   " },
+    };
+    expect(keysMissingTriggers(b)).toEqual(["jargon-unglossed:scaffold"]);
   });
 });
