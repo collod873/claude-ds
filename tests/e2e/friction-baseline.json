@@ -2,7 +2,10 @@
   "_comment": "PRD #439 friction baseline — the ledger of CURRENTLY-ACCEPTED friction findings measured against tests/e2e/fixtures/crewops-snapshot via the real CLI sequence (adopt -> heal -> audit --fix -> doctor -> classify --dry-run -> reconcile --dry-run -> upgrade --dry-run -> version --offline -> front door, plus an interactive PTY capture of the bare front door). This is the ratchet: a finding whose key is NOT here is a regression and FAILS the gate. Keys may only be REMOVED across commits, never added — the ONLY sanctioned addition is the day-one red recorded when the gate's command surface is first widened (e.g. the doctor/reconcile/upgrade/version entries added when grading expanded past the adopt journey). Closing a friction-fix issue means deleting its key here AND the gate confirming the finding no longer reproduces (see docs/agents/friction-loop.md). RED on day one is intended — every entry is a tracked defect with a removal trigger (ADR-0003).",
   "_removal_triggers": {
     "repetition:doctor:- [x] `<path>`": "Collapse doctor's per-file '- [x] `<path>`' managed-files checklist to a tier/count summary by default (mirror the heal wall-collapse, #448); full list behind --verbose.",
-    "next-step-dead-end:run 'claude-ds audit' to check for drift": "reconcile/upgrade/version suggest 'run claude-ds audit' as a → Next: step, but audit is read-only and changes no state, so the liveness runner reads it as a dead end. Fix by either dropping the suggestion when the tree is already clean, or pointing at an action that actually advances state."
+    "next-step-dead-end:run 'claude-ds audit' to check for drift": "reconcile/upgrade/version suggest 'run claude-ds audit' as a → Next: step, but audit is read-only and changes no state, so the liveness runner reads it as a dead end. Fix by either dropping the suggestion when the tree is already clean, or pointing at an action that actually advances state.",
+    "repetition:sync:skip: <path> — in sync": "Collapse sync's per-file 'skip: <path> — in sync' wall to a count by default (the ~40-line block buries the one 'rewrite:' line that matters); full list behind --verbose, mirroring the heal/doctor wall-collapse.",
+    "repetition:sync:skip: <path> — seeded; never re-touched": "Collapse sync's per-file 'skip: <path> — seeded; never re-touched' wall to a count by default; full list behind --verbose.",
+    "self-block:sync->heal": "sync leaves managed writes in the tree, then a bare heal refuses on the dirty tree — the suggested sequence wedges itself. Fix by having heal tolerate its own pipeline's managed writes (it already runs sub-commands with --allow-dirty internally) or by not steering the user from sync into a heal that will refuse."
   },
   "keys": [
     "next-step-dead-end:npm run ds:build-manifest",
@@ -10,6 +13,9 @@
     "next-step-dead-end:run your build (e.g. npm run build) to verify everything compiles",
     "next-step-dead-end:run 'claude-ds audit' to check for drift",
     "jargon-unglossed:scaffold",
-    "repetition:doctor:- [x] `<path>`"
+    "repetition:doctor:- [x] `<path>`",
+    "repetition:sync:skip: <path> — in sync",
+    "repetition:sync:skip: <path> — seeded; never re-touched",
+    "self-block:sync->heal"
   ]
 }

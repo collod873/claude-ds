@@ -1,0 +1,4 @@
+# command: node dist/cli.js enforce
+# exit: 3
+# --- stdout/stderr below; bytes are verbatim from the built CLI ---
+Flip mode warn → block (open exceptions ≤ 10)? [y/N]: non-TTY, no answer available — pass --yes to confirm non-interactively

@@ -2,10 +2,10 @@
  * Friction gate e2e (PRD #439) — the closing edge of the verification loop.
  *
  * Runs the **real built CLI** through the real command sequence
- * (`adopt → heal → audit --fix → doctor → classify → reconcile → upgrade →
- * version → front door`, plus an interactive PTY front-door capture) against a
- * copy of the harvested `crewops-snapshot` fixture, captures the rendered
- * stdout/stderr, runs the
+ * (`adopt → heal → audit --fix → doctor → classify → sync → reconcile →
+ * upgrade → version → enforce → front door`, plus an interactive PTY front-door
+ * capture) against a copy of the harvested `crewops-snapshot` fixture, captures
+ * the rendered stdout/stderr, runs the
  * pure friction detector over it (with a real next-step runner injected), and
  * reconciles the findings against the committed `friction-baseline.json`.
  *
