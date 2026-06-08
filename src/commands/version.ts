@@ -1,7 +1,7 @@
 import { parseConfig } from "../lib/config.js";
 import { parseLsRemote } from "../lib/tags.js";
 import { semverLt } from "../lib/version-currency.js";
-import { printNextStep } from "../lib/log.js";
+import { colors, printNextStep } from "../lib/log.js";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -92,20 +92,21 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
   const pinned = raw ? parseConfig(raw).packVersion : null;
   const installedVer = `v${pkg.version}`;
 
+  const c = colors();
   if (opts.check) {
     if (!pinned) {
-      console.log("no .claude-ds.json found — cannot check version");
+      console.log(c.red("no .claude-ds.json found — cannot check version"));
       printNextStep("version", { versionState: "no-config" });
       process.exit(1);
     }
 
     if (pinned === installedVer) {
-      console.log(`up to date (${installedVer})`);
+      console.log(c.green(`up to date (${installedVer})`));
       printNextStep("version", { versionState: "up-to-date" });
       process.exit(0);
     }
 
-    console.log(`pinned: ${pinned}  installed: ${installedVer}`);
+    console.log(`pinned: ${c.bold(pinned)}  installed: ${c.bold(installedVer)}`);
     console.log("");
 
     // Resolve CHANGELOG.md via the same relative URL pattern the package.json
@@ -118,7 +119,7 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
     if (changelog) {
       const sections = extractChangelogSections(changelog, pinned, installedVer);
       if (sections.length > 0) {
-        console.log("Changes between your pinned version and installed version:\n");
+        console.log(c.cyan("Changes between your pinned version and installed version:") + "\n");
         for (const s of sections) {
           // Print just the heading line for brevity
           const heading = s.split("\n")[0];
@@ -141,21 +142,21 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
   // `(none)` when no config is present. `latest` is the highest tag at the
   // remote; failures print a hint on stderr instead of silently rendering
   // `latest: unknown` (issue #368).
-  console.log(`installed: ${installedVer}`);
-  console.log(`pinned: ${pinned ?? "(none)"}`);
+  console.log(`installed: ${c.bold(installedVer)}`);
+  console.log(`pinned: ${c.bold(pinned ?? "(none)")}`);
 
   if (opts.offline) {
-    console.log(`latest: unknown`);
+    console.log(`latest: ${c.dim("unknown")}`);
     printNextStep("version", { versionState: defaultVersionState(pinned, installedVer) });
     return;
   }
 
   const result = fetchLatestTag(DEFAULT_REMOTE);
   if (result.ok) {
-    console.log(`latest: ${result.tag ?? "unknown"}`);
+    console.log(`latest: ${c.bold(result.tag ?? "unknown")}`);
   } else {
-    console.log(`latest: unknown`);
-    console.error(`(latest tag check failed: ${result.reason}; pass --offline to skip)`);
+    console.log(`latest: ${c.dim("unknown")}`);
+    console.error(c.red(`(latest tag check failed: ${result.reason}; pass --offline to skip)`));
   }
   printNextStep("version", { versionState: defaultVersionState(pinned, installedVer) });
 }
