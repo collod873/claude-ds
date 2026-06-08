@@ -29,11 +29,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import {
   AUTO_FILED_MARKER,
-  AUTO_FILED_LABEL,
   buildIssueBody,
   buildPrdBody,
   decideEscalation,
-  failureSignature,
   type HarnessFailure,
   type OpenAutoFiledIssue,
 } from "../../src/lib/self-correcting-loop.js";

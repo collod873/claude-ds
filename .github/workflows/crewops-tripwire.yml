@@ -94,6 +94,17 @@ jobs:
           popd
         id: real
 
+      - name: Ensure tripwire label exists
+        # Idempotent label-create on first fire (mirrors the pattern in
+        # architecture-review.yml). Without this, `gh issue create --label
+        # claude-ds:fixture-refresh` fails on the first divergence run.
+        if: steps.real.outputs.skip != 'true'
+        run: |
+          gh label create "claude-ds:fixture-refresh" \
+            --color "FBCA04" \
+            --description "Fixture-refresh request auto-filed by the Crewops tripwire (issue #416)" \
+            >/dev/null 2>&1 || true
+
       - name: Compare heal payloads
         if: steps.real.outputs.skip != 'true'
         env:
