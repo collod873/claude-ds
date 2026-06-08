@@ -2,6 +2,6 @@
 # exit: 0
 # --- stdout/stderr below; bytes are verbatim from the built CLI ---
 rewrite: .claude/settings.json — hybrid json owned keys changed upstream
-skipped 83 files already in sync (1 hybrid json in sync, 37 in sync, 2 marker region in sync, 43 seeded; never re-touched) — re-run with --verbose to list them
+skipped 83 files already in sync (1 hybrid json in sync, 42 in sync, 2 marker region in sync, 38 seeded; never re-touched) — re-run with --verbose to list them
 config unchanged
 [dry-run] planned changes shown above — no files modified
