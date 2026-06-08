@@ -29,6 +29,16 @@ Use red-green-refactor where applicable:
 
 Run `npm run typecheck` before committing. Run focused tests where relevant.
 
+## Execution discipline
+
+- Run every command in the **foreground** and wait for it to finish. The full
+  test suite (`npx vitest run`) completes in well under a minute — run it inline.
+- **Never** background a command and then poll or busy-wait on it (e.g.
+  `cmd & while ps -p $!; do sleep 10; done`). A long, silent background command
+  produces no stdout and trips the harness idle-timeout, which kills this run
+  before your commits can be pushed — losing all your work (#381).
+- Keep output flowing: if a step is slow, run it directly so its stdout streams.
+
 # COMMIT
 
 Make one or more commits on `{{BRANCH}}` with conventional commit messages.
