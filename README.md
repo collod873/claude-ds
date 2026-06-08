@@ -7,7 +7,7 @@ Shared design-system governance and scaffold CLI. Installs a consistent `design-
 The bare command with no subcommand is the front door. `cd` into any project and run:
 
 ```sh
-npx github:collod873/claude-ds#v1.4.0
+npx github:collod873/claude-ds#v1.5.0
 ```
 
 It routes itself:
@@ -28,10 +28,10 @@ If you'd rather skip the greet and call the onramp directly:
 
 ```sh
 # Greenfield — bootstrap a new project with the full scaffold
-npx github:collod873/claude-ds#v1.4.0 init --pack next-react
+npx github:collod873/claude-ds#v1.5.0 init --pack next-react
 
 # Brownfield — adopt into an existing project
-npx github:collod873/claude-ds#v1.4.0 adopt --pack next-react
+npx github:collod873/claude-ds#v1.5.0 adopt --pack next-react
 ```
 
 ## Commands
