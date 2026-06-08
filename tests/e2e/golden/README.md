@@ -3,7 +3,10 @@
 This directory is the committed home for the **rendered terminal output** of
 the e2e gate's command steps. The harness's gate mode (`runE2eHarness({ …,
 goldenDir })`) writes one file per step here, named `NN-<step>.txt` in run
-order (`00-adopt.txt`, `01-heal.txt`, …).
+order. The graded sequence is `adopt → heal → audit --fix → doctor →
+classify --dry-run → reconcile --dry-run → upgrade --dry-run → version --offline
+→ front door` (`00-adopt.txt` … `08-front-door.txt`), plus the interactive
+front-door capture appended last (`09-front-door-interactive.txt`).
 
 ## What's in a golden file
 
@@ -26,7 +29,7 @@ the bytes a TTY-blind agent reads back from stdout/stderr — the headless
 contract is intact; the capture comes from the **same built CLI a user runs**,
 with no test-only rendering path.
 
-## The interactive golden (`04-front-door-interactive.txt`)
+## The interactive golden (`09-front-door-interactive.txt`)
 
 One step is the exception to "what a blind agent reads": the bare front door
 captured through a **pseudo-terminal** so the CLI takes its `isTTY()` path

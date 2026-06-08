@@ -1,0 +1,5 @@
+# command: node dist/cli.js reconcile --dry-run
+# exit: 0
+# --- stdout/stderr below; bytes are verbatim from the built CLI ---
+reconcile: no orphans or collisions found — tree is clean
+→ Next: run 'claude-ds audit' to check for drift

@@ -1,10 +1,15 @@
 {
-  "_comment": "PRD #439 friction baseline — the ledger of CURRENTLY-ACCEPTED friction findings measured against tests/e2e/fixtures/crewops-snapshot via the real CLI sequence (adopt -> heal -> audit --fix -> front door, plus an interactive PTY capture of the bare front door — #443). This is the ratchet: a finding whose key is NOT here is a regression and FAILS the gate. Keys may only be REMOVED across commits, never added. Closing a friction-fix issue means deleting its key here AND the gate confirming the finding no longer reproduces (see docs/agents/friction-loop.md). RED on day one is intended — every entry is a tracked defect with a removal trigger (ADR-0003).",
-  "_removal_triggers": {},
+  "_comment": "PRD #439 friction baseline — the ledger of CURRENTLY-ACCEPTED friction findings measured against tests/e2e/fixtures/crewops-snapshot via the real CLI sequence (adopt -> heal -> audit --fix -> doctor -> classify --dry-run -> reconcile --dry-run -> upgrade --dry-run -> version --offline -> front door, plus an interactive PTY capture of the bare front door). This is the ratchet: a finding whose key is NOT here is a regression and FAILS the gate. Keys may only be REMOVED across commits, never added — the ONLY sanctioned addition is the day-one red recorded when the gate's command surface is first widened (e.g. the doctor/reconcile/upgrade/version entries added when grading expanded past the adopt journey). Closing a friction-fix issue means deleting its key here AND the gate confirming the finding no longer reproduces (see docs/agents/friction-loop.md). RED on day one is intended — every entry is a tracked defect with a removal trigger (ADR-0003).",
+  "_removal_triggers": {
+    "repetition:doctor:- [x] `<path>`": "Collapse doctor's per-file '- [x] `<path>`' managed-files checklist to a tier/count summary by default (mirror the heal wall-collapse, #448); full list behind --verbose.",
+    "next-step-dead-end:run 'claude-ds audit' to check for drift": "reconcile/upgrade/version suggest 'run claude-ds audit' as a → Next: step, but audit is read-only and changes no state, so the liveness runner reads it as a dead end. Fix by either dropping the suggestion when the tree is already clean, or pointing at an action that actually advances state."
+  },
   "keys": [
     "next-step-dead-end:npm run ds:build-manifest",
     "next-step-dead-end:run 'claude-ds classify --src <dir>' to migrate existing components",
     "next-step-dead-end:run your build (e.g. npm run build) to verify everything compiles",
-    "jargon-unglossed:scaffold"
+    "next-step-dead-end:run 'claude-ds audit' to check for drift",
+    "jargon-unglossed:scaffold",
+    "repetition:doctor:- [x] `<path>`"
   ]
 }

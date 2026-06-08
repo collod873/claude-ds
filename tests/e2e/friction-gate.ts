@@ -2,8 +2,10 @@
  * PRD #439 — friction gate + baseline ratchet (the closing edge of the loop).
  *
  * Drives the **real built CLI** through the real command sequence
- * (`adopt → heal → audit --fix → front door`) against a copy of the harvested
- * `crewops-snapshot` fixture, captures the rendered stdout/stderr of each step,
+ * (`adopt → heal → audit --fix → doctor → classify → reconcile → upgrade →
+ * version → front door`, plus an interactive PTY front-door capture) against a
+ * copy of the harvested `crewops-snapshot` fixture, captures the rendered
+ * stdout/stderr of each step,
  * runs `scanFriction` over it (with a real next-step runner injected), and
  * reconciles the resulting findings against a committed `friction-baseline`.
  *
@@ -140,8 +142,8 @@ export async function captureFrictionRun(
   // the dashboard + commitment gate a human sees, which the piped steps below
   // never render (#443). stdin is /dev/null, so the gate cancels and the tree is
   // untouched, leaving the headless sequence unaffected. It runs here (before
-  // heal mutates the tree) but is appended to `steps` LAST so it goldens as
-  // `04-front-door-interactive.txt` without renumbering the existing goldens.
+  // heal mutates the tree) but is appended to `steps` LAST so it always goldens
+  // as the highest-numbered `NN-front-door-interactive.txt` step.
   const interactive = await captureInteractive({
     name: "front-door-interactive",
     cliPath: opts.cliPath,
@@ -155,12 +157,40 @@ export async function captureFrictionRun(
   // pass `--allow-dirty` for the same reason heal runs it inline. This is the
   // real fixer surface a consumer reaches for after heal.
   steps.push(await runStep("audit-fix", [opts.cliPath, "audit", "--fix", "--allow-dirty"], work, timeoutMs));
+
+  // Standalone diagnostic surface — the commands a consumer runs on their own to
+  // ask "what's here / what else can I do" once the tree is healed. The original
+  // gate only graded the `adopt → heal → audit → front door` journey, leaving
+  // every other command's human output ungraded for friction (the surface where
+  // a wall of lines, jargon, or a dead-end `→ Next:` actually bites). These are
+  // the read-only / `--dry-run` commands that need no argument, no git repo, and
+  // no network, so they stay deterministic on the committed snapshot:
+  //   doctor          — health checklist + verdict
+  //   classify        — classification plan (dry-run; never moves files)
+  //   reconcile       — orphan/collision report (dry-run; never deletes)
+  //   upgrade         — version-bump preview (dry-run; pins to installed CLI, no fetch)
+  //   version         — installed/pinned report (--offline; no remote tag lookup)
+  // Deliberately NOT graded here, each for a determinism reason (NOT silently
+  // dropped — see PRD #439 "no silent caps"): `init` (re-scaffolds a greenfield
+  // tree, conflicts with the adopted one), `sync`/`sync --dry-run` (fetches
+  // upstream — heal already exercises sync internally), `reconform` (spawns
+  // `tsc --noEmit`, needs installed deps), `enforce` (mutates hook mode behind a
+  // prompt), `migrate`/`migrate-layout` (require a path argument and a git repo).
+  // Add them here as the snapshot grows the fixtures/deps to make them
+  // deterministic.
+  steps.push(await runStep("doctor", [opts.cliPath, "doctor"], work, timeoutMs));
+  steps.push(await runStep("classify", [opts.cliPath, "classify", "--dry-run"], work, timeoutMs));
+  steps.push(await runStep("reconcile", [opts.cliPath, "reconcile", "--dry-run"], work, timeoutMs));
+  steps.push(await runStep("upgrade", [opts.cliPath, "upgrade", "--dry-run"], work, timeoutMs));
+  steps.push(await runStep("version", [opts.cliPath, "version", "--offline"], work, timeoutMs));
+
   // Front door: the bare no-arg invocation — what a user types to "check in".
   steps.push(await runStep("front-door", [opts.cliPath], work, timeoutMs));
 
-  // Append the interactive capture last (goldens as 04). Null ⇒ `script(1)` is
-  // unavailable; skip rather than block the gate — the interactive findings then
-  // read as `stale` (gone), which the ratchet reports without failing.
+  // Append the interactive capture last (it always goldens as the highest-
+  // numbered step). Null ⇒ `script(1)` is unavailable; skip rather than block
+  // the gate — the interactive findings then read as `stale` (gone), which the
+  // ratchet reports without failing.
   if (interactive) {
     steps.push(interactive);
   } else {
