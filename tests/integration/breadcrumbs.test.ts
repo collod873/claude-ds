@@ -225,6 +225,29 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
     expect(combined).toMatch(/→ Next:.*claude-ds adopt/);
   });
 
+  // #363: pin the `ahead` routing (pinned > installed) — the only branch with a
+  // non-`run 'claude-ds X'` message ("update the CLI binary…"). Both surfaces
+  // — default mode and --check — share the same switch, so cover both.
+  it("version (default, offline, pinned > installed) routes → Next: to update the CLI binary", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v999.0.0", pack: "next-react", mode: "warn" }),
+    );
+    const r = await runCli(["version", "--offline"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/→ Next:.*update the CLI binary/);
+  });
+
+  it("version --check (pinned > installed) routes → Next: to update the CLI binary", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v999.0.0", pack: "next-react", mode: "warn" }),
+    );
+    const r = await runCli(["version", "--check"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/→ Next:.*update the CLI binary/);
+  });
+
   it("migrate-layout (nothing to migrate) prints → Next:", async () => {
     const { execFile: execFileCb } = await import("node:child_process");
     const { promisify } = await import("node:util");
