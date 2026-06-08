@@ -319,6 +319,10 @@
       "category": "managed"
     },
     {
+      "path": "design-system/contracts/import-meta-glob.d.ts",
+      "category": "managed"
+    },
+    {
       "path": ".claude/skills/aesthetic-principles/SKILL.md",
       "category": "seeded"
     },

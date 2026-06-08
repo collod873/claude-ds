@@ -8,10 +8,18 @@ declare namespace JSX {
   interface ElementChildrenAttribute { children: Record<string, unknown>; }
 }
 
+declare namespace React {
+  type ReactNode = unknown;
+  type ComponentType<P = unknown> = (props: P) => unknown;
+  function createElement(
+    type: unknown,
+    props?: Record<string, unknown> | null,
+    ...children: unknown[]
+  ): unknown;
+}
+
 declare module "react" {
-  export type ReactNode = unknown;
-  const React: unknown;
-  export default React;
+  export = React;
 }
 
 declare module "react/jsx-runtime" {

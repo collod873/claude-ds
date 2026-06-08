@@ -27,8 +27,6 @@
   "exclude": [
     "node_modules",
     ".claude-ds",
-    "**/*.test.ts",
-    "**/*.test.tsx",
     "**/*.showcase.tsx"
   ]
 }
