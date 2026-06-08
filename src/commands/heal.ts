@@ -13,6 +13,8 @@ import {
 import type { PendingDecision } from "../lib/decision/index.js";
 import { driveRemediation } from "../lib/remediation-driver.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
+import { deriveProjectState } from "../lib/project-state.js";
+import { planRemediation } from "../lib/remediation-planner.js";
 
 /**
  * `claude-ds heal` — drive a consumer tree to a fixed point in one command.
@@ -90,6 +92,19 @@ export interface HealOpts {
    * so the JSON document is the entirety of stdout.
    */
   json?: boolean;
+  /**
+   * Issue #416: preview-only mode. Derive project state + plan the
+   * remediation walk, but don't run anything. Combined with `--json`,
+   * returns a structured pass/fail (`verdict` is `"clean"` when the
+   * planner emits an empty plan, otherwise `"work-pending"`) suitable for
+   * the real-Crewops tripwire and other headless self-checks.
+   *
+   * Designed so a scheduled job can call `claude-ds heal --dry-run --json`
+   * against real Crewops to confirm the fixture still mirrors reality —
+   * a non-clean verdict against real Crewops while the fixture says clean
+   * is the tripwire's central divergence signal.
+   */
+  dryRun?: boolean;
 }
 
 export async function healCmd(opts: HealOpts): Promise<void> {
@@ -128,6 +143,43 @@ export async function healCmd(opts: HealOpts): Promise<void> {
     err(m);
     if (opts.json) emitHeadless(errorResult("heal", m));
     process.exit(2);
+  }
+
+  // Issue #416: `--dry-run` plans the walk without running anything. Combined
+  // with `--json` this is the headless tripwire signal — a scheduled job can
+  // call this against real Crewops and compare its envelope to the fixture's.
+  // The dry-run path deliberately skips the convergence loop, the live progress
+  // UI, and the consumer-verify gate: it asks the planner "would this project
+  // need heal?", not "what does heal do to it?".
+  if (opts.dryRun) {
+    let state;
+    try {
+      state = await deriveProjectState(cwd);
+    } catch (e) {
+      const m = `heal --dry-run: failed to derive project state: ${e instanceof Error ? e.message : String(e)}`;
+      err(m);
+      if (opts.json) emitHeadless(errorResult("heal", m));
+      process.exit(2);
+    }
+    const plan = planRemediation(state);
+    const ok = plan.length === 0;
+    const verdict = ok ? "clean" : "work-pending";
+    if (opts.json) {
+      emitHeadless({
+        command: "heal",
+        ok,
+        verdict,
+        exitCode: ok ? HEADLESS_EXIT.OK : HEADLESS_EXIT.FINDINGS,
+        actions: { dryRun: true, plan, maxIterations },
+        remaining: { plan, planLength: plan.length, state },
+      });
+    }
+    if (ok) {
+      info("heal --dry-run: planner emitted an empty plan — project is at a fixed point.");
+    } else {
+      err(`heal --dry-run: plan would run ${plan.join(" → ")} (${plan.length} step(s))`);
+    }
+    process.exit(ok ? 0 : 1);
   }
 
   // Resumability hint (PRD #325 / sub-issue #328). TTY only — agent runs
