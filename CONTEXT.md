@@ -97,18 +97,29 @@ with no access to any consumer's code — so the oracle lives outside the
 component body and catches wrong-from-day-one bugs, not just regressions
 (the F3 trap a per-component `.test.tsx` falls into). Drives the
 component purely through the rendered DOM by ARIA role and ARIA state, so
-one contract serves every **single-component** implementation of that
-role; the same property subsumes a11y verification. The runner renders
-one DS component into one container, so a *multi-part* widget whose ARIA
-anchor is only assembled by composing sub-parts in consumer usage (e.g. a
-headless-lib combobox: cmdk/base-ui/radix root + trigger + content +
-item) is out of scope until a multi-part contract model lands — a tracked
-limitation, ADR-0022 / issue #455, not a silent gap. Runs in the
-consumer's existing vitest + jsdom runtime (#297) against the component's
-`meta.examples`. Today the pack ships exactly one — combobox; further
-contracts ship only when a real consumer component demands them
-(ADR-0016's anti-speculative-infra constraint).
+one contract serves every implementation of that role; the same property
+subsumes a11y verification. The contract drives a **composed-widget mount**
+(see *Contract example*), so a *multi-part* widget whose ARIA anchor is only
+assembled by composing sub-parts in consumer usage (a headless-lib combobox:
+cmdk/base-ui/radix root + trigger + content + item) is in scope — the mount
+returns the assembled widget (ADR-0024, which resolves the single-component
+limit ADR-0022 had recorded). Runs in the consumer's existing vitest + jsdom
+runtime (#297). Today the pack ships exactly one — combobox; further contracts
+ship only when a real consumer component demands them (ADR-0016's
+anti-speculative-infra constraint).
 _Avoid_: pattern contract, behavioral spec, a11y test, snapshot.
+
+### Contract example
+A composed-widget mount the role contract drives — a `meta.contractExamples`
+entry whose `render()` thunk returns the **fully assembled** widget (for a
+multi-part combobox: the root composed with its trigger/input/content/item
+children, since the `role="combobox"` anchor only exists once they are mounted
+together). Distinct from a showcase *example* (`meta.examples`, flat props,
+visual): a contract example is behavioral and is kept in its own field so a JSX
+thunk never reaches the showcase/GEN-001 whole-array `JSON.parse` (ADR-0024). A
+role stamped with zero contract examples is a green, resolvable soft-skip (the
+runner names the part and the one action that activates it), never a red failure.
+_Avoid_: calling it a showcase example, a fixture, or a story.
 
 ### Smart part
 A DS atom or composite whose body uses React state, effect, or context —

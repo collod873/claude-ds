@@ -26,16 +26,21 @@ function importsFromDomainRoot(source: string, domainRoots: string[]): boolean {
  * either, and the proposer must not miss a combobox just because the consumer
  * prefers single quotes.
  *
- * Detection is **deliberately narrow** — literal `role="combobox"` in the
- * source only. Do NOT broaden it to catch library-applied roles (cmdk /
- * base-ui / radix apply `role="combobox"` at runtime, so it never appears as
- * source text). That is a known, intentional gap, not an oversight: the
- * single-component contract runner cannot drive a multi-part headless combobox
- * (root provider + Trigger/Input/Content/Item composed in consumer usage), so
- * stamping the role from an import/render heuristic would turn a green
- * soft-skip into a RED failure on real consumers — strictly worse (north
- * star: never break a consumer). Detection broadens ONLY in lock-step with a
- * multi-part runner model. See ADR-0022 and issue #455 before changing this.
+ * Detection covers BOTH the literal anchor and library-applied roles, now that
+ * the multi-part contract model exists (ADR-0024). A literal `role="combobox"`
+ * in the source is the unambiguous single-component case; an `import … from
+ * "cmdk"` is the headless-lib case (cmdk / base-ui / radix apply
+ * `role="combobox"` at runtime, so it never appears as source text — see the
+ * `IMPORT_PATTERNS` rationale below).
+ *
+ * Broadening to the import heuristic was previously forbidden (ADR-0022 §2):
+ * with only a single-component runner, stamping a role the runner couldn't
+ * drive turned a green soft-skip into a RED failure on real consumers —
+ * strictly worse. That coupling is now satisfied. Detection and the runner
+ * moved together (ADR-0024): a stamped role with no composed `contractExamples`
+ * mount lands in the runner's `pending` arm — a GREEN, resolvable soft-skip —
+ * never a red failure. So the import heuristic ships here, lock-step with the
+ * multi-part model, exactly as ADR-0022 required. Read ADR-0024 before changing.
  */
 const ROLE_PATTERNS: { role: string; anchor: RegExp }[] = [
   // `role="combobox"` is the WAI-APG anchor the shipped combobox contract
@@ -43,6 +48,24 @@ const ROLE_PATTERNS: { role: string; anchor: RegExp }[] = [
   // part renders that attribute, it is — by definition — claiming to be a
   // combobox, so the proposal is unambiguous.
   { role: "combobox", anchor: /\brole\s*=\s*['"]combobox['"]/ },
+];
+
+/**
+ * Import-based role anchors for headless libraries that apply the ARIA role at
+ * runtime, so no literal `role="..."` ever appears in the source (ADR-0024,
+ * issue #461). Matched only on smart parts (the presentational guard runs
+ * first), so a pure re-export or type shim never trips it.
+ *
+ * `cmdk` is the combobox engine itself — `import { Command } from "cmdk"` is a
+ * near-unambiguous "this part IS a combobox/command widget" signal, and command
+ * palettes are comboboxes under WAI-APG, so the proposal holds even for the
+ * palette framing. We key on `cmdk` rather than the more generic base-ui
+ * popover import (a popover is not necessarily a combobox) to keep the
+ * false-positive rate near zero. A stamped-but-unmounted combobox is safe
+ * regardless: it soft-skips green until the consumer authors a composed mount.
+ */
+const IMPORT_PATTERNS: { role: string; anchor: RegExp }[] = [
+  { role: "combobox", anchor: /\bfrom\s+['"]cmdk['"]/ },
 ];
 
 /**
@@ -79,9 +102,12 @@ export type RoleProposal =
  *   1. Presentational parts (no smart-part hook) → `null`. The role-contract
  *      system only governs *behavior*; a pure render-of-props is fully
  *      covered by the showcase mirror (ADR-0003).
- *   2. ARIA anchor match → `{ kind: "role", role }`. The same anchor the
- *      shipped contract selects on, so a positive proposal means the
- *      contract will be able to drive the component.
+ *   2. ARIA anchor match (literal `role="combobox"`) OR a headless-lib import
+ *      anchor (`cmdk`) → `{ kind: "role", role }`. The literal anchor is the
+ *      single-component case; the import anchor is the runtime-applied-role
+ *      case the multi-part runner now handles (ADR-0024). A positive proposal
+ *      means the contract *can* drive the part once a composed mount exists; if
+ *      none exists yet the runner soft-skips green, never red.
  *   3. Smart, no shipped role, AND imports from a configured domain root →
  *      `{ kind: "candidate-feature" }`. The ADR-0005 import predicate fires
  *      so the relocate-to-`features/` hand-off is real.
@@ -100,6 +126,9 @@ export function proposeRole(
 ): RoleProposal | null {
   if (!isSmartPartFromSource(source)) return null;
   for (const { role, anchor } of ROLE_PATTERNS) {
+    if (anchor.test(source)) return { kind: "role", role };
+  }
+  for (const { role, anchor } of IMPORT_PATTERNS) {
     if (anchor.test(source)) return { kind: "role", role };
   }
   if (importsFromDomainRoot(source, domainRoots)) {

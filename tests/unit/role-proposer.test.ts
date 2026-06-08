@@ -56,6 +56,62 @@ describe("proposeRole — combobox detection", () => {
     `;
     expect(proposeRole(src)).toEqual({ kind: "role", role: "combobox" });
   });
+
+  // ADR-0024: detection now also catches the runtime-applied-role case — a
+  // headless-lib combobox built on cmdk never carries a literal role="combobox"
+  // in source (cmdk applies it at runtime). Safe to stamp now that the
+  // multi-part runner soft-skips a stamped-but-unmounted role instead of going
+  // red (#461).
+  it("proposes role=combobox for a smart part importing cmdk (runtime-applied role)", () => {
+    const src = `
+      import * as React from "react";
+      import { Command as CommandPrimitive } from "cmdk";
+      import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
+      export function Combobox({ children }: { children: React.ReactNode }) {
+        const [open, setOpen] = React.useState(false);
+        return <CommandPrimitive>{children}</CommandPrimitive>;
+      }
+    `;
+    expect(proposeRole(src)).toEqual({ kind: "role", role: "combobox" });
+  });
+
+  it("proposes role=combobox for a cmdk import with single quotes", () => {
+    const src = `
+      import { useState } from "react";
+      import { Command } from 'cmdk';
+      export function CommandPalette() {
+        const [q, setQ] = useState("");
+        return <Command />;
+      }
+    `;
+    expect(proposeRole(src)).toEqual({ kind: "role", role: "combobox" });
+  });
+
+  it("does NOT stamp combobox on a presentational part that imports cmdk", () => {
+    // The presentational guard runs before the import anchor: a pure re-export
+    // or type shim that names cmdk but uses no state is not a combobox to drive.
+    const src = `
+      import { Command } from "cmdk";
+      export function CommandRe(props: { children: unknown }) {
+        return <Command>{props.children as any}</Command>;
+      }
+    `;
+    expect(proposeRole(src)).toBeNull();
+  });
+
+  it("does NOT stamp combobox for base-ui popover alone (no cmdk)", () => {
+    // A popover is not necessarily a combobox; keying on cmdk keeps the
+    // false-positive rate near zero (ADR-0024).
+    const src = `
+      import { useState } from "react";
+      import { Popover } from "@base-ui/react/popover";
+      export function Tooltip() {
+        const [open, setOpen] = useState(false);
+        return <Popover open={open} />;
+      }
+    `;
+    expect(proposeRole(src)).toEqual({ kind: "tracked-exception" });
+  });
 });
 
 describe("proposeRole — tracked-exception default (PRD #340 F7)", () => {

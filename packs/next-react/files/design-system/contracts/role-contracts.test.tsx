@@ -14,7 +14,6 @@
  * with `eager: true`, so role selection happens at test-collection time and
  * the vitest UI lists every role-bearing component as its own test case.
  */
-import React from "react";
 import { describe, test, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
 import {
@@ -31,18 +30,16 @@ const sources = import.meta.glob<Record<string, unknown>>(
 function toMetaModule(path: string, mod: Record<string, unknown>): MetaModule | null {
   const meta = mod.meta;
   if (!meta || typeof meta !== "object") return null;
-  // Convention: the component is either the default export or the first
-  // function-valued named export. (No coupling to a specific export style —
-  // matches how the showcase generator resolves the rendered component.)
-  const Component =
-    (typeof mod.default === "function" ? mod.default : undefined) ??
-    Object.values(mod).find((v) => typeof v === "function");
-  if (!Component) return null;
+  // The contract path mounts the composed widget via `meta.contractExamples`
+  // thunks (ADR-0024), so the runner needs no resolved component. We therefore
+  // do NOT require a function-valued export here: a multi-part combobox root is
+  // often a context provider that isn't the file's first function export, and
+  // requiring one would silently drop it from discovery (no role seen → no
+  // soft-skip). `meta` alone is enough to discover and route the part.
   const file = path.split("/").pop() ?? path;
   const name = file.replace(/\.tsx$/, "");
   return {
     name,
-    Component,
     meta: meta as MetaModule["meta"],
   };
 }
@@ -51,42 +48,40 @@ const modules: MetaModule[] = Object.entries(sources)
   .map(([path, mod]) => toMetaModule(path, mod))
   .filter((m): m is MetaModule => m !== null);
 
-const roleBearing = selectRoleBearingComponents(modules);
+const { drivable, pending } = selectRoleBearingComponents(modules);
 
 afterEach(() => cleanup());
 
 describe("role contracts", () => {
-  if (roleBearing.length === 0) {
-    // No role-bearing components found. Two cases land here, both green:
-    //
-    //   - Fresh project / mid-rollout — no role declarations yet; the runner
-    //     is silent until `classify` proposes roles.
-    //   - Known limitation (ADR-0022) — a multi-part headless-lib combobox
-    //     (cmdk / base-ui / radix) applies `role="combobox"` at runtime, so
-    //     detection never stamps a role, AND the single-component runner
-    //     can't drive a widget that's only assembled in consumer usage.
-    //     Detection stays narrow on purpose: broadening it without a
-    //     multi-part runner would turn this green skip RED on real consumers
-    //     (strictly worse — see ADR-0022 / issue #455).
-    //
-    // The skip stays green either way (never a red failure dropped into a
-    // consumer). The label names the limitation so "1 skipped" reads as the
-    // tracked gap it is, not as benign mid-rollout state.
-    test.skip(
-      "no single-component role-bearing parts (fresh project, or multi-part headless widget — ADR-0022)",
-      () => {},
-    );
+  if (drivable.length === 0 && pending.length === 0) {
+    // No role-bearing parts at all — fresh project / mid-rollout. The runner is
+    // silent until `classify` proposes roles. Green, by design.
+    test.skip("no role-bearing parts yet (fresh project / mid-rollout)", () => {});
     return;
   }
 
-  for (const comp of roleBearing) {
+  // Pending parts: a role is stamped (e.g. detection caught a cmdk-based
+  // combobox) but no composed `meta.contractExamples` mount exists yet, so the
+  // runner can't drive the widget. This is a GREEN soft-skip — never a red
+  // failure dropped into a consumer (north star) — but unlike the old perpetual
+  // skip it is *resolvable*: the label names the exact part and the one action
+  // that activates it. See ADR-0024 (the multi-part model) / issue #461.
+  for (const comp of pending) {
+    test.skip(
+      `${comp.name} (role: ${comp.role}) — add a meta.contractExamples mount of the composed widget to activate (ADR-0024)`,
+      () => {},
+    );
+  }
+
+  // Drivable parts: a role with a composed mount the contract can drive.
+  for (const comp of drivable) {
     test(`${comp.name} (role: ${comp.role})`, async () => {
       await runRoleContracts([comp], {
-        render: (Component, props, container) => {
-          render(
-            React.createElement(Component as React.ComponentType, props as never),
-            { container },
-          );
+        renderComposed: (renderable, container) => {
+          // Cast via render's own signature so this typechecks under the
+          // minimal React type shim the pack's tsc test uses (no named
+          // `ReactElement` export there).
+          render(renderable as Parameters<typeof render>[0], { container });
         },
       });
     });

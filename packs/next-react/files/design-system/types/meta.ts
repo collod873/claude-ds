@@ -18,6 +18,29 @@ export interface Example {
 }
 
 /**
+ * A composed-widget mount for the role contract (ADR-0024, issue #461).
+ *
+ * `render` returns the **fully assembled** widget. For a multi-part headless-lib
+ * combobox (cmdk / base-ui / radix) that means the root provider with its
+ * Trigger / Input / Content / Item children composed exactly as a consumer uses
+ * them — because the ARIA `role="combobox"` anchor only exists once those parts
+ * are mounted together, never in any single DS file. The JSX *is* the part
+ * graph; no separate graph declaration is needed. Typed `() => unknown` to keep
+ * the pack framework-free; in a React consumer it returns a ReactNode (JSX).
+ *
+ * Why a dedicated field instead of overloading `examples`: `examples` is parsed
+ * by the showcase generator and the GEN-001 integrity check via a whole-array
+ * `JSON.parse`. A JSX thunk inside `examples` makes that parse throw, dropping
+ * *every* example and producing false GEN drift on every consumer. So composed
+ * mounts live here, read only by the role-contract runner — the showcase /
+ * integrity machinery never touches them. See ADR-0024.
+ */
+export interface ContractExample {
+  name: string;
+  render: () => unknown; // () => React.ReactNode — typed unknown to avoid a React dep in the pack
+}
+
+/**
  * Reserved `meta.examples[].name` values for pattern-tier showcase chrome.
  *
  * Showcase chrome renders these with special UI treatment:
@@ -70,6 +93,18 @@ export type Meta =
        * arms intentionally do not carry roles.
        */
       role?: Role;
+      /**
+       * Composed-widget mounts the role contract drives (ADR-0024, issue #461).
+       * Each entry's `render()` returns the fully assembled widget — for a
+       * multi-part headless-lib combobox, the root composed with its Trigger /
+       * Input / Content / Item children, since the `role="combobox"` anchor only
+       * exists once the parts are mounted together. A role declared with zero
+       * `contractExamples` is a tracked, green soft-skip (the runner names the
+       * part and asks for a mount), never a red failure — see ADR-0024. Kept
+       * separate from `examples` so the showcase / GEN-001 parsers never see a
+       * JSX thunk (which would break their whole-array `JSON.parse`).
+       */
+      contractExamples?: ContractExample[];
     }
   | {
       kind: "pattern";

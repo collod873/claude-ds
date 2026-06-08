@@ -1,7 +1,14 @@
 # 0022 — Multi-part roles and the single-component runner limit
 
 Date: 2026-06-08
-Status: Accepted
+Status: Superseded by 0024
+
+> **Removal trigger satisfied (2026-06-08, issue #461).** The multi-part contract
+> model this ADR deferred has landed — see **ADR-0024**. The single-component
+> runner limit recorded below is lifted, and the deliberately-narrow detection
+> invariant is replaced by the lock-step broadening this ADR named as the
+> unblocking condition. The history below is retained for context; the live
+> decision is ADR-0024.
 
 Amends: 0016 (behavior as the fourth scaffold concern — role contracts)
 
