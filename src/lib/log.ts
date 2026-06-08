@@ -13,7 +13,7 @@ export async function detectBuildCommand(cwd: string): Promise<string> {
   return "your build (e.g. npm run build)";
 }
 
-type NextStepCommand = "adopt" | "classify" | "audit" | "audit-fix" | "sync" | "reconcile" | "doctor" | "upgrade" | "migrate-layout";
+type NextStepCommand = "adopt" | "classify" | "audit" | "audit-fix" | "sync" | "reconcile" | "doctor" | "upgrade" | "migrate-layout" | "version" | "reconform" | "enforce";
 
 interface NextStepContext {
   hasFindings?: boolean;
@@ -77,6 +77,13 @@ interface NextStepContext {
    * unblocking action is `heal`, not a second `adopt`.
    */
   projectKind?: "adopted" | "pre-adopt";
+  /**
+   * For `version` (#363): which of the four pinned-vs-installed states the
+   * command resolved to. `no-config` → adopt; `up-to-date` → audit;
+   * `behind` (pinned < installed) → upgrade; `ahead` (pinned > installed) →
+   * update the CLI binary.
+   */
+  versionState?: "no-config" | "up-to-date" | "behind" | "ahead";
 }
 
 export function printNextStep(command: NextStepCommand, ctx: NextStepContext): void {
@@ -176,6 +183,41 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
           message = "run 'claude-ds audit' to check for new drift after the upgrade";
           break;
       }
+      break;
+    case "version":
+      // #363: even the informational `version` command must end with a
+      // breadcrumb (CONTEXT.md's "Next-step breadcrumb" rule covers every
+      // CLI command, not just mutating ones). Route on pinned vs installed:
+      // no config → adopt; behind → upgrade; ahead → update the CLI binary;
+      // up-to-date → audit (the standard verify step).
+      switch (ctx.versionState) {
+        case "no-config":
+          message = "run 'claude-ds adopt' to install the scaffold";
+          break;
+        case "behind":
+          message = "run 'claude-ds upgrade' to apply pending migrations";
+          break;
+        case "ahead":
+          message = "update the CLI binary to match (or downgrade the .claude-ds.json pin)";
+          break;
+        case "up-to-date":
+        default:
+          message = "run 'claude-ds audit' to check for drift";
+          break;
+      }
+      break;
+    case "reconform":
+      // #363: reconform ends with a summary line ("reconform complete — …")
+      // but never a breadcrumb. The post-reconform next step is the standard
+      // verify pass.
+      message = "run 'claude-ds audit' to check for drift";
+      break;
+    case "enforce":
+      // #363: the post-flip and already-block paths both leave the operator
+      // in block mode; the standard verify after a mode change is audit.
+      // (The gate-refusal path keeps its inline #362 breadcrumb — it has a
+      // command-specific recovery instruction.)
+      message = "run 'claude-ds audit' to check for drift";
       break;
   }
 
