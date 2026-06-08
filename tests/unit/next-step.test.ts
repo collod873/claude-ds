@@ -63,16 +63,22 @@ describe("printNextStep", () => {
     expect(logged.some(l => l.includes("npm run build"))).toBe(true);
   });
 
-  it("prints audit with-findings breadcrumb", () => {
+  // C2 (#414): with-findings / extraction / unfixable / warnings breadcrumbs
+  // route at `heal` — the single self-converging entry — not the bare loop
+  // steps (`audit --fix`, `classify`) heal already runs itself.
+  it("prints audit with-findings breadcrumb routing to heal", () => {
     printNextStep("audit", { hasFindings: true });
-    expect(logged.some(l => l.includes("claude-ds audit --fix"))).toBe(true);
+    const line = logged.find(l => l.includes("→ Next:"))!;
+    expect(line).toContain("claude-ds heal");
+    expect(line).not.toContain("claude-ds audit --fix");
   });
 
-  it("routes audit breadcrumb to classify when extraction-needed findings remain", () => {
+  it("routes audit breadcrumb to heal when extraction-needed findings remain (C2)", () => {
     printNextStep("audit", { hasFindings: true, extractionCount: 2 });
     const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("claude-ds classify");
+    expect(line).toContain("claude-ds heal");
     expect(line).toContain("2 inline components");
+    expect(line).not.toContain("claude-ds classify");
     expect(line).not.toContain("claude-ds audit --fix");
   });
 
@@ -85,36 +91,37 @@ describe("printNextStep", () => {
 
   it("keeps the default with-findings breadcrumb when extractionCount is 0", () => {
     printNextStep("audit", { hasFindings: true, extractionCount: 0 });
-    expect(logged.some(l => l.includes("claude-ds audit --fix"))).toBe(true);
+    expect(logged.some(l => l.includes("claude-ds heal"))).toBe(true);
     expect(logged.some(l => l.includes("claude-ds classify"))).toBe(false);
   });
 
-  it("routes audit breadcrumb to classify when remaining findings are not auto-fixable", () => {
+  it("routes audit breadcrumb to heal when remaining findings are not auto-fixable (C2)", () => {
     printNextStep("audit", { hasFindings: true, unfixableCount: 3 });
     const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("claude-ds classify");
+    expect(line).toContain("claude-ds heal");
+    expect(line).not.toContain("claude-ds classify");
     expect(line).not.toContain("claude-ds audit --fix");
   });
 
   it("prefers the extraction breadcrumb when both extraction and other unfixable findings remain", () => {
     printNextStep("audit", { hasFindings: true, extractionCount: 2, unfixableCount: 3 });
     const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("claude-ds classify");
+    expect(line).toContain("claude-ds heal");
     expect(line).toContain("2 inline components");
-    expect(line).not.toContain("claude-ds audit --fix");
+    expect(line).not.toContain("claude-ds classify");
   });
 
   it("keeps the default with-findings breadcrumb when unfixableCount is 0", () => {
     printNextStep("audit", { hasFindings: true, unfixableCount: 0 });
-    expect(logged.some(l => l.includes("claude-ds audit --fix"))).toBe(true);
+    expect(logged.some(l => l.includes("claude-ds heal"))).toBe(true);
     expect(logged.some(l => l.includes("claude-ds classify"))).toBe(false);
   });
 
-  it("routes sync breadcrumb to classify on a brownfield tree", () => {
+  it("routes sync breadcrumb to heal on a brownfield tree (C2)", () => {
     printNextStep("sync", { brownfield: true });
     const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("claude-ds classify");
-    expect(line).not.toMatch(/claude-ds audit\b/);
+    expect(line).toContain("claude-ds heal");
+    expect(line).not.toContain("claude-ds classify");
   });
 
   it("sync breadcrumb stays on audit when the tree is greenfield", () => {
@@ -151,22 +158,28 @@ describe("printNextStep", () => {
     expect(line).toContain("claude-ds adopt");
   });
 
-  it("routes doctor's → Next at sync when scaffold-gap is the verdict", () => {
+  // C2 (#414): every fixable doctor verdict reroutes at `heal`, not the bare
+  // loop step (`sync`, `upgrade`, `audit --fix`, `migrate-layout`). The
+  // operator no longer has to pick which command runs which loop member.
+  it("routes doctor's → Next at heal when scaffold-gap is the verdict (C2)", () => {
     printNextStep("doctor", { doctorVerdict: "scaffold-gap" });
     const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("claude-ds sync");
+    expect(line).toContain("claude-ds heal");
+    expect(line).not.toMatch(/claude-ds sync\b/);
   });
 
-  it("routes doctor's → Next at upgrade when repair-needed is the verdict", () => {
+  it("routes doctor's → Next at heal when repair-needed is the verdict (C2)", () => {
     printNextStep("doctor", { doctorVerdict: "repair-needed" });
     const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("claude-ds upgrade");
+    expect(line).toContain("claude-ds heal");
+    expect(line).not.toMatch(/claude-ds upgrade\b/);
   });
 
-  it("routes doctor's → Next at upgrade when upgrade-available is the verdict", () => {
+  it("routes doctor's → Next at heal when upgrade-available is the verdict (C2)", () => {
     printNextStep("doctor", { doctorVerdict: "upgrade-available" });
     const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("claude-ds upgrade");
+    expect(line).toContain("claude-ds heal");
+    expect(line).not.toMatch(/claude-ds upgrade\b/);
   });
 
   it("routes upgrade's → Next at audit when applied is the outcome", () => {
@@ -181,9 +194,10 @@ describe("printNextStep", () => {
     expect(line).toContain("claude-ds audit");
   });
 
-  it("routes audit's → Next at audit --fix when actionable warnings remain (#349 F9)", () => {
+  it("routes audit's → Next at heal when actionable warnings remain (#349 F9 / C2)", () => {
     printNextStep("audit", { hasActionableWarnings: true });
     const line = logged.find(l => l.includes("→ Next:"))!;
-    expect(line).toContain("claude-ds audit --fix");
+    expect(line).toContain("claude-ds heal");
+    expect(line).not.toContain("claude-ds audit --fix");
   });
 });

@@ -44,14 +44,17 @@ describe("audit verdict consistency (#349 F9)", () => {
     expect(saysNoAction && recommendsAction).toBe(false);
   });
 
-  it("ends with a → Next breadcrumb that points at the action when warnings remain", async () => {
+  it("ends with a → Next breadcrumb that points at heal when warnings remain (C2 #414)", async () => {
+    // C2: `audit --fix` is a heal loop step, so the breadcrumb routes at
+    // `heal` (single self-converging entry), not the bare loop step.
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
       version: "v0.2.1", pack: "next-react", mode: "warn", removed: [],
     }, null, 2));
     await writeFile(join(dir, "contracts.md"), "# legacy\n");
 
     const r = await runCli(["audit"], { cwd: dir });
-    expect(r.stdout).toMatch(/→ Next:.*audit --fix/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds heal/);
+    expect(r.stdout).not.toMatch(/→ Next:.*audit --fix/);
   });
 });
 
@@ -68,15 +71,15 @@ describe("doctor → Next breadcrumb (#349 F21)", () => {
     expect(r.stdout).toMatch(/→ Next:/);
   });
 
-  it("doctor with a missing managed file routes → Next at sync", async () => {
-    // Post-adopt config but managed files were never seeded → doctor's
-    // missing-managed list is non-empty and the breadcrumb names the action.
+  it("doctor with a missing managed file routes → Next at heal (C2 #414)", async () => {
+    // C2: `sync` is a heal loop step — heal auto-runs it. The breadcrumb
+    // names `heal`, not the bare loop step.
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
       packVersion: `v${pkg.version}`, pack: "next-react", mode: "warn", removed: [],
     }, null, 2));
     const r = await runCli(["doctor"], { cwd: dir });
     expect(r.code).toBe(1);
-    expect(r.stdout).toMatch(/→ Next:.*sync/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds heal/);
   });
 
   it("pre-adopt doctor does not say 'All clear' + 'run npm run build' while body recommends adopt", async () => {
@@ -110,9 +113,10 @@ describe("doctor verdict aggregation (#349 F16)", () => {
 
     const r = await runCli(["doctor"], { cwd: dir });
     // F16: a clean all-clear must not be reported — the upgrade is the
-    // outstanding action.
+    // outstanding action. C2 (#414): `upgrade` is a heal loop step, so the
+    // breadcrumb routes at `heal` instead of naming the bare step.
     expect(r.stdout).toMatch(/upgrade available/i);
-    expect(r.stdout).toMatch(/→ Next:.*upgrade/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds heal/);
   });
 
   it("does not report all-clear when repair would act on the project (regressed setting)", async () => {
@@ -128,7 +132,9 @@ describe("doctor verdict aggregation (#349 F16)", () => {
 
     const r = await runCli(["doctor"], { cwd: dir });
     expect(r.stdout).toMatch(/repair needed/i);
-    expect(r.stdout).toMatch(/→ Next:.*upgrade/);
+    // C2 (#414): repair-needed routes at `heal`, the single self-converging
+    // entry, instead of naming the bare `upgrade` loop step.
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds heal/);
   });
 });
 

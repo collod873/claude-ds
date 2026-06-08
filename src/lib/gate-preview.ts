@@ -25,7 +25,7 @@
 import { run } from "./runner.js";
 import type { ProjectContext } from "./project.js";
 import type { SummaryEntry } from "./render/index.js";
-import { renderChangeSummary } from "./render/index.js";
+import { renderChangeSummary, renderChangeTierSummary } from "./render/index.js";
 import { makeSyncPackFiles } from "./ops/sync-pack-files.js";
 import {
   computeMigrationChain,
@@ -142,16 +142,33 @@ function stepHeader(step: LoopStep, ctx: ProjectContext, counts: GateFindingCoun
  * with their real `Change[]` summary, finding-driven steps with their real
  * count. The caller prints these, then the single `[Enter]` gate prompt.
  */
+export interface GateOpts {
+  /**
+   * Issue #414 / C4. When false (default), byte-deterministic step previews
+   * collapse to a per-tier summary (`90 files modified — 45 atoms, 45
+   * composites`); when true, the full one-line-per-file list is rendered.
+   * The gate's promise — "I'll fix these N things" — is the same either way;
+   * verbose only changes how much detail the operator sees while consenting.
+   */
+  verbose?: boolean;
+}
+
 export async function buildCommitmentGate(
   ctx: ProjectContext,
   plan: LoopStep[],
   counts: GateFindingCounts,
+  opts: GateOpts = {},
 ): Promise<string[]> {
   const lines: string[] = [];
   lines.push("");
   lines.push(`I'll bring this tree to clean — ${plan.length} step${plan.length === 1 ? "" : "s"}:`);
   lines.push(`  ${plan.join(" → ")}`);
+  // C3 convergence explainer: name the bounded loop so "iteration 1/3" later
+  // reads as planned, not stuck.
+  lines.push("  Converging until no drift — up to 3 passes.");
   lines.push("");
+
+  const render = opts.verbose ? renderChangeSummary : renderChangeTierSummary;
 
   for (const step of plan) {
     lines.push(stepHeader(step, ctx, counts));
@@ -160,9 +177,14 @@ export async function buildCommitmentGate(
       if (entries.length === 0) {
         lines.push("    (no file changes — version pin only)");
       } else {
-        lines.push(...indent(renderChangeSummary(entries)));
+        lines.push(...indent(render(entries)));
       }
     }
+  }
+
+  if (!opts.verbose) {
+    lines.push("");
+    lines.push("  (re-run with --verbose for the full per-file change list)");
   }
 
   return lines;

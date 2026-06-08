@@ -145,7 +145,8 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
   it("adopted + missing managed files: the gate previews the real sync Change[]", async () => {
     // Seed config pinned to the CURRENT version (so upgrade does not lead) with
     // no scaffold on disk — the canonical "managed files missing" case. The gate
-    // must render the real planned restores, one line per file.
+    // must render the real planned restores. Default render (C4 #414) collapses
+    // them to a tier summary; `--verbose` would dump one line per file.
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({
       packVersion: CURRENT,
       pack: "next-react",
@@ -157,8 +158,10 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
     const out = await captureFrontDoor({ cwd: dir });
 
     expect(out).toMatch(/sync — restore managed scaffold files/);
-    // Real planned Change[] rendered as `A path` restore lines under the step.
-    expect(out).toMatch(/^\s+A .+/m);
+    // C4: tier-summary collapse. The count is the real planned Change[] count
+    // (the F11 invariant); the previous "A path" per-file assertion now lives
+    // on the F11 test below, which switches to `verbose: true`.
+    expect(out).toMatch(/\bAdded \d+ scaffold files\b|\b\d+ files added\b/);
   });
 });
 
@@ -217,10 +220,15 @@ export function SoloLabel() { return <span />; }
     const plannedCount = dryRun.ops.reduce((n, o) => n + o.changes.length, 0);
     expect(plannedCount).toBeGreaterThan(0);
 
-    const gateLines = await buildCommitmentGate(ctx, ["sync"], {
-      classifyCount: 0,
-      autoFixableCount: 0,
-    });
+    // C4 (#414): the default tier-summary collapse hides per-file lines; pass
+    // `verbose: true` so the F11 invariant — preview count == planned count —
+    // still has a per-file surface to count.
+    const gateLines = await buildCommitmentGate(
+      ctx,
+      ["sync"],
+      { classifyCount: 0, autoFixableCount: 0 },
+      { verbose: true },
+    );
     const changeLineCount = gateLines.filter(l => /^\s+[AMRD] /.test(l)).length;
 
     expect(changeLineCount).toBe(plannedCount);

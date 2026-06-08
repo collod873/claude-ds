@@ -64,7 +64,8 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
   // an adopted project stays exactly the bytes it shipped with.
   program
     .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016) — used by the first-run greet")
-    .action(async (opts: { answers?: string }) => {
+    .option("--verbose", "show the full per-file change list in the commitment-gate preview (default: per-tier summary)")
+    .action(async (opts: { answers?: string; verbose?: boolean }) => {
       const cwd = defaults.cwd ?? process.cwd();
       if (!(await configExists(cwd))) {
         await greetCmd({ cwd, answers: opts.answers });
@@ -73,7 +74,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
       if (isTTY()) {
         // Forward `--answers` so the interactive driver can resolve genuine
         // Ambiguities it pauses on without a second invocation (ADR-0016).
-        await frontDoorCmd({ cwd, answers: opts.answers });
+        await frontDoorCmd({ cwd, answers: opts.answers, verbose: opts.verbose });
       } else {
         program.outputHelp();
       }

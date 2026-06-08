@@ -186,6 +186,151 @@ export function renderChangeSummary(entries: SummaryEntry[]): string[] {
 }
 
 /**
+ * Tier-summary rendering (issue #414 / C4). Where `renderChangeSummary` is the
+ * one-line-per-file shape kept behind `--verbose`, this collapses the Change
+ * list to a per-tier count by default:
+ *
+ *   "Substantive changes:" (config-flag flips, unchanged)
+ *   "90 files modified — 45 atoms, 45 composites"
+ *   "Added 3 scaffold files"
+ *   "Skipped: 2 files (hand-edited or unsafe to overwrite)"
+ *
+ * Defects this closes:
+ *   - 90-line per-file dumps that buried whatever substantive change happened
+ *     at the top.
+ *
+ * Pure — no I/O, no color. Tier inference is path-based: every Change under
+ * `design-system/<tier>/` is bucketed by `<tier>`; everything else is bucketed
+ * as `scaffold` (managed pack files outside the tier dirs — hooks, contracts,
+ * tokens, etc.).
+ */
+type Tier = "atom" | "composite" | "pattern" | "token" | "scaffold";
+
+function tierForPath(p: string): Tier {
+  if (p.startsWith("design-system/atoms/")) return "atom";
+  if (p.startsWith("design-system/composites/")) return "composite";
+  if (p.startsWith("design-system/patterns/")) return "pattern";
+  if (p.startsWith("design-system/tokens/")) return "token";
+  return "scaffold";
+}
+
+function pluralTier(tier: Tier, n: number): string {
+  const root = tier === "atom" ? "atom"
+    : tier === "composite" ? "composite"
+    : tier === "pattern" ? "pattern"
+    : tier === "token" ? "token"
+    : "scaffold file";
+  return n === 1 ? root : `${root}s`;
+}
+
+interface TierBuckets {
+  total: number;
+  byTier: Map<Tier, number>;
+}
+
+function formatTierBreakdown(buckets: TierBuckets): string {
+  const parts: string[] = [];
+  const order: Tier[] = ["atom", "composite", "pattern", "token", "scaffold"];
+  for (const t of order) {
+    const n = buckets.byTier.get(t) ?? 0;
+    if (n > 0) parts.push(`${n} ${pluralTier(t, n)}`);
+  }
+  return parts.join(", ");
+}
+
+function bucketChange(buckets: TierBuckets, path: string): void {
+  buckets.total += 1;
+  const t = tierForPath(path);
+  buckets.byTier.set(t, (buckets.byTier.get(t) ?? 0) + 1);
+}
+
+function emptyBuckets(): TierBuckets {
+  return { total: 0, byTier: new Map() };
+}
+
+export function renderChangeTierSummary(entries: SummaryEntry[]): string[] {
+  const substantive: { entry: SummaryEntry; flips: FlagFlip[] }[] = [];
+  const added = emptyBuckets();
+  const modified = emptyBuckets();
+  const deleted = emptyBuckets();
+  const renamed = emptyBuckets();
+  let abortCount = 0;
+
+  for (const entry of entries) {
+    const c = entry.change;
+    if (c.kind === "abort") { abortCount++; continue; }
+    const flips = detectFlagFlips(c);
+    if (flips) { substantive.push({ entry, flips }); continue; }
+    if (c.kind === "rename") { bucketChange(renamed, c.path); continue; }
+    if (c.kind === "delete") { bucketChange(deleted, c.path); continue; }
+    if (c.kind === "write") {
+      if (c.before === null) bucketChange(added, c.path);
+      else bucketChange(modified, c.path);
+    }
+  }
+
+  const lines: string[] = [];
+
+  if (substantive.length > 0) {
+    lines.push("Substantive changes:");
+    for (const { entry, flips } of substantive) {
+      lines.push(
+        `! ${entry.change.path}  (config flag${flips.length === 1 ? "" : "s"} flipped)`,
+      );
+      for (const flip of flips) {
+        lines.push(`    ${flip.key}: ${flip.before} -> ${flip.after}`);
+      }
+    }
+  }
+
+  const verbs: { verb: string; buckets: TierBuckets }[] = [
+    { verb: "modified", buckets: modified },
+    { verb: "added", buckets: added },
+    { verb: "deleted", buckets: deleted },
+    { verb: "renamed", buckets: renamed },
+  ];
+
+  // Special-case: every non-substantive Change is a managed-scaffold add (the
+  // canonical sync-restores-scaffold path). Render as "Added N scaffold files"
+  // rather than the generic "N files added — N scaffolds" form so the C4
+  // example ("restored N managed scaffold files") matches verbatim.
+  const scaffoldOnly =
+    added.total > 0 && modified.total === 0 && deleted.total === 0 && renamed.total === 0 &&
+    added.byTier.size === 1 && (added.byTier.get("scaffold") ?? 0) === added.total;
+  if (scaffoldOnly) {
+    if (substantive.length > 0) {
+      lines.push("");
+      lines.push("Other changes:");
+    }
+    const n = added.total;
+    lines.push(`Added ${n} scaffold file${n === 1 ? "" : "s"}`);
+  } else {
+    const anyVerb = verbs.some(v => v.buckets.total > 0);
+    if (anyVerb) {
+      if (substantive.length > 0) {
+        lines.push("");
+        lines.push("Other changes:");
+      }
+      for (const { verb, buckets } of verbs) {
+        if (buckets.total === 0) continue;
+        const noun = buckets.total === 1 ? "file" : "files";
+        lines.push(`${buckets.total} ${noun} ${verb} — ${formatTierBreakdown(buckets)}`);
+      }
+    }
+  }
+
+  if (abortCount > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push(
+      `Skipped: ${abortCount} file${abortCount === 1 ? "" : "s"} (hand-edited or unsafe to overwrite)`,
+    );
+  }
+
+  if (lines.length === 0) lines.push("No changes.");
+  return lines;
+}
+
+/**
  * Machine-readable JSON shape for `--json`. Stable contract — paths are
  * relative to `ctx.cwd`, `kind` matches the `Change` discriminator. Byte
  * buffers (`before`/`after` on writes) are not emitted; the consumer that

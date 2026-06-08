@@ -33,13 +33,16 @@ describe("version", () => {
   });
 
   describe("--check", () => {
-    it("routes the user to `upgrade`, not `reconcile`, when pinned < installed", async () => {
+    it("routes the user to `heal`, not `reconcile`, when pinned < installed (C2 #414)", async () => {
+      // C2: `upgrade` is a heal loop step — the breadcrumb names `heal`
+      // (single self-converging entry), never the bare loop step.
       await writeFile(join(dir, ".claude-ds.json"),
         JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }));
       const r = await runCli(["version", "--check"], { cwd: dir });
       expect(r.code).toBe(1);
-      expect(r.stdout).toMatch(/claude-ds upgrade/);
+      expect(r.stdout).toMatch(/claude-ds heal/);
       expect(r.stdout).not.toMatch(/reconcile/);
+      expect(r.stdout).not.toMatch(/claude-ds upgrade/);
     });
 
     it("uses consistent vocabulary: `pinned` (config) vs `installed` (CLI binary)", async () => {
