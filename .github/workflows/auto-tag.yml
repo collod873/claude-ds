@@ -99,10 +99,30 @@ jobs:
 
       - name: Install
         if: steps.check.outputs.exists == 'false'
+        # `npm ci` runs the `prepare` script (`npm run build`) which produces
+        # `dist/cli.js`. That output is required by the e2e smoke harness
+        # (`tests/e2e/smoke.test.ts`) — without it the harness auto-skips on
+        # the missing CLI guard and the release gate would silently lose its
+        # blocking e2e coverage (issue #415).
         run: npm ci
 
-      - name: Test gate
+      - name: Build CLI (explicit — required by smoke e2e in test gate)
         if: steps.check.outputs.exists == 'false'
+        # Belt-and-suspenders for the dist dependency above. `prepare` already
+        # built dist during `npm ci`, but pinning it as its own step means a
+        # future package.json refactor that drops `prepare` cannot silently
+        # convert the smoke gate into a skip on the release path (issue #415,
+        # PRD #407 user story 17).
+        run: npm run build
+
+      - name: Test gate (includes smoke e2e — release blocked on red smoke)
+        if: steps.check.outputs.exists == 'false'
+        # `npm test` is `vitest run`, which runs every test file under
+        # `tests/**/*.test.ts` — including `tests/e2e/smoke.test.ts`. A red
+        # smoke harness therefore mechanically fails this step, preventing
+        # `Tag and push` below from firing on a release where a
+        # representative consumer ends up broken (PRD #407 user story 17,
+        # issue #415).
         run: npm test
 
       - name: Tag and push

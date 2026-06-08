@@ -1,0 +1,67 @@
+name: e2e-release
+
+# Heavy multi-fixture / per-command e2e matrix — the release+nightly tier
+# of the tiered CI split introduced by issue #415 (PRD #407 user story 27).
+#
+# This workflow runs the FULL `tests/e2e/` suite, not just the smoke. As
+# per-command e2e cases (`audit --fix`, `upgrade`, `classify`, `sync`) and
+# additional fixtures land under `tests/e2e/per-command/*.test.ts` and
+# `tests/e2e/fixtures/<other-shape>/`, they are picked up automatically here
+# without further workflow plumbing.
+#
+# Why a separate workflow:
+#  - PR CI (`e2e-smoke.yml`) runs ONLY `tests/e2e/smoke.test.ts` so the
+#    inner loop stays in single-digit minutes per commit.
+#  - The heavy matrix is high-coverage but high-latency; running it on every
+#    push would re-bloat the inner loop and defeat the tiering.
+#  - Tag push + nightly schedule catch the moments where coverage actually
+#    matters: a release going out (`v*` tag) and a daily liveness check
+#    against a Crewops-shaped consumer.
+#
+# Triggers:
+#   - schedule: nightly (03:00 UTC) — catches drift without blocking PRs.
+#   - tags: v* — every release tag must clear the full matrix.
+#   - workflow_dispatch — manual fire for on-demand coverage runs.
+# NOTE: deliberately NOT `pull_request:` — that would defeat the tiered split.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  e2e-release:
+    runs-on: ubuntu-latest
+    # Heavy matrix budget — generous, but still finite. A run that exceeds
+    # this almost certainly has a hung subprocess in the harness, not a
+    # legitimate workload.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build CLI
+        run: npm run build
+
+      - name: Run full e2e suite (smoke + per-command + multi-fixture)
+        # The whole `tests/e2e` directory — every fixture, every per-command
+        # case. A future test file landing under `tests/e2e/` is included
+        # here automatically.
+        run: npx vitest run tests/e2e/
+
+      - name: Upload e2e reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-release-report
+          path: e2e-report.json
+          if-no-files-found: warn
