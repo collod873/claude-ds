@@ -122,23 +122,28 @@ describe("e2e-smoke.yml: blocking inner-loop gate (#415)", () => {
     expect(yml).toMatch(/push:\s*\n\s*branches:\s*\[main\]/);
   });
 
-  it("runs ONLY the smoke test file — heavy e2e matrix belongs in nightly", async () => {
-    // The whole point of tiering: PR CI runs only `tests/e2e/smoke.test.ts`,
-    // not the full `tests/e2e/` glob. A future per-command file added under
-    // `tests/e2e/per-command/` must NOT be picked up by this workflow — that
-    // would re-bloat the inner loop and defeat the tiered split.
+  it("runs ONLY the blocking inner-loop e2e files — heavy matrix belongs in nightly", async () => {
+    // The whole point of tiering: PR CI runs only the deliberate inner-loop
+    // gates — `tests/e2e/smoke.test.ts` (scaffold integrity, #415) and
+    // `tests/e2e/friction.test.ts` (the friction ratchet, PRD #439 user story
+    // 16) — NOT the full `tests/e2e/` glob. A future per-command file added
+    // under `tests/e2e/per-command/` must NOT be picked up by this workflow —
+    // that would re-bloat the inner loop and defeat the tiered split.
     // Strip comments first so narrative prose that mentions `tests/e2e/` (the
     // companion heavy workflow, future fixture paths) is not misread as an
     // active vitest target.
     const code = stripYamlComments(await readWorkflow("e2e-smoke.yml"));
-    // Positive: the smoke file IS the target.
+    // Positive: both inner-loop files ARE targets.
     expect(code).toMatch(/run:[^\n]*\btests\/e2e\/smoke\.test\.ts\b/);
+    expect(code).toMatch(/run:[^\n]*\btests\/e2e\/friction\.test\.ts\b/);
     // Negative: no active `run:` directive references a `tests/e2e/...` path
-    // that is NOT the smoke file — catches the silent-re-bloat regression of
-    // someone appending the full directory or a per-command sub-path to a
-    // step in this workflow. Mirrors the symmetric exclusivity assertion on
-    // `e2e-release.yml` below.
-    expect(code).not.toMatch(/run:[^\n]*\btests\/e2e\b(?!\/smoke\.test\.ts\b)/);
+    // that is NOT one of the two sanctioned inner-loop files — catches the
+    // silent-re-bloat regression of someone appending the full directory or a
+    // per-command sub-path to a step in this workflow. Mirrors the symmetric
+    // exclusivity assertion on `e2e-release.yml` below.
+    expect(code).not.toMatch(
+      /run:[^\n]*\btests\/e2e\b(?!\/(smoke|friction)\.test\.ts\b)/,
+    );
   });
 });
 

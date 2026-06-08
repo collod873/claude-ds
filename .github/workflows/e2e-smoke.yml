@@ -51,11 +51,16 @@ jobs:
       - name: Build CLI
         run: npm run build
 
-      - name: Run e2e smoke harness
-        # No `continue-on-error` — a red smoke harness fails the PR gate.
-        # The harness still emits `e2e-report.json` for the artifact step
-        # below; non-zero vitest exit is the blocking signal.
-        run: npx vitest run tests/e2e/smoke.test.ts
+      - name: Run e2e smoke harness + friction gate
+        # No `continue-on-error` — a red smoke harness OR a friction regression
+        # fails the PR gate. The smoke harness emits `e2e-report.json` for the
+        # artifact step below; the friction gate (PRD #439, issue #439)
+        # reconciles the real CLI's rendered output against
+        # `tests/e2e/friction-baseline.json` and fails on any finding NOT in the
+        # baseline — wired here into the BLOCKING smoke tier (#415) so friction
+        # is checked on every PR, not nightly. Reproduce locally with
+        # `npm run e2e:friction`. Non-zero vitest exit is the blocking signal.
+        run: npx vitest run tests/e2e/smoke.test.ts tests/e2e/friction.test.ts
 
       - name: Upload smoke report
         # `if: always()` so a failing run still uploads the report — the

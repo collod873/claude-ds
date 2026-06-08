@@ -1,0 +1,9 @@
+{
+  "_comment": "PRD #439 friction baseline — the ledger of CURRENTLY-ACCEPTED friction findings measured against tests/e2e/fixtures/crewops-snapshot via the real CLI sequence (adopt -> heal -> audit --fix -> front door). This is the ratchet: a finding whose key is NOT here is a regression and FAILS the gate. Keys may only be REMOVED across commits, never added. Closing a friction-fix issue means deleting its key here AND the gate confirming the finding no longer reproduces (see docs/agents/friction-loop.md). RED on day one is intended — every entry is a tracked defect with a removal trigger (ADR-0003).",
+  "keys": [
+    "next-step-dead-end:npm run ds:build-manifest",
+    "next-step-dead-end:run 'claude-ds classify --src <dir>' to migrate existing components",
+    "next-step-dead-end:run your build (e.g. npm run build) to verify everything compiles",
+    "jargon-unglossed:scaffold"
+  ]
+}
