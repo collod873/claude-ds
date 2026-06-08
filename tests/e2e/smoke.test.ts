@@ -57,6 +57,21 @@ describe.skipIf(!hasDist)("e2e smoke: Crewops-shaped fixture", () => {
       const duplicateMeta = report.deviations.filter((d) => d.category === "duplicate-meta-decl");
       expect(duplicateMeta, JSON.stringify(duplicateMeta, null, 2)).toHaveLength(0);
 
+      // Issue #415: as the smoke flips from non-blocking catalogue to
+      // blocking PR gate, the bottom-line shape of "adopt happened, config
+      // landed, managed scaffold is present" is green today and must stay
+      // green. These categories have zero entries against the current
+      // Crewops-shaped fixture; a regression in any of them is a scaffold
+      // collapse, not a soft data point.
+      const adoptFailed = report.deviations.filter((d) => d.category === "adopt-failed");
+      expect(adoptFailed, JSON.stringify(adoptFailed, null, 2)).toHaveLength(0);
+
+      const missingConfig = report.deviations.filter((d) => d.category === "missing-config");
+      expect(missingConfig, JSON.stringify(missingConfig, null, 2)).toHaveLength(0);
+
+      const missingManaged = report.deviations.filter((d) => d.category === "missing-managed-file");
+      expect(missingManaged, JSON.stringify(missingManaged, null, 2)).toHaveLength(0);
+
       // Human-readable summary line so the run page shows the bottom line
       // without the operator having to download the artifact.
       // eslint-disable-next-line no-console

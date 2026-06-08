@@ -1,13 +1,20 @@
 name: e2e-smoke
 
-# Non-blocking discovery catalogue for parent PRD #407 (sub-issue #417).
+# Blocking inner-loop gate for PRD #407 (issue #415).
 # Runs the real built CLI (`node dist/cli.js`) against the committed
 # Crewops-shaped fixture, then publishes `e2e-report.json` as an artifact.
 #
-# Until the defects the catalogue surfaces are fixed (A1, A2, A3, …) the
-# job is `continue-on-error: true` and intentionally does NOT gate PR
-# merges. A later slice flips the flag once the report comes back green
-# against a real consumer.
+# Until #414/A1–A3 landed this job was a non-blocking discovery catalogue
+# (`continue-on-error: true`). Issue #415 flips it to a hard PR gate now that
+# the harness's green invariant can actually be met — a regression that
+# resurrects the duplicate `export const meta` shape, drops a managed
+# scaffold file, or breaks `adopt → write `.claude-ds.json`` fails the gate
+# instead of waiting for a tag-cut to discover it (PRD #407 user story 17).
+#
+# Hard time budget: `timeout-minutes` keeps this in the fast inner loop
+# (single-digit minutes — PRD #407 user story 27). The heavy per-command /
+# multi-fixture matrix lives in `e2e-release.yml` (nightly + tag push), not
+# here, so the inner loop stays fast as more fixtures land.
 
 on:
   push:
@@ -18,10 +25,10 @@ on:
 jobs:
   e2e-smoke:
     runs-on: ubuntu-latest
-    # Non-blocking gate: the harness exists to enumerate breakage, not
-    # to halt the queue while it does so. Flip to `false` once the PRD's
-    # fix list lands.
-    continue-on-error: true
+    # Inner-loop budget — every step has to finish well under this. If a step
+    # newly bloats the gate past single-digit minutes, this fails loudly
+    # rather than letting the gate quietly creep into 15+ minute territory.
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v5
 
@@ -37,10 +44,14 @@ jobs:
         run: npm run build
 
       - name: Run e2e smoke harness
+        # No `continue-on-error` — a red smoke harness fails the PR gate.
+        # The harness still emits `e2e-report.json` for the artifact step
+        # below; non-zero vitest exit is the blocking signal.
         run: npx vitest run tests/e2e/smoke.test.ts
-        continue-on-error: true
 
-      - name: Upload discovery catalogue
+      - name: Upload smoke report
+        # `if: always()` so a failing run still uploads the report — the
+        # artifact is the debugging surface for whatever broke the gate.
         if: always()
         uses: actions/upload-artifact@v4
         with:
