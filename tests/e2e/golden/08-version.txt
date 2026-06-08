@@ -4,4 +4,4 @@
 installed: v1.5.3
 pinned: v1.5.3
 latest: unknown
-→ Next: run 'claude-ds audit' to check for drift
+→ Verify: run 'claude-ds audit' to check for drift

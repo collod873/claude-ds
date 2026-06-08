@@ -392,7 +392,12 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   progress.succeed("finishing setup");
 
   const pm = await detectPackageManager(cwd);
-  info(`adopted claude-ds (${pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Next: ${runCmd(pm, "ds:build-manifest")}`);
+  // #454: NOT a "Next:" line. adopt already bootstraps the manifest above, so
+  // re-running `ds:build-manifest` advances no state — a `Next:` breadcrumb the
+  // liveness gate (ADR-0013) rightly grades as a dead end. Reworded as a plain
+  // "regenerate any time with" note; the real next action is the printNextStep
+  // breadcrumb below.
+  info(`adopted claude-ds (${pack}, mode=warn). Run 'enforce' when ready. Detected package manager: ${pm}. Regenerate the manifest any time with ${runCmd(pm, "ds:build-manifest")}.`);
   info(`CI scripts installed. Run: ${runCmd(pm, "ci:hook-contract")} and ${runCmd(pm, "ci:consistency")}`);
   info(`A starter GitHub Actions workflow was seeded at .github/workflows/claude-ds-governance.yml (delete if not on GH Actions). See docs/ci-wiring.md for details.`);
   printNextStep("adopt", {});

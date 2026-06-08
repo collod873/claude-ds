@@ -63,12 +63,15 @@ describe("doctor → Next breadcrumb (#349 F21)", () => {
   beforeEach(async () => { dir = await freshTmpDir(); });
   afterEach(async () => { await cleanup(dir); });
 
-  it("doctor on a clean adopted project prints a → Next breadcrumb", async () => {
+  it("doctor on a clean adopted project prints a steering line", async () => {
     const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
     expect(adopt.code).toBe(0);
     const r = await runCli(["doctor"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/→ Next:/);
+    // #454: a clean verdict's steering is a read-only build check, so it's a
+    // `→ Verify:` tip, not a `→ Next:` action — accept either prefix (the F21
+    // mandate is "ends with a steering line").
+    expect(r.stdout).toMatch(/→ (Next|Verify):/);
   });
 
   it("doctor with a missing managed file routes → Next at heal (C2 #414)", async () => {
@@ -163,11 +166,13 @@ describe("upgrade → Next breadcrumb (#349 F21)", () => {
     expect(r.stdout).toMatch(/→ Next:/);
   });
 
-  it("upgrade with no chain (already current) prints a → Next breadcrumb", async () => {
+  it("upgrade with no chain (already current) prints a steering line", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }));
     const r = await runCli(["upgrade", "--to", "v0.8.0", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/already at v0\.8\.0/);
-    expect(r.stdout).toMatch(/→ Next:/);
+    // #454: the no-op path's verify is read-only `audit`, so it's a `→ Verify:`
+    // tip now, not a `→ Next:` action.
+    expect(r.stdout).toMatch(/→ Verify:/);
   });
 });

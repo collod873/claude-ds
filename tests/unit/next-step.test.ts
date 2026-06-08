@@ -47,9 +47,14 @@ describe("printNextStep", () => {
   });
   afterEach(() => { console.log = origLog; });
 
-  it("prints adopt breadcrumb", () => {
+  // #454: adopt's classify hint carries a `<their-dir>` placeholder and only
+  // applies on a brownfield tree, so it's verification-grade guidance (a
+  // `→ Verify:` tip), not a runnable `→ Next:` action the liveness gate would
+  // grade as a dead end.
+  it("prints adopt classify guidance as a → Verify tip", () => {
     printNextStep("adopt", {});
-    expect(logged.some(l => l.includes("→ Next:"))).toBe(true);
+    expect(logged.some(l => l.includes("→ Verify:"))).toBe(true);
+    expect(logged.some(l => l.includes("→ Next:"))).toBe(false);
     expect(logged.some(l => l.includes("claude-ds classify"))).toBe(true);
   });
 
@@ -124,11 +129,14 @@ describe("printNextStep", () => {
     expect(line).not.toContain("claude-ds classify");
   });
 
-  it("sync breadcrumb stays on audit when the tree is greenfield", () => {
+  // #454: the greenfield tail is read-only `audit` (verification), so it goes
+  // out as a `→ Verify:` tip rather than a `→ Next:` action.
+  it("sync breadcrumb stays on audit (as a → Verify tip) when the tree is greenfield", () => {
     printNextStep("sync", { brownfield: false });
-    const line = logged.find(l => l.includes("→ Next:"))!;
+    const line = logged.find(l => l.includes("→ Verify:"))!;
     expect(line).toContain("claude-ds audit");
     expect(line).not.toContain("claude-ds classify");
+    expect(logged.some(l => l.includes("→ Next:"))).toBe(false);
   });
 
   it("prints audit-fix breadcrumb with build command", () => {
@@ -146,10 +154,14 @@ describe("printNextStep", () => {
     expect(logged.some(l => l.includes("claude-ds audit"))).toBe(true);
   });
 
-  it("prints a breadcrumb for doctor (#349 F21 — CONTEXT.md mandates every command end with a → Next)", () => {
+  // #349 F21 — CONTEXT.md mandates every command end with a steering line. #454
+  // splits that into `→ Next:` (state-advancing action) and `→ Verify:`
+  // (read-only check); a clean doctor verdict is the latter (run your build),
+  // so accept either prefix here — the mandate is "ends with a steering line".
+  it("prints a steering line for doctor (#349 F21)", () => {
     printNextStep("doctor", {});
     expect(logged.length).toBeGreaterThan(0);
-    expect(logged.some(l => l.includes("→ Next:"))).toBe(true);
+    expect(logged.some(l => /→ (Next|Verify):/.test(l))).toBe(true);
   });
 
   it("routes doctor's → Next at adopt when pre-adopt is the verdict (#349 F9/F21)", () => {
@@ -182,15 +194,17 @@ describe("printNextStep", () => {
     expect(line).not.toMatch(/claude-ds upgrade\b/);
   });
 
-  it("routes upgrade's → Next at audit when applied is the outcome", () => {
+  // #454: upgrade's post-action verify is read-only `audit`, so it's a
+  // `→ Verify:` tip, not a `→ Next:` action.
+  it("routes upgrade's → Verify at audit when applied is the outcome", () => {
     printNextStep("upgrade", { upgradeOutcome: "applied" });
-    const line = logged.find(l => l.includes("→ Next:"))!;
+    const line = logged.find(l => l.includes("→ Verify:"))!;
     expect(line).toContain("claude-ds audit");
   });
 
-  it("routes upgrade's → Next at audit when no-op is the outcome", () => {
+  it("routes upgrade's → Verify at audit when no-op is the outcome", () => {
     printNextStep("upgrade", { upgradeOutcome: "no-op" });
-    const line = logged.find(l => l.includes("→ Next:"))!;
+    const line = logged.find(l => l.includes("→ Verify:"))!;
     expect(line).toContain("claude-ds audit");
   });
 

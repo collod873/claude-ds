@@ -2,4 +2,4 @@
 # exit: 0
 # --- stdout/stderr below; bytes are verbatim from the built CLI ---
 nothing to migrate
-→ Next: run 'claude-ds heal' to converge the project to clean
+→ Verify: run 'claude-ds heal' any time to re-converge the project to clean

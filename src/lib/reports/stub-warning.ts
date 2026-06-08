@@ -16,9 +16,12 @@ async function readOrNull(p: string): Promise<string | null> {
  * even by one byte, the hint goes silent — that *is* the acknowledge path,
  * no flag or config field required.
  *
- * Framed as a "→ Next:" hint (not a "WARNING") because the line above this
- * in reconform's output is "check pass: no violations found" — a stub the
- * operator hasn't gotten to yet is not a check failure.
+ * Framed as a "→ Customize:" hint (not a "WARNING") because the line above
+ * this in reconform's output is "check pass: no violations found" — a stub the
+ * operator hasn't gotten to yet is not a check failure. #454: NOT a "→ Next:"
+ * line — this is by-hand editing guidance, not a runnable command, and the
+ * next-step-liveness gate (ADR-0013) rightly grades a `Next:` that can't be run
+ * as a dead end. A distinct prefix keeps the guidance without that promise.
  */
 export async function emitStubHint(ctx: ProjectContext): Promise<void> {
   const { cwd, packDir } = ctx;
@@ -40,7 +43,7 @@ export async function emitStubHint(ctx: ProjectContext): Promise<void> {
   }
   if (untouched.length === 0) return;
 
-  const lines: string[] = ["", "→ Next: consolidate these seeded files (still the pack defaults — edit to silence):"];
+  const lines: string[] = ["", "→ Customize: consolidate these seeded files (still the pack defaults — edit to silence):"];
   for (const u of untouched) {
     const tag = u.reason === "absent" ? "missing" : "untouched seed";
     lines.push(`  ${u.rel} (${tag}) — ${u.recipe}`);

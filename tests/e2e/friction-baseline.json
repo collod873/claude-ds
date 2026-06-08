@@ -1,23 +1,9 @@
 {
   "_comment": "PRD #439 friction baseline — the ledger of CURRENTLY-ACCEPTED friction findings measured against tests/e2e/fixtures/crewops-snapshot via the real CLI sequence. Post-adopt journey on a shared tree: adopt -> heal -> audit --fix -> doctor -> classify --dry-run -> sync --dry-run -> reconcile --dry-run -> upgrade --dry-run -> version --offline -> enforce -> reconform --dry-run -> front door (+ interactive PTY front door); plus alternate-tree captures on their own fresh copies: greet (pre-adopt), init (greenfield), migrate-layout (git-seeded). This is the ratchet: a finding whose key is NOT here is a regression and FAILS the gate. Keys may only be REMOVED across commits, never added — the ONLY sanctioned addition is day-one red recorded when the gate's command surface is first widened, and the #442 monotonic guard enforces that every added key carries a _removal_triggers entry (ADR-0003). Closing a friction-fix issue means deleting its key here AND the gate confirming the finding no longer reproduces (see docs/agents/friction-loop.md).",
   "_removal_triggers": {
-    "next-step-dead-end:run 'claude-ds audit' to check for drift": "reconcile/upgrade/version suggest 'run claude-ds audit' as a → Next: step, but audit is read-only and changes no state, so the liveness runner reads it as a dead end. Fix by either dropping the suggestion when the tree is already clean, or pointing at an action that actually advances state.",
-    "self-block:sync->heal": "sync leaves managed writes in the tree, then a bare heal refuses on the dirty tree — the suggested sequence wedges itself. Fix by having heal tolerate its own pipeline's managed writes (it already runs sub-commands with --allow-dirty internally) or by not steering the user from sync into a heal that will refuse.",
-    "next-step-dead-end:consolidate these seeded files (still the pack defaults — edit to silence):": "reconform's '→ Next: consolidate these seeded files (… edit to silence):' is human guidance, not a runnable command, so the liveness runner reads it as a dead end. Either drop the '→ Next:' prefix for non-command guidance, or replace it with a concrete runnable suggestion.",
-    "next-step-dead-end:run 'claude-ds heal' to converge the project to clean": "migrate-layout ends with '→ Next: run claude-ds heal to converge the project to clean', but heal exits 1 (non-converged — it fails loudly per the completeness principle) on the post-migrate-layout tree, so the suggestion dead-ends. Fix by ensuring the suggested heal can actually converge from that state, or by making migrate-layout's next-step reflect what will actually succeed.",
-    "jargon-unglossed:scaffold": "Gloss or reword 'scaffold' on first use in command output per the #442 jargon rule. Backfilled by #456; burns down via #453.",
-    "next-step-dead-end:npm run ds:build-manifest": "Only emit 'npm run ds:build-manifest' as a -> Next: step when the script exists and advances state in the target tree; otherwise drop the prefix. Backfilled by #456; burns down via #454.",
-    "next-step-dead-end:run 'claude-ds classify --src <dir>' to migrate existing components": "The '<dir>' placeholder isn't runnable as printed -- emit a concrete path or drop the -> Next: prefix for templated guidance. Backfilled by #456; burns down via #454.",
-    "next-step-dead-end:run your build (e.g. npm run build) to verify everything compiles": "'your build' / 'e.g.' is human guidance, not a command -- reword as non-Next guidance or emit the project's real build command. Backfilled by #456; burns down via #454."
+    "jargon-unglossed:scaffold": "Gloss or reword 'scaffold' on first use in command output per the #442 jargon rule. Backfilled by #456; burns down via #453."
   },
   "keys": [
-    "next-step-dead-end:npm run ds:build-manifest",
-    "next-step-dead-end:run 'claude-ds classify --src <dir>' to migrate existing components",
-    "next-step-dead-end:run your build (e.g. npm run build) to verify everything compiles",
-    "next-step-dead-end:run 'claude-ds audit' to check for drift",
-    "jargon-unglossed:scaffold",
-    "self-block:sync->heal",
-    "next-step-dead-end:consolidate these seeded files (still the pack defaults — edit to silence):",
-    "next-step-dead-end:run 'claude-ds heal' to converge the project to clean"
+    "jargon-unglossed:scaffold"
   ]
 }

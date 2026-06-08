@@ -18,4 +18,4 @@ Package manager: **npm**
 ## Verdict
 
 - ✓ All clear
-→ Next: run your build (e.g. npm run build) to verify everything compiles
+→ Verify: run your build (e.g. npm run build) to verify everything compiles

@@ -87,10 +87,13 @@ describe("migrate-layout", () => {
     expect(r.stdout).not.toMatch(/re-run adopt to proceed/);
   });
 
-  it("post-success message points at heal when invoked post-adopt", async () => {
+  it("post-success message points at heal (as a → Verify tip) when invoked post-adopt", async () => {
     // #359: in an already-adopted project the next step is heal/sync, not
     // adopt. The old breadcrumb told the consumer to "re-run adopt", which
-    // doesn't apply once `.claude-ds.json` exists.
+    // doesn't apply once `.claude-ds.json` exists. #454: a post-migrate-layout
+    // tree is already at a fixed point, so heal advances no state — surfaced as
+    // a `→ Verify:` "re-converge any time" tip, not a `→ Next:` action that
+    // would dead-end the next-step-liveness gate.
     await gitInit(dir);
     await writeFile(
       join(dir, ".claude-ds.json"),
@@ -103,7 +106,7 @@ describe("migrate-layout", () => {
     const r = await runCli(["migrate-layout", "--yes"], { cwd: dir });
 
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain("→ Next:");
+    expect(r.stdout).toContain("→ Verify:");
     expect(r.stdout).toContain("claude-ds heal");
     expect(r.stdout).not.toMatch(/re-run adopt to proceed/);
   });

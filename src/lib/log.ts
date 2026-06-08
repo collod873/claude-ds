@@ -123,13 +123,28 @@ interface NextStepContext {
 export function printNextStep(command: NextStepCommand, ctx: NextStepContext): void {
   const buildCmd = ctx.buildCmd ?? "your build (e.g. npm run build)";
   let message: string | null = null;
+  // ADR-0013 / #454: a `→ Next:` breadcrumb is a promise that running it
+  // advances the project toward clean. The next-step-liveness gate runs each
+  // one against the post-command tree and flags any that change no state (a
+  // read-only `audit`/build check) or refuse — those dead-end the consumer.
+  // So read-only VERIFICATION guidance is emitted under a distinct `→ Verify:`
+  // prefix instead: it's a thing to run to confirm, not the next ACTION that
+  // moves state. The liveness rule only grades `Next:` lines, so verification
+  // tips no longer register as dead ends, and the consumer still sees them.
+  let verify = false;
 
   switch (command) {
     case "adopt":
-      message = "run 'claude-ds classify --src <dir>' to migrate existing components";
+      // The `<dir>` placeholder isn't runnable as printed and the migration
+      // path only exists on a brownfield tree with loose components. Routed as
+      // verification-grade guidance (not a `→ Next:` action) so it isn't graded
+      // as a dead-end runnable step; the front door owns the real next action.
+      message = "have loose components to organize? run 'claude-ds classify --src <their-dir>' to migrate them";
+      verify = true;
       break;
     case "classify":
       message = "run 'claude-ds audit' to check for drift";
+      verify = true;
       break;
     case "audit":
       // C2 (#414): route every finding-class breadcrumb at `heal`, the single
@@ -152,22 +167,35 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
         message = "run 'claude-ds heal' to resolve the warnings listed above";
       } else {
         message = `run ${buildCmd} to verify everything compiles`;
+        verify = true;
       }
       break;
     case "audit-fix":
       message = `run ${buildCmd} to verify no breakage was introduced`;
+      verify = true;
       break;
     case "sync":
       // C2 (#414): brownfield route used to name `classify` (a loop step heal
       // auto-runs) — now `heal` itself, the single self-converging entry. The
-      // greenfield (clean) tail keeps `audit` since audit is read-only and is
-      // not a loop step.
-      message = ctx.brownfield
-        ? "run 'claude-ds heal' to organize existing design-system files"
-        : "run 'claude-ds audit' to check for new drift after the upgrade";
+      // greenfield (clean) tail is verification-grade (`audit` is read-only and
+      // is not a loop step), so it goes out as a `→ Verify:` tip, not a `→ Next:`
+      // action the liveness gate would grade as a dead end.
+      //
+      // #451: sync just wrote managed files, so the tree is now dirty. A bare
+      // `claude-ds heal` would refuse on that dirty tree — the sync→heal wedge.
+      // Steer to `heal --allow-dirty`, the authorized override heal already
+      // applies to its own inner sub-commands, so the suggested next step
+      // actually runs instead of dead-ending on a clean-tree refusal.
+      if (ctx.brownfield) {
+        message = "run 'claude-ds heal --allow-dirty' to organize the existing design-system files sync just wrote";
+      } else {
+        message = "run 'claude-ds audit' to check for new drift after the upgrade";
+        verify = true;
+      }
       break;
     case "reconcile":
       message = "run 'claude-ds audit' to check for drift";
+      verify = true;
       break;
     case "doctor":
       // #349 F21: doctor previously printed no breadcrumb, violating the
@@ -202,30 +230,38 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
         case "clean":
         default:
           message = `run ${buildCmd} to verify everything compiles`;
+          verify = true;
           break;
       }
       break;
     case "migrate-layout":
-      // #359: pre-adopt projects continue on to `adopt`; an already-adopted
-      // project's next move is `heal` (the self-converging command), not a
-      // second `adopt`. The auto-commit and the "re-run adopt to proceed" copy
-      // were a single defect — both telling the consumer the wrong thing for
-      // the post-adopt path.
-      message = ctx.projectKind === "adopted"
-        ? "run 'claude-ds heal' to converge the project to clean"
-        : "run 'claude-ds adopt' to install the scaffold";
+      // #359 / #454: pre-adopt projects continue on to `adopt` (a real state-
+      // advancing action). An already-adopted project that just finished
+      // migrate-layout is at a clean fixed point, so a `→ Next: run heal`
+      // breadcrumb dead-ends — heal advances no state (and on a tree that still
+      // needs work, fails loudly). Surface heal as verification-grade guidance
+      // instead, so it isn't graded as a runnable next step that goes nowhere.
+      if (ctx.projectKind === "adopted") {
+        message = "run 'claude-ds heal' any time to re-converge the project to clean";
+        verify = true;
+      } else {
+        message = "run 'claude-ds adopt' to install the scaffold";
+      }
       break;
     case "upgrade":
       switch (ctx.upgradeOutcome) {
         case "repaired":
           message = "run 'claude-ds audit' to verify the restored baseline";
+          verify = true;
           break;
         case "no-op":
           message = "run 'claude-ds audit' to check for drift";
+          verify = true;
           break;
         case "applied":
         default:
           message = "run 'claude-ds audit' to check for new drift after the upgrade";
+          verify = true;
           break;
       }
       break;
@@ -248,25 +284,32 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
         case "up-to-date":
         default:
           message = "run 'claude-ds audit' to check for drift";
+          verify = true;
           break;
       }
       break;
     case "reconform":
       // #363: reconform ends with a summary line ("reconform complete — …")
-      // but never a breadcrumb. The post-reconform next step is the standard
-      // verify pass.
+      // but never a breadcrumb. The post-reconform verify pass is read-only
+      // audit — verification guidance, not a state-advancing next action.
       message = "run 'claude-ds audit' to check for drift";
+      verify = true;
       break;
     case "enforce":
       // #363: the post-flip and already-block paths both leave the operator
-      // in block mode; the standard verify after a mode change is audit.
-      // (The gate-refusal path keeps its inline #362 breadcrumb — it has a
-      // command-specific recovery instruction.)
+      // in block mode; the standard verify after a mode change is read-only
+      // audit. (The gate-refusal path keeps its inline #362 breadcrumb — it has
+      // a command-specific recovery instruction.)
       message = "run 'claude-ds audit' to check for drift";
+      verify = true;
       break;
   }
 
-  if (message) info(`→ Next: ${message}`);
+  // `→ Verify:` for read-only checks, `→ Next:` for state-advancing actions.
+  // The next-step-liveness gate (#454 / ADR-0013) grades only `Next:` lines, so
+  // a read-only check no longer reads as a dead-end runnable step while staying
+  // visible to the consumer.
+  if (message) info(`→ ${verify ? "Verify" : "Next"}: ${message}`);
 }
 
 /**

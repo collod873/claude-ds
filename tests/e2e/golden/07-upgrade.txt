@@ -2,4 +2,4 @@
 # exit: 0
 # --- stdout/stderr below; bytes are verbatim from the built CLI ---
 already at v1.5.3
-→ Next: run 'claude-ds audit' to check for drift
+→ Verify: run 'claude-ds audit' to check for drift

@@ -475,25 +475,46 @@ const SEQUENCING_HAZARDS: SequencingHazard[] = [
   },
 ];
 
+/**
+ * The blocked command's output proves it actually refused *because of the
+ * precondition* (a dirty / unclean working tree) — NOT just any line that
+ * happens to carry the word "cannot". #451: the gate's heal step reports a
+ * pre-existing TypeScript error ("Cannot find module …"), which the old broad
+ * `/cannot/` refusal pattern misread as a dirty-tree refusal and paired with
+ * sync's benign "keys changed" line to manufacture a phantom self-block. A real
+ * clean-tree refusal names the tree state and the `--allow-dirty` escape hatch
+ * (see `checkCleanTree`), so we match that shape specifically.
+ */
+const DIRTY_TREE_REFUSAL =
+  /\b(dirty\b|allow-dirty|working tree|commit or stash|uncommitted|refus(?:e|es|ed|ing)\b)/i;
+
 function ruleSelfBlock(input: ScanInput): FrictionFinding[] {
   const findings: FrictionFinding[] = [];
 
   for (const hazard of SEQUENCING_HAZARDS) {
     // Did a creator step run AND show it created the precondition?
-    const creatorStep = input.steps.find(
+    const creatorIdx = input.steps.findIndex(
       s => stepMatches(s, hazard.creator) && hazard.precondition.test(s.combined),
     );
-    if (!creatorStep) continue;
+    if (creatorIdx < 0) continue;
+    const creatorStep = input.steps[creatorIdx];
 
-    // Is the blocked command the next suggested step (or does a later step
-    // show it refusing the precondition the creator made)?
+    // Is the blocked command the next suggested step? This is the wedge as the
+    // user experiences it: the creator hands them a → Next that will refuse.
     const suggested = parseNextSteps(creatorStep.combined).some(c =>
       commandMatches(c, hazard.blocked),
     );
+
+    // …or did the blocked command actually run AFTER the creator and refuse on
+    // the precondition? Ordering matters — a self-block is creator-THEN-block;
+    // a heal that ran BEFORE sync cannot have been wedged by it. And the refusal
+    // must be a genuine dirty-tree refusal, not an unrelated "Cannot find module"
+    // diagnostic in the blocked step's output (#451 false-positive guard).
     const laterRefusal = input.steps.some(
-      s =>
+      (s, i) =>
+        i > creatorIdx &&
         stepMatches(s, hazard.blocked) &&
-        /\b(refus|abort|won't|cannot|will not|dirty)\b/i.test(s.combined),
+        DIRTY_TREE_REFUSAL.test(s.combined),
     );
 
     if (suggested || laterRefusal) {

@@ -148,9 +148,12 @@ describe("reconform", () => {
 
     const r = await runCli(["reconform"], { cwd: dir });
     expect(r.code).toBe(0);
-    // Hint frames as actionable next-step (not a "WARNING"), names the file,
-    // and tells the operator how to silence it (editing).
-    expect(r.stdout).toMatch(/→ Next/);
+    // #454: framed as a `→ Customize:` hint (not a "WARNING", and NOT a
+    // `→ Next:` — by-hand editing isn't a runnable command, so the
+    // next-step-liveness gate would rightly read it as a dead end). Names the
+    // file and tells the operator how to silence it (editing).
+    expect(r.stdout).toMatch(/→ Customize/);
+    expect(r.stdout).not.toMatch(/→ Next/);
     expect(r.stdout).toMatch(/contracts\.md/);
     expect(r.stdout).toMatch(/tokens\.json/);
     expect(r.stdout).toMatch(/edit/i);
@@ -192,7 +195,7 @@ describe("reconform", () => {
     // so by definition neither file is the verbatim seed — hint must not fire.
     const r = await runCli(["reconform"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).not.toMatch(/→ Next: consolidate/);
+    expect(r.stdout).not.toMatch(/→ Customize: consolidate/);
   });
 
   it("check phase: invokes project-local scripts/check-*.ts (not pack-internal)", async () => {
