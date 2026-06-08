@@ -355,7 +355,9 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
       lines.push("Pack-owned regions updated; user-owned content preserved.");
     }
     lines.push("To diff before adopt, run: claude-ds doctor --pack <name>");
-    process.stdout.write(lines.join("\n") + "\n");
+    // Issue #408: under --json the JSON document must be the entirety of
+    // stdout. The overwrite preview rides on `actions.overwrites` instead.
+    if (!opts.json) process.stdout.write(lines.join("\n") + "\n");
   }
 
   progress.start("finishing setup");

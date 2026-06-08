@@ -79,6 +79,26 @@ describe("headless contract — adopt", () => {
     // JSON.parse throws and the test fails.
     expect(() => JSON.parse(r.stdout.trim())).not.toThrow();
   });
+
+  it("--json keeps stdout JSON-only even when adopt overwrites managed files", async () => {
+    // Pre-seed a managed pack file so the post-write overwrite preview block
+    // fires (`overwrites.length > 0`). Without the `!opts.json` gate that block
+    // wrote raw markdown to stdout and broke the headless contract.
+    // `--ignore .claude/**` silences the lookalike heuristic so adopt reaches
+    // the sync-pack-files stage where the overwrite occurs.
+    await mkdir(join(dir, ".claude/hooks"), { recursive: true });
+    await writeFile(join(dir, ".claude/hooks/atom-imports.sh"), "# stale stub\n");
+    const r = await runCli(
+      ["adopt", "--pack", "next-react", "--json", "--ignore", ".claude/**"],
+      { cwd: dir },
+    );
+    expect(r.code).toBe(0);
+    // The whole stdout still parses as a single JSON envelope — the overwrite
+    // preview that used to leak as markdown now rides on `actions.overwrites`.
+    const result = parseJsonOutput(r.stdout);
+    expect(result.command).toBe("adopt");
+    expect(result.verdict).toBe("adopted");
+  });
 });
 
 describe("headless contract — sync", () => {
