@@ -22,6 +22,8 @@
  * changes shown are the first iteration's. After `[Enter]`, `driveRemediation`
  * re-derives and walks to a fixed point.
  */
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { run } from "./runner.js";
 import type { ProjectContext } from "./project.js";
 import type { SummaryEntry } from "./render/index.js";
@@ -35,6 +37,8 @@ import {
 import { MIGRATION_REGISTRY } from "./migration-registry.js";
 import { checkVersionCurrency } from "./version-currency.js";
 import type { LoopStep } from "./remediation-planner.js";
+import { metaKindFromSource } from "./three-signal.js";
+import { walkDir } from "./reports/unexpected-files.js";
 import pkg from "../../package.json" with { type: "json" };
 
 /**
@@ -137,24 +141,150 @@ function stepHeader(step: LoopStep, ctx: ProjectContext, counts: GateFindingCoun
 }
 
 /**
+ * A blast-radius disclosure for a config-flag flip that cascades into file
+ * rewrites (#413). Today's only known cascade is the v0.9.0 `meta-kind-hard`
+ * migration's `meta_kind_strict: false → true` flip, which projects new
+ * `DRIFT-META-KIND-MISSING` findings on every DS tier file lacking a
+ * `meta.kind` declaration — driving an `audit --fix` step the operator never
+ * saw in the announced plan. The preview names the flip and its affected-file
+ * count, and `projectFullPlan` lifts the triggered step into the announced
+ * plan so the "what you approve" set equals the "what runs" set.
+ */
+export interface CascadeDisclosure {
+  /** Human-readable line shown in the preview under the upgrade step. */
+  message: string;
+  /** The loop step the flip drives — appended to the announced plan if absent. */
+  triggeredStep: LoopStep;
+  /** Number of files the flip rewrites — feeds the triggered step's header count. */
+  affectedFiles: number;
+}
+
+const DRIFT_TIER_DIRS = [
+  "design-system/atoms",
+  "design-system/composites",
+  "design-system/patterns",
+];
+
+/**
+ * Count DS tier files (one level deep, .tsx, not showcase/test/stories) whose
+ * source declares no `meta.kind`. This is the projected affected-file count for
+ * the `meta_kind_strict: false → true` cascade: once strict is on,
+ * `DRIFT-META-KIND-MISSING` fires on each of these files, driving `audit --fix`
+ * to backfill via `mergeMetaKind`. Mirrors the depth filter in
+ * `scanDriftAndIntegrity` so the projection matches what the next iteration
+ * will actually find.
+ */
+async function countDsFilesMissingMetaKind(cwd: string): Promise<number> {
+  let count = 0;
+  for (const dir of DRIFT_TIER_DIRS) {
+    const files = await walkDir(cwd, dir);
+    for (const f of files) {
+      if (!f.endsWith(".tsx")) continue;
+      if (f.endsWith(".showcase.tsx") || f.endsWith(".test.tsx") || f.endsWith(".stories.tsx")) continue;
+      const sub = f.slice(dir.length + 1);
+      if (sub.includes("/")) continue;
+      let source: string;
+      try {
+        source = await readFile(join(cwd, f), "utf8");
+      } catch {
+        continue;
+      }
+      if (metaKindFromSource(source) === null) count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Project the executed plan from the announced one: walk every step the
+ * caller's plan triggers (via known flag-flip cascades) and return both the
+ * augmented step list and the disclosures that earned each addition. Today's
+ * only wired cascade is `meta_kind_strict: false → true` from the v0.9.0
+ * `meta-kind-hard` migration in the upgrade chain — if `upgrade` is in the
+ * plan and that migration's flip applies, projected `audit --fix` work over
+ * every DS file lacking `meta.kind` joins the plan.
+ *
+ * Returned counts shape:
+ *   - `plan` — input plan with cascade-triggered steps appended (deduped).
+ *   - `cascades` — one disclosure per detected cascade for preview rendering.
+ *   - `metaKindBackfillCount` — extra finding count the projected `audit --fix`
+ *     step must reflect in its header, on top of the caller's
+ *     `autoFixableCount`. Pure projection — no I/O is mutated.
+ */
+export async function projectFullPlan(
+  ctx: ProjectContext,
+  initialPlan: LoopStep[],
+): Promise<{
+  plan: LoopStep[];
+  cascades: CascadeDisclosure[];
+  metaKindBackfillCount: number;
+}> {
+  const cascades: CascadeDisclosure[] = [];
+  let metaKindBackfillCount = 0;
+
+  if (initialPlan.includes("upgrade") && !ctx.auditConfig.metaKindStrict) {
+    const from = ctx.cfg.packVersion;
+    const to = `v${pkg.version}`;
+    const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
+    const flipsMetaKindStrict = chain.some((mv) =>
+      mv.ops.some((op) => op.name === "meta-kind-hard@v0.9.0"),
+    );
+    if (flipsMetaKindStrict) {
+      const n = await countDsFilesMissingMetaKind(ctx.cwd);
+      if (n > 0) {
+        metaKindBackfillCount = n;
+        const noun = n === 1 ? "file" : "files";
+        cascades.push({
+          message: `meta_kind_strict: false → true → backfills meta.kind across ${n} ${noun}`,
+          triggeredStep: "audit --fix",
+          affectedFiles: n,
+        });
+      }
+    }
+  }
+
+  const plan: LoopStep[] = [...initialPlan];
+  for (const c of cascades) {
+    if (!plan.includes(c.triggeredStep)) plan.push(c.triggeredStep);
+  }
+  return { plan, cascades, metaKindBackfillCount };
+}
+
+/**
  * Build the commitment-gate preview lines for a non-empty plan. The header
  * names the ordered plan; each step is then expanded — byte-deterministic steps
  * with their real `Change[]` summary, finding-driven steps with their real
- * count. The caller prints these, then the single `[Enter]` gate prompt.
+ * count. Before rendering, the input plan is projected forward through every
+ * known config-flag cascade (today: the v0.9.0 `meta_kind_strict: false → true`
+ * flip in the upgrade chain) so the announced step set equals the executed
+ * step set — B1/B2 / #413. Cascade-triggered file-rewrite counts appear under
+ * the originating step, and the triggered step's header reflects the projected
+ * finding count, not just the caller's current-state count. The caller prints
+ * these, then the single `[Enter]` gate prompt.
  */
 export async function buildCommitmentGate(
   ctx: ProjectContext,
   plan: LoopStep[],
   counts: GateFindingCounts,
 ): Promise<string[]> {
+  const { plan: projected, cascades, metaKindBackfillCount } = await projectFullPlan(ctx, plan);
+
+  const effectiveCounts: GateFindingCounts = {
+    classifyCount: counts.classifyCount,
+    // The cascade projects findings that today's strict=false scan cannot see;
+    // sum them into the announced count so the header equals what audit --fix
+    // will actually repair after the upstream flip lands (#413 AC).
+    autoFixableCount: counts.autoFixableCount + metaKindBackfillCount,
+  };
+
   const lines: string[] = [];
   lines.push("");
-  lines.push(`I'll bring this tree to clean — ${plan.length} step${plan.length === 1 ? "" : "s"}:`);
-  lines.push(`  ${plan.join(" → ")}`);
+  lines.push(`I'll bring this tree to clean — ${projected.length} step${projected.length === 1 ? "" : "s"}:`);
+  lines.push(`  ${projected.join(" → ")}`);
   lines.push("");
 
-  for (const step of plan) {
-    lines.push(stepHeader(step, ctx, counts));
+  for (const step of projected) {
+    lines.push(stepHeader(step, ctx, effectiveCounts));
     const entries = await previewStepChanges(ctx, step);
     if (entries !== null) {
       if (entries.length === 0) {
@@ -163,7 +293,28 @@ export async function buildCommitmentGate(
         lines.push(...indent(renderChangeSummary(entries)));
       }
     }
+    // Blast-radius disclosure (#413): cascades that fire from THIS step's
+    // execution. Today only `upgrade` drives a flag-flip cascade, but the
+    // projection model is per-step — when a future cascade lands on `sync` or
+    // `repair`, the same loop renders it under its origin.
+    for (const c of cascades) {
+      if (cascadeOrigin(c, step)) {
+        lines.push(`    ${c.message}`);
+      }
+    }
   }
 
   return lines;
+}
+
+/**
+ * Tag each cascade to the loop step whose execution flips its driving flag.
+ * Today the only cascade is `meta_kind_strict`, set by the v0.9.0 migration
+ * Op `meta-kind-hard` whose Op runs under `upgrade`. Kept as a tiny matcher so
+ * a future flag-flipping migration that runs under a different step (e.g. a
+ * post-upgrade `repair` re-flip) attaches its disclosure to the right header.
+ */
+function cascadeOrigin(c: CascadeDisclosure, step: LoopStep): boolean {
+  if (c.triggeredStep === "audit --fix" && step === "upgrade") return true;
+  return false;
 }
