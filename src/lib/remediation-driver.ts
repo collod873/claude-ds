@@ -211,6 +211,14 @@ export interface DriveOpts {
    * driver stays UI-neutral so neither driver's stdout leaks into the other.
    */
   onIteration?: (iter: number, max: number) => void;
+  /**
+   * Issue #414 / C3 — called after a pass's plan is derived, so the driver can
+   * surface the labeled iteration ("pass 2/3 — classify → audit --fix") instead
+   * of a generic "iteration 2/3" line that reads as a stuck loop. Fires after
+   * `onIteration` and before any step dispatches; called only when the plan is
+   * non-empty (an empty plan converges immediately and produces no labeled pass).
+   */
+  onPassPlan?: (iter: number, max: number, plan: LoopStep[]) => void;
 }
 
 /**
@@ -244,7 +252,7 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 
   for (let iter = 1; iter <= maxIterations; iter++) {
     opts.onIteration?.(iter, maxIterations);
-    progress.info(`iteration ${iter}/${maxIterations}`);
+    progress.info(`pass ${iter}/${maxIterations}`);
 
     // Plan from current state. Re-derived every iteration so steps the previous
     // iteration completed drop out of the next plan.
@@ -262,6 +270,10 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
       }
       return { kind: "converged", iterations: iter };
     }
+
+    // C3 (#414) — surface the labeled pass with the plan it'll run, so the
+    // operator sees what work this pass is doing rather than a bare counter.
+    opts.onPassPlan?.(iter, maxIterations, plan);
 
     const before = await snapshotTree(cwd);
     const pendingBefore = pendingSink?.length ?? 0;

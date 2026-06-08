@@ -145,6 +145,10 @@ export async function healCmd(opts: HealOpts): Promise<void> {
   // counter surfaced via `progress.info`.
   const progress = createProgress();
   try {
+    // C3 (#414): name the bounded loop in plain English so "pass 1/3" reads as
+    // planned, not stuck. Followed by the planner-driven loop heading the agent
+    // surface has shipped for several releases (kept for log-grep continuity).
+    info(`heal: converging until no drift — up to ${maxIterations} passes.`);
     info(`heal: planner-driven loop (max ${maxIterations} iterations)`);
 
     // Pending-decision sink (PRD #325 sub-issue #333). Passed by reference
@@ -165,7 +169,12 @@ export async function healCmd(opts: HealOpts): Promise<void> {
       answers: opts.answers,
       pendingSink,
       progress,
-      onIteration: (iter, max) => info(`heal: iteration ${iter}/${max}`),
+      // C3 (#414): label each pass with the steps it'll run so "pass 2/3" is
+      // self-explanatory. The pre-plan `onIteration` log is dropped — the
+      // labeled `onPassPlan` line below subsumes it and the bare counter was
+      // exactly the "stuck loop" reading C3 was filed to fix.
+      onPassPlan: (iter, max, plan) =>
+        info(`heal: pass ${iter}/${max} — ${plan.join(" → ")}`),
     });
 
     if (outcome.kind === "converged") {

@@ -35,10 +35,10 @@ describe("next-step breadcrumbs (#193)", () => {
     expect(r.stdout).toMatch(/→ Next:.*build/);
   });
 
-  it("audit (with auto-fixable findings) prints → Next: with audit --fix", async () => {
-    // A correctly-placed atom with the retired meta.states field (ADR-0007)
-    // produces DRIFT-STALE-META-STATES — an auto-fixable rule. Breadcrumb
-    // should still point at `audit --fix`, not classify (#245).
+  it("audit (with auto-fixable findings) routes → Next: at heal (C2 #414)", async () => {
+    // C2: `audit --fix` is a heal loop step — the tool auto-runs it. The
+    // breadcrumb routes at `heal` (single self-converging entry), never at the
+    // loop step heal would walk for the operator.
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await writeFile(
       join(dir, "design-system/atoms/solo-label.tsx"),
@@ -49,14 +49,13 @@ export function SoloLabel() { return <span />; }
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(1);
     expect(r.stdout).toMatch(/DRIFT-STALE-META-STATES/);
-    expect(r.stdout).toMatch(/→ Next:.*claude-ds audit --fix/);
-    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds classify/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds heal/);
+    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds audit --fix/);
   });
 
-  it("audit --fix leaving an inline-component raw primitive points at classify (#207)", async () => {
-    // A composite with a non-exported, ≥20-line inline component that renders a
-    // raw <button>. The fixer can't replace it in place (extraction is classify's
-    // job) and defers; the breadcrumb must route to classify, not audit --fix.
+  it("audit --fix leaving an inline-component raw primitive routes → Next: at heal (C2 #414)", async () => {
+    // Same C2 rule: classify is a heal loop step, so the breadcrumb names
+    // `heal` instead of `classify`.
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
     const inlineBody = Array.from({ length: 22 }, (_, i) => `    const v${i} = ${i};`).join("\n");
     await writeFile(
@@ -73,15 +72,15 @@ export function CalendarView() {
     );
     const r = await runCli(["audit", "--pack", "next-react", "--fix"], { cwd: dir });
     expect(r.code).toBe(1);
-    expect(r.stdout).toMatch(/→ Next:.*claude-ds classify/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds heal/);
     expect(r.stdout).toMatch(/inline component/);
-    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds audit --fix/);
+    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds (classify|audit --fix)/);
   });
 
-  it("audit (MISPLACED finding) points → Next: at classify, not audit --fix (#245)", async () => {
+  it("audit (MISPLACED finding) routes → Next: at heal (C2 #414)", async () => {
     // A composite-shaped file (≥3 DS-component imports) living under atoms/
-    // produces DRIFT-MISPLACED. That finding is report-only — `audit --fix`
-    // can't repair it, only `classify` can. Breadcrumb must reflect that.
+    // produces DRIFT-MISPLACED. C2: classify is a heal loop step, so the
+    // breadcrumb names `heal`, not `classify`.
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await mkdir(join(dir, "design-system/composites"), { recursive: true });
     for (const name of ["card", "button", "input"]) {
@@ -101,18 +100,18 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
     const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
     expect(r.code).toBe(1);
     expect(r.stdout).toMatch(/DRIFT-MISPLACED/);
-    expect(r.stdout).toMatch(/→ Next:.*claude-ds classify/);
-    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds audit --fix/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds heal/);
+    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds (classify|audit --fix)/);
   });
 
-  it("sync on a brownfield tree points → Next: at classify (#245)", async () => {
+  it("sync on a brownfield tree routes → Next: at heal (C2 #414)", async () => {
     await writeFile(
       join(dir, ".claude-ds.json"),
       JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }),
     );
     // Pre-existing consumer tier file makes this tree brownfield: there is
-    // something for classify to look at. Sync's Next: must route there, not
-    // skip ahead to audit.
+    // something for the loop to organize. C2: `classify` is a heal loop step,
+    // so the breadcrumb names `heal`, not `classify`.
     await mkdir(join(dir, "design-system/atoms"), { recursive: true });
     await writeFile(
       join(dir, "design-system/atoms/legacy-button.tsx"),
@@ -120,8 +119,8 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
     );
     const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/→ Next:.*claude-ds classify/);
-    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds audit\b/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds heal/);
+    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds classify/);
   });
 
   it("audit breadcrumb detects package.json build script", async () => {
@@ -180,14 +179,17 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
     expect(r.stdout).toMatch(/→ Next:.*claude-ds audit/);
   });
 
-  it("version (default, offline, pinned < installed) routes → Next: to upgrade", async () => {
+  it("version (default, offline, pinned < installed) routes → Next: to heal (C2 #414)", async () => {
+    // C2: `upgrade` is a heal loop step — the tool auto-runs it. The
+    // breadcrumb routes at `heal` (single self-converging entry) instead.
     await writeFile(
       join(dir, ".claude-ds.json"),
       JSON.stringify({ version: "v0.1.0", pack: "next-react", mode: "warn" }),
     );
     const r = await runCli(["version", "--offline"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/→ Next:.*claude-ds upgrade/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds heal/);
+    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds upgrade/);
   });
 
   it("version (default, no .claude-ds.json) routes → Next: to adopt", async () => {
@@ -207,14 +209,15 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
     expect(r.stdout).toMatch(/→ Next:.*claude-ds audit/);
   });
 
-  it("version --check (behind) prints → Next: with upgrade", async () => {
+  it("version --check (behind) routes → Next: at heal (C2 #414)", async () => {
     await writeFile(
       join(dir, ".claude-ds.json"),
       JSON.stringify({ version: "v0.1.0", pack: "next-react", mode: "warn" }),
     );
     const r = await runCli(["version", "--check"], { cwd: dir });
     expect(r.code).toBe(1);
-    expect(r.stdout).toMatch(/→ Next:.*claude-ds upgrade/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds heal/);
+    expect(r.stdout).not.toMatch(/→ Next:.*claude-ds upgrade/);
   });
 
   it("version --check (no .claude-ds.json) routes → Next: to adopt", async () => {

@@ -75,6 +75,9 @@ export interface FrontDoorOpts {
   answers?: string;
   /** Override the auto-advance iteration ceiling. Tests use it; default 3. */
   maxIterations?: number;
+  /** C4 — when true, gate-preview renders the full one-line-per-file list
+   *  instead of the per-tier collapse. Default false. */
+  verbose?: boolean;
 }
 
 export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
@@ -231,10 +234,15 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
   // counts the operator approves equal what runs — F11), then a single [Enter].
   // `unfixableCount` already subsumes extraction, so it is classify's whole
   // non-overlapping share; the remainder is audit --fix's auto-fixable set.
-  const gateLines = await buildCommitmentGate(ctx, plan, {
-    classifyCount: unfixableCount,
-    autoFixableCount: findings.length - unfixableCount,
-  });
+  const gateLines = await buildCommitmentGate(
+    ctx,
+    plan,
+    {
+      classifyCount: unfixableCount,
+      autoFixableCount: findings.length - unfixableCount,
+    },
+    { verbose: opts.verbose },
+  );
   printLines(gateLines);
 
   if (interactive) {

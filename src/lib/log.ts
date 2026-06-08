@@ -132,19 +132,24 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
       message = "run 'claude-ds audit' to check for drift";
       break;
     case "audit":
+      // C2 (#414): route every finding-class breadcrumb at `heal`, the single
+      // self-converging entry. Naming `classify` / `audit --fix` / `sync` here
+      // would be asking the operator to run a loop step the tool auto-runs —
+      // the "homework for self-loop work" defect C2 closes. `audit --except`
+      // stays in the with-findings line because exceptions are a deliberate
+      // operator decision, not a loop step heal walks.
       if ((ctx.extractionCount ?? 0) > 0) {
         const ext = ctx.extractionCount ?? 0;
-        message = `run 'claude-ds classify' to extract ${ext} inline ${ext === 1 ? "component" : "components"}, then re-run 'claude-ds audit'`;
+        message = `run 'claude-ds heal' to extract ${ext} inline ${ext === 1 ? "component" : "components"} and converge`;
       } else if ((ctx.unfixableCount ?? 0) > 0) {
-        message = "run 'claude-ds classify' to address findings audit can't auto-repair";
+        message = "run 'claude-ds heal' to address findings audit can't auto-repair";
       } else if (ctx.hasFindings) {
-        message = "run 'claude-ds audit --fix' to auto-repair, or 'claude-ds audit --except' to register exceptions";
+        message = "run 'claude-ds heal' to auto-repair, or 'claude-ds audit --except' to register exceptions";
       } else if (ctx.hasActionableWarnings) {
         // #349 F9: warnings (orphans, deprecated-path matches) are actionable
-        // even though they're not errors — route to the command that resolves
-        // them rather than telling the consumer to verify a build while the
-        // listed action goes undone.
-        message = "run 'claude-ds audit --fix' to resolve the warnings listed above";
+        // even though they're not errors. Route through `heal` — same self-
+        // converging entry the finding paths use — instead of `audit --fix`.
+        message = "run 'claude-ds heal' to resolve the warnings listed above";
       } else {
         message = `run ${buildCmd} to verify everything compiles`;
       }
@@ -153,8 +158,12 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
       message = `run ${buildCmd} to verify no breakage was introduced`;
       break;
     case "sync":
+      // C2 (#414): brownfield route used to name `classify` (a loop step heal
+      // auto-runs) — now `heal` itself, the single self-converging entry. The
+      // greenfield (clean) tail keeps `audit` since audit is read-only and is
+      // not a loop step.
       message = ctx.brownfield
-        ? "run 'claude-ds classify' to organize existing design-system files"
+        ? "run 'claude-ds heal' to organize existing design-system files"
         : "run 'claude-ds audit' to check for new drift after the upgrade";
       break;
     case "reconcile":
@@ -163,27 +172,29 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
     case "doctor":
       // #349 F21: doctor previously printed no breadcrumb, violating the
       // CONTEXT.md "every command ends with a verdict and a → Next" mandate.
-      // The verdict it carries — clean, scaffold-gap, repair-needed,
-      // upgrade-available — picks which action to name. The pre-adopt path
-      // (no .claude-ds.json) routes through `adopt`.
+      // C2 (#414) rerouted every fixable-state verdict at `heal` — the single
+      // self-converging entry — instead of naming the loop step (`sync`,
+      // `audit --fix`, `migrate-layout`, `upgrade`) the operator would have to
+      // pick. `pre-adopt` and `clean` (no plan exists) keep their direct
+      // breadcrumbs because heal isn't the right action there.
       switch (ctx.doctorVerdict) {
         case "pre-adopt":
           message = "run 'claude-ds adopt' to install the scaffold";
           break;
         case "scaffold-gap":
-          message = "run 'claude-ds sync' to restore the missing managed file(s)";
+          message = "run 'claude-ds heal' to restore the missing managed file(s)";
           break;
         case "root-dupes":
-          message = "run 'claude-ds audit --fix' to resolve the root-level duplicate(s)";
+          message = "run 'claude-ds heal' to resolve the root-level duplicate(s)";
           break;
         case "lookalikes":
-          message = "run 'claude-ds migrate-layout' to rename the lookalike(s) to canonical paths";
+          message = "run 'claude-ds heal' to rename the lookalike(s) to canonical paths";
           break;
         case "repair-needed":
-          message = "run 'claude-ds upgrade' to re-apply the regressed migration end-state(s)";
+          message = "run 'claude-ds heal' to re-apply the regressed migration end-state(s)";
           break;
         case "upgrade-available":
-          message = "run 'claude-ds upgrade' to install the newer pack version";
+          message = "run 'claude-ds heal' to install the newer pack version";
           break;
         case "completeness-findings":
           message = "review the findings above — delete superseded files, link issues to exceptions, or mark permanent";
@@ -221,15 +232,15 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
     case "version":
       // #363: even the informational `version` command must end with a
       // breadcrumb (CONTEXT.md's "Next-step breadcrumb" rule covers every
-      // CLI command, not just mutating ones). Route on pinned vs installed:
-      // no config → adopt; behind → upgrade; ahead → update the CLI binary;
-      // up-to-date → audit (the standard verify step).
+      // CLI command, not just mutating ones). C2 (#414) reroutes the `behind`
+      // branch at `heal` (was `upgrade`) so the operator gets the single self-
+      // converging entry, not the bare loop step.
       switch (ctx.versionState) {
         case "no-config":
           message = "run 'claude-ds adopt' to install the scaffold";
           break;
         case "behind":
-          message = "run 'claude-ds upgrade' to apply pending migrations";
+          message = "run 'claude-ds heal' to apply pending migrations";
           break;
         case "ahead":
           message = "update the CLI binary to match (or downgrade the .claude-ds.json pin)";
