@@ -11,6 +11,9 @@ const ROUTE_FILES = [
   "app/design/layout.tsx",
   "app/design/[...slug]/page.tsx",
   "app/design/[...slug]/resolve.ts",
+  // Client component that renders the catalog grid; gates detail links on
+  // `has_showcase` so showcase-less sub-parts aren't shipped as dead links.
+  "app/design/_filter.tsx",
 ];
 
 const REFERENCE_FILES = [
@@ -34,6 +37,19 @@ describe("/design route files shipped by pack", () => {
     expect(src).toMatch(/NODE_ENV.*===.*["']production["']/);
     expect(src).toMatch(/DESIGN_GALLERY_ENABLED/);
     expect(src).toMatch(/notFound\(\)/);
+  });
+
+  it("catalog gates detail links on has_showcase so sub-parts aren't dead links", () => {
+    // The [...slug] route 404s on any entry without a `.showcase.tsx`. The
+    // index must therefore NOT link showcase-less sub-parts (combobox-input,
+    // accordion-trigger, …). Assert the filter branches on `has_showcase`
+    // and renders a non-anchor card for the showcase-less path.
+    const filter = readFileSync(join(PACK_FILES, "app/design/_filter.tsx"), "utf8");
+    expect(filter).toMatch(/has_showcase === false/);
+    // The page must carry the flag through from the manifest for the gate to
+    // see it.
+    const page = readFileSync(join(PACK_FILES, "app/design/page.tsx"), "utf8");
+    expect(page).toMatch(/has_showcase\?: boolean/);
   });
 });
 

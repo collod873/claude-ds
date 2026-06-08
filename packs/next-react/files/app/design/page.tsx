@@ -7,6 +7,11 @@ interface Entry {
   name: string;
   kind?: Kind;
   tier: string;
+  // Carried through from the manifest so the index can gate links: the detail
+  // route renders only components with a `.showcase.tsx`, so listing a
+  // showcase-less sub-part (combobox-input, accordion-trigger, …) as a link
+  // is a guaranteed 404. Absent on legacy manifests → treated as linkable.
+  has_showcase?: boolean;
 }
 
 function groupByKind(entries: Entry[]): Record<Kind, Entry[]> {

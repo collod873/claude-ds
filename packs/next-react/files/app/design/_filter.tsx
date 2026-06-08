@@ -9,6 +9,8 @@ interface Entry {
   name: string;
   kind?: Kind;
   tier: string;
+  // See app/design/page.tsx — gates whether this entry links to a detail page.
+  has_showcase?: boolean;
 }
 
 const SECTION_FOR_KIND: Record<Kind, string> = {
@@ -53,15 +55,31 @@ export function DesignFilter({ groups }: DesignFilterProps) {
           <section key={kind} className="mb-10">
             <h2 className="text-lg font-semibold mb-3">{SECTION_TITLES[kind]}</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
-              {entries.map((e) => (
-                <Link
-                  key={e.name}
-                  href={`/design/${section}/${e.name}`}
-                  className="border rounded-md p-3 text-sm hover:bg-muted transition-colors truncate"
-                >
-                  {e.name}
-                </Link>
-              ))}
+              {entries.map((e) =>
+                // Only components with a `.showcase.tsx` have a detail page; the
+                // catch-all route 404s on the rest. Render showcase-less
+                // sub-parts (combobox-input, accordion-trigger, …) as
+                // non-clickable cards so the catalog stays honest instead of
+                // shipping ~40 dead links. `=== false` so legacy manifests
+                // (field absent) keep linking.
+                e.has_showcase === false ? (
+                  <div
+                    key={e.name}
+                    title="No standalone preview — rendered inside its parent component"
+                    className="border border-dashed rounded-md p-3 text-sm text-muted-foreground/60 truncate cursor-default"
+                  >
+                    {e.name}
+                  </div>
+                ) : (
+                  <Link
+                    key={e.name}
+                    href={`/design/${section}/${e.name}`}
+                    className="border rounded-md p-3 text-sm hover:bg-muted transition-colors truncate"
+                  >
+                    {e.name}
+                  </Link>
+                )
+              )}
             </div>
           </section>
         );
