@@ -236,23 +236,23 @@
     },
     {
       "path": "scripts/check-tier-imports.ts",
-      "category": "seeded"
+      "category": "managed"
     },
     {
       "path": "scripts/similarity-check.ts",
-      "category": "seeded"
+      "category": "managed"
     },
     {
       "path": "scripts/a11y-scan.ts",
-      "category": "seeded"
+      "category": "managed"
     },
     {
       "path": "scripts/check-principles-freshness.ts",
-      "category": "seeded"
+      "category": "managed"
     },
     {
       "path": "scripts/update-tokens.ts",
-      "category": "seeded"
+      "category": "managed"
     },
     {
       "path": "scripts/run-a11y.sh",
