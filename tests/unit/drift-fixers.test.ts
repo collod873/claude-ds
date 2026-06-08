@@ -796,6 +796,44 @@ describe("drift-fixers", () => {
       const content = await readFile(join(dir, "design-system/atoms/button.tsx"), "utf8");
       expect(content).toMatch(/export const meta = \{ kind: "atom" as const, examples: \[\] \}/);
     });
+
+    // A1 (PRD #407 / issue #409): the previous fixer blindly appended a
+    // second `export const meta = {…}` to a file that already declared one,
+    // producing ~182 TS errors on a Crewops-shaped consumer. `mergeMetaKind`
+    // must merge `kind` into the existing object instead.
+    it("merges kind into an existing typed meta with `as const`, never appends a duplicate", async () => {
+      await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+      const source = [
+        `import type { Meta } from "@ds/types/meta";`,
+        ``,
+        `export function Input() { return <input />; }`,
+        ``,
+        `export const meta = {`,
+        `  examples: [`,
+        `    { name: "default", props: { value: "" } },`,
+        `    { name: "filled", props: { value: "hello" } },`,
+        `  ],`,
+        `} as const;`,
+        ``,
+        `export type _MetaShape = Meta;`,
+        ``,
+      ].join("\n");
+      await writeFile(join(dir, "design-system/atoms/input.tsx"), source);
+
+      const fixer = getFixer("DRIFT-META-KIND-MISSING")!;
+      const result = await fixAndApply(fixer, {
+        ruleId: "DRIFT-META-KIND-MISSING",
+        file: "design-system/atoms/input.tsx",
+        message: "missing meta.kind",
+      }, dir);
+
+      expect(result.fixed).toBe(true);
+      const content = await readFile(join(dir, "design-system/atoms/input.tsx"), "utf8");
+      const metaDecls = content.match(/^export\s+const\s+meta\b/gm) ?? [];
+      expect(metaDecls).toHaveLength(1);
+      expect(content).toContain(`kind: "atom" as const`);
+      expect(content).toContain(`{ name: "filled", props: { value: "hello" } }`);
+    });
   });
 
   describe("fixRawPrimitive", () => {

@@ -49,6 +49,14 @@ describe.skipIf(!hasDist)("e2e smoke: Crewops-shaped fixture", () => {
       expect(report.steps[0].name).toBe("adopt");
       expect(typeof report.pass).toBe("boolean");
 
+      // A1 (PRD #407 / issue #409): the meta-kind-missing fixer must merge
+      // `kind` into the existing `export const meta` instead of appending a
+      // second one. Locked in as a blocking assertion now that
+      // `mergeMetaKind` is wired up — a regression that resurrects the
+      // append-only behaviour fails the smoke gate, not just the unit table.
+      const duplicateMeta = report.deviations.filter((d) => d.category === "duplicate-meta-decl");
+      expect(duplicateMeta, JSON.stringify(duplicateMeta, null, 2)).toHaveLength(0);
+
       // Human-readable summary line so the run page shows the bottom line
       // without the operator having to download the artifact.
       // eslint-disable-next-line no-console
