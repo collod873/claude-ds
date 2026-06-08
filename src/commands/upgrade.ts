@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
-import { info, err, confirm, printNextStep } from "../lib/log.js";
+import { info, err, confirm, printNextStep, setJsonMode } from "../lib/log.js";
+import { HEADLESS_EXIT, errorResult, emitHeadless } from "../lib/headless.js";
 
 const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
@@ -48,10 +49,17 @@ function collectSummaryEntries(report: RunReport): SummaryEntry[] {
   return entries;
 }
 
-function renderUpgradePreview(report: RunReport, mode: UpgradeRenderMode): void {
+function renderUpgradePreview(
+  report: RunReport,
+  mode: UpgradeRenderMode,
+  jsonAccumulator?: SummaryEntry[],
+): void {
   const entries = collectSummaryEntries(report);
   if (mode === "json") {
-    process.stdout.write(renderChangesJson(entries) + "\n");
+    // Issue #408: under --json we collect entries across every preview call
+    // and emit ONE final JSON document at the end of the command — keeping
+    // stdout a single parseable JSON payload (the headless contract).
+    if (jsonAccumulator) jsonAccumulator.push(...entries);
     return;
   }
   if (mode === "diff") {
@@ -63,6 +71,35 @@ function renderUpgradePreview(report: RunReport, mode: UpgradeRenderMode): void 
   for (const line of renderChangeSummary(entries)) {
     process.stdout.write(line + "\n");
   }
+}
+
+/**
+ * Emit upgrade's headless contract — issue #408. Combines the existing
+ * `{ changes: [...] }` shape (back-compat with PRD #340 sub-issue #344's
+ * machine surface) with the headless envelope every loop-critical command
+ * now ships under `--json`. The function is `never`-returning: it calls
+ * `process.exit(exitCode)` so callers don't have to remember to.
+ */
+function emitUpgradeHeadless(
+  exitCode: number,
+  verdict: string,
+  changesEntries: SummaryEntry[],
+  actions: Record<string, unknown>,
+  remaining: Record<string, unknown>,
+): never {
+  const payload = JSON.parse(renderChangesJson(changesEntries)) as { changes: unknown[] };
+  const out = {
+    command: "upgrade" as const,
+    ok: exitCode === HEADLESS_EXIT.OK,
+    verdict,
+    exitCode,
+    actions,
+    remaining,
+    changes: payload.changes,
+  };
+  process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+  setJsonMode(false);
+  process.exit(exitCode);
 }
 
 /**
@@ -82,7 +119,7 @@ function renderUpgradePreview(report: RunReport, mode: UpgradeRenderMode): void 
 async function verifyEndStates(
   ctx: Awaited<ReturnType<typeof loadProject>>,
   packVersion: string,
-  opts: { dryRun?: boolean; yes?: boolean; renderMode: UpgradeRenderMode },
+  opts: { dryRun?: boolean; yes?: boolean; renderMode: UpgradeRenderMode; jsonAccumulator?: SummaryEntry[] },
 ): Promise<number> {
   const verifyChain = computeVerificationChain(packVersion, MIGRATION_REGISTRY);
   if (verifyChain.length === 0) return 0;
@@ -94,7 +131,7 @@ async function verifyEndStates(
   if (opts.renderMode !== "json") {
     info(`migration end-state drift detected: ${driftedOps.map((o) => o.name).join(", ")}`);
   }
-  renderUpgradePreview(dryReport, opts.renderMode);
+  renderUpgradePreview(dryReport, opts.renderMode, opts.jsonAccumulator);
 
   if (opts.dryRun) return driftedOps.length;
 
@@ -130,6 +167,11 @@ export async function upgradeCmd(opts: {
 }) {
   const cwd = opts.cwd ?? process.cwd();
   const renderMode: UpgradeRenderMode = opts.json ? "json" : opts.diff ? "diff" : "summary";
+  if (opts.json) setJsonMode(true);
+  // Issue #408: under --json every preview call appends entries here instead
+  // of emitting them, so the single final JSON document carries the complete
+  // set of planned/applied changes.
+  const jsonAccumulator: SummaryEntry[] | undefined = renderMode === "json" ? [] : undefined;
   const humanLog = (msg: string): void => {
     if (renderMode !== "json") info(msg);
   };
@@ -140,12 +182,15 @@ export async function upgradeCmd(opts: {
     const guard = checkCleanTree({ command: "upgrade", cwd, allowDirty: opts.allowDirty });
     if (!guard.ok) {
       err(guard.message);
+      if (opts.json) emitHeadless(errorResult("upgrade", guard.message));
       process.exit(2);
     }
   }
 
   try { await stat(join(cwd, ".claude-ds.json")); } catch {
-    err(".claude-ds.json absent — run adopt first");
+    const m = ".claude-ds.json absent — run adopt first";
+    err(m);
+    if (opts.json) emitHeadless(errorResult("upgrade", m));
     process.exit(2);
   }
 
@@ -155,12 +200,21 @@ export async function upgradeCmd(opts: {
 
   if (from === to) {
     humanLog(`already at ${to}`);
-    const drifted = await verifyEndStates(ctx, from, { ...opts, renderMode });
+    const drifted = await verifyEndStates(ctx, from, { ...opts, renderMode, jsonAccumulator });
     // #349 F21: every command ends with a → Next breadcrumb. #344's render
     // policy suppresses all human output under --json, so gate the breadcrumb
     // on the same renderMode rather than emitting it into the JSON surface.
     if (renderMode !== "json") {
       printNextStep("upgrade", { upgradeOutcome: drifted > 0 ? "repaired" : "no-op" });
+    }
+    if (opts.json) {
+      emitUpgradeHeadless(
+        HEADLESS_EXIT.OK,
+        drifted > 0 ? "repaired" : "no-op",
+        jsonAccumulator ?? [],
+        { from, to, drifted, applied: false },
+        { findingsCount: 0 },
+      );
     }
     return;
   }
@@ -170,9 +224,18 @@ export async function upgradeCmd(opts: {
   if (chain.length === 0) {
     humanLog(`no registered migrations between ${from} and ${to}`);
     humanLog(`pack is at ${from}`);
-    const drifted = await verifyEndStates(ctx, from, { ...opts, renderMode });
+    const drifted = await verifyEndStates(ctx, from, { ...opts, renderMode, jsonAccumulator });
     if (renderMode !== "json") {
       printNextStep("upgrade", { upgradeOutcome: drifted > 0 ? "repaired" : "no-op" });
+    }
+    if (opts.json) {
+      emitUpgradeHeadless(
+        HEADLESS_EXIT.OK,
+        drifted > 0 ? "repaired" : "no-op",
+        jsonAccumulator ?? [],
+        { from, to, drifted, applied: false, chainLength: 0 },
+        { findingsCount: 0 },
+      );
     }
     return;
   }
@@ -189,10 +252,11 @@ export async function upgradeCmd(opts: {
   const planErrors = dryReport.ops.filter((o) => o.error);
   if (planErrors.length > 0) {
     for (const o of planErrors) err(`plan error in ${o.name}: ${o.error}`);
+    if (opts.json) emitHeadless(errorResult("upgrade", "plan errors", { planErrors: planErrors.map(o => ({ name: o.name, error: o.error })) }));
     process.exit(2);
   }
 
-  renderUpgradePreview(dryReport, renderMode);
+  renderUpgradePreview(dryReport, renderMode, jsonAccumulator);
 
   const totalChanges = dryReport.ops.reduce((n, o) => n + o.changes.length, 0);
   if (totalChanges === 0) {
@@ -201,18 +265,30 @@ export async function upgradeCmd(opts: {
 
   if (opts.dryRun) {
     humanLog("dry-run complete");
+    if (opts.json) {
+      emitUpgradeHeadless(
+        HEADLESS_EXIT.OK,
+        "dry-run",
+        jsonAccumulator ?? [],
+        { from, to, dryRun: true, applied: false, planned: totalChanges },
+        {},
+      );
+    }
     return;
   }
 
   if (!opts.yes && !(await confirm("Apply migrations?"))) {
     err("aborted");
+    if (opts.json) emitHeadless(errorResult("upgrade", "aborted"));
     process.exit(130);
   }
 
   const report = await runMigrations(ctx, chain, "apply");
 
   if (report.failed) {
-    err(`apply failed: ${report.failed.error}`);
+    const m = `apply failed: ${report.failed.error}`;
+    err(m);
+    if (opts.json) emitHeadless(errorResult("upgrade", m));
     process.exit(2);
   }
 
@@ -221,7 +297,9 @@ export async function upgradeCmd(opts: {
   const postCtx = await loadProject(cwd);
   const finalizeReport = await run(postCtx, [finalizeUpgrade(to, detectedImports)], "apply");
   if (finalizeReport.failed) {
-    err(`finalize-upgrade failed: ${finalizeReport.failed.error}`);
+    const m = `finalize-upgrade failed: ${finalizeReport.failed.error}`;
+    err(m);
+    if (opts.json) emitHeadless(errorResult("upgrade", m));
     process.exit(2);
   }
   if (detectedImports.length > 0) {
@@ -250,6 +328,16 @@ export async function upgradeCmd(opts: {
       const exitCode = (e as { code?: number }).code ?? "?";
       humanLog(`warning: build-manifest failed (exit ${exitCode}). Run manually: node --experimental-strip-types scripts/build-manifest.ts`);
     }
+  }
+
+  if (opts.json) {
+    emitUpgradeHeadless(
+      HEADLESS_EXIT.OK,
+      "applied",
+      jsonAccumulator ?? [],
+      { from, to, applied: true, chainLength: chain.length },
+      { findingsCount: 0 },
+    );
   }
 }
 

@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { info, err } from "../lib/log.js";
+import { info, err, setJsonMode } from "../lib/log.js";
+import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 import { createProgress } from "../lib/render/tty-layer.js";
 import { loadProject } from "../lib/project.js";
@@ -82,11 +83,18 @@ export interface HealOpts {
    * run `heal --answers <file>` (PRD #325 sub-issue #333).
    */
   answers?: string;
+  /**
+   * Issue #408: emit the headless contract — exit code + JSON document
+   * (verdict, iterations, pending, exhausted). Suppresses `info()` chatter
+   * so the JSON document is the entirety of stdout.
+   */
+  json?: boolean;
 }
 
 export async function healCmd(opts: HealOpts): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+  if (opts.json) setJsonMode(true);
 
   // Clean-tree guard at the top of the loop (PRD #325 / sub-issue #328).
   // The guard refuses BEFORE the loop body so dirtying never happens. Once
@@ -97,6 +105,7 @@ export async function healCmd(opts: HealOpts): Promise<void> {
   const guard = checkCleanTree({ command: "heal", cwd, allowDirty: opts.allowDirty });
   if (!guard.ok) {
     err(guard.message);
+    if (opts.json) emitHeadless(errorResult("heal", guard.message));
     process.exit(2);
   }
 
@@ -105,14 +114,18 @@ export async function healCmd(opts: HealOpts): Promise<void> {
   // "did not converge after NaN iterations" — a confusing failure for a
   // user-input error.
   if (!Number.isInteger(maxIterations) || maxIterations < 1) {
-    err(`heal: --max-iterations must be a positive integer (got ${opts.maxIterations})`);
+    const m = `heal: --max-iterations must be a positive integer (got ${opts.maxIterations})`;
+    err(m);
+    if (opts.json) emitHeadless(errorResult("heal", m));
     process.exit(2);
   }
 
   try {
     await stat(join(cwd, ".claude-ds.json"));
   } catch {
-    err(".claude-ds.json absent — run `claude-ds adopt` first");
+    const m = ".claude-ds.json absent — run `claude-ds adopt` first";
+    err(m);
+    if (opts.json) emitHeadless(errorResult("heal", m));
     process.exit(2);
   }
 
@@ -156,6 +169,16 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 
     if (outcome.kind === "converged") {
       info(`heal: converged in ${outcome.iterations} iteration(s) — 0 changes, 0 findings`);
+      if (opts.json) {
+        emitHeadless({
+          command: "heal",
+          ok: true,
+          verdict: "converged",
+          exitCode: HEADLESS_EXIT.OK,
+          actions: { iterations: outcome.iterations, maxIterations },
+          remaining: { findingsCount: 0, pending: 0 },
+        });
+      }
       return;
     }
 
@@ -163,14 +186,14 @@ export async function healCmd(opts: HealOpts): Promise<void> {
     // Pending. Surface the named PENDING exit with a scaffold rather than
     // letting sandcastle automation conflate it with "did not converge."
     if (outcome.kind === "pending") {
-      await reportPendingAndExit(cwd, pendingSink, progress);
+      await reportPendingAndExit(cwd, pendingSink, progress, opts.json);
       return;
     }
 
     // Ceiling hit. If Pending accumulated, that still needs the operator — the
     // named PENDING exit, not a hard failure. Sandcastle routes on it either way.
     if (pendingSink.length > 0) {
-      await reportPendingAndExit(cwd, pendingSink, progress);
+      await reportPendingAndExit(cwd, pendingSink, progress, opts.json);
       return;
     }
 
@@ -183,6 +206,16 @@ export async function healCmd(opts: HealOpts): Promise<void> {
     err(
       `heal: did not converge after ${maxIterations} iterations — run \`claude-ds audit\` for the remaining findings`,
     );
+    if (opts.json) {
+      emitHeadless({
+        command: "heal",
+        ok: false,
+        verdict: "exhausted",
+        exitCode: HEADLESS_EXIT.FINDINGS,
+        actions: { maxIterations },
+        remaining: { lastStep: phase, pending: 0 },
+      });
+    }
     process.exit(1);
   } finally {
     progress.stop();
@@ -204,6 +237,7 @@ async function reportPendingAndExit(
   cwd: string,
   pending: PendingDecision[],
   progress: ReturnType<typeof createProgress>,
+  json?: boolean,
 ): Promise<void> {
   const uniqueById = new Map<string, PendingDecision>();
   for (const p of pending) if (!uniqueById.has(p.id)) uniqueById.set(p.id, p);
@@ -238,5 +272,18 @@ async function reportPendingAndExit(
       `"FILL: …" hint with the chosen option index), then re-run: ` +
       `\`claude-ds heal --answers ${PENDING_ANSWERS_SCAFFOLD}\`.`,
   );
+  if (json) {
+    emitHeadless({
+      command: "heal",
+      ok: false,
+      verdict: "pending",
+      exitCode: HEAL_EXIT_PENDING,
+      actions: { scaffoldWritten: PENDING_ANSWERS_SCAFFOLD },
+      remaining: {
+        pending: deduped.length,
+        decisions: deduped.map(d => ({ id: d.id, question: d.question })),
+      },
+    });
+  }
   process.exit(HEAL_EXIT_PENDING);
 }

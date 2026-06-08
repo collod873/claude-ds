@@ -110,8 +110,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--verbose", "show full scaffold inventory (present + missing)")
     .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016)")
     .option("--allow-dirty", "bypass the clean-tree guard (only meaningful with --fix)")
-    .action(async (opts: { pack?: string; suggestRemovals?: boolean; fix?: boolean; except?: boolean; reason?: string; issue?: string; permanent?: boolean; verbose?: boolean; answers?: string; allowDirty?: boolean }) => {
-      await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals, fix: opts.fix, except: opts.except, reason: opts.reason, issue: opts.issue, permanent: opts.permanent, verbose: opts.verbose, answers: opts.answers, allowDirty: opts.allowDirty, cwd: defaults.cwd });
+    .option("--json", "emit machine-readable headless contract (issue #408)")
+    .action(async (opts: { pack?: string; suggestRemovals?: boolean; fix?: boolean; except?: boolean; reason?: string; issue?: string; permanent?: boolean; verbose?: boolean; answers?: string; allowDirty?: boolean; json?: boolean }) => {
+      await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals, fix: opts.fix, except: opts.except, reason: opts.reason, issue: opts.issue, permanent: opts.permanent, verbose: opts.verbose, answers: opts.answers, allowDirty: opts.allowDirty, json: opts.json, cwd: defaults.cwd });
     });
 
   program
@@ -122,8 +123,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--dry-run", "preview what adopt would do without applying changes")
     .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
     .option("--allow-dirty", "bypass the clean-tree guard")
-    .action(async (opts: { pack?: string; yes?: boolean; dryRun?: boolean; ignore?: string; allowDirty?: boolean }) => {
-      await adoptCmd({ pack: opts.pack, yes: opts.yes, dryRun: opts.dryRun, ignore: opts.ignore, allowDirty: opts.allowDirty, cwd: defaults.cwd });
+    .option("--json", "emit machine-readable headless contract (issue #408)")
+    .action(async (opts: { pack?: string; yes?: boolean; dryRun?: boolean; ignore?: string; allowDirty?: boolean; json?: boolean }) => {
+      await adoptCmd({ pack: opts.pack, yes: opts.yes, dryRun: opts.dryRun, ignore: opts.ignore, allowDirty: opts.allowDirty, json: opts.json, cwd: defaults.cwd });
     });
 
   program
@@ -162,8 +164,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("-y, --yes", "skip confirmation prompt (no-op, kept for back-compat)")
     .option("--dry-run", "preview what sync would do without applying changes")
     .option("--allow-dirty", "bypass the clean-tree guard")
-    .action(async (opts: { offlineFixture?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean }) => {
-      await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd, yes: opts.yes, dryRun: opts.dryRun, allowDirty: opts.allowDirty });
+    .option("--json", "emit machine-readable headless contract (issue #408)")
+    .action(async (opts: { offlineFixture?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean }) => {
+      await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd, yes: opts.yes, dryRun: opts.dryRun, allowDirty: opts.allowDirty, json: opts.json });
     });
 
   program
@@ -231,8 +234,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--yes", "skip the apply-moves commitment-gate (ADR-0016)")
     .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016)")
     .option("--allow-dirty", "accepted for compatibility (no-op since PRD #340 F7 — classify's commitment-gate is the safety, git is the undo)")
-    .action(async (opts: { src?: string; dryRun?: boolean; yes?: boolean; answers?: string; allowDirty?: boolean }) => {
-      await classifyCmd({ src: opts.src, dryRun: opts.dryRun, yes: opts.yes, answers: opts.answers, allowDirty: opts.allowDirty, cwd: defaults.cwd });
+    .option("--json", "emit machine-readable headless contract (issue #408)")
+    .action(async (opts: { src?: string; dryRun?: boolean; yes?: boolean; answers?: string; allowDirty?: boolean; json?: boolean }) => {
+      await classifyCmd({ src: opts.src, dryRun: opts.dryRun, yes: opts.yes, answers: opts.answers, allowDirty: opts.allowDirty, json: opts.json, cwd: defaults.cwd });
     });
 
   program
@@ -241,8 +245,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--max-iterations <n>", "override iteration ceiling (default 3)", (v) => parseInt(v, 10))
     .option("--allow-dirty", "bypass the clean-tree guard (top-level + sub-command propagation)")
     .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016) — resolves Pending decisions from a prior heal run")
-    .action(async (opts: { maxIterations?: number; allowDirty?: boolean; answers?: string }) => {
-      await healCmd({ maxIterations: opts.maxIterations, allowDirty: opts.allowDirty, answers: opts.answers, cwd: defaults.cwd });
+    .option("--json", "emit machine-readable headless contract (issue #408)")
+    .action(async (opts: { maxIterations?: number; allowDirty?: boolean; answers?: string; json?: boolean }) => {
+      await healCmd({ maxIterations: opts.maxIterations, allowDirty: opts.allowDirty, answers: opts.answers, json: opts.json, cwd: defaults.cwd });
     });
 
   return program;

@@ -702,9 +702,12 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
   // `--json` selects the machine surface; default is the human checklist.
   // Pre-#344 every invocation dumped both. The verdict aggregation above
   // still runs in both modes — it feeds the exit code, not just the render.
-  if (opts.json) {
-    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-  } else {
+  //
+  // Issue #408: under `--json` we defer the emit until the verdict is
+  // computed below so the headless contract envelope can wrap the existing
+  // DoctorResult shape. Non-JSON mode still emits the markdown checklist
+  // here, byte-identical to today.
+  if (!opts.json) {
     process.stdout.write(renderMarkdown(result));
   }
 
@@ -777,13 +780,44 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
   // dupes) — those are project-defect signals — and let upgrade-available
   // / repair-needed surface in the verdict + breadcrumb without flipping
   // the exit code. Tests pin both behaviors.
-  if (hasLookalikes || hasMissingManaged || hasRootDupes) {
+  const failing = hasLookalikes || hasMissingManaged || hasRootDupes;
+  if (failing) {
     if (hasLookalikes) {
       process.stderr.write("If these matches are false positives, re-run with --ignore '<glob>,<glob>'\n");
     }
     if (hasRootDupes) {
       process.stderr.write("Root-level duplicates detected — run `reconcile` to resolve\n");
     }
+  }
+
+  // Issue #408: emit the headless contract envelope around the existing
+  // DoctorResult shape so a verifying agent can route on `verdict`/`ok`/
+  // `exitCode` without reparsing the markdown. Top-level `mode`,
+  // `canonical`, `drift`, etc. are preserved for back-compat with PRD
+  // #340 sub-issue #344's machine surface (pinned by doctor.test.ts).
+  if (opts.json) {
+    const exitCode = failing ? 1 : 0;
+    const headlessEnvelope = {
+      command: "doctor" as const,
+      ok: !failing,
+      verdict,
+      exitCode,
+      actions: {},
+      remaining: {
+        missingManaged: result.drift?.missing ?? [],
+        lookalikes: findings.filter(f => !f.present && f.lookalike !== null).length,
+        rootDupes: rootDupes.length,
+        repairNeeded,
+        upgradeAvailable,
+        openExceptions,
+      },
+      ...result,
+    };
+    process.stdout.write(JSON.stringify(headlessEnvelope, null, 2) + "\n");
+    process.exit(exitCode);
+  }
+
+  if (failing) {
     process.exit(1);
   }
 }

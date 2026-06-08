@@ -2,7 +2,8 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { basename, join } from "node:path";
 import picomatch from "picomatch";
-import { info, err, printNextStep } from "../lib/log.js";
+import { info, err, printNextStep, setJsonMode } from "../lib/log.js";
+import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, type Tier } from "../lib/classifier.js";
 import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
@@ -175,8 +176,15 @@ export async function classifyCmd(opts: {
    * (PRD #325 sub-issue #333).
    */
   pendingSink?: PendingDecision[];
+  /**
+   * Issue #408: emit the headless contract — exit code + JSON document.
+   * Suppresses all human `info()` chatter so the JSON document is the
+   * entirety of stdout.
+   */
+  json?: boolean;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
+  if (opts.json) setJsonMode(true);
   const dryRun = opts.dryRun ?? false;
   const yes = opts.yes ?? false;
   const srcRel = opts.src;
@@ -193,7 +201,9 @@ export async function classifyCmd(opts: {
     try {
       suppliedAnswers = await loadAnswersFile(opts.answers);
     } catch (e) {
-      err(e instanceof Error ? e.message : String(e));
+      const m = e instanceof Error ? e.message : String(e);
+      err(m);
+      if (opts.json) emitHeadless(errorResult("classify", m));
       process.exit(2);
       return;
     }
@@ -204,11 +214,14 @@ export async function classifyCmd(opts: {
   try {
     ctx = await loadProject(cwd);
   } catch (e) {
+    let m: string;
     if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-      err(".claude-ds.json absent — run `adopt` or `init` first");
+      m = ".claude-ds.json absent — run `adopt` or `init` first";
     } else {
-      err(`invalid .claude-ds.json: ${(e as Error).message}`);
+      m = `invalid .claude-ds.json: ${(e as Error).message}`;
     }
+    err(m);
+    if (opts.json) emitHeadless(errorResult("classify", m));
     process.exit(2);
   }
 
@@ -338,6 +351,16 @@ export async function classifyCmd(opts: {
         await run(ctx, ops, "dry-run");
       }
       info(`[dry-run] ${classified.length} file(s) classified — run without --dry-run to apply`);
+      if (opts.json) {
+        emitHeadless({
+          command: "classify",
+          ok: true,
+          verdict: "dry-run",
+          exitCode: HEADLESS_EXIT.OK,
+          actions: { dryRun: true, classified: classified.length },
+          remaining: {},
+        });
+      }
       return;
     }
 
@@ -382,7 +405,14 @@ export async function classifyCmd(opts: {
         gateAnswer = result.answers[gate.id] as number;
       } catch (e) {
         if (e instanceof UnresolvedAmbiguityError) {
-          err(`classify needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`);
+          const m = `classify needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`;
+          err(m);
+          if (opts.json) {
+            emitHeadless(errorResult("classify", m, {
+              decisionId: e.decisionId,
+              decisionQuestion: e.decisionQuestion,
+            }));
+          }
           process.exit(2);
           return;
         }
@@ -437,6 +467,16 @@ export async function classifyCmd(opts: {
   } else if (dryRun) {
     // Nothing to pull in; extraction/ambiguity never run under --dry-run.
     info(`[dry-run] no design-system parts to pull in${hasSrc ? ` from ${srcRel}` : ""}`);
+    if (opts.json) {
+      emitHeadless({
+        command: "classify",
+        ok: true,
+        verdict: "dry-run",
+        exitCode: HEADLESS_EXIT.OK,
+        actions: { dryRun: true, classified: 0 },
+        remaining: {},
+      });
+    }
     return;
   }
 
@@ -540,11 +580,37 @@ export async function classifyCmd(opts: {
   ) {
     info("classify: no files moved");
     printNextStep("classify", {});
+    if (opts.json) {
+      emitHeadless({
+        command: "classify",
+        ok: true,
+        verdict: "no-op",
+        exitCode: HEADLESS_EXIT.OK,
+        actions: { moved: 0, extracted: 0, ambiguityMoved: 0 },
+        remaining: { ambiguityKept, roleProposals: 0 },
+      });
+    }
     return;
   }
 
   info("classify: complete");
   printNextStep("classify", {});
+
+  if (opts.json) {
+    emitHeadless({
+      command: "classify",
+      ok: true,
+      verdict: "moved",
+      exitCode: HEADLESS_EXIT.OK,
+      actions: {
+        moved,
+        extracted: extractions.length,
+        ambiguityMoved,
+        roleProposals: roleProposals.length,
+      },
+      remaining: { ambiguityKept },
+    });
+  }
 
   // Ambiguity pass (ADR-0015, issue #203, PRD #241 / #244, issue #251):
   // Walk design-system/atoms/ and re-classify each file using classifySource —
