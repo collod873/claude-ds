@@ -25,7 +25,7 @@ import {
 } from "../lib/migration-framework.js";
 import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
 import { printNextStep, detectBuildCommand } from "../lib/log.js";
-import pkg from "../../package.json" with { type: "json" };
+import { cliVersion, LABEL_CLI, LABEL_PIN } from "../lib/version-vocab.js";
 
 async function exists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
@@ -676,7 +676,7 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
   if (ctx.kind === "adopted") {
     upgradeAvailable = checkVersionCurrency({
       pinned: ctx.cfg.packVersion,
-      installed: `v${pkg.version}`,
+      installed: cliVersion(),
     }).upgradeAvailable;
 
     // Repair-needed = N regressed migration end-states at the current
@@ -740,7 +740,7 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
     if (hasRootDupes) verdictLines.push(`- ✗ Root-level duplicates: ${rootDupes.length}`);
     if (repairNeeded > 0) verdictLines.push(`- ⚠ Repair needed: ${repairNeeded} regressed migration end-state(s)`);
     if (upgradeAvailable) {
-      verdictLines.push(`- ⚠ Upgrade available: pinned ${ctx.cfg.packVersion} < installed v${pkg.version}`);
+      verdictLines.push(`- ⚠ Upgrade available: ${LABEL_PIN} ${ctx.cfg.packVersion} < ${LABEL_CLI} ${cliVersion()}`);
     }
     if (openExceptions > 0) verdictLines.push(`- ℹ Open exceptions: ${openExceptions}`);
 

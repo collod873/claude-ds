@@ -25,7 +25,7 @@ import {
   type SummaryEntry,
 } from "../lib/render/index.js";
 import type { RunReport } from "../lib/runner.js";
-import pkg from "../../package.json" with { type: "json" };
+import { cliVersion } from "../lib/version-vocab.js";
 
 /**
  * Output mode for upgrade's planned-Change preview (PRD #340 sub-issue #344).
@@ -196,7 +196,7 @@ export async function upgradeCmd(opts: {
 
   const ctx = await loadProject(cwd);
   const from = ctx.cfg.packVersion;
-  const to = opts.to ?? `v${pkg.version}`;
+  const to = opts.to ?? cliVersion();
 
   if (from === to) {
     humanLog(`already at ${to}`);

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import pkg from "../../package.json" with { type: "json" };
+import { cliVersion, LABEL_CLI, LABEL_PIN } from "../lib/version-vocab.js";
 
 const DEFAULT_REMOTE = "https://github.com/collod873/claude-ds";
 
@@ -90,7 +90,7 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
   const cwd = opts.cwd ?? process.cwd();
   const raw = await readIfExistsLocal(join(cwd, ".claude-ds.json"));
   const pinned = raw ? parseConfig(raw).packVersion : null;
-  const installedVer = `v${pkg.version}`;
+  const installedVer = cliVersion();
 
   const c = colors();
   if (opts.check) {
@@ -106,7 +106,7 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
       process.exit(0);
     }
 
-    console.log(`pinned: ${c.bold(pinned)}  installed: ${c.bold(installedVer)}`);
+    console.log(`${LABEL_PIN}: ${c.bold(pinned)}  ${LABEL_CLI}: ${c.bold(installedVer)}`);
     console.log("");
 
     // Resolve CHANGELOG.md via the same relative URL pattern the package.json
@@ -142,8 +142,8 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
   // `(none)` when no config is present. `latest` is the highest tag at the
   // remote; failures print a hint on stderr instead of silently rendering
   // `latest: unknown` (issue #368).
-  console.log(`installed: ${c.bold(installedVer)}`);
-  console.log(`pinned: ${c.bold(pinned ?? "(none)")}`);
+  console.log(`${LABEL_CLI}: ${c.bold(installedVer)}`);
+  console.log(`${LABEL_PIN}: ${c.bold(pinned ?? "(none)")}`);
 
   if (opts.offline) {
     console.log(`latest: ${c.dim("unknown")}`);

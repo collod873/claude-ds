@@ -32,7 +32,7 @@ import { parseManifest } from "../lib/manifest.js";
 import { parseConfig, type Config } from "../lib/config.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { checkVersionCurrency } from "../lib/version-currency.js";
-import pkg from "../../package.json" with { type: "json" };
+import { cliVersion } from "../lib/version-vocab.js";
 import { parseExceptions, type Exception } from "../lib/exceptions.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import { scanDriftAndIntegrity } from "../lib/reports/drift-integrity-scan.js";
@@ -187,7 +187,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
   if (ctx.kind === "adopted" && parsedCfg) {
     upgradeAvailable = checkVersionCurrency({
       pinned: parsedCfg.packVersion,
-      installed: `v${pkg.version}`,
+      installed: cliVersion(),
     }).upgradeAvailable;
   }
 
