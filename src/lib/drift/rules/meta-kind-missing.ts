@@ -5,6 +5,7 @@ import { classifySource } from "../../classifier.js";
 import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
 import { locationTierFromPath } from "../../three-signal.js";
+import { mergeMetaKind } from "../merge-meta-kind.js";
 
 import type {
   DriftFinding,
@@ -44,8 +45,15 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
     return { finding, fixed: false, message: `cannot determine tier for ${finding.file}`, changes: [] };
   }
 
-  const metaExport = `\nexport const meta = { kind: "${tier}" as const, examples: [] };\n`;
-  const newContent = source.trimEnd() + "\n" + metaExport;
+  // A1 (PRD #407 / issue #409): merge into the existing meta object when the
+  // file already declares one — the previous append-only branch produced a
+  // second `export const meta` and broke the consumer's tsc. `mergeMetaKind`
+  // is a pure function over source text; this rule is just the
+  // ProjectContext-aware adapter that picks the tier and emits a Change.
+  const newContent = mergeMetaKind(source, tier);
+  if (newContent === source) {
+    return { finding, fixed: false, message: `${finding.file} already declares meta.kind`, changes: [] };
+  }
   const changes: Change[] = [{
     kind: "write",
     path: finding.file,
