@@ -105,7 +105,25 @@ jobs:
             state=$(gh issue view "$issue" --json state --jq '.state')
             if [ "$state" = "OPEN" ]; then
               echo "Closing #$issue"
-              gh issue close "$issue" --reason completed
+              # Use AGENT_PAT for the close so the standalone on-close
+              # promotion trigger (agent-promote-queued.yml) fires too —
+              # GITHUB_TOKEN closes do not trigger workflows, which is the
+              # bypass that stranded dependents when this run was cancelled
+              # before reaching the inline cascade (#422). Falls back to
+              # GITHUB_TOKEN; the inline cascade and the reconciler sweep
+              # still provide promotion in that case.
+              set +e
+              if [ -n "${AGENT_PAT:-}" ]; then
+                GH_TOKEN="$AGENT_PAT" gh issue close "$issue" --reason completed
+                status=$?
+                if [ "$status" -ne 0 ]; then
+                  echo "AGENT_PAT close failed (status $status); falling back to GITHUB_TOKEN."
+                  gh issue close "$issue" --reason completed
+                fi
+              else
+                gh issue close "$issue" --reason completed
+              fi
+              set -e
             fi
 
             # Cascade parent-PRD close. If this issue is a sub-issue and every
