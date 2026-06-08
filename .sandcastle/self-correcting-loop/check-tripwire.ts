@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 /**
- * Issue #416 — workflow shim: the Crewops tripwire.
+ * Issue #416 (repurposed by PRD #439) — workflow shim: the Crewops
+ * snapshot-staleness tripwire.
  *
  * Reads two doctor/heal --json payloads and decides whether to auto-file
  * a fixture-refresh issue. Pure decision lives in
  * `src/lib/crewops-tripwire.ts`; this file is the I/O-side glue.
  *
  * Env:
- *   FIXTURE_PAYLOAD — path to the `--json` payload captured against the fixture
- *   REAL_PAYLOAD    — path to the `--json` payload captured against real Crewops
- *   RUN_URL         — workflow-run URL for back-ref in the auto-filed issue
- *   REAL_SOURCE     — optional human-readable source for the real payload
- *   DRY_RUN=1       — skip gh issue create; print what would be filed
+ *   SNAPSHOT_PAYLOAD — path to the `--json` payload captured against the committed snapshot
+ *   REAL_PAYLOAD     — path to the `--json` payload captured against live Crewops
+ *   RUN_URL          — workflow-run URL for back-ref in the auto-filed issue
+ *   REAL_SOURCE      — optional human-readable source for the real payload
+ *   DRY_RUN=1        — skip gh issue create; print what would be filed
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -32,23 +33,23 @@ function loadEnvelope(path: string): HeadlessDoctorEnvelope {
 }
 
 function main(): void {
-  const fixturePath = process.env.FIXTURE_PAYLOAD;
+  const snapshotPath = process.env.SNAPSHOT_PAYLOAD;
   const realPath = process.env.REAL_PAYLOAD;
   const runUrl = process.env.RUN_URL ?? "";
   const realSource = process.env.REAL_SOURCE;
   const dryRun = process.env.DRY_RUN === "1";
 
-  if (!fixturePath || !realPath) {
-    console.error("FIXTURE_PAYLOAD and REAL_PAYLOAD env vars required");
+  if (!snapshotPath || !realPath) {
+    console.error("SNAPSHOT_PAYLOAD and REAL_PAYLOAD env vars required");
     process.exit(2);
   }
 
-  const fixture = loadEnvelope(fixturePath);
+  const snapshot = loadEnvelope(snapshotPath);
   const real = loadEnvelope(realPath);
-  const report = detectDivergence({ fixture, real });
+  const report = detectDivergence({ snapshot, real });
 
   if (report.ok) {
-    console.log("Fixture and real Crewops agree — no tripwire fire.");
+    console.log("Committed snapshot and live Crewops agree — no tripwire fire.");
     return;
   }
 
@@ -81,9 +82,9 @@ function main(): void {
     }
   }
 
-  const title = `tripwire: real Crewops diverged from fixture (${report.reasons.length} reason(s))`;
+  const title = `tripwire: committed Crewops snapshot is stale vs live Crewops (${report.reasons.length} reason(s))`;
   const body = buildTripwireIssueBody({
-    fixture,
+    snapshot,
     real,
     reasons: report.reasons,
     runUrl,

@@ -1,20 +1,24 @@
 /**
- * Issue #416 / PRD #407 — real-Crewops tripwire.
+ * Issue #416 (repurposed by PRD #439) — Crewops snapshot-staleness tripwire.
  *
- * The committed Crewops-shaped fixture (`tests/e2e/fixtures/crewops-shaped/`)
- * is a proxy for the real Crewops project. The e2e gate's only useful
- * signal is "what the real consumer would experience" — when the proxy
- * drifts away from the real Crewops shape, the gate goes green while real
- * Crewops still breaks (the exact "ships broken" failure mode PRD #407
- * exists to kill).
+ * The committed Crewops snapshot (`tests/e2e/fixtures/crewops-snapshot/`) is a
+ * sanitized, real-derived slice of the real Crewops project. The deterministic
+ * PR gate (the friction gate) runs against that committed snapshot, so the
+ * snapshot's *only* failure mode is going STALE relative to live Crewops: the
+ * shapes it carries drift away from what real Crewops actually presents, and
+ * the gate keeps grading green against a tree that no longer matches reality.
  *
- * The tripwire takes two `doctor --json` (or `heal --dry-run --json`)
- * payloads — one captured against the fixture, one captured against the
- * real Crewops project — and decides whether they have diverged. A
- * divergence is the proxy-staleness signal; the workflow shim consumes
- * `detectDivergence().reasons` to auto-file a fixture-refresh issue and
- * the documented refresh procedure (docs/agents/fixture-refresh.md) is
- * the maintainer's runbook for closing it.
+ * This tripwire is the snapshot's freshness early-warning owner. It takes two
+ * `doctor --json` (or `heal --dry-run --json`) payloads — one captured against
+ * the committed snapshot, one captured against live Crewops — and decides
+ * whether they have diverged. A divergence is the staleness signal; the
+ * workflow shim consumes `detectDivergence().reasons` to auto-file a
+ * fixture-refresh issue, and the documented refresh procedure
+ * (docs/agents/fixture-refresh.md) is the maintainer's runbook for closing it.
+ *
+ * It runs DAILY only and never blocks a PR — the deterministic gate against the
+ * committed snapshot is the merge gate; this tripwire is purely the alarm that
+ * tells the maintainer the committed snapshot needs re-harvesting.
  *
  * Pure module: no fs, no network. The workflow script reads the two JSON
  * files, hands them to `detectDivergence`, then calls `gh issue create`
@@ -46,7 +50,7 @@ export interface HeadlessDoctorEnvelope {
 }
 
 export interface DivergenceReport {
-  /** `true` ⇒ the fixture and real-Crewops payloads agree (no fixture refresh needed). */
+  /** `true` ⇒ the snapshot and live-Crewops payloads agree (snapshot is fresh). */
   ok: boolean;
   /** One human-readable line per detected divergence. Empty when `ok`. */
   reasons: string[];
@@ -72,7 +76,7 @@ export const TRIPWIRE_LABEL = "claude-ds:fixture-refresh";
  * Fields under `remaining` that the tripwire compares. The
  * `upgradeAvailable` field is excluded by design: real Crewops's pinned
  * packVersion moves at its own cadence, and a CLI version drift relative
- * to the fixture is not a fixture-staleness signal.
+ * to the snapshot is not a snapshot-staleness signal.
  */
 const COMPARED_REMAINING_FIELDS = [
   "missingManaged",
@@ -83,33 +87,35 @@ const COMPARED_REMAINING_FIELDS = [
 ] as const;
 
 export interface DetectDivergenceInput {
-  fixture: HeadlessDoctorEnvelope;
+  /** `doctor`/`heal` envelope captured against the committed snapshot fixture. */
+  snapshot: HeadlessDoctorEnvelope;
+  /** `doctor`/`heal` envelope captured against live Crewops. */
   real: HeadlessDoctorEnvelope;
 }
 
 /**
- * Decide whether the fixture and real-Crewops doctor outputs have
- * diverged. The comparison is intentionally narrow: verdict, ok, and
+ * Decide whether the committed snapshot and live-Crewops doctor outputs
+ * have diverged. The comparison is intentionally narrow: verdict, ok, and
  * the structural counts under `remaining`. Pinned by the unit test
  * table above.
  */
 export function detectDivergence(input: DetectDivergenceInput): DivergenceReport {
   const reasons: string[] = [];
 
-  if (input.fixture.verdict !== input.real.verdict) {
+  if (input.snapshot.verdict !== input.real.verdict) {
     reasons.push(
-      `verdict mismatch: fixture=${input.fixture.verdict} real=${input.real.verdict}`,
+      `verdict mismatch: snapshot=${input.snapshot.verdict} real=${input.real.verdict}`,
     );
   }
-  if (input.fixture.ok !== input.real.ok) {
-    reasons.push(`ok mismatch: fixture=${input.fixture.ok} real=${input.real.ok}`);
+  if (input.snapshot.ok !== input.real.ok) {
+    reasons.push(`ok mismatch: snapshot=${input.snapshot.ok} real=${input.real.ok}`);
   }
 
   for (const field of COMPARED_REMAINING_FIELDS) {
-    const f = input.fixture.remaining?.[field];
+    const f = input.snapshot.remaining?.[field];
     const r = input.real.remaining?.[field];
     if (!fieldEquals(f, r)) {
-      reasons.push(`remaining.${field} differs: fixture=${render(f)} real=${render(r)}`);
+      reasons.push(`remaining.${field} differs: snapshot=${render(f)} real=${render(r)}`);
     }
   }
 
@@ -139,20 +145,20 @@ function render(v: unknown): string {
  * click — not "read every workflow run page."
  */
 export function buildTripwireIssueBody(input: {
-  fixture: HeadlessDoctorEnvelope;
+  snapshot: HeadlessDoctorEnvelope;
   real: HeadlessDoctorEnvelope;
   reasons: string[];
   runUrl: string;
   /** Optional source of the real payload — repo URL, branch, etc. */
   realSource?: string;
 }): string {
-  const realSource = input.realSource ?? "real Crewops project";
+  const realSource = input.realSource ?? "live Crewops project";
   return [
     TRIPWIRE_MARKER,
     "",
-    "## Auto-filed by the Crewops tripwire (issue #416)",
+    "## Auto-filed by the Crewops snapshot-staleness tripwire (issue #416)",
     "",
-    `A \`doctor --json\` (or \`heal --dry-run --json\`) run against ${realSource} diverged from the committed Crewops-shaped fixture. The fixture is the proxy the e2e gate runs against — when it disagrees with the real project the gate's green verdict no longer means real Crewops will end up green.`,
+    `A \`doctor --json\` (or \`heal --dry-run --json\`) run against ${realSource} diverged from the committed Crewops snapshot (\`tests/e2e/fixtures/crewops-snapshot/\`). That snapshot is the tree the deterministic friction gate runs against on every PR — when it disagrees with live Crewops it has gone stale, and the gate's green verdict no longer reflects what real Crewops will experience. This tripwire is daily-only and does not block any PR; it only flags that the committed snapshot needs re-harvesting.`,
     "",
     "### Divergence",
     "",
@@ -160,19 +166,19 @@ export function buildTripwireIssueBody(input: {
     "",
     "### Verdicts (side by side)",
     "",
-    "| | fixture | real |",
+    "| | snapshot | real |",
     "|---|---|---|",
-    `| verdict | \`${input.fixture.verdict}\` | \`${input.real.verdict}\` |`,
-    `| ok | \`${input.fixture.ok}\` | \`${input.real.ok}\` |`,
-    `| exitCode | \`${input.fixture.exitCode}\` | \`${input.real.exitCode}\` |`,
+    `| verdict | \`${input.snapshot.verdict}\` | \`${input.real.verdict}\` |`,
+    `| ok | \`${input.snapshot.ok}\` | \`${input.real.ok}\` |`,
+    `| exitCode | \`${input.snapshot.exitCode}\` | \`${input.real.exitCode}\` |`,
     "",
     "### Trace",
     "",
     `- **Tripwire run:** ${input.runUrl}`,
     "",
-    "### Next step — fixture-refresh",
+    "### Next step — snapshot refresh",
     "",
-    "Run through the documented refresh procedure: [`docs/agents/fixture-refresh.md`](docs/agents/fixture-refresh.md). It walks through capturing the real-Crewops shape and updating `tests/e2e/fixtures/crewops-shaped/` so the next gate run actually exercises the divergent case.",
+    "Run through the documented refresh procedure: [`docs/agents/fixture-refresh.md`](docs/agents/fixture-refresh.md). It walks through re-harvesting the live-Crewops shape and updating `tests/e2e/fixtures/crewops-snapshot/` so the next gate run actually exercises the divergent case.",
     "",
     "<sub>Bulk-close all auto-filed tripwire issues with `gh issue list --search \"" +
       TRIPWIRE_MARKER +

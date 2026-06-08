@@ -1,13 +1,20 @@
 name: Crewops tripwire
 
-# Issue #416 — the real-Crewops tripwire.
+# Issue #416, repurposed by PRD #439 — the Crewops snapshot-staleness tripwire.
 #
 # Runs `claude-ds heal --dry-run --json` and `claude-ds doctor --json`
-# against BOTH the committed Crewops-shaped fixture AND the real Crewops
-# project, then compares the two `--json` envelopes via
+# against BOTH the committed Crewops snapshot
+# (tests/e2e/fixtures/crewops-snapshot/) AND the live Crewops project,
+# then compares the two `--json` envelopes via
 # `.sandcastle/self-correcting-loop/check-tripwire.ts`. A divergence is
-# the proxy-staleness signal — the e2e gate's green verdict no longer
-# matches what real Crewops will experience.
+# the snapshot-staleness signal — the committed snapshot the deterministic
+# PR friction gate runs against has drifted away from live Crewops, so the
+# gate's green verdict no longer matches what real Crewops will experience.
+#
+# The committed snapshot's SOLE failure mode is going stale; this tripwire
+# is its freshness early-warning owner. The deterministic merge gate is the
+# friction gate that runs against the committed snapshot on every PR — this
+# tripwire never gates a PR.
 #
 # When divergence fires, the workflow auto-files an issue labeled
 # `claude-ds:fixture-refresh` whose body lists every divergent field and
@@ -17,10 +24,11 @@ name: Crewops tripwire
 #
 # Triggers:
 #   - schedule: daily — early-warning, never blocks CI.
-#   - workflow_dispatch — manual fire (after a fixture refresh, for example).
+#   - workflow_dispatch — manual fire (after a snapshot refresh, for example).
 #
 # NOT triggered on push/PR: this fires against a long-running external
-# project and would create noisy gh-API churn against every PR.
+# project and would create noisy gh-API churn against every PR. PR-time
+# determinism is the friction gate's job, not this tripwire's.
 
 on:
   schedule:
@@ -52,27 +60,27 @@ jobs:
       - name: Build CLI
         run: npm run build
 
-      - name: Capture fixture payload
-        # Copy the fixture to a scratch dir and run `adopt → heal --dry-run --json`
-        # against it. Each payload — heal and doctor — is captured separately so
-        # the tripwire script compares them field-by-field. Failures here
-        # surface as workflow errors, not divergence reports — they mean the
-        # fixture itself is broken.
+      - name: Capture committed-snapshot payload
+        # Copy the committed snapshot to a scratch dir and run
+        # `adopt → heal --dry-run --json` against it. Each payload — heal and
+        # doctor — is captured separately so the tripwire script compares them
+        # field-by-field. Failures here surface as workflow errors, not
+        # divergence reports — they mean the committed snapshot itself is broken.
         run: |
           set -euo pipefail
-          mkdir -p /tmp/fixture-copy
-          cp -r tests/e2e/fixtures/crewops-shaped/. /tmp/fixture-copy/
-          pushd /tmp/fixture-copy
+          mkdir -p /tmp/snapshot-copy
+          cp -r tests/e2e/fixtures/crewops-snapshot/. /tmp/snapshot-copy/
+          pushd /tmp/snapshot-copy
           node "$GITHUB_WORKSPACE/dist/cli.js" adopt --pack next-react --yes
-          node "$GITHUB_WORKSPACE/dist/cli.js" heal --dry-run --json > "$GITHUB_WORKSPACE/fixture-heal.json"
-          node "$GITHUB_WORKSPACE/dist/cli.js" doctor --json > "$GITHUB_WORKSPACE/fixture-doctor.json" || true
+          node "$GITHUB_WORKSPACE/dist/cli.js" heal --dry-run --json > "$GITHUB_WORKSPACE/snapshot-heal.json"
+          node "$GITHUB_WORKSPACE/dist/cli.js" doctor --json > "$GITHUB_WORKSPACE/snapshot-doctor.json" || true
           popd
 
-      - name: Capture real-Crewops payload
-        # Clones real Crewops at HEAD, links claude-ds in, and runs
+      - name: Capture live-Crewops payload
+        # Clones live Crewops at HEAD, links claude-ds in, and runs
         # `heal --dry-run --json` / `doctor --json`. The runs are read-only —
         # `--dry-run` and `doctor` write no bytes to the Crewops tree. The
-        # `|| true` on doctor mirrors the fixture step so a non-zero exit
+        # `|| true` on doctor mirrors the snapshot step so a non-zero exit
         # (legitimate findings, exit 1) still produces a payload for the
         # comparison rather than failing the workflow.
         env:
@@ -108,19 +116,19 @@ jobs:
       - name: Compare heal payloads
         if: steps.real.outputs.skip != 'true'
         env:
-          FIXTURE_PAYLOAD: fixture-heal.json
+          SNAPSHOT_PAYLOAD: snapshot-heal.json
           REAL_PAYLOAD: real-heal.json
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          REAL_SOURCE: "real Crewops (https://github.com/collod873/crewops, HEAD)"
+          REAL_SOURCE: "live Crewops (https://github.com/collod873/crewops, HEAD)"
         run: npx tsx .sandcastle/self-correcting-loop/check-tripwire.ts
 
       - name: Compare doctor payloads
         if: steps.real.outputs.skip != 'true'
         env:
-          FIXTURE_PAYLOAD: fixture-doctor.json
+          SNAPSHOT_PAYLOAD: snapshot-doctor.json
           REAL_PAYLOAD: real-doctor.json
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          REAL_SOURCE: "real Crewops (https://github.com/collod873/crewops, HEAD)"
+          REAL_SOURCE: "live Crewops (https://github.com/collod873/crewops, HEAD)"
         run: npx tsx .sandcastle/self-correcting-loop/check-tripwire.ts
 
       - name: Upload tripwire payloads
@@ -129,8 +137,8 @@ jobs:
         with:
           name: crewops-tripwire-payloads
           path: |
-            fixture-heal.json
-            fixture-doctor.json
+            snapshot-heal.json
+            snapshot-doctor.json
             real-heal.json
             real-doctor.json
           if-no-files-found: warn
