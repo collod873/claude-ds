@@ -23,7 +23,7 @@
 import { spawn } from "node:child_process";
 import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 /** One CLI / tsc subprocess invocation the harness recorded. */
 export interface StepResult {
@@ -156,7 +156,7 @@ export async function runE2eHarness(opts: HarnessOpts): Promise<HarnessReport> {
   await mkdir(opts.workDir, { recursive: true });
   await cp(opts.fixtureDir, opts.workDir, { recursive: true });
 
-  const fixtureName = baseName(opts.fixtureDir);
+  const fixtureName = basename(opts.fixtureDir);
   const steps: StepResult[] = [];
   const deviations: Deviation[] = [];
   let tsc: TscResult | undefined;
@@ -315,7 +315,7 @@ interface RunStepOpts {
  */
 async function runStep(opts: RunStepOpts): Promise<StepResult> {
   const start = Date.now();
-  const command = `${baseName(opts.cmd)} ${opts.args.map(quoteIfNeeded).join(" ")}`;
+  const command = `${basename(opts.cmd)} ${opts.args.map(quoteIfNeeded).join(" ")}`;
   return new Promise((resolvePromise) => {
     const child = spawn(opts.cmd, opts.args, {
       cwd: opts.cwd,
@@ -327,6 +327,7 @@ async function runStep(opts: RunStepOpts): Promise<StepResult> {
     });
     let stdout = "";
     let stderr = "";
+    let settled = false;
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -337,9 +338,17 @@ async function runStep(opts: RunStepOpts): Promise<StepResult> {
       stderr += `\n[harness] step '${opts.name}' timed out after ${opts.timeoutMs}ms`;
     }, opts.timeoutMs);
 
-    child.on("error", (err) => {
+    // Node fires `error` then `close` on spawn failure; guard so the second
+    // event doesn't replace the diagnostic-rich result from the first.
+    const settle = (result: StepResult) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      resolvePromise({
+      resolvePromise(result);
+    };
+
+    child.on("error", (err) => {
+      settle({
         name: opts.name,
         command,
         exitCode: 127,
@@ -349,9 +358,8 @@ async function runStep(opts: RunStepOpts): Promise<StepResult> {
       });
     });
     child.on("close", (code, signal) => {
-      clearTimeout(timer);
       const exit = code ?? (signal ? 124 : 1);
-      resolvePromise({
+      settle({
         name: opts.name,
         command,
         exitCode: exit,
@@ -402,11 +410,6 @@ function tryParseJson(s: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-function baseName(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i < 0 ? p : p.slice(i + 1);
 }
 
 function quoteIfNeeded(arg: string): string {
