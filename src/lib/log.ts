@@ -1,8 +1,24 @@
 import { createInterface } from "node:readline/promises";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { ColorAdapter } from "./render/color.js";
+import { loadColorAdapter } from "./render/tty-layer.js";
 export function info(msg: string): void { console.log(msg); }
 export function err(msg: string): void { console.error(msg); }
+
+/**
+ * Issue #370 — TTY-gated color adapter for the commands that still emit plain
+ * `info()` / `err()` lines. Returns the picocolors-backed adapter on a real
+ * TTY (so phase headers / verdict lines pick up the same color band the
+ * dashboard and front door use) and the identity adapter otherwise. Off-TTY
+ * — the agent surface — the byte stream stays byte-identical to today.
+ *
+ * Resolved on each call rather than at module load so tests (and any other
+ * mid-process TTY-state change) see the current `process.stdout.isTTY` value.
+ */
+export function colors(): ColorAdapter {
+  return loadColorAdapter();
+}
 
 export async function detectBuildCommand(cwd: string): Promise<string> {
   try {

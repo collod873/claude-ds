@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { parseManifest, type Manifest } from "../lib/manifest.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { detectLookalikes } from "../lib/lookalike.js";
-import { info, err, confirm, printNextStep } from "../lib/log.js";
+import { info, err, confirm, printNextStep, colors } from "../lib/log.js";
 import { run } from "../lib/runner.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 import type { Change, Operation } from "../lib/operation.js";
@@ -24,6 +24,7 @@ export async function migrateLayoutCmd(opts: {
   cwd?: string;
 }) {
   const cwd = opts.cwd ?? process.cwd();
+  const c = colors();
 
   // Refuse if not inside a git repo. migrate-layout relies on `git mv` to
   // preserve history on the renames, and the clean-tree guard upstream gives
@@ -33,7 +34,7 @@ export async function migrateLayoutCmd(opts: {
   try {
     await execFile("git", ["rev-parse", "--is-inside-work-tree"], { cwd });
   } catch {
-    process.stderr.write("migrate-layout: not inside a git repo\n");
+    process.stderr.write(c.red("migrate-layout: not inside a git repo") + "\n");
     process.exit(2);
   }
 
@@ -41,7 +42,7 @@ export async function migrateLayoutCmd(opts: {
   // hand-rolled `git status --porcelain` check this command used to carry.
   const guard = checkCleanTree({ command: "migrate-layout", cwd, allowDirty: opts.allowDirty });
   if (!guard.ok) {
-    process.stderr.write(guard.message + "\n");
+    process.stderr.write(c.red(guard.message) + "\n");
     process.exit(2);
   }
 
@@ -69,7 +70,7 @@ export async function migrateLayoutCmd(opts: {
       ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
     }
   } else {
-    if (!opts.pack) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
+    if (!opts.pack) { err(c.red("--pack required (no .claude-ds.json found)")); process.exit(2); }
     pack = opts.pack;
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..", "..");
@@ -103,19 +104,20 @@ export async function migrateLayoutCmd(opts: {
   }
 
   if (renames.length === 0) {
-    info("nothing to migrate");
+    info(c.dim("nothing to migrate"));
     return;
   }
 
-  // Print plan
-  process.stdout.write("Rename plan:\n");
+  // Print plan. Bold heading + dim arrows so the canonical destination is
+  // visually distinct from the source on a TTY; bytes off-TTY are unchanged.
+  process.stdout.write(c.bold("Rename plan:") + "\n");
   for (const r of renames) {
-    process.stdout.write(`  ${r.from} → ${r.to}\n`);
+    process.stdout.write(`  ${r.from} ${c.dim("→")} ${c.cyan(r.to)}\n`);
   }
   process.stdout.write("\n");
 
   if (!opts.yes && !(await confirm("Apply renames with git mv?"))) {
-    err("aborted");
+    err(c.red("aborted"));
     process.exit(130);
   }
 
@@ -127,7 +129,7 @@ export async function migrateLayoutCmd(opts: {
   };
   const report = await run(ctx, [renamesOp], "apply");
   if (report.failed) {
-    err(`migrate-layout failed: ${report.failed.error}`);
+    err(c.red(`migrate-layout failed: ${report.failed.error}`));
     process.exit(2);
   }
 
@@ -138,6 +140,6 @@ export async function migrateLayoutCmd(opts: {
   // old behavior) defeated that and required `git reset --hard HEAD~1` to
   // back out, which is exactly the destructive operation we steer consumers
   // away from.
-  info(`migrated ${renames.length} file(s) — renames are staged in the git index; review with 'git status' and commit when ready`);
+  info(c.green(`migrated ${renames.length} file(s) — renames are staged in the git index; review with 'git status' and commit when ready`));
   printNextStep("migrate-layout", { projectKind: ctx.kind });
 }

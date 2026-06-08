@@ -1,21 +1,22 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parseExceptions, gate } from "../lib/exceptions.js";
-import { info, err, confirm } from "../lib/log.js";
+import { info, err, confirm, colors } from "../lib/log.js";
 import { loadProject } from "../lib/project.js";
 import { run } from "../lib/runner.js";
 import { setConfigMode } from "../lib/ops/set-config-mode.js";
 
 export async function enforceCmd(opts: { yes?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
+  const c = colors();
   const cfgPath = join(cwd, ".claude-ds.json");
-  try { await stat(cfgPath); } catch { err(".claude-ds.json absent; run init or adopt first"); process.exit(2); }
+  try { await stat(cfgPath); } catch { err(c.red(".claude-ds.json absent; run init or adopt first")); process.exit(2); }
   const ctx = await loadProject(cwd);
   const ex = parseExceptions(await readFile(join(cwd, "design-system/exceptions.json"), "utf8"));
   try {
     gate(ex, ctx.cfg.enforce_threshold);
   } catch (e) {
-    err((e as Error).message);
+    err(c.red((e as Error).message));
     // #362: gate refusal previously left the operator with no recovery path.
     // Name the inspection command + both ways out (close exceptions, raise
     // the threshold) so a "nothing-to-do" exit becomes self-explanatory.
@@ -25,10 +26,10 @@ export async function enforceCmd(opts: { yes?: boolean; cwd?: string }) {
   // #362: idempotency — when the project is already in block mode, say so
   // instead of falsely claiming a flip. Branch *before* the confirm so an
   // operator re-running the command isn't asked to approve a no-op either.
-  if (ctx.cfg.mode === "block") { info("enforce: already in block mode — nothing to do"); return; }
+  if (ctx.cfg.mode === "block") { info(c.dim("enforce: already in block mode — nothing to do")); return; }
   // #364: interactive cancel must fail loud (stderr + exit 130) per ADR-0016.
-  if (!opts.yes && !(await confirm(`Flip mode warn → block (open exceptions ≤ ${ctx.cfg.enforce_threshold})?`))) { err("aborted"); process.exit(130); }
+  if (!opts.yes && !(await confirm(`Flip mode warn → block (open exceptions ≤ ${ctx.cfg.enforce_threshold})?`))) { err(c.red("aborted")); process.exit(130); }
   const report = await run(ctx, [setConfigMode("block")], "apply");
-  if (report.failed) { err(`enforce failed: ${report.failed.error}`); process.exit(2); }
-  info("enforce: mode flipped to block");
+  if (report.failed) { err(c.red(`enforce failed: ${report.failed.error}`)); process.exit(2); }
+  info(c.green("enforce: mode flipped to block"));
 }
