@@ -127,8 +127,18 @@ describe("e2e-smoke.yml: blocking inner-loop gate (#415)", () => {
     // not the full `tests/e2e/` glob. A future per-command file added under
     // `tests/e2e/per-command/` must NOT be picked up by this workflow — that
     // would re-bloat the inner loop and defeat the tiered split.
-    const yml = await readWorkflow("e2e-smoke.yml");
-    expect(yml).toMatch(/tests\/e2e\/smoke\.test\.ts\b/);
+    // Strip comments first so narrative prose that mentions `tests/e2e/` (the
+    // companion heavy workflow, future fixture paths) is not misread as an
+    // active vitest target.
+    const code = stripYamlComments(await readWorkflow("e2e-smoke.yml"));
+    // Positive: the smoke file IS the target.
+    expect(code).toMatch(/run:[^\n]*\btests\/e2e\/smoke\.test\.ts\b/);
+    // Negative: no active `run:` directive references a `tests/e2e/...` path
+    // that is NOT the smoke file — catches the silent-re-bloat regression of
+    // someone appending the full directory or a per-command sub-path to a
+    // step in this workflow. Mirrors the symmetric exclusivity assertion on
+    // `e2e-release.yml` below.
+    expect(code).not.toMatch(/run:[^\n]*\btests\/e2e\b(?!\/smoke\.test\.ts\b)/);
   });
 });
 
@@ -148,6 +158,21 @@ describe("e2e-release.yml: heavy multi-fixture / per-command nightly+release gat
     // The whole point of tiering: never on PR — otherwise the inner loop
     // re-bloats and the user-story-27 budget evaporates.
     expect(code).not.toMatch(/^\s*pull_request:/m);
+  });
+
+  it("has a bounded time budget — `timeout-minutes` is set on the heavy job", async () => {
+    // The heavy matrix is high-coverage but high-latency; no implicit
+    // GitHub-default 6-hour timeout on this path either. A run that hangs
+    // (hung subprocess in the harness, never-completing fixture) should fail
+    // loudly rather than burning a runner slot all night.
+    const yml = await readWorkflow("e2e-release.yml");
+    const m = yml.match(/timeout-minutes:\s*(\d+)/);
+    expect(m, "e2e-release.yml must set `timeout-minutes` on the heavy job").not.toBeNull();
+    const minutes = Number(m![1]);
+    expect(minutes).toBeGreaterThan(0);
+    // Generous upper bound — the heavy matrix may legitimately take longer
+    // than the inner-loop gate, but a runaway above an hour is a bug.
+    expect(minutes).toBeLessThanOrEqual(60);
   });
 
   it("runs the full e2e suite (not just the smoke) so future fixtures get picked up", async () => {
