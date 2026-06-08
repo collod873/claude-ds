@@ -1,0 +1,50 @@
+name: Agent Reconcile Queued
+
+# #422 — self-healing backstop for the agent:queued → agent:implement promotion
+# cascade. The inline cascade inside agent-auto-merge.yml is coupled to a single
+# workflow run; if that run is cancelled or killed after the PR merges (closing
+# the linked issue) but before the cascade executes, dependents stay
+# `agent:queued` permanently. The standalone agent-promote-queued.yml is also
+# bypassed in that scenario, because its trigger (`issues: closed`) does not
+# fire for closes authored by GITHUB_TOKEN.
+#
+# This workflow sweeps every open `agent:queued` issue on a cron schedule (and
+# on-demand via workflow_dispatch) and promotes any whose declared blockers are
+# all closed. Idempotent: a healthy queue produces a no-op run.
+
+on:
+  schedule:
+    # Every 15 minutes. Bounds recovery time for a stranded agent:queued
+    # without spamming the API. Tune down if the queue grows hot.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+# Don't pile up concurrent sweeps — they'd race on the same labels. The
+# script's per-issue re-check lose-the-race guard handles overlap correctness;
+# this just keeps the run-history clean.
+concurrency:
+  group: agent-reconcile-queued
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      # AGENT_PAT is required for the promoted `agent:implement` label to
+      # fire `agent-implement.yml` — labels added via GITHUB_TOKEN do not
+      # trigger downstream workflows. Falls back to GITHUB_TOKEN, in which
+      # case promotion lands but the downstream run won't auto-trigger.
+      AGENT_PAT: ${{ secrets.AGENT_PAT }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Sweep agent:queued and promote unblocked dependents
+        run: node scripts/reconcile-queued.mjs
