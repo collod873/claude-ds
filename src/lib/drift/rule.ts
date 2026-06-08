@@ -92,6 +92,17 @@ export interface FixResult {
   fixed: boolean;
   message: string;
   changes: Change[];
+  /**
+   * Opt-in collapse descriptor (#448). When many files get the SAME fix, the
+   * per-file `fixed […]: …` lines are a brownfield wall — the `repetition`
+   * friction the gate grades (PRD #439). A fixer sets this so `audit`/`heal`
+   * collapse same-`(ruleId, label, group)` fixed results into one count line —
+   * `fixed [DRIFT-META-KIND-MISSING]: added meta.kind to 16 files (atoms)` —
+   * unless `--verbose` is set. `label` is the action; `group` is the bucket
+   * (e.g. the tier) used both to partition the count and as the parenthetical
+   * (pluralized with a trailing "s").
+   */
+  collapse?: { label: string; group: string };
 }
 
 /**

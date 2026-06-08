@@ -195,6 +195,7 @@ export async function auditCmd(opts: AuditOpts) {
       issue: opts.issue,
       permanent: opts.permanent,
       pendingSink: opts.pendingSink,
+      verbose,
     });
   } catch (e) {
     // ADR-0016: a genuine Ambiguity hit a non-TTY caller with no pre-supplied

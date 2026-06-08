@@ -61,7 +61,15 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
     after: Buffer.from(newContent),
   }];
 
-  return { finding, fixed: true, message: `added meta.kind = "${tier}" to ${finding.file}`, changes };
+  return {
+    finding,
+    fixed: true,
+    message: `added meta.kind = "${tier}" to ${finding.file}`,
+    changes,
+    // #448: a brownfield adopter with many kind-less files gets one of these
+    // lines per file. Bucket by tier so audit/heal collapse the wall to a count.
+    collapse: { label: "added meta.kind", group: tier },
+  };
 }
 
 export const metaKindMissingRule: DriftRule = {

@@ -1,13 +1,10 @@
 {
   "_comment": "PRD #439 friction baseline — the ledger of CURRENTLY-ACCEPTED friction findings measured against tests/e2e/fixtures/crewops-snapshot via the real CLI sequence (adopt -> heal -> audit --fix -> front door, plus an interactive PTY capture of the bare front door — #443). This is the ratchet: a finding whose key is NOT here is a regression and FAILS the gate. Keys may only be REMOVED across commits, never added. Closing a friction-fix issue means deleting its key here AND the gate confirming the finding no longer reproduces (see docs/agents/friction-loop.md). RED on day one is intended — every entry is a tracked defect with a removal trigger (ADR-0003).",
-  "_removal_triggers": {
-    "repetition:heal:fixed [DRIFT-META-KIND-MISSING]: added <file> = \"atom\" to <path>": "Brownfield wall — heal prints one near-identical 'fixed [DRIFT-META-KIND-MISSING]' line per unclassified atom (the gate injects 15 to reproduce; see injectBrownfieldSurface in friction-gate.ts and golden 01-heal.txt). Remove when heal collapses the wall to a count: #448."
-  },
+  "_removal_triggers": {},
   "keys": [
     "next-step-dead-end:npm run ds:build-manifest",
     "next-step-dead-end:run 'claude-ds classify --src <dir>' to migrate existing components",
     "next-step-dead-end:run your build (e.g. npm run build) to verify everything compiles",
-    "jargon-unglossed:scaffold",
-    "repetition:heal:fixed [DRIFT-META-KIND-MISSING]: added <file> = \"atom\" to <path>"
+    "jargon-unglossed:scaffold"
   ]
 }
