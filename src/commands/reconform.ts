@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { info, err, colors } from "../lib/log.js";
+import { info, err, colors, printNextStep } from "../lib/log.js";
 import { createProgress } from "../lib/render/tty-layer.js";
 import { loadProject } from "../lib/project.js";
 import { migrateClaudeMd } from "../lib/ops/migrate-claude-md.js";
@@ -232,10 +232,16 @@ export async function reconformCmd(opts: {
     // auto-repairs GEN violations in-place and exits 0.
     if (dryRun) {
       info(c.cyan(`[dry-run] complete — ${companionsCreated.length} companion(s) would be created, ${metaMissing.length} meta export(s) missing${backfillMetaFlag ? `, ${classificationCount} misclassified` : ""}`));
+      // #363: even the dry-run completion gets a breadcrumb. Suppressed when
+      // we're about to exit non-zero on GEN violations (the stderr trail
+      // already names the failing rule and the consumer's recovery is to
+      // re-run apply, not to follow a generic Next step).
+      if (genViolations.length === 0) printNextStep("reconform", {});
       process.exit(genViolations.length > 0 ? 2 : 0);
     }
 
     info(c.green(`reconform complete — ${companionsCreated.length} companion(s) created, ${metaMissing.length} meta export(s) missing${backfillMetaFlag ? `, ${metaBackfilled} meta backfilled, ${classificationCount} misclassified` : ""}, ${allViolations.length} violation(s) reviewed`));
+    printNextStep("reconform", {});
   } finally {
     progress.stop();
   }

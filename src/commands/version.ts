@@ -1,7 +1,7 @@
 import { parseConfig } from "../lib/config.js";
 import { parseLsRemote } from "../lib/tags.js";
 import { semverLt } from "../lib/version-currency.js";
-import { colors } from "../lib/log.js";
+import { colors, printNextStep } from "../lib/log.js";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -96,11 +96,13 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
   if (opts.check) {
     if (!pinned) {
       console.log(c.red("no .claude-ds.json found — cannot check version"));
+      printNextStep("version", { versionState: "no-config" });
       process.exit(1);
     }
 
     if (pinned === installedVer) {
       console.log(c.green(`up to date (${installedVer})`));
+      printNextStep("version", { versionState: "up-to-date" });
       process.exit(0);
     }
 
@@ -127,7 +129,11 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
       }
     }
 
-    console.log(`Run ${c.bold("`claude-ds upgrade`")} to apply pending migrations.`);
+    // #363: replace the free-form "Run `claude-ds upgrade`..." line with the
+    // canonical `→ Next:` breadcrumb. Route based on direction: pinned <
+    // installed → upgrade; pinned > installed → update the CLI binary.
+    const state: "behind" | "ahead" = semverLt(pinned, installedVer) ? "behind" : "ahead";
+    printNextStep("version", { versionState: state });
     process.exit(1);
   }
 
@@ -141,6 +147,7 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
 
   if (opts.offline) {
     console.log(`latest: ${c.dim("unknown")}`);
+    printNextStep("version", { versionState: defaultVersionState(pinned, installedVer) });
     return;
   }
 
@@ -151,4 +158,20 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
     console.log(`latest: ${c.dim("unknown")}`);
     console.error(c.red(`(latest tag check failed: ${result.reason}; pass --offline to skip)`));
   }
+  printNextStep("version", { versionState: defaultVersionState(pinned, installedVer) });
+}
+
+/**
+ * #363: pick the breadcrumb routing for the default `version` mode. Mirrors
+ * the `--check` branch — no pin → adopt, pin behind → upgrade, pin ahead →
+ * update the CLI, equal → audit — so both surfaces land on the same next step
+ * for the same project state.
+ */
+function defaultVersionState(
+  pinned: string | null,
+  installedVer: string,
+): "no-config" | "up-to-date" | "behind" | "ahead" {
+  if (!pinned) return "no-config";
+  if (pinned === installedVer) return "up-to-date";
+  return semverLt(pinned, installedVer) ? "behind" : "ahead";
 }

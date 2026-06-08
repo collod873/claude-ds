@@ -141,15 +141,24 @@ jobs:
           OUTPUT_DIR: ${{ runner.temp }}
         run: npx tsx .sandcastle/agent-workflows/implement/implement.ts
 
-      - name: Push branch
-        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
+      - name: Push branch (preserve committed work even on failure)
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && !cancelled()
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
         # Force-push so we recover from leftover branches whose PR has since
         # closed/merged. Safe because the preflight step refuses when an open
         # PR exists for this issue, and the branch name is deterministic from
         # the issue number — any remote ref here is an orphan.
-        run: git push --force origin "$BRANCH"
+        #
+        # Runs even when the implement step FAILED (e.g. the harness idle-timeout
+        # killed a long, silent command) so committed work is never stranded on
+        # the runner — see #381. Skips cleanly when nothing was committed.
+        run: |
+          if [ "$(git rev-list --count main..HEAD)" -eq 0 ]; then
+            echo "No commits beyond main — nothing to push."
+            exit 0
+          fi
+          git push --force origin "$BRANCH"
 
       - name: Write PR title and description
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
@@ -203,10 +212,15 @@ jobs:
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && failure()
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BRANCH: ${{ steps.branch.outputs.name }}
         run: |
           reason="(no reason file written — check workflow logs)"
           if [ -f "${RUNNER_TEMP}/failure_reason.txt" ]; then
             reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
+          fi
+          branch_note="No branch was pushed (no commits were made)."
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            branch_note="Any commits made before the failure were pushed to \`$BRANCH\` — inspect or retry from there; work was not lost."
           fi
           gh issue edit "$ISSUE_NUMBER" --add-label "agent:blocked" || true
           gh issue comment "$ISSUE_NUMBER" --body "$(cat <<EOF
@@ -215,6 +229,8 @@ jobs:
           **Reason:** $reason
 
           **Workflow run:** $RUN_URL
+
+          $branch_note
 
           Re-add \`agent:implement\` to retry.
           EOF

@@ -105,6 +105,10 @@ export async function migrateLayoutCmd(opts: {
 
   if (renames.length === 0) {
     info(c.dim("nothing to migrate"));
+    // #363: even the no-op path ends with the breadcrumb. Same routing as the
+    // success path — adopted → heal, pre-adopt → adopt — so the consumer's
+    // next move doesn't depend on whether migrate-layout found anything.
+    printNextStep("migrate-layout", { projectKind: ctx.kind });
     return;
   }
 
