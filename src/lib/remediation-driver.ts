@@ -152,12 +152,15 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
   switch (step) {
     case "upgrade":
     case "repair":
+      // Issue #410: heal owns the final verify gate at convergence — running
+      // it inside every inner step would mean N extra tsc invocations per
+      // heal iteration.
       return runWithoutExit(() =>
-        upgradeCmd({ cwd, yes: true, allowDirty: true }),
+        upgradeCmd({ cwd, yes: true, allowDirty: true, skipVerifyGate: true }),
       );
     case "sync":
       return runWithoutExit(() =>
-        syncCmd({ cwd, yes: true, allowDirty: true }),
+        syncCmd({ cwd, yes: true, allowDirty: true, skipVerifyGate: true }),
       );
     case "classify":
       return runWithoutExit(() =>
@@ -177,6 +180,7 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
           allowDirty: true,
           answers,
           pendingSink,
+          skipVerifyGate: true,
         }),
       );
     case "migrate-layout":

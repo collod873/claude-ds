@@ -15,8 +15,9 @@ import { detectFormatter, runFormatter } from "../lib/formatter.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
+import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 
-export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean }) {
+export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean; skipVerifyGate?: boolean }) {
   const cwd = opts.cwd ?? process.cwd();
   if (opts.json) setJsonMode(true);
   try { await stat(join(cwd, ".claude-ds.json")); } catch {
@@ -154,23 +155,92 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
     }
   }
 
-  info(`sync complete → ${target}`);
+  // Collect what we wrote so the verify gate (#410) treats those files as
+  // scaffold paths even when they live outside `design-system/` (e.g.
+  // `.claude/hooks/*`).
+  const touchedFiles = new Set<string>();
+  for (const c of report.applied) {
+    if (c.kind === "write" || c.kind === "delete") touchedFiles.add(c.path);
+    else if (c.kind === "rename") { touchedFiles.add(c.path); touchedFiles.add(c.after); }
+  }
+  const writes = report.applied.filter(c => c.kind === "write").length;
+  const aborts = decisions.filter(d => d.verdict.action === "abort").length;
+  const inSync = writes === 0 && aborts === 0;
+
+  // Verify gate (#410 / PRD #407). Runs only when sync actually wrote bytes
+  // AND the caller did not opt out (heal/driveRemediation owns the final
+  // gate; running it per inner step would mean N tsc invocations per heal
+  // iteration). The gate fails loud on errors in scaffold/touched files
+  // and reports pre-existing consumer errors as warn-only.
+  let verify: VerifyResult | undefined;
+  if (!opts.skipVerifyGate && !inSync) {
+    const cfgCtx = await loadProject(cwd);
+    verify = await runConsumerVerify(cwd, {
+      managedFiles: new Set(cfgCtx.manifest.files.map(f => f.path)),
+      touchedFiles,
+      managedRoots: ["design-system/"],
+    });
+    if (!verify.ok) {
+      reportRedGate(verify);
+      if (opts.json) {
+        emitHeadless({
+          command: "sync",
+          ok: false,
+          verdict: "verify-failed",
+          exitCode: HEADLESS_EXIT.FINDINGS,
+          actions: { filesWritten: writes, aborts, target },
+          remaining: { brownfield: false, verify: verifyJson(verify) },
+        });
+      }
+      process.exit(1);
+      return;
+    }
+  }
+
+  info(`sync complete → ${target}${verify ? ` (verified via ${verify.command})` : ""}`);
   const brownfield = await hasConsumerTierFiles(cwd);
   printNextStep("sync", { brownfield });
 
   if (opts.json) {
-    const writes = report.applied.filter(c => c.kind === "write").length;
-    const aborts = decisions.filter(d => d.verdict.action === "abort").length;
-    const inSync = writes === 0 && aborts === 0;
     emitHeadless({
       command: "sync",
       ok: true,
       verdict: inSync ? "in-sync" : "applied",
       exitCode: HEADLESS_EXIT.OK,
       actions: { filesWritten: writes, aborts, target },
-      remaining: { brownfield },
+      remaining: { brownfield, ...(verify ? { verify: verifyJson(verify) } : {}) },
     });
   }
+}
+
+/** Surface scaffold errors on stderr. */
+function reportRedGate(verify: VerifyResult): void {
+  err(
+    `verify gate failed: ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
+  );
+  for (const e of verify.scaffoldErrors.slice(0, 20)) {
+    err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
+  }
+  if (verify.scaffoldErrors.length > 20) {
+    err(`  …and ${verify.scaffoldErrors.length - 20} more`);
+  }
+  if (verify.consumerErrors.length > 0) {
+    err(`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`);
+  }
+}
+
+function verifyJson(verify: VerifyResult): Record<string, unknown> {
+  return {
+    ok: verify.ok,
+    command: verify.command,
+    exitCode: verify.exitCode,
+    scaffoldErrorCount: verify.scaffoldErrors.length,
+    consumerErrorCount: verify.consumerErrors.length,
+    scaffoldErrors: verify.scaffoldErrors.slice(0, 20).map(e => ({
+      file: e.file, line: e.line, col: e.col, code: e.code, message: e.message,
+    })),
+    reason: verify.reason,
+  };
 }
 
 const TIER_DIRS = ["design-system/atoms", "design-system/composites", "design-system/patterns"] as const;
