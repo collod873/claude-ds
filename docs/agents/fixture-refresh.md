@@ -101,6 +101,94 @@ message and reference the tripwire issue. The auto-filed issue carries
 the source of truth for what diverged; the commit message ties the
 refresh to it.
 
+## Harvesting a fresh snapshot from real Crewops
+
+The procedure above *refreshes* an existing snapshot one shape at a time. This
+section is the from-scratch version: producing the committed snapshot tree from
+live Crewops the first time, or fully re-harvesting it when the existing one has
+drifted past per-shape patching. The output is the same committed fixture at
+`tests/e2e/fixtures/crewops-snapshot/`; the difference is you start from the
+real DS tree, not from the committed one.
+
+The snapshot is read by every PR and lives under version control, so it must
+carry the *shapes* of real Crewops without any of its *content*. The harvest is
+three moves: pull → sanitize → verify-survival.
+
+### 1. Pull the DS tree from real Crewops
+
+```bash
+# Read-only — never mutate live Crewops:
+cp -r /path/to/crewops/design-system /tmp/harvest/design-system
+cp /path/to/crewops/tsconfig.json /tmp/harvest/tsconfig.json
+cp /path/to/crewops/package.json   /tmp/harvest/package.json
+```
+
+Keep only what the friction gate needs to run: the `design-system/` tree (atoms
++ composites at minimum), the `tsconfig.json` whose `paths` aliases the metas
+import through, a minimal `package.json` with a `verify: tsc --noEmit` script,
+and one feature-tier consumer under `src/` that imports every atom/composite so
+the consumer `tsc --noEmit` step reaches them all.
+
+### 2. Sanitize
+
+Strip everything that is real Crewops, keep only the structural shape:
+
+- **Business identifiers / copy / domain data** — replace component names with
+  generic structural names (`StatusBadge`, `EntityPicker`, …), blank every
+  user-facing string and label to `""` or a placeholder token, drop domain
+  enums down to neutral values.
+- **Secrets** — no API keys, tokens, endpoints, internal URLs, or `.env`
+  values may survive into a committed file. Grep the harvested tree for them
+  before continuing.
+- **Component logic** — reduce each component body to the structural minimum
+  that preserves the shape under test. A smart composite keeps a trivial
+  open/closed toggle so the *stateful* shape survives; a presentational atom
+  collapses to a pure render. No real interaction, data-fetching, or
+  domain branching remains.
+
+**Do not** reorder or normalize the `meta` declarations during sanitization —
+the after-a-nested-brace `kind` ordering and the missing-`kind` meta ARE the
+shapes under test. "Tidying" them is the exact silent loss the unit test guards.
+
+### 3. Verify the breaking shapes survived (before committing)
+
+Sanitization is where shapes get accidentally dropped, so this checklist is the
+gate. All four must still be present after step 2:
+
+- [ ] **(a)** a `meta` declaring `kind` AFTER a nested brace
+      (`examples: [{ … }]` listed before `kind`) — the parser-breaking ordering
+- [ ] **(b)** a `meta` with **no** `kind` at all
+- [ ] **(c)** a smart-part composite declaring a `role`
+- [ ] **(d)** a presentational atom (pure render, a `kind`, no `role`)
+- [ ] the tiers `design-system/atoms/` and `design-system/composites/` and the
+      scaffold files `package.json` + `tsconfig.json` are present
+
+Run the structural well-formedness unit test — it asserts exactly the five
+items above through the brace-aware meta-source reader, so it fails loudly if a
+shape was lost in sanitization:
+
+```bash
+npm run build
+npx vitest run tests/unit/crewops-snapshot.test.ts
+```
+
+Then confirm the friction detectors still reproduce the **known findings** the
+snapshot exists to carry — a sanitized snapshot that no longer trips them is
+useless. Run the gate against the harvested tree and diff against the committed
+baseline:
+
+```bash
+npx vitest run tests/e2e/friction.test.ts
+# The findings must still match tests/e2e/friction-baseline.json — same keys,
+# no finding silently vanished. A key that disappears means a shape was
+# sanitized away; go back to step 2 and restore it.
+```
+
+Only commit once both the unit test is green AND the friction findings still
+match the baseline. A snapshot that passes the unit test but no longer
+reproduces the baseline findings has lost a detector-relevant shape even though
+its structure looks intact — both checks are required.
+
 ## When **not** to refresh
 
 If the divergence is real (the snapshot *should* be green and live Crewops
