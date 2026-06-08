@@ -1,0 +1,49 @@
+name: e2e-smoke
+
+# Non-blocking discovery catalogue for parent PRD #407 (sub-issue #417).
+# Runs the real built CLI (`node dist/cli.js`) against the committed
+# Crewops-shaped fixture, then publishes `e2e-report.json` as an artifact.
+#
+# Until the defects the catalogue surfaces are fixed (A1, A2, A3, …) the
+# job is `continue-on-error: true` and intentionally does NOT gate PR
+# merges. A later slice flips the flag once the report comes back green
+# against a real consumer.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  e2e-smoke:
+    runs-on: ubuntu-latest
+    # Non-blocking gate: the harness exists to enumerate breakage, not
+    # to halt the queue while it does so. Flip to `false` once the PRD's
+    # fix list lands.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build CLI
+        run: npm run build
+
+      - name: Run e2e smoke harness
+        run: npx vitest run tests/e2e/smoke.test.ts
+        continue-on-error: true
+
+      - name: Upload discovery catalogue
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: e2e-report.json
+          if-no-files-found: warn
