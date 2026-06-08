@@ -97,12 +97,17 @@ with no access to any consumer's code — so the oracle lives outside the
 component body and catches wrong-from-day-one bugs, not just regressions
 (the F3 trap a per-component `.test.tsx` falls into). Drives the
 component purely through the rendered DOM by ARIA role and ARIA state, so
-one contract serves every implementation of that role; the same property
-subsumes a11y verification. Runs in the consumer's existing vitest +
-jsdom runtime (#297) against the component's `meta.examples`. Today the
-pack ships exactly one — combobox; further contracts ship only when a
-real consumer component demands them (ADR-0016's anti-speculative-infra
-constraint).
+one contract serves every **single-component** implementation of that
+role; the same property subsumes a11y verification. The runner renders
+one DS component into one container, so a *multi-part* widget whose ARIA
+anchor is only assembled by composing sub-parts in consumer usage (e.g. a
+headless-lib combobox: cmdk/base-ui/radix root + trigger + content +
+item) is out of scope until a multi-part contract model lands — a tracked
+limitation, ADR-0022 / issue #455, not a silent gap. Runs in the
+consumer's existing vitest + jsdom runtime (#297) against the component's
+`meta.examples`. Today the pack ships exactly one — combobox; further
+contracts ship only when a real consumer component demands them
+(ADR-0016's anti-speculative-infra constraint).
 _Avoid_: pattern contract, behavioral spec, a11y test, snapshot.
 
 ### Smart part
