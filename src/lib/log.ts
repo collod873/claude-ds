@@ -3,7 +3,25 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ColorAdapter } from "./render/color.js";
 import { loadColorAdapter } from "./render/tty-layer.js";
-export function info(msg: string): void { console.log(msg); }
+/**
+ * `--json` mode suppression (issue #408). When a command runs with
+ * `--json`, every `info()` chatter line is silenced so the final JSON
+ * document is the entirety of stdout — the headless contract a verifying
+ * agent depends on. `err()` still goes to stderr (machine-readable surface
+ * is stdout; diagnostics on stderr are fine).
+ *
+ * Module-level state because the existing command bodies sprinkle `info()`
+ * across many call sites; touching every one with a `quiet?: boolean` flag
+ * would balloon the diff for no contract benefit.
+ */
+let jsonModeActive = false;
+export function setJsonMode(active: boolean): void { jsonModeActive = active; }
+export function isJsonMode(): boolean { return jsonModeActive; }
+
+export function info(msg: string): void {
+  if (jsonModeActive) return;
+  console.log(msg);
+}
 export function err(msg: string): void { console.error(msg); }
 
 /**

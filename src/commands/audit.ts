@@ -3,7 +3,8 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
-import { info, err, printNextStep, detectBuildCommand } from "../lib/log.js";
+import { info, err, printNextStep, detectBuildCommand, setJsonMode } from "../lib/log.js";
+import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { parseExceptions, type Exception } from "../lib/exceptions.js";
 import { isExtractionNeededFinding, isFixable, type DriftRuleId } from "../lib/drift/index.js";
@@ -42,6 +43,12 @@ export interface AuditOpts {
    * with --fix; the read-only audit path is non-destructive and does not gate. */
   allowDirty?: boolean;
   /**
+   * Issue #408: emit the headless contract — exit code + JSON document
+   * (verdict, actions taken, remaining findings). Suppresses all human
+   * `info()` chatter so the JSON document is the entirety of stdout.
+   */
+  json?: boolean;
+  /**
    * When provided, ADR-0016 Ambiguity Decisions hit during the audit-fix
    * pre-pass are collected here as `PendingDecision`s instead of throwing
    * `UnresolvedAmbiguityError`. The caller is responsible for surfacing them
@@ -58,6 +65,7 @@ const suppressedKey = (rule: string, path: string) => `${rule}:${path}`;
 
 export async function auditCmd(opts: AuditOpts) {
   const cwd = opts.cwd ?? process.cwd();
+  if (opts.json) setJsonMode(true);
 
   // Clean-tree guard (PRD #325 / sub-issue #328). Only the destructive
   // `--fix` path gates; the read-only audit can always run, dirty or not.
@@ -67,6 +75,7 @@ export async function auditCmd(opts: AuditOpts) {
     const guard = checkCleanTree({ command: "audit", cwd, allowDirty: opts.allowDirty });
     if (!guard.ok) {
       err(guard.message);
+      if (opts.json) emitHeadless(errorResult("audit", guard.message));
       process.exit(2);
     }
   }
@@ -80,12 +89,19 @@ export async function auditCmd(opts: AuditOpts) {
     try {
       decisions.answers = await loadAnswersFile(opts.answers);
     } catch (e) {
-      err(e instanceof Error ? e.message : String(e));
+      const m = e instanceof Error ? e.message : String(e);
+      err(m);
+      if (opts.json) emitHeadless(errorResult("audit", m));
       process.exit(2);
     }
   }
   if (!pack) {
-    if (!(await exists(cfgPath))) { err("--pack required (no .claude-ds.json found)"); process.exit(2); }
+    if (!(await exists(cfgPath))) {
+      const m = "--pack required (no .claude-ds.json found)";
+      err(m);
+      if (opts.json) emitHeadless(errorResult("audit", m));
+      process.exit(2);
+    }
     ctx = await loadProject(cwd, decisions);
     cfg = ctx.cfg;
     pack = cfg.pack;
@@ -176,8 +192,15 @@ export async function auditCmd(opts: AuditOpts) {
     // answer. Print a named, plain-language exit so the operator knows which
     // Decision id to put in `--answers` and re-run with.
     if (e instanceof UnresolvedAmbiguityError) {
-      err(`audit needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`);
+      const m = `audit needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`;
+      err(m);
       err(`Re-run with --answers <file> mapping "${e.decisionId}" to an option index, or --except to register an exception.`);
+      if (opts.json) {
+        emitHeadless(errorResult("audit", m, {
+          decisionId: e.decisionId,
+          decisionQuestion: e.decisionQuestion,
+        }));
+      }
       process.exit(2);
       return;
     }
@@ -199,6 +222,9 @@ export async function auditCmd(opts: AuditOpts) {
   }));
 
   const buildCmd = await detectBuildCommand(cwd);
+  // Issue #408: build the headless contract incrementally so each branch
+  // can choose its verdict / exitCode. The contract is the source of truth
+  // when --json is set; the existing TTY chatter still runs above it.
   if (activeFindings.length > 0) {
     info(`${activeFindings.length} error(s) require attention`);
     const extractionCount = activeFindings.filter(isExtractionNeededFinding).length;
@@ -215,10 +241,37 @@ export async function auditCmd(opts: AuditOpts) {
       return !isFixable(f.ruleId as DriftRuleId);
     }).length;
     printNextStep("audit", { hasFindings: true, extractionCount, unfixableCount });
+    if (opts.json) {
+      emitHeadless({
+        command: "audit",
+        ok: false,
+        verdict: opts.fix ? "findings-remain" : "findings",
+        exitCode: HEADLESS_EXIT.FINDINGS,
+        actions: { fixedCount: fixSummary.fixedCount, reconciledCount: fixSummary.reconciledCount },
+        remaining: {
+          findingsCount: activeFindings.length,
+          extractionCount,
+          unfixableCount,
+          warnings: warningCount,
+          findings: activeFindings.map(f => ({ ruleId: f.ruleId, file: f.file })),
+          missingScaffold: scaffold.total - scaffold.present,
+        },
+      });
+    }
     process.exit(1);
   } else if (fixSummary.fixedCount > 0) {
     info("No action required.");
     printNextStep("audit-fix", { buildCmd });
+    if (opts.json) {
+      emitHeadless({
+        command: "audit",
+        ok: true,
+        verdict: "fixed",
+        exitCode: HEADLESS_EXIT.OK,
+        actions: { fixedCount: fixSummary.fixedCount, reconciledCount: fixSummary.reconciledCount },
+        remaining: { warnings: warningCount, findingsCount: 0 },
+      });
+    }
   } else if (warningCount > 0 && !opts.fix) {
     // #349 F9: warnings (orphans, deprecated-path matches, strict-root
     // unexpected files) are actionable even though they aren't errors. The
@@ -228,8 +281,28 @@ export async function auditCmd(opts: AuditOpts) {
     // command that resolves them (`audit --fix` runs reconcile inline).
     info(`${warningCount} warning(s) — re-run with --fix to auto-resolve.`);
     printNextStep("audit", { hasActionableWarnings: true, buildCmd });
+    if (opts.json) {
+      emitHeadless({
+        command: "audit",
+        ok: true,
+        verdict: "warnings",
+        exitCode: HEADLESS_EXIT.OK,
+        actions: {},
+        remaining: { warnings: warningCount, findingsCount: 0 },
+      });
+    }
   } else {
     info("No action required.");
     printNextStep("audit", { hasFindings: false, buildCmd });
+    if (opts.json) {
+      emitHeadless({
+        command: "audit",
+        ok: true,
+        verdict: "clean",
+        exitCode: HEADLESS_EXIT.OK,
+        actions: { fixedCount: fixSummary.fixedCount },
+        remaining: { findingsCount: 0, warnings: warningCount },
+      });
+    }
   }
 }

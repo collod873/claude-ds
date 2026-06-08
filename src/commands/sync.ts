@@ -5,7 +5,8 @@ import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { info, err, printNextStep } from "../lib/log.js";
+import { info, err, printNextStep, setJsonMode } from "../lib/log.js";
+import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
 
 const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
@@ -15,9 +16,15 @@ import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 
-export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean }) {
+export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean }) {
   const cwd = opts.cwd ?? process.cwd();
-  try { await stat(join(cwd, ".claude-ds.json")); } catch { err(".claude-ds.json absent"); process.exit(2); }
+  if (opts.json) setJsonMode(true);
+  try { await stat(join(cwd, ".claude-ds.json")); } catch {
+    const m = ".claude-ds.json absent";
+    err(m);
+    if (opts.json) emitHeadless(errorResult("sync", m));
+    process.exit(2);
+  }
 
   // Clean-tree guard (PRD #325 / sub-issue #328). --dry-run never mutates so
   // it bypasses the gate; the apply path refuses on a dirty tree unless the
@@ -26,6 +33,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
     const guard = checkCleanTree({ command: "sync", cwd, allowDirty: opts.allowDirty });
     if (!guard.ok) {
       err(guard.message);
+      if (opts.json) emitHeadless(errorResult("sync", guard.message));
       process.exit(2);
     }
   }
@@ -44,7 +52,9 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
       }
     }
     if (migrationReport.failed) {
-      err(`migrate-config failed: ${migrationReport.failed.error}`);
+      const m = `migrate-config failed: ${migrationReport.failed.error}`;
+      err(m);
+      if (opts.json) emitHeadless(errorResult("sync", m));
       process.exit(2);
     }
   }
@@ -89,6 +99,16 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
 
   if (opts.dryRun) {
     info("[dry-run] planned changes shown above — no files modified");
+    if (opts.json) {
+      emitHeadless({
+        command: "sync",
+        ok: true,
+        verdict: "dry-run",
+        exitCode: HEADLESS_EXIT.OK,
+        actions: { dryRun: true, planned: decisions.length },
+        remaining: { target },
+      });
+    }
     return;
   }
 
@@ -100,7 +120,9 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
     if (d.verdict.action === "abort") err(`skipped (abort): ${d.manifestPath} — ${d.verdict.reason}`);
   }
   if (report.failed) {
-    err(`apply failed at ${report.failed.change.kind}: ${report.failed.error}`);
+    const m = `apply failed at ${report.failed.change.kind}: ${report.failed.error}`;
+    err(m);
+    if (opts.json) emitHeadless(errorResult("sync", m));
     process.exit(2);
   }
 
@@ -133,7 +155,22 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
   }
 
   info(`sync complete → ${target}`);
-  printNextStep("sync", { brownfield: await hasConsumerTierFiles(cwd) });
+  const brownfield = await hasConsumerTierFiles(cwd);
+  printNextStep("sync", { brownfield });
+
+  if (opts.json) {
+    const writes = report.applied.filter(c => c.kind === "write").length;
+    const aborts = decisions.filter(d => d.verdict.action === "abort").length;
+    const inSync = writes === 0 && aborts === 0;
+    emitHeadless({
+      command: "sync",
+      ok: true,
+      verdict: inSync ? "in-sync" : "applied",
+      exitCode: HEADLESS_EXIT.OK,
+      actions: { filesWritten: writes, aborts, target },
+      remaining: { brownfield },
+    });
+  }
 }
 
 const TIER_DIRS = ["design-system/atoms", "design-system/composites", "design-system/patterns"] as const;

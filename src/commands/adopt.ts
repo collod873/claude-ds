@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { info, err, printNextStep } from "../lib/log.js";
+import { info, err, printNextStep, setJsonMode } from "../lib/log.js";
 import { detectLookalikes } from "../lib/lookalike.js";
 import { detectPackageManager, runCmd } from "../lib/package-manager.js";
 import { detectAppDir, detectClaudeMdCandidates, DEFAULT_CLAUDE_MD_TARGET } from "../lib/paths.js";
@@ -17,6 +17,7 @@ import { patchTsconfigPathAlias } from "../lib/ops/patch-tsconfig-path-alias.js"
 import { writeBootstrapClaudeDsConfig } from "../lib/bootstrap-config.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 import { createProgress } from "../lib/render/tty-layer.js";
+import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
 
 const execFile = promisify(execFileCb);
 
@@ -58,8 +59,9 @@ async function patchTsconfigForSrcApp(cwd: string): Promise<void> {
   }
 }
 
-export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: string; dryRun?: boolean; allowDirty?: boolean; cwd?: string }) {
+export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: string; dryRun?: boolean; allowDirty?: boolean; json?: boolean; cwd?: string }) {
   const cwd = opts.cwd ?? process.cwd();
+  if (opts.json) setJsonMode(true);
 
   // Clean-tree guard (PRD #325 / sub-issue #328). Adopt writes the initial
   // .claude-ds.json and a sheaf of pack-managed files; mixing those with the
@@ -70,11 +72,17 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     const guard = checkCleanTree({ command: "adopt", cwd, allowDirty: opts.allowDirty });
     if (!guard.ok) {
       err(guard.message);
+      if (opts.json) emitHeadless(errorResult("adopt", guard.message));
       process.exit(2);
     }
   }
 
-  if (await exists(join(cwd, ".claude-ds.json"))) { err(".claude-ds.json already exists — did you mean `claude-ds sync`?"); process.exit(2); }
+  if (await exists(join(cwd, ".claude-ds.json"))) {
+    const msg = ".claude-ds.json already exists — did you mean `claude-ds sync`?";
+    err(msg);
+    if (opts.json) emitHeadless(errorResult("adopt", msg));
+    process.exit(2);
+  }
 
   const here = dirname(fileURLToPath(import.meta.url));
   const repoRoot = resolve(here, "..", "..");
@@ -91,9 +99,15 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     if (available.length === 1) {
       pack = available[0];
     } else if (available.length === 0) {
-      err("--pack required: no packs found in packs/"); process.exit(2);
+      const m = "--pack required: no packs found in packs/";
+      err(m);
+      if (opts.json) emitHeadless(errorResult("adopt", m));
+      process.exit(2);
     } else {
-      err(`--pack required: valid packs are: ${available.join(", ")}`); process.exit(2);
+      const m = `--pack required: valid packs are: ${available.join(", ")}`;
+      err(m);
+      if (opts.json) emitHeadless(errorResult("adopt", m));
+      process.exit(2);
     }
   }
 
@@ -130,6 +144,11 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
     lines.push("No files were modified.");
     lines.push("If these matches are false positives, re-run with --ignore '<glob>,<glob>'");
     process.stderr.write(lines.join("\n") + "\n");
+    if (opts.json) {
+      emitHeadless(errorResult("adopt", "lookalikes detected — rename to canonical names first", {
+        lookalikes: blockers.map(b => ({ lookalike: b.lookalike, canonical: b.canonical })),
+      }));
+    }
     process.exit(2);
   }
 
@@ -159,6 +178,16 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   if (opts.dryRun) {
     info(`[dry-run] would adopt pack=${pack}, mode=warn, app_dir=${appDir}, claude_md_target=${claudeMdTarget}`);
     info("[dry-run] no files modified");
+    if (opts.json) {
+      emitHeadless({
+        command: "adopt",
+        ok: true,
+        verdict: "dry-run",
+        exitCode: HEADLESS_EXIT.OK,
+        actions: { dryRun: true, pack, appDir, claudeMdTarget },
+        remaining: {},
+      });
+    }
     return;
   }
 
@@ -239,7 +268,9 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
       }
     }
     if (migrationReport.failed) {
-      err(`migrate-config failed: ${migrationReport.failed.error}`);
+      const m = `migrate-config failed: ${migrationReport.failed.error}`;
+      err(m);
+      if (opts.json) emitHeadless(errorResult("adopt", m));
       process.exit(2);
     }
   }
@@ -256,7 +287,9 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
 
   if (report.failed) {
     progress.fail(`installing pack files — ${report.failed.change.kind}`);
-    err(`adopt failed at ${report.failed.change.kind}: ${report.failed.error}`);
+    const m = `adopt failed at ${report.failed.change.kind}: ${report.failed.error}`;
+    err(m);
+    if (opts.json) emitHeadless(errorResult("adopt", m));
     process.exit(2);
   }
   progress.succeed("installing pack files");
@@ -322,7 +355,9 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
       lines.push("Pack-owned regions updated; user-owned content preserved.");
     }
     lines.push("To diff before adopt, run: claude-ds doctor --pack <name>");
-    process.stdout.write(lines.join("\n") + "\n");
+    // Issue #408: under --json the JSON document must be the entirety of
+    // stdout. The overwrite preview rides on `actions.overwrites` instead.
+    if (!opts.json) process.stdout.write(lines.join("\n") + "\n");
   }
 
   progress.start("finishing setup");
@@ -361,6 +396,26 @@ export async function adoptCmd(opts: { pack?: string; yes?: boolean; ignore?: st
   info(`CI scripts installed. Run: ${runCmd(pm, "ci:hook-contract")} and ${runCmd(pm, "ci:consistency")}`);
   info(`A starter GitHub Actions workflow was seeded at .github/workflows/claude-ds-governance.yml (delete if not on GH Actions). See docs/ci-wiring.md for details.`);
   printNextStep("adopt", {});
+
+  if (opts.json) {
+    // Pack the headless contract: what got installed, what overwrote
+    // user content, what the operator still has to do (build-manifest).
+    const writes = report.applied.filter(c => c.kind === "write").length;
+    emitHeadless({
+      command: "adopt",
+      ok: true,
+      verdict: "adopted",
+      exitCode: HEADLESS_EXIT.OK,
+      actions: {
+        pack,
+        appDir,
+        claudeMdTarget,
+        filesWritten: writes,
+        overwrites: overwrites.map(o => ({ path: o.path, category: o.category })),
+      },
+      remaining: { packageManager: pm },
+    });
+  }
   } finally {
     progress.stop();
   }
