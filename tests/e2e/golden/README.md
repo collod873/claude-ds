@@ -26,6 +26,19 @@ the bytes a TTY-blind agent reads back from stdout/stderr — the headless
 contract is intact; the capture comes from the **same built CLI a user runs**,
 with no test-only rendering path.
 
+## The interactive golden (`04-front-door-interactive.txt`)
+
+One step is the exception to "what a blind agent reads": the bare front door
+captured through a **pseudo-terminal** so the CLI takes its `isTTY()` path
+(`captureInteractive` in `harness.ts`). It holds the dashboard + commitment gate
++ cancel lines a **human** sees, which never render through a pipe — a surface a
+TTY-blind agent cannot read, goldened precisely *because* a human reads it
+([ADR-0021](../../../docs/adr/0021-interactive-output-is-a-gated-artifact.md)).
+Its bytes are normalized for stability (PTY `\r\n`→`\n`, EOF echo stripped, the
+scratch cwd rewritten to `<project>`); the readline prompt's ANSI cursor codes
+are left verbatim. The step skips gracefully when `script(1)` is unavailable, so
+this golden may be absent on a PTY-less machine.
+
 ## Determinism
 
 The harness forces `FORCE_COLOR=0 NO_COLOR=1 CI=1` for every step, so colorized

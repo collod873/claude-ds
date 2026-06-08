@@ -1,0 +1,16 @@
+# command: cli.js (interactive/pty)
+# exit: 0
+# --- stdout/stderr below; bytes are verbatim from the built CLI ---
+Where you are: adopted (<project>)
+Scaffold: 84/84 ✓
+What's wrong: 16 findings
+
+I'll bring this tree to clean — 1 step:
+  audit --fix
+  Converging until no drift — up to 3 passes.
+
+audit --fix — auto-repair 16 findings
+
+  (re-run with --verbose for the full per-file change list)
+[1G[0J[Enter] to run all, anything else to cancel: [46G
+Cancelled — nothing changed.

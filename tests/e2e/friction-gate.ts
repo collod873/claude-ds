@@ -29,7 +29,7 @@
  * lives in the detector, the ratchet policy lives here.
  */
 import { spawn } from "node:child_process";
-import { cp, mkdir, mkdtemp, readdir, readFile, stat } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,7 +40,18 @@ import {
   type FrictionFinding,
   type NextStepRunResult,
 } from "../../src/lib/friction-detector.js";
-import { writeGoldenOutput } from "./harness.js";
+import { writeGoldenOutput, captureInteractive } from "./harness.js";
+
+/**
+ * How many kind-less atoms the gate injects into the scratch copy to manufacture
+ * the brownfield "wall of repetition" a real adopter with many unclassified
+ * components hits. Above {@link REPETITION_THRESHOLD} (12) so heal's per-file
+ * `fixed [DRIFT-META-KIND-MISSING]` lines trip the `repetition` rule. Injected
+ * at runtime — NOT committed as stub files — so the shared `crewops-snapshot`
+ * fixture stays pristine for the #416 tripwire and `crewops-snapshot.test.ts`
+ * (PRD #443).
+ */
+const BROWNFIELD_ATOM_COUNT = 15;
 
 /** The committed baseline file shape — a flat list of accepted friction keys. */
 export interface FrictionBaseline {
@@ -119,9 +130,26 @@ export async function captureFrictionRun(
 
   const work = await mkdtemp(join(tmpdir(), "e2e-friction-"));
   await cp(opts.fixtureDir, work, { recursive: true });
+  // Manufacture the brownfield repetition surface in the scratch copy only.
+  await injectBrownfieldSurface(work);
 
   const steps: CapturedStep[] = [];
   steps.push(await runStep("adopt", [opts.cliPath, "adopt", "--pack", pack, "--yes"], work, timeoutMs));
+
+  // Interactive (TTY) capture of the bare front door, on the POST-ADOPT tree —
+  // the dashboard + commitment gate a human sees, which the piped steps below
+  // never render (#443). stdin is /dev/null, so the gate cancels and the tree is
+  // untouched, leaving the headless sequence unaffected. It runs here (before
+  // heal mutates the tree) but is appended to `steps` LAST so it goldens as
+  // `04-front-door-interactive.txt` without renumbering the existing goldens.
+  const interactive = await captureInteractive({
+    name: "front-door-interactive",
+    cliPath: opts.cliPath,
+    args: [],
+    cwd: work,
+    timeoutMs,
+  });
+
   steps.push(await runStep("heal", [opts.cliPath, "heal"], work, timeoutMs));
   // `audit --fix` gates on a clean tree; heal leaves managed writes behind, so
   // pass `--allow-dirty` for the same reason heal runs it inline. This is the
@@ -129,6 +157,19 @@ export async function captureFrictionRun(
   steps.push(await runStep("audit-fix", [opts.cliPath, "audit", "--fix", "--allow-dirty"], work, timeoutMs));
   // Front door: the bare no-arg invocation — what a user types to "check in".
   steps.push(await runStep("front-door", [opts.cliPath], work, timeoutMs));
+
+  // Append the interactive capture last (goldens as 04). Null ⇒ `script(1)` is
+  // unavailable; skip rather than block the gate — the interactive findings then
+  // read as `stale` (gone), which the ratchet reports without failing.
+  if (interactive) {
+    steps.push(interactive);
+  } else {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[friction-gate] interactive PTY capture skipped (script(1) unavailable) — " +
+        "interactive-only findings will read as stale this run",
+    );
+  }
 
   if (opts.goldenDir) {
     await mkdir(opts.goldenDir, { recursive: true });
@@ -215,6 +256,48 @@ export async function runFrictionGate(
 
 interface RawStep extends CapturedStep {
   durationMs: number;
+}
+
+/**
+ * Write {@link BROWNFIELD_ATOM_COUNT} atoms whose `meta` declares no `kind` into
+ * the scratch copy's `design-system/atoms/`. heal's `audit --fix` injects
+ * `meta.kind` into each, emitting one near-identical
+ * `fixed [DRIFT-META-KIND-MISSING]: …` line per file — the wall of repetition a
+ * real brownfield adopter hits (PRD #439). The count is above the detector's
+ * threshold so the `repetition` rule fires.
+ *
+ * Names are zero-padded so the fixer's alphabetical ordering is stable across
+ * runs (the golden's line order is deterministic). The shape mirrors the
+ * fixture's own kind-less `IconLabel.tsx`: a valid component plus an `as const`
+ * meta with `kind` absent and no `: Meta` annotation (which would refuse to
+ * compile without `kind`).
+ */
+async function injectBrownfieldSurface(work: string): Promise<void> {
+  const atomsDir = join(work, "design-system", "atoms");
+  await mkdir(atomsDir, { recursive: true });
+  for (let i = 1; i <= BROWNFIELD_ATOM_COUNT; i++) {
+    const name = `Unclassified${String(i).padStart(2, "0")}`;
+    await writeFile(join(atomsDir, `${name}.tsx`), kindlessAtomSource(name), "utf8");
+  }
+}
+
+/** Source for one injected kind-less atom (see {@link injectBrownfieldSurface}). */
+function kindlessAtomSource(name: string): string {
+  return (
+    [
+      `// Injected at runtime by the friction gate (PRD #443): an atom whose meta`,
+      `// has NO \`kind\`. heal's fixer adds it, producing one line in the wall of`,
+      `// near-identical "fixed [DRIFT-META-KIND-MISSING]" output the repetition`,
+      `// rule grades. NOT committed — kept out of the shared snapshot fixture.`,
+      `export function ${name}(props: { text?: string }) {`,
+      `  return <span>{props.text ?? ""}</span>;`,
+      `}`,
+      ``,
+      `export const meta = {`,
+      `  examples: [{ name: "default", props: { text: "" } }],`,
+      `} as const;`,
+    ].join("\n") + "\n"
+  );
 }
 
 /**

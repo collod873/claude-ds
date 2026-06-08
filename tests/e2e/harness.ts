@@ -31,7 +31,7 @@
  */
 import { spawn } from "node:child_process";
 import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 /** One CLI / tsc subprocess invocation the harness recorded. */
@@ -592,4 +592,165 @@ export function normalizeCommand(command: string): string {
     /(^|\s)\/.*?\/((?:dist|node_modules)\/\S+)/g,
     "$1$2",
   );
+}
+
+// ----------------------------------------------------------------------------
+// Interactive (TTY) capture — PRD #439 / #443
+// ----------------------------------------------------------------------------
+
+/**
+ * Capture the INTERACTIVE (TTY) rendering of a CLI invocation via `script(1)`.
+ *
+ * Every other gate step forces NON-TTY (piped stdio) — the byte stream a
+ * TTY-blind agent reads. But a real human runs the CLI in a terminal, and a
+ * whole surface lives ONLY on the `isTTY()` path: the health dashboard, the
+ * commitment gate, the cancel / convergence lines. None of it is reachable
+ * through a pipe, so the headless gate was structurally blind to friction a
+ * human actually hits (#443 decision 1). This helper gives the gate eyes on it.
+ *
+ * `script(1)` hands the child a pseudo-terminal, so `process.stdout.isTTY` is
+ * true and the CLI takes its interactive path, while we still capture the bytes
+ * from `script`'s own stdout. stdin is `/dev/null`: the immediate EOF makes the
+ * commitment gate cancel cleanly and deterministically ("Cancelled — nothing
+ * changed.", exit 0), so the capture never blocks on input and never mutates the
+ * tree it ran against.
+ *
+ * GRACEFUL SKIP — this must NEVER falsely block CI. Returns `null` (and the
+ * caller logs) when `script` is unavailable, the platform is unknown, or the
+ * capture errors. A missing interactive step surfaces only as `stale` baseline
+ * keys (findings that no longer reproduce), which the ratchet reports without
+ * failing — so a `script`-less environment still runs the gate green.
+ *
+ * The captured bytes are NORMALIZED for golden stability via
+ * {@link normalizePtyCapture}: PTY CRLF→LF, the terminal's EOF echo stripped,
+ * and the scratch cwd (which the dashboard echoes as an absolute path) rewritten
+ * to `<project>`. The readline prompt's ANSI cursor sequences are deterministic
+ * and left intact — they are what scrolled past.
+ */
+export async function captureInteractive(opts: {
+  /** Logical step name — also the golden file stem (e.g. `front-door-interactive`). */
+  name: string;
+  /** Absolute path to the built CLI entry. */
+  cliPath: string;
+  /** CLI args (empty for the bare front door). */
+  args: string[];
+  /** Working directory the CLI runs in (the scratch fixture copy). */
+  cwd: string;
+  /** Subprocess timeout in ms. */
+  timeoutMs: number;
+}): Promise<CapturedStep | null> {
+  const invocation = scriptInvocation([process.execPath, opts.cliPath, ...opts.args]);
+  if (!invocation) return null; // unknown platform — skip rather than guess
+
+  const command = [basename(opts.cliPath), ...opts.args, "(interactive/pty)"].join(" ");
+
+  return new Promise((resolvePromise) => {
+    let child;
+    try {
+      child = spawn(invocation.cmd, invocation.args, {
+        cwd: opts.cwd,
+        // stdin = /dev/null ('ignore') → immediate EOF → the commitment gate
+        // cancels cleanly. `script` provides the child its own pty for stdout
+        // (so the CLI sees a TTY); we capture `script`'s stdout via a pipe.
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", CI: "1" },
+      });
+    } catch {
+      resolvePromise(null); // `script` not on PATH — graceful skip
+      return;
+    }
+
+    let out = "";
+    let settled = false;
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (c) => (out += c));
+    // `script` merges the child's stderr into the pty stream; its own stderr is
+    // only used for `script`'s diagnostics. Fold it in so nothing is lost.
+    child.stderr?.on("data", (c) => (out += c));
+
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      out += `\n[friction-gate] interactive step '${opts.name}' timed out after ${opts.timeoutMs}ms`;
+    }, opts.timeoutMs);
+
+    const settle = (exitCode: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const normalized = normalizePtyCapture(out, opts.cwd);
+      resolvePromise({
+        name: opts.name,
+        command,
+        exitCode,
+        stdout: normalized,
+        stderr: "",
+        combined: normalized,
+      });
+    };
+
+    child.on("error", () => {
+      // Spawn failed (e.g. `script` missing) — skip, never block the gate.
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise(null);
+    });
+    child.on("close", (code, signal) => settle(code ?? (signal ? 124 : 1)));
+  });
+}
+
+/**
+ * Platform-branched `script(1)` argv that runs `argv` quietly with no saved
+ * typescript. BSD `script` (darwin) and util-linux `script` take incompatible
+ * flags:
+ *   darwin:  script -q /dev/null <cmd> <args...>
+ *   linux:   script -qec "<cmd string>" /dev/null
+ * Returns `null` on any other platform so the caller skips the interactive step
+ * rather than guessing a flag set.
+ */
+function scriptInvocation(argv: string[]): { cmd: string; args: string[] } | null {
+  if (process.platform === "darwin") {
+    return { cmd: "script", args: ["-q", "/dev/null", ...argv] };
+  }
+  if (process.platform === "linux") {
+    // util-linux runs a single shell command string under -c; quote every token
+    // so a path with spaces (e.g. "Claude Projects") survives the shell.
+    return { cmd: "script", args: ["-qec", argv.map(shellQuote).join(" "), "/dev/null"] };
+  }
+  return null;
+}
+
+/** Single-quote a token for a POSIX shell (`-c` string), escaping inner quotes. */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Make a PTY capture byte-stable across machines so the committed golden only
+ * diffs on a real output change:
+ *  - PTY CRLF / CR → LF (raw terminal mode emits `\r\n`).
+ *  - Strip the terminal's EOF echo (`^D` then erasing backspaces) that appears
+ *    when stdin is `/dev/null`.
+ *  - Rewrite the scratch cwd — which the dashboard echoes verbatim as an
+ *    absolute path (`Where you are: adopted (<abs>)`) — to `<project>`. Both the
+ *    raw path and its realpath are scrubbed because macOS resolves `/tmp` and
+ *    `/var/folders/…` through `/private`, so the child's `process.cwd()` differs
+ *    from the `mkdtemp` path we hold.
+ */
+export function normalizePtyCapture(raw: string, cwd: string): string {
+  let real = cwd;
+  try {
+    real = realpathSync(cwd);
+  } catch {
+    /* tree already gone — fall back to the literal path */
+  }
+  let s = raw
+    .replace(/\r\n?/g, "\n") // PTY CRLF / lone CR → LF
+    .replace(/\^D\x08*/g, "") // terminal EOF echo: ^D then erasing backspaces
+    .replace(/\x04/g, ""); // raw EOT byte (other PTY flavours)
+  for (const p of new Set([real, cwd])) {
+    if (p) s = s.split(p).join("<project>");
+  }
+  return s;
 }

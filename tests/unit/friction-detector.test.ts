@@ -196,27 +196,62 @@ describe("clean run", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Regression: VERBATIM real-Crewops-style output.
+// Regression: VERBATIM real-captured output.
 //
-// This payload mirrors the wall of friction graded in a real Crewops session:
-// a self-contradicting audit, a ~90-line repetition wall, a dishonest
-// convergence message, jargon with no gloss, a dead-end / self-blocking
-// next-step. The assertions pin the EXTERNAL finding set, not internals.
+// The repetition wall below is the EXACT heal output the friction gate captures
+// when a brownfield tree carries many unclassified atoms — copied verbatim from
+// tests/e2e/golden/01-heal.txt (the gate's injectBrownfieldSurface plants 15
+// kind-less atoms; heal's fixer adds meta.kind to each, one line per file). This
+// is the one rule that genuinely reproduces against the real CLI, so its fixture
+// is real bytes, not a synthetic reconstruction (PRD #443). Tracked in
+// friction-baseline.json; removal trigger is the collapse-to-count fix (#448).
+//
+// The surrounding self-contradiction / convergence / jargon / next-step shapes
+// stay crafted — those rules are regression guards (self-contradiction is fixed,
+// convergence-dishonest is a near-dead defensive branch), so the unit test pins
+// the rule behavior while the gate owns the real-output coverage.
 // ---------------------------------------------------------------------------
-describe("regression: real-Crewops-style wall of friction", () => {
-  // Reconstructed near-verbatim from the grading session: the repetition wall.
-  const wall = Array.from(
-    { length: 90 },
-    (_, i) => `  ⚠ meta.kind missing — needs scaffold in src/components/Component${i}.tsx`,
-  ).join("\n");
+describe("regression: real-captured wall of friction", () => {
+  // Verbatim from tests/e2e/golden/01-heal.txt — the per-file fixer lines that
+  // trip the repetition rule (16 lines > REPETITION_THRESHOLD of 12).
+  const realHealWall = [
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/IconLabel.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified01.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified02.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified03.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified04.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified05.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified06.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified07.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified08.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified09.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified10.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified11.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified12.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified13.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified14.tsx`,
+    `fixed [DRIFT-META-KIND-MISSING]: added meta.kind = "atom" to design-system/atoms/Unclassified15.tsx`,
+  ].join("\n");
 
+  // The real captured wall, in a heal step — this is the rule that reproduces.
+  const healStep = step({
+    name: "heal",
+    stdout: [
+      "heal: pass 1/3 — audit --fix",
+      realHealWall,
+      "fix summary: 16 fixed, 0 deferred",
+    ].join("\n"),
+  });
+
+  // Crafted shapes for the guard rules: self-contradiction (a path with both
+  // verdicts — also a bare, unglossed `meta.kind` ⇒ jargon), dishonest
+  // convergence, and a dead-end / self-blocking next-step.
   const auditStep = step({
     name: "audit",
     stdout: [
       "Auditing design-system…",
       "src/components/Button.tsx is missing meta.kind",
       "src/components/Button.tsx already has meta.kind",
-      wall,
       "Some findings still need attention.",
       "→ Next: run npx claude-ds heal",
     ].join("\n"),
@@ -227,8 +262,8 @@ describe("regression: real-Crewops-style wall of friction", () => {
     stdout: ["Updated 12 files in design-system/.", "→ Next: run npx claude-ds heal"].join("\n"),
   });
 
-  it("surfaces every graded friction kind from the real output", () => {
-    const found = new Set(scanFriction([syncStep, auditStep]).map(f => f.kind));
+  it("surfaces every graded friction kind from the captured + crafted output", () => {
+    const found = new Set(scanFriction([syncStep, auditStep, healStep]).map(f => f.kind));
     expect(found).toContain("self-contradiction");
     expect(found).toContain("repetition");
     expect(found).toContain("convergence-dishonest");
@@ -236,9 +271,18 @@ describe("regression: real-Crewops-style wall of friction", () => {
     expect(found).toContain("self-block");
   });
 
+  it("the repetition finding is the real captured heal wall", () => {
+    const rep = scanFriction([healStep]).filter(f => f.kind === "repetition");
+    expect(rep).toHaveLength(1);
+    // The normalized key strips the per-file token, matching the gate's key.
+    expect(rep[0].key).toBe(
+      `repetition:heal:fixed [DRIFT-META-KIND-MISSING]: added <file> = "atom" to <path>`,
+    );
+  });
+
   it("produces stable keys so the baseline ratchet can match findings across runs", () => {
-    const keysA = scanFriction([syncStep, auditStep]).map(f => f.key).sort();
-    const keysB = scanFriction([syncStep, auditStep]).map(f => f.key).sort();
+    const keysA = scanFriction([syncStep, auditStep, healStep]).map(f => f.key).sort();
+    const keysB = scanFriction([syncStep, auditStep, healStep]).map(f => f.key).sort();
     expect(keysA).toEqual(keysB);
     // The self-contradiction key carries the offending path so it is
     // human-traceable and unique per file.
