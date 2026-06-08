@@ -6,6 +6,36 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [1.5.0] — 2026-06-08
+
+The complete delivery of PRD #407: make claude-ds **verification-first** so nothing — no command verdict, no release tag — claims success unless a real consumer tree actually verifies green. The whole A1–C4 defect cluster that was *claimed fixed across v1.0.0→v1.4.0 yet still live in source* is now closed and **proven against a real consumer**, not asserted against unit tests.
+
+The spine is a committed Crewops-shaped fixture plus a headless smoke harness that drives the **real built CLI** (`node dist/cli.js`) through `adopt → heal` and asserts the resulting tree compiles under the consumer's own plain `tsc` — now wired as a **blocking** pre-merge gate. On top of it: an in-tool verify contract so no command may print "clean/converged/no action required" on a tree it mutated without running the consumer's verify gate and gating its verdict on the result; the two most damaging fixers (`meta.kind` merge, scaffold typecheck) corrected and exercised by the harness; honest preview/plan/version vocabulary; a unified output grammar; and a self-correcting loop that strings breakage back into GH automatically instead of dead-ending on Collin. No migration set — a consumer pinned at v1.4.0 runs zero migrations on upgrade.
+
+### Added
+- **Crewops-shaped consumer fixture + headless smoke e2e harness** (#418, closing #417). A committed `next-react` fixture mirroring Crewops's real shape — typed/`as const`/multiline metas, some missing `kind`, a role-bearing component, mixed `@ds/*` and `@/design-system/*` import spellings, plain-`tsc` verify — driven by a harness that runs the built CLI as a subprocess and observes only headlessly (exit codes, parsed `--json`, filesystem, the consumer's `tsc`). The discovery engine and the release gate.
+- **Headless contracts on every loop-critical command** (#419, closing #408). `adopt`, `heal`, `audit` (incl. `--fix`), `upgrade`, `sync`, `classify`, and `doctor` expose `--json` and meaningful exit codes, so a TTY-blind caller can determine the outcome without reading rendered output.
+- **In-tool verify-gate contract** (#432, closing #410, the A2). `runConsumerVerify(cwd)` detects and runs the consumer's verify gate; any command that mutated the tree must pass it before emitting a clean/converged verdict. A red gate surfaces the failure instead of certifying success, and the "→ Next: run <build>" homework is gone — the tool runs it.
+- **Self-correcting loop + Crewops tripwire** (#435, closing #416). Red gates auto-file follow-up work into the agent queue with a bounded ceiling (converge-or-escalate, no runaway fan-out); a headless real-Crewops self-check (`doctor --json` / `heal --dry-run --json`) is the divergence tripwire that catches the fixture drifting from reality. Collin is pulled in only for genuine Pending/Ambiguity decisions, never for "it broke."
+
+### Changed
+- **Announced plan equals executed plan + blast-radius disclosure** (#424, the B1/B2). The commitment gate enumerates every step that will run (incl. `audit --fix` and convergence passes) and discloses downstream blast radius for config-flag flips ("flipping this flag rewrites ~N files") before you consent.
+- **Honest version vocabulary** (#430, closing #412, the C1). A single source of truth distinguishes the **CLI binary version** (`pkg.version`) from the **pack pin** (`cfg.packVersion`); a pin-only no-op is never framed as a `vX → vY` migration and headline can't contradict body.
+- **Unified output grammar** (#433, closing #414, the C2/C3/C4). One coherent state → verdict → next-step block per command, a one-line convergence explainer, and per-file change dumps collapsed to a tier summary with the full list behind `--verbose`.
+
+### Fixed
+- **`meta.kind` is merged, not duplicated** (#420, closing #409, the A1 P0). The fixer injects `kind` into the existing `export const meta` declaration across typed (`: Meta`), `as const`, single- and multi-line shapes, only emitting a fresh declaration when the file genuinely has none. A consumer with typed metas no longer gets a second `export const meta` and ~182 TS errors.
+- **Scaffold typechecks under plain `tsc`** (#421, closing #411, the A3). The pack ships a self-contained ambient `ImportMeta.glob` declaration so the scaffolded `role-contracts.test.tsx` typechecks with zero consumer dependencies — the scaffold no longer fails the gate it itself imposes.
+
+### CI / tooling
+- **Tiered CI — blocking smoke gate + nightly/release matrix** (#434, closing #415). The `adopt → heal → tsc` smoke e2e is now a blocking pre-merge gate (single-digit minutes); the heavy per-command / multi-fixture matrix moves to the nightly/release tier so simple PRs stop running long tests constantly.
+- **Self-healing promotion cascade** (#436, closing #422). A cancelled auto-merge run no longer strands `agent:queued` dependents permanently — the cascade re-promotes ready work as its blockers close, fixing the class that orphaned #416 mid-PRD.
+
+### Removed
+- **`/go` skill** — wrong tool, never used.
+
+---
+
 ## [1.4.0] — 2026-06-07
 
 The five previously-unexercised commands (`version`, `migrate`, `migrate-layout`, `reconform`, `enforce`) now feel like the same product as the front door instead of a different one. Probing them under PRD #340 surfaced a cluster of friction — no next-step breadcrumb, monochrome output, silent no-ops, inconsistent exit codes and verbs — all now closed. Alongside that, the AFK agent pipeline and release tooling got more robust: an implement run can no longer silently lose work to the harness idle-timeout, and a forgotten version bump now fails loud instead of quietly stranding `main` unreleased. No migration set — a consumer pinned at v1.3.1 runs zero migrations on upgrade.
