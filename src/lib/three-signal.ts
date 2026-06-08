@@ -1,5 +1,6 @@
 import { classifySource, type Tier, type TierVerdict } from "./classifier.js";
 import { evaluateDrift, type DriftFinding } from "./drift/index.js";
+import { findMetaBody, topLevelStringValue } from "./meta-source.js";
 import type { ProjectContext } from "./project.js";
 
 export interface ThreeSignals {
@@ -22,8 +23,6 @@ const TIER_FOLDERS: Record<string, Tier> = {
   patterns: "pattern",
 };
 
-const META_KIND_RE = /\bmeta\s*=\s*\{[^}]*\bkind\s*:\s*["'](\w+)["']/s;
-const META_ROLE_RE = /\bmeta\s*=\s*\{[^}]*\brole\s*:\s*["']([\w-]+)["']/s;
 const VALID_TIERS = new Set<string>(["atom", "composite", "pattern", "feature"]);
 
 /**
@@ -60,11 +59,18 @@ export function locationTierFromPath(filePath: string): Tier | null {
   return TIER_FOLDERS[tierFolder] ?? null;
 }
 
-/** Extract meta.kind from source text, null if absent or unrecognized. */
+/**
+ * Extract meta.kind from source text, null if absent or unrecognized.
+ *
+ * Reads through the shared brace-aware `meta-source` parser (not a regex) so
+ * this checker and the `mergeMetaKind` fixer can never disagree about whether
+ * a `kind` is present — even when it sits after a nested brace.
+ */
 export function metaKindFromSource(source: string): Tier | null {
-  const m = META_KIND_RE.exec(source);
-  if (!m) return null;
-  const kind = m[1];
+  const meta = findMetaBody(source);
+  if (!meta) return null;
+  const kind = topLevelStringValue(meta.body, "kind");
+  if (kind === null) return null;
   return VALID_TIERS.has(kind) ? (kind as Tier) : null;
 }
 
@@ -79,8 +85,9 @@ export function metaKindFromSource(source: string): Tier | null {
  * surfaces that — not a parse error here.
  */
 export function metaRoleFromSource(source: string): string | null {
-  const m = META_ROLE_RE.exec(source);
-  return m ? m[1] : null;
+  const meta = findMetaBody(source);
+  if (!meta) return null;
+  return topLevelStringValue(meta.body, "role");
 }
 
 /**
