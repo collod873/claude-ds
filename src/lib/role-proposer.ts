@@ -25,6 +25,17 @@ function importsFromDomainRoot(source: string, domainRoots: string[]): boolean {
  * regex matches both single- and double-quoted attribute values — JSX accepts
  * either, and the proposer must not miss a combobox just because the consumer
  * prefers single quotes.
+ *
+ * Detection is **deliberately narrow** — literal `role="combobox"` in the
+ * source only. Do NOT broaden it to catch library-applied roles (cmdk /
+ * base-ui / radix apply `role="combobox"` at runtime, so it never appears as
+ * source text). That is a known, intentional gap, not an oversight: the
+ * single-component contract runner cannot drive a multi-part headless combobox
+ * (root provider + Trigger/Input/Content/Item composed in consumer usage), so
+ * stamping the role from an import/render heuristic would turn a green
+ * soft-skip into a RED failure on real consumers — strictly worse (north
+ * star: never break a consumer). Detection broadens ONLY in lock-step with a
+ * multi-part runner model. See ADR-0022 and issue #455 before changing this.
  */
 const ROLE_PATTERNS: { role: string; anchor: RegExp }[] = [
   // `role="combobox"` is the WAI-APG anchor the shipped combobox contract

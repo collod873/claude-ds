@@ -57,10 +57,25 @@ afterEach(() => cleanup());
 
 describe("role contracts", () => {
   if (roleBearing.length === 0) {
-    // Fresh project / mid-rollout — no role declarations yet. The runner's
-    // job is silent until `classify` proposes roles. Soft-skip keeps the
-    // vitest run green.
-    test.skip("no role-bearing components declared", () => {});
+    // No role-bearing components found. Two cases land here, both green:
+    //
+    //   - Fresh project / mid-rollout — no role declarations yet; the runner
+    //     is silent until `classify` proposes roles.
+    //   - Known limitation (ADR-0022) — a multi-part headless-lib combobox
+    //     (cmdk / base-ui / radix) applies `role="combobox"` at runtime, so
+    //     detection never stamps a role, AND the single-component runner
+    //     can't drive a widget that's only assembled in consumer usage.
+    //     Detection stays narrow on purpose: broadening it without a
+    //     multi-part runner would turn this green skip RED on real consumers
+    //     (strictly worse — see ADR-0022 / issue #455).
+    //
+    // The skip stays green either way (never a red failure dropped into a
+    // consumer). The label names the limitation so "1 skipped" reads as the
+    // tracked gap it is, not as benign mid-rollout state.
+    test.skip(
+      "no single-component role-bearing parts (fresh project, or multi-part headless widget — ADR-0022)",
+      () => {},
+    );
     return;
   }
 
