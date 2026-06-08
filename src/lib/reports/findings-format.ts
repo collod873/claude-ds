@@ -52,7 +52,7 @@ export function formatScorecard(opts: {
 }): string {
   const { scaffoldPresent, scaffoldTotal, reconciledCount, fixedCount, warningCount, errorCount } = opts;
   const parts: string[] = [];
-  let scaffold = `Scaffold: ${scaffoldPresent}/${scaffoldTotal}`;
+  let scaffold = `Managed files: ${scaffoldPresent}/${scaffoldTotal}`;
   if (scaffoldPresent === scaffoldTotal) scaffold += " ✓";
   parts.push(scaffold);
   if (reconciledCount > 0) parts.push(`Reconciled: ${reconciledCount}`);

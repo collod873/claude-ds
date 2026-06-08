@@ -2,6 +2,6 @@
 # exit: 0
 # --- stdout/stderr below; bytes are verbatim from the built CLI ---
 evaluated 21 file(s) across 3 tier directories (21 clean, 0 with findings)
-Scaffold: 84/84 ✓
+Managed files: 84/84 ✓
 No action required.
 → Verify: run your build (e.g. npm run build) to verify everything compiles

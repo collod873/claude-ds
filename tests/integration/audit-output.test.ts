@@ -72,7 +72,7 @@ describe("audit output redesign (#170)", () => {
   describe("scorecard", () => {
     it("prints scaffold count in scorecard on clean run", async () => {
       const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
-      expect(r.stdout).toMatch(/Scaffold:.*\d+\/\d+/);
+      expect(r.stdout).toMatch(/Managed files:.*\d+\/\d+/);
     });
 
     it("prints 'No action required' when no errors exist", async () => {
@@ -97,7 +97,7 @@ describe("audit output redesign (#170)", () => {
       await writeFile(join(dir, "design-system/drift-audit.md"), "# Drift Audit");
       const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
       expect(r.stdout).toMatch(/Warning/i);
-      expect(r.stdout).toMatch(/Scaffold:/);
+      expect(r.stdout).toMatch(/Managed files:/);
     });
 
     it("includes fixed count in scorecard after --fix", async () => {

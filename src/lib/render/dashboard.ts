@@ -42,7 +42,7 @@ export function renderDashboard(state: DashboardState): string[] {
   if (state.scaffold) {
     const { present, total } = state.scaffold;
     const tick = present === total ? " ✓" : "";
-    lines.push(`Scaffold: ${present}/${total}${tick}`);
+    lines.push(`Managed files: ${present}/${total}${tick}`);
   }
 
   const scaffoldIncomplete =

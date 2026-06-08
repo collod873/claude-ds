@@ -394,7 +394,7 @@ function reportRedGate(verify: VerifyResult): void {
   if (verify.consumerErrors.length > 0) {
     err(`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`);
   }
-  err("Address the listed scaffold errors and re-run `claude-ds heal`.");
+  err("Address the listed errors in the managed files and re-run `claude-ds heal`.");
 }
 
 /** Compact JSON envelope for the verify result on the headless surface. */

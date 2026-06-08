@@ -84,7 +84,7 @@ describe("renderDashboard (pure)", () => {
     expect(renderDashboard(CLEAN)).toMatchInlineSnapshot(`
       [
         "Where you are: adopted (/repo/example-app)",
-        "Scaffold: 12/12 ✓",
+        "Managed files: 12/12 ✓",
         "What's wrong: nothing — tree is clean",
       ]
     `);
@@ -94,7 +94,7 @@ describe("renderDashboard (pure)", () => {
     expect(renderDashboard(WITH_FINDINGS)).toMatchInlineSnapshot(`
       [
         "Where you are: adopted (/repo/example-app)",
-        "Scaffold: 12/12 ✓",
+        "Managed files: 12/12 ✓",
         "What's wrong: 3 findings",
       ]
     `);
@@ -106,7 +106,7 @@ describe("renderDashboard (pure)", () => {
     expect(renderDashboard(INCOMPLETE_SCAFFOLD)).toMatchInlineSnapshot(`
       [
         "Where you are: adopted (/repo/example-app)",
-        "Scaffold: 9/12",
+        "Managed files: 9/12",
         "What's wrong: scaffold incomplete",
       ]
     `);
@@ -116,7 +116,7 @@ describe("renderDashboard (pure)", () => {
     expect(renderDashboard(INCOMPLETE_SCAFFOLD_WITH_FINDINGS)).toMatchInlineSnapshot(`
       [
         "Where you are: adopted (/repo/example-app)",
-        "Scaffold: 9/12",
+        "Managed files: 9/12",
         "What's wrong: scaffold incomplete + 1 finding",
       ]
     `);
@@ -126,7 +126,7 @@ describe("renderDashboard (pure)", () => {
     expect(renderDashboard(UPGRADE_AVAILABLE)).toMatchInlineSnapshot(`
       [
         "Where you are: adopted (/repo/example-app)",
-        "Scaffold: 12/12 ✓",
+        "Managed files: 12/12 ✓",
         "What's wrong: upgrade available",
       ]
     `);

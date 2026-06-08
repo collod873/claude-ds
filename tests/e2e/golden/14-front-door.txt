@@ -3,7 +3,8 @@
 # --- stdout/stderr below; bytes are verbatim from the built CLI ---
 Usage: claude-ds [options] [command]
 
-Design-system governance & scaffold CLI.
+Design-system governance CLI — installs and syncs the scaffold (the managed
+design-system files this tool owns).
 Run `claude-ds` with no command to start: first run greets and routes you to
 init/adopt;
 an adopted project shows a health dashboard. The commands below are the
@@ -24,8 +25,9 @@ Commands:
   audit [options]           read-only conformance report (--fix auto-remediates
                             deterministic issues)
   adopt [options]           brownfield install — scaffold + hooks in WARN mode
-  migrate [options] <path>  move one component into the scaffold (registers an
-                            exception only when --tier forces a misplacement)
+  migrate [options] <path>  move one component into the managed layout
+                            (registers an exception only when --tier forces a
+                            misplacement)
   enforce [options]         flip hooks WARN → BLOCK (gated on exception-count
                             threshold)
   sync [options]            update managed files to the pinned release (diff +

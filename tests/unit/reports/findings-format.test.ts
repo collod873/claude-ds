@@ -63,7 +63,7 @@ describe("formatScorecard", () => {
       warningCount: 0,
       errorCount: 0,
     });
-    expect(line).toMatch(/Scaffold: 5\/5 ✓/);
+    expect(line).toMatch(/Managed files: 5\/5 ✓/);
   });
 
   it("omits the ✓ when scaffold is not fully present", () => {
@@ -75,7 +75,7 @@ describe("formatScorecard", () => {
       warningCount: 0,
       errorCount: 0,
     });
-    expect(line).toContain("Scaffold: 3/5");
+    expect(line).toContain("Managed files: 3/5");
     expect(line).not.toContain("✓");
   });
 
@@ -118,6 +118,6 @@ describe("formatScorecard", () => {
       warningCount: 0,
       errorCount: 0,
     });
-    expect(line).toBe("Scaffold: 5/5 ✓ | Reconciled: 1");
+    expect(line).toBe("Managed files: 5/5 ✓ | Reconciled: 1");
   });
 });

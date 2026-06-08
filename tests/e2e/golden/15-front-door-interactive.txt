@@ -2,7 +2,7 @@
 # exit: 0
 # --- stdout/stderr below; bytes are verbatim from the built CLI ---
 Where you are: adopted (<project>)
-Scaffold: 84/84 ✓
+Managed files: 84/84 ✓
 What's wrong: 16 findings
 
 I'll bring this tree to clean — 1 step:

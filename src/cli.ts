@@ -36,7 +36,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
   program
     .name("claude-ds")
     .description(
-      "Design-system governance & scaffold CLI.\n" +
+      "Design-system governance CLI — installs and syncs the scaffold (the managed design-system files this tool owns).\n" +
         "Run `claude-ds` with no command to start: first run greets and routes you to init/adopt;\n" +
         "an adopted project shows a health dashboard. The commands below are the explicit onramps.",
     )
@@ -131,7 +131,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 
   program
     .command("migrate")
-    .description("move one component into the scaffold (registers an exception only when --tier forces a misplacement)")
+    .description("move one component into the managed layout (registers an exception only when --tier forces a misplacement)")
     .argument("<path>", "source component path")
     .option("--reason <text>", "reason for exception (required only when --tier creates a misplacement)")
     .option("--issue <ref>", "issue link (URL or #N) recorded on the exception (required only when --tier creates a misplacement)")

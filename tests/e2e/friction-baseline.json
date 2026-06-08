@@ -1,9 +1,5 @@
 {
   "_comment": "PRD #439 friction baseline — the ledger of CURRENTLY-ACCEPTED friction findings measured against tests/e2e/fixtures/crewops-snapshot via the real CLI sequence. Post-adopt journey on a shared tree: adopt -> heal -> audit --fix -> doctor -> classify --dry-run -> sync --dry-run -> reconcile --dry-run -> upgrade --dry-run -> version --offline -> enforce -> reconform --dry-run -> front door (+ interactive PTY front door); plus alternate-tree captures on their own fresh copies: greet (pre-adopt), init (greenfield), migrate-layout (git-seeded). This is the ratchet: a finding whose key is NOT here is a regression and FAILS the gate. Keys may only be REMOVED across commits, never added — the ONLY sanctioned addition is day-one red recorded when the gate's command surface is first widened, and the #442 monotonic guard enforces that every added key carries a _removal_triggers entry (ADR-0003). Closing a friction-fix issue means deleting its key here AND the gate confirming the finding no longer reproduces (see docs/agents/friction-loop.md).",
-  "_removal_triggers": {
-    "jargon-unglossed:scaffold": "Gloss or reword 'scaffold' on first use in command output per the #442 jargon rule. Backfilled by #456; burns down via #453."
-  },
-  "keys": [
-    "jargon-unglossed:scaffold"
-  ]
+  "_removal_triggers": {},
+  "keys": []
 }
