@@ -21,6 +21,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e:friction": "npm run build && vitest run tests/e2e/friction.test.ts",
+    "baseline:check": "node scripts/check-baseline-monotonic.mjs",
     "sandcastle": "npx tsx .sandcastle/main.mts"
   },
   "engines": {

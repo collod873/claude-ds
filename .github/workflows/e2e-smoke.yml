@@ -39,6 +39,12 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Full history + all branches so the baseline monotonicity guard
+          # (#442) can read `friction-baseline.json` on the base ref via
+          # `git show origin/<base>:...`. Shallow single-branch checkout would
+          # leave that ref unreachable and the guard would (safely) no-op.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -50,6 +56,20 @@ jobs:
 
       - name: Build CLI
         run: npm run build
+
+      - name: Friction baseline monotonicity guard (#442)
+        # Mechanically enforces the ratchet's one-way contract: keys in
+        # `tests/e2e/friction-baseline.json` may only be REMOVED across commits,
+        # never added. Adding a key is how someone would silence a real friction
+        # regression instead of fixing it — so this fails the PR if the baseline
+        # GAINED any key vs the base ref. First-run / base-absent ⇒ no-op pass.
+        # Reproduce locally with `npm run baseline:check`.
+        env:
+          # On PRs, diff against the PR's actual base branch; default to
+          # origin/main for pushes. The checkout above is unshallowed for blob
+          # access via fetch-depth: 0.
+          BASE_REF: origin/${{ github.event_name == 'pull_request' && github.base_ref || 'main' }}
+        run: npm run baseline:check
 
       - name: Run e2e smoke harness + friction gate
         # No `continue-on-error` — a red smoke harness OR a friction regression
