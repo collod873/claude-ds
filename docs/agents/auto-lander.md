@@ -67,7 +67,7 @@ gh workflow run agent-land.yml --repo collod873/claude-ds -f dry_run=false
 ## The end-to-end flow
 
 ```
-/go (or label issues agent:implement)
+label issues agent:implement
   → agent-implement.yml      (parallel, one PR each, off main)
   → agent-review.yml         (votes: approve → ready-to-merge | reject → agent:blocked)
   → agent-auto-merge.yml     (clean → merge; stale → hand to update-branch)
