@@ -28,7 +28,7 @@ export async function migrateLayoutCmd(opts: {
 
   // Refuse if not inside a git repo. migrate-layout relies on `git mv` to
   // preserve history on the renames, and the clean-tree guard upstream gives
-  // the consumer "git is the undo" by default (ADR-0016). A git repo is the
+  // the consumer "git is the undo" by default (ADR-0023). A git repo is the
   // hard precondition — the shared clean-tree guard treats a missing repo as
   // "cannot check" and proceeds, which would silently break that affordance.
   try {

@@ -13,7 +13,7 @@ explicit onramps.
 Options:
   -V                        output the version number
   --answers <file>          JSON bag of pre-supplied Decision answers
-                            (ADR-0016) — used by the first-run greet
+                            (ADR-0023) — used by the first-run greet
   --verbose                 show the full per-file change list in the
                             commitment-gate preview (default: per-tier summary)
   -h, --help                display help for command

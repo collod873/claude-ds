@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
  *     require git (today: `migrate-layout`) keep their own pre-check.
  *   - Clean working tree → ok.
  *   - Dirty working tree → fail with a named, plain-language message that
- *     identifies the command and the `--allow-dirty` escape hatch (ADR-0016
+ *     identifies the command and the `--allow-dirty` escape hatch (ADR-0023
  *     fail-loud: never silently continue past a refusal).
  *   - `allowDirty: true` → ok. The caller's authorized override; the
  *     historical "I know what I'm doing" path the issue preserves.

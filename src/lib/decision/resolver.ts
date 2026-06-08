@@ -39,7 +39,7 @@ export interface ResolveResult {
 }
 
 /**
- * The three-kind matrix (ADR-0016). One pass over the Decision list; for each
+ * The three-kind matrix (ADR-0023). One pass over the Decision list; for each
  * one the lookup order is supplied answer → kind-specific behavior.
  *
  * `commitment-gate`: TTY prompts (one approve per command); non-TTY auto-

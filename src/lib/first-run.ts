@@ -124,7 +124,7 @@ async function hasAnyComponentFile(cwd: string): Promise<boolean> {
  * in a stable order (adopt = 0, init = 1) so the `--answers` key/value
  * contract stays predictable across brownfield/greenfield runs. The Decision
  * is an `ambiguity` so a non-TTY caller with no supplied answer fails loud
- * via the resolver's named throw (ADR-0016).
+ * via the resolver's named throw (ADR-0023).
  */
 export function buildGreetDecision(state: FirstRunState): Decision {
   return {

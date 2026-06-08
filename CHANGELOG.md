@@ -156,11 +156,11 @@ One shared remediation planner now backs every surface that changes files. `heal
 
 ## [1.2.0] — 2026-06-07
 
-Ships the interactive front door the README already advertised. The bare `claude-ds` command is now the entry point: first run greets and routes to `init`/`adopt`, an adopted project renders a state-aware health dashboard, and a Decision spine (ADR-0016) gives every prompt the same TTY / non-TTY (`--answers`) semantics. No breaking changes; no v1.2.0 migration set. Cut to close the gap where v1.1.0 was tagged five-plus commits behind the shipped UX — `npx …#v1.1.0` was installing pre-front-door code.
+Ships the interactive front door the README already advertised. The bare `claude-ds` command is now the entry point: first run greets and routes to `init`/`adopt`, an adopted project renders a state-aware health dashboard, and a Decision spine (ADR-0023) gives every prompt the same TTY / non-TTY (`--answers`) semantics. No breaking changes; no v1.2.0 migration set. Cut to close the gap where v1.1.0 was tagged five-plus commits behind the shipped UX — `npx …#v1.1.0` was installing pre-front-door code.
 
 ### Added
 - **Bare-command front door** (#325/#331/#334). No-subcommand `claude-ds` detects first-run vs. adopted state and dispatches in-process: greet → `init`/`adopt`, or the dashboard with `[Enter]` to run the recommended next command. Non-TTY keeps stable help output.
-- **Upgrade-available surfacing on the dashboard** (#337) and the state-aware front-door overhaul + Decision spine (#335, ADR-0016).
+- **Upgrade-available surfacing on the dashboard** (#337) and the state-aware front-door overhaul + Decision spine (#335, ADR-0023).
 - **Behavior as the fourth scaffold concern** (#322/#323). Role contracts via `meta.role`; `doctor` completeness is now capability-scoped via Owned concerns, not location-scoped.
 - **Subcommand help descriptions.** Every command now carries a one-line `.description()`, so `--help` and the non-TTY fallback read as a real command index instead of a blank wall.
 

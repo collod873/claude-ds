@@ -32,7 +32,7 @@ export async function enforceCmd(opts: { yes?: boolean; cwd?: string }) {
     printNextStep("enforce", {});
     return;
   }
-  // #364: interactive cancel must fail loud (stderr + exit 130) per ADR-0016.
+  // #364: interactive cancel must fail loud (stderr + exit 130) per ADR-0023.
   if (!opts.yes && !(await confirm(`Flip mode warn → block (open exceptions ≤ ${ctx.cfg.enforce_threshold})?`))) { err(c.red("aborted")); process.exit(130); }
   const report = await run(ctx, [setConfigMode("block")], "apply");
   if (report.failed) { err(c.red(`enforce failed: ${report.failed.error}`)); process.exit(2); }

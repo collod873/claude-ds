@@ -5,7 +5,7 @@ import type { AnswerBag, DecisionAnswer } from "./types.js";
  * Load the `--answers <file>` JSON bag. Validates the shape so a malformed
  * answers file fails before the resolver runs — the alternative is silently
  * dropping an entry that was meant to resolve a genuine Ambiguity, which
- * would re-introduce the silent-project-decisions failure ADR-0016 closes.
+ * would re-introduce the silent-project-decisions failure ADR-0023 closes.
  *
  * Allowed value shape per id:
  *   - `number` — index into `Decision.options`

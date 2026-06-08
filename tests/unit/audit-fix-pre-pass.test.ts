@@ -1,5 +1,5 @@
 /**
- * PRD #325 / ADR-0016 — command-level Decision pre-pass + determinism of
+ * PRD #325 / ADR-0023 — command-level Decision pre-pass + determinism of
  * `fixerAsOperation(f).plan(ctx)`.
  *
  * What the pre-pass guarantees:
@@ -81,7 +81,7 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
     });
   }
 
-  describe("non-TTY pre-pass fails loud on unresolved Ambiguities (ADR-0016)", () => {
+  describe("non-TTY pre-pass fails loud on unresolved Ambiguities (ADR-0023)", () => {
     /**
      * Composite imports a symbol from `lib/api/` whose source file has its own
      * `features/auth/` domain dep. `canExtract` is false, `canConvertToProp`
@@ -127,7 +127,7 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
       expect(named).toMatch(/DRIFT-DS-IMPORTS-FEATURE.*user-badge\.tsx/);
       expect(exitSpy).toHaveBeenCalledWith(2);
 
-      // No exceptions.json is written — auto-deferral retired (ADR-0016).
+      // No exceptions.json is written — auto-deferral retired (ADR-0023).
       expect(await exists(join(dir, "design-system/exceptions.json"))).toBe(false);
 
       // The fix never ran — the original import is still there.

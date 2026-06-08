@@ -142,13 +142,13 @@ describe("classify", () => {
     expect(r.stdout).toMatch(/invoice-form\.tsx/);
   });
 
-  // ADR-0016 / PRD #325 sub-issue #327 — classify's per-bucket confirms
+  // ADR-0023 / PRD #325 sub-issue #327 — classify's per-bucket confirms
   // collapse into a single commitment-gate Decision per command.
   it("apply: collapses per-bucket confirms into a single commitment-gate Decision", async () => {
     await setupBrownfieldFixture();
     // Add a second feature in a DIFFERENT bucket — under the OLD code this
     // would have triggered two `Move these to <bucket>/?` prompts (one per
-    // bucket). Per ADR-0016 there is now exactly one preview-and-approve.
+    // bucket). Per ADR-0023 there is now exactly one preview-and-approve.
     await mkdir(join(dir, "features/billing"), { recursive: true });
     await writeFile(
       join(dir, "src/components/billing-row.tsx"),
@@ -182,7 +182,7 @@ describe("classify", () => {
 
   it("apply: non-TTY (no --yes) auto-applies the commitment-gate — git is the undo", async () => {
     await setupBrownfieldFixture();
-    // No --yes, no TTY (test runner). ADR-0016: commitment-gate non-TTY
+    // No --yes, no TTY (test runner). ADR-0023: commitment-gate non-TTY
     // auto-applies (zero-prompt path the agent / automation needs).
     const r = await runCli(["classify", "--src", "src/components"], { cwd: dir });
     expect(r.code).toBe(0);

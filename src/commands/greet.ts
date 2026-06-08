@@ -4,7 +4,7 @@
  * Invoked from the bare-`claude-ds` action in `cli.ts` whenever no
  * `.claude-ds.json` exists. Detects framework + presence of consumer
  * components, surfaces a single Ambiguity Decision through the resolver
- * (ADR-0016), and dispatches to `initCmd` / `adoptCmd` in-process based on
+ * (ADR-0023), and dispatches to `initCmd` / `adoptCmd` in-process based on
  * the resolved answer.
  *
  * The resolver matrix gives this slice the same TTY/non-TTY semantics every
@@ -114,7 +114,7 @@ export async function greetCmd(opts: GreetOpts): Promise<void> {
   // `"defer"` is a valid resolver outcome for an Ambiguity — the operator
   // pressed [s] at the prompt, or fed `"defer"` in `--answers`. Treat it as
   // "abort the greet" with a non-zero exit: dispatching to init or adopt on
-  // an unanswered Decision is the silent-project-call ADR-0016 closes.
+  // an unanswered Decision is the silent-project-call ADR-0023 closes.
   if (answer === "defer") {
     err(`greet: decision "${GREET_DECISION_ID}" deferred — no onramp chosen.`);
     err(`Re-run with --answers <file> mapping "${GREET_DECISION_ID}" to ${GREET_ADOPT_INDEX} (adopt) or ${GREET_INIT_INDEX} (init).`);

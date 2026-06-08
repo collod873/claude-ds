@@ -90,7 +90,7 @@ describe("clean-tree guard — applied to every destructive command (#328)", () 
 
   describe("classify (dirty-tree guard removed — PRD #340 F7 / sub-issue #350)", () => {
     // PRD #340 (sub-issue #350) removed classify's hard-block on a dirty tree.
-    // The commitment-gate preview is the safety; git is the undo (ADR-0016).
+    // The commitment-gate preview is the safety; git is the undo (ADR-0023).
     // The other destructive commands keep their guard — classify is the one
     // surface friction report F7 named explicitly.
     it("dirty tree: classify runs (no refusal)", async () => {

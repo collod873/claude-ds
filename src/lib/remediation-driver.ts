@@ -16,7 +16,7 @@
  *   - **Pending policy** — `heal` passes a `pendingSink` (collect Ambiguities,
  *     write an `--answers` scaffold, exit 3); the front door passes none, so the
  *     Decision resolver prompts inline on a TTY (or fails loud non-TTY without
- *     `--answers`) — ADR-0016's three-kind matrix, unchanged.
+ *     `--answers`) — ADR-0023's three-kind matrix, unchanged.
  *
  * The driver never calls `process.exit`: it returns a `DriveOutcome` and the
  * caller owns exit codes, scaffolds, and convergence prose. That keeps `heal`'s

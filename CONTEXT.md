@@ -455,7 +455,7 @@ to a partial fixed point, **collects** the Pending decisions, and exits
 non-zero with an "N decisions need you" report plus an `--answers` scaffold to
 fill and re-run. This supersedes ADR-0014's "every ambiguity gets a safe
 default" for genuine Ambiguities — the agent no longer makes project decisions
-that were Collin's to make. See ADR-0016.
+that were Collin's to make. See ADR-0023.
 
 ### First-run greet
 The bare-`claude-ds` action's pre-config branch. When no `.claude-ds.json`

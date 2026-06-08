@@ -3,6 +3,10 @@
 Date: 2026-06-06
 Status: Accepted
 
+> **Disambiguation:** this is the *role contracts / behavior* ADR. The Decision
+> spine / non-TTY `--answers` fallback ADR briefly also carried 0016; it was
+> renumbered to ADR-0023.
+
 ## Context
 
 claude-ds owns three design-system concerns end-to-end — **structure** (tiers

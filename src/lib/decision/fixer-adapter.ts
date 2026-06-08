@@ -6,7 +6,7 @@ import type { Decision, DecisionId } from "./types.js";
  * fixer-only ancestor of the spine) and the spine's `Decision`. Every fixer
  * question is an Ambiguity by construction: the Simple-question test was the
  * gate that elevated a question to fixer-pre-pass status in the first place
- * (ADR-0016 amends ADR-0014). Per-finding answers continue to live on
+ * (ADR-0023 amends ADR-0014). Per-finding answers continue to live on
  * `ctx.decisions.fixerChoices` so existing `fix()` bodies don't change; the
  * spine sits in front of them at the command-level pre-pass.
  *

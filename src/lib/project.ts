@@ -49,7 +49,7 @@ export interface ProjectContext {
      */
     fixerChoices?: Record<FindingKey, Record<DecisionKey, DecisionAnswer>>;
     /**
-     * The Decision spine's flat answer bag (PRD #325 / ADR-0016). Loaded from
+     * The Decision spine's flat answer bag (PRD #325 / ADR-0023). Loaded from
      * `--answers <file>` and consulted by `resolveDecisions` before any
      * prompt fires. Keys are stable `Decision.id`s (e.g.
      * `"DRIFT-RAW-PRIMITIVE:design-system/atoms/x.tsx::extract:Sidebar"`).

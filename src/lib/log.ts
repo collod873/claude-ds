@@ -317,7 +317,7 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
  * Without a TTY there is no human to answer the prompt; the previous code
  * raced `rl.question` against `rl.close` so a closed stdin resolved to `""`
  * — indistinguishable from a real "n", and the command exited 0 as if the
- * user had declined. Per ADR-0016, an unanswered prompt with no human in
+ * user had declined. Per ADR-0023, an unanswered prompt with no human in
  * the loop must fail loud (named, non-zero) rather than fabricate an answer.
  * Exit 3 = "non-TTY: pass --yes (or supply `--answers` for Decision-based
  * commands) so the prompt does not need a human."

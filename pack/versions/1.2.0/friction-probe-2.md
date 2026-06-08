@@ -59,7 +59,7 @@ output matches the `→ Next:` breadcrumb convention CONTEXT.md mandates.
   refusal has no recovery hint; permanent exceptions count toward the gate
   threshold against CONTEXT.md's "informational" framing.
 - **#364** — `confirm()` on non-TTY (closed stdin) silently aborts with
-  exit 0; ADR-0016 calls for fail-loud on non-TTY ambiguity.
+  exit 0; ADR-0023 calls for fail-loud on non-TTY ambiguity.
 - **#366** — `reconform`'s stub-file warning fires every run with no
   acknowledge path or recipe for what "populating contracts.md" entails.
 - **#367** — `version`'s "installed" label means CLI version in `--check`
@@ -81,7 +81,7 @@ output matches the `→ Next:` breadcrumb convention CONTEXT.md mandates.
   remote (#368). Each is small individually; together they form the same
   surface-area-of-trust problem PRD #340 set out to fix in the front door.
 - `version`, `migrate`, and `migrate-layout` each contradict at least one
-  ADR-0011 / ADR-0016 statement.
+  ADR-0011 / ADR-0023 statement.
 
 The PRD predicted "expect the count to rise" — it has. The findings here
 should be folded into the PRD #340 work or treated as parallel cleanup,

@@ -187,7 +187,7 @@ describe("classify ambiguity pass (issue #203)", () => {
 // PRD #325 sub-issue #327: the atom-vs-composite Ambiguity flows through the
 // Decision spine. Non-TTY without --answers fails loud (no silent default);
 // pre-supplied --answers resolves the Ambiguity headlessly.
-describe("classify ambiguity spine integration (PRD #325 / ADR-0016)", () => {
+describe("classify ambiguity spine integration (PRD #325 / ADR-0023)", () => {
   let dir: string;
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errSpy: ReturnType<typeof vi.spyOn>;
@@ -212,7 +212,7 @@ describe("classify ambiguity spine integration (PRD #325 / ADR-0016)", () => {
   });
 
   it("non-TTY + no --answers: fails loud naming the Decision (no silent default)", async () => {
-    // No injected prompt, no TTY, no --answers. ADR-0016: an Ambiguity in
+    // No injected prompt, no TTY, no --answers. ADR-0023: an Ambiguity in
     // these conditions must throw, not silently pick a default. The audit-fix
     // pre-pass would have silently auto-deferred under ADR-0014; here we must
     // exit non-zero with the Decision id surfaced.

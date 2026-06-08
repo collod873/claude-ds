@@ -35,7 +35,7 @@ describe("audit --fix", () => {
       join(dir, "design-system/composites/solo-label.tsx"),
       'import { api } from "@/features/billing/api";\nexport function SoloLabel() { return <span>{api()}</span>; }',
     );
-    // ADR-0016: this fixture also fires DRIFT-DS-IMPORTS-FEATURE, an
+    // ADR-0023: this fixture also fires DRIFT-DS-IMPORTS-FEATURE, an
     // interactive rule. Pre-supply `--answers` deferring that Ambiguity so
     // audit doesn't fail loud before reaching the unfixable DRIFT-MISPLACED.
     const answersPath = join(dir, ".answers.json");

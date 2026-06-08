@@ -184,7 +184,7 @@ verbs end with a verdict and a `→ Next` breadcrumb, and both render via the
 summary-default policy (substantive changes — config-flag flips — surfaced
 first; `--diff` for full diff, `--json` for machine output). See CONTEXT.md
 *Upgrade*, *Repair*, *Scaffold gap*; the decision-kind / commitment-gate
-model is ADR-0016.
+model is ADR-0023.
 
 Whether `repair` is a standalone command or a mode of `upgrade` is an
 implementation detail; what this ADR fixes is that the two states are named,

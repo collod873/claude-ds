@@ -1,9 +1,13 @@
-# ADR-0016: Decision kinds and the non-TTY fallback
+# ADR-0023: Decision kinds and the non-TTY fallback
 
 **Status:** Accepted
 **Date:** 2026-06-06
 **Deciders:** Collin Lodato
 **Amends:** ADR-0014 (zero-prompt audit)
+
+> **Renumbered from 0016 (was a duplicate).** This is the *Decision spine /
+> non-TTY `--answers` fallback* ADR. For *behavior as the fourth scaffold
+> concern (role contracts)*, see ADR-0016.
 
 ## Context
 

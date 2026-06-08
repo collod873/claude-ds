@@ -357,7 +357,7 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
     // (8) and `spacing-4` (16), so the DRIFT-INLINE-STATIC-STYLE fixer's
     // `describeDecisions` enumerates a `token-tie:padding:12` Ambiguity. In
     // non-TTY with no --answers, the agent must NOT silently pick a default
-    // — this is exactly the project judgment ADR-0016 preserved for Collin.
+    // — this is exactly the project judgment ADR-0023 preserved for Collin.
     async function scaffoldEquidistantTokenFixture(): Promise<void> {
       await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
       await mkdir(join(dir, "design-system/atoms"), { recursive: true });

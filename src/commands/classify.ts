@@ -154,7 +154,7 @@ export async function classifyCmd(opts: {
    * Path to a JSON file mapping Decision id → answer index (or `"defer"`).
    * Resolves classify's Ambiguity Decisions (atom-vs-composite per ambiguous
    * file) ahead of any prompt — both the agent-supply path and the test seam
-   * for non-TTY runs (PRD #325 / ADR-0016).
+   * for non-TTY runs (PRD #325 / ADR-0023).
    */
   answers?: string;
   /**
@@ -165,11 +165,11 @@ export async function classifyCmd(opts: {
   /**
    * Accepted for API/CLI compatibility. PRD #340 F7 / sub-issue #350 removed
    * classify's hard-block on a dirty tree — the commitment-gate preview is
-   * the safety, git is the undo (ADR-0016). Heal still threads this through.
+   * the safety, git is the undo (ADR-0023). Heal still threads this through.
    */
   allowDirty?: boolean;
   /**
-   * When provided, ADR-0016 Ambiguity Decisions hit during the within-DS
+   * When provided, ADR-0023 Ambiguity Decisions hit during the within-DS
    * ambiguity pass are collected here as `PendingDecision`s instead of
    * throwing `UnresolvedAmbiguityError`. heal threads this through across
    * iterations; everywhere else leaves it undefined → today's fail-loud
@@ -199,7 +199,7 @@ export async function classifyCmd(opts: {
 
   // PRD #340 F7 / sub-issue #350: classify no longer hard-blocks on a dirty
   // tree. The commitment-gate preview ("Ready to apply N moves … [y/N]") is
-  // the safety; git is the undo (ADR-0016). `--allow-dirty` is still
+  // the safety; git is the undo (ADR-0023). `--allow-dirty` is still
   // accepted as a flag for API compat and so heal can forward it.
   void opts.allowDirty;
 
@@ -372,7 +372,7 @@ export async function classifyCmd(opts: {
     }
 
     // Stage every planned move under a single commitment-gate Decision
-    // (ADR-0016 / PRD #325). The former per-bucket confirms — one prompt per
+    // (ADR-0023 / PRD #325). The former per-bucket confirms — one prompt per
     // feature bucket plus the implicit "apply atoms/composites" path —
     // collapsed into ONE approve per command. TTY shows the preview-and-
     // approve gate; non-TTY auto-applies (git is the undo); --yes skips.
@@ -662,7 +662,7 @@ export async function classifyCmd(opts: {
     //      genuinely-ambiguous ones as Ambiguity Decisions.
     //   2. Route the collected Decisions through the spine resolver — TTY
     //      prompts, non-TTY with a supplied answer reads it, non-TTY without
-    //      throws (ADR-0016 fail-loud; no silent default).
+    //      throws (ADR-0023 fail-loud; no silent default).
     interface AmbiguousAtom {
       decision: Decision;
       atomRel: string;

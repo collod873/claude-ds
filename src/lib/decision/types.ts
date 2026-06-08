@@ -1,5 +1,5 @@
 /**
- * The interaction spine for the CLI (ADR-0016 / PRD #325).
+ * The interaction spine for the CLI (ADR-0023 / PRD #325).
  *
  * Every choice the CLI surfaces is a **Decision** of one of three **kinds**;
  * the kind — not the command — picks behavior in the resolver matrix:

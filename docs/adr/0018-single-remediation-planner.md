@@ -2,7 +2,7 @@
 
 Date: 2026-06-07
 Status: Accepted
-Amends: ADR-0014 (next-step breadcrumb), ADR-0016 (decision kinds), ADR-0003 (heal convergence)
+Amends: ADR-0014 (next-step breadcrumb), ADR-0023 (decision kinds), ADR-0003 (heal convergence)
 
 ## Context
 
@@ -66,12 +66,12 @@ Two drivers consume that one planner:
 
 - **`heal` — headless driver.** Runs the plan to exhaustion with no prompts,
   collecting Pending decisions and exiting with an `--answers` scaffold
-  (ADR-0016). This is **Convergence**.
+  (ADR-0023). This is **Convergence**.
 
 - **Front door — interactive driver.** Runs the *same* plan with a human
   watching: **one up-front commitment gate** ("I'll fix these N things,
   `[Enter]`"), then **auto-advances to clean** with live progress (#332),
-  pausing inline only for genuine **Ambiguities** (ADR-0016). After the first
+  pausing inline only for genuine **Ambiguities** (ADR-0023). After the first
   `[Enter]`, the user never types another `claude-ds` command and never
   re-runs the door by hand.
 
@@ -111,7 +111,7 @@ are verified against `heal`'s implementation before locking, not asserted here.
   reasons about it.
 - **Testability is preserved.** The planner is a pure function of project
   state (render separately, snapshot the plan); the interactive driver's
-  Ambiguity prompts resolve via `--answers` (ADR-0016) — no pseudo-TTY needed.
+  Ambiguity prompts resolve via `--answers` (ADR-0023) — no pseudo-TTY needed.
 - **This is the north star made mechanical.** "Remember as little as
   possible" becomes "press Enter once." A future session that re-introduces a
   hand-typed `→ Next:` breadcrumb chain, or a second ordering brain, is

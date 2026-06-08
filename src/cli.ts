@@ -63,7 +63,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
   // the dashboard is a human surface, and the agent/automation contract for
   // an adopted project stays exactly the bytes it shipped with.
   program
-    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016) — used by the first-run greet")
+    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0023) — used by the first-run greet")
     .option("--verbose", "show the full per-file change list in the commitment-gate preview (default: per-tier summary)")
     .action(async (opts: { answers?: string; verbose?: boolean }) => {
       const cwd = defaults.cwd ?? process.cwd();
@@ -73,7 +73,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
       }
       if (isTTY()) {
         // Forward `--answers` so the interactive driver can resolve genuine
-        // Ambiguities it pauses on without a second invocation (ADR-0016).
+        // Ambiguities it pauses on without a second invocation (ADR-0023).
         await frontDoorCmd({ cwd, answers: opts.answers, verbose: opts.verbose });
       } else {
         program.outputHelp();
@@ -109,7 +109,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--issue <ref>", "tracking issue link (used with --except)")
     .option("--permanent", "mark exceptions as permanent (used with --except)")
     .option("--verbose", "show full scaffold inventory (present + missing)")
-    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016)")
+    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0023)")
     .option("--allow-dirty", "bypass the clean-tree guard (only meaningful with --fix)")
     .option("--json", "emit machine-readable headless contract (issue #408)")
     .action(async (opts: { pack?: string; suggestRemovals?: boolean; fix?: boolean; except?: boolean; reason?: string; issue?: string; permanent?: boolean; verbose?: boolean; answers?: string; allowDirty?: boolean; json?: boolean }) => {
@@ -235,8 +235,8 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .description("categorize existing files into DS tiers")
     .option("--src <dir>", "opt-in: pull design-system parts from this source dir into design-system/ (omit to only reorganize within design-system/)")
     .option("--dry-run", "show classification plan without moving any files")
-    .option("--yes", "skip the apply-moves commitment-gate (ADR-0016)")
-    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016)")
+    .option("--yes", "skip the apply-moves commitment-gate (ADR-0023)")
+    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0023)")
     .option("--allow-dirty", "accepted for compatibility (no-op since PRD #340 F7 — classify's commitment-gate is the safety, git is the undo)")
     .option("--json", "emit machine-readable headless contract (issue #408)")
     .action(async (opts: { src?: string; dryRun?: boolean; yes?: boolean; answers?: string; allowDirty?: boolean; json?: boolean }) => {
@@ -248,7 +248,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .description("loop sync → upgrade → classify → audit --fix until convergence (max 3 iterations)")
     .option("--max-iterations <n>", "override iteration ceiling (default 3)", (v) => parseInt(v, 10))
     .option("--allow-dirty", "bypass the clean-tree guard (top-level + sub-command propagation)")
-    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016) — resolves Pending decisions from a prior heal run")
+    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0023) — resolves Pending decisions from a prior heal run")
     .option("--json", "emit machine-readable headless contract (issue #408)")
     .option("--dry-run", "plan the remediation walk without running anything (issue #416 — pairs with --json for the Crewops tripwire)")
     .action(async (opts: { maxIterations?: number; allowDirty?: boolean; answers?: string; json?: boolean; dryRun?: boolean }) => {

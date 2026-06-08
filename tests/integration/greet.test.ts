@@ -46,7 +46,7 @@ describe("first-run greet — non-TTY at the CLI boundary", () => {
     const r = await runCli([], { cwd: dir });
     expect(r.code).not.toBe(0);
     // The error must name the Decision id so the operator knows what key to
-    // put in `--answers`. ADR-0016's fail-loud contract — no silent default.
+    // put in `--answers`. ADR-0023's fail-loud contract — no silent default.
     expect(r.stderr).toContain(GREET_DECISION_ID);
     // And the .claude-ds.json must NOT have been silently written.
     expect(await exists(join(dir, ".claude-ds.json"))).toBe(false);

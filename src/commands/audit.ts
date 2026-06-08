@@ -38,7 +38,7 @@ export interface AuditOpts {
   verbose?: boolean;
   /** Path to a JSON file mapping Decision id → answer index (or `"defer"`).
    * Loaded into `ctx.decisions.answers` before the audit-fix pre-pass runs
-   * (PRD #325 / ADR-0016). */
+   * (PRD #325 / ADR-0023). */
   answers?: string;
   /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). Only meaningful
    * with --fix; the read-only audit path is non-destructive and does not gate. */
@@ -50,7 +50,7 @@ export interface AuditOpts {
    */
   json?: boolean;
   /**
-   * When provided, ADR-0016 Ambiguity Decisions hit during the audit-fix
+   * When provided, ADR-0023 Ambiguity Decisions hit during the audit-fix
    * pre-pass are collected here as `PendingDecision`s instead of throwing
    * `UnresolvedAmbiguityError`. The caller is responsible for surfacing them
    * (e.g. heal collects across iterations, writes an `--answers` scaffold,
@@ -205,7 +205,7 @@ export async function auditCmd(opts: AuditOpts) {
       verbose,
     });
   } catch (e) {
-    // ADR-0016: a genuine Ambiguity hit a non-TTY caller with no pre-supplied
+    // ADR-0023: a genuine Ambiguity hit a non-TTY caller with no pre-supplied
     // answer. Print a named, plain-language exit so the operator knows which
     // Decision id to put in `--answers` and re-run with.
     if (e instanceof UnresolvedAmbiguityError) {

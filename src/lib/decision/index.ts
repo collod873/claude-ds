@@ -1,5 +1,5 @@
 /**
- * The Decision spine (ADR-0016 / PRD #325). One barrel export — every
+ * The Decision spine (ADR-0023 / PRD #325). One barrel export — every
  * command-level pre-pass imports from here.
  */
 export type {

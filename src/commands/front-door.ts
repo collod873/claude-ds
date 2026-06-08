@@ -71,7 +71,7 @@ export interface FrontDoorOpts {
   yes?: boolean;
   /** Path to an `--answers` JSON file (Decision id → option index / `"defer"`).
    *  Forwarded to the drive loop so the front door converges without a TTY —
-   *  the no-pseudo-TTY automation path (ADR-0016). */
+   *  the no-pseudo-TTY automation path (ADR-0023). */
   answers?: string;
   /** Override the auto-advance iteration ceiling. Tests use it; default 3. */
   maxIterations?: number;
@@ -260,7 +260,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 
   // Auto-advance to clean. No `pendingSink` → the Decision resolver prompts
   // inline on a TTY for genuine Ambiguities, resolves silently when `--answers`
-  // is supplied, and fails loud non-TTY otherwise (ADR-0016). Live progress on
+  // is supplied, and fails loud non-TTY otherwise (ADR-0023). Live progress on
   // stderr; the loop never pauses for mechanical work.
   const progress = createProgress();
   try {
