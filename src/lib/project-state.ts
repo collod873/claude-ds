@@ -34,7 +34,7 @@ import { parseExceptions, type Exception } from "./exceptions.js";
 import { computeVerificationChain } from "./migration-framework.js";
 import { MIGRATION_REGISTRY } from "./migration-registry.js";
 import type { ProjectState } from "./remediation-planner.js";
-import pkg from "../../package.json" with { type: "json" };
+import { cliVersion } from "./version-vocab.js";
 
 async function exists(p: string): Promise<boolean> {
   try {
@@ -70,7 +70,7 @@ async function deriveFromCtx(ctx: ProjectContext): Promise<ProjectState> {
 
   const upgradeAvailable = checkVersionCurrency({
     pinned: cfg.packVersion,
-    installed: `v${pkg.version}`,
+    installed: cliVersion(),
   }).upgradeAvailable;
 
   const scaffold = await scanScaffoldPresence(ctx, {
