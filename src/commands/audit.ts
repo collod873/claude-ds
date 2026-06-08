@@ -23,6 +23,7 @@ import {
   type PendingDecision,
 } from "../lib/decision/index.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
+import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
 
@@ -58,6 +59,14 @@ export interface AuditOpts {
    * exits 2 with a plain-language "decision X needs you" message.
    */
   pendingSink?: PendingDecision[];
+  /**
+   * Issue #410: skip the post-fix verify gate (the consumer's `tsc`/verify
+   * is run before emitting a clean/fixed verdict). heal/driveRemediation
+   * passes this when running audit --fix as an inner step — heal owns the
+   * final gate at convergence and a per-step `tsc` invocation would mean N
+   * extra runs per heal iteration.
+   */
+  skipVerifyGate?: boolean;
   cwd?: string;
 }
 
@@ -260,8 +269,43 @@ export async function auditCmd(opts: AuditOpts) {
     }
     process.exit(1);
   } else if (fixSummary.fixedCount > 0) {
-    info("No action required.");
-    printNextStep("audit-fix", { buildCmd });
+    // Issue #410 / PRD #407 — the verify gate. The previous code printed
+    // "No action required" then "→ Next: run <build>", asking the operator
+    // to verify a tree the tool just mutated. Now the tool runs the
+    // consumer's verify itself and gates the success verdict on a green
+    // result. A red gate on a file claude-ds touched surfaces the errors
+    // and exits non-zero — never prints "clean."
+    const verify = opts.skipVerifyGate
+      ? null
+      : await gateVerify(cwd, ctx.manifest.files.map(f => f.path), fixSummary.touchedFiles);
+    if (verify && !verify.ok) {
+      reportRedGate(verify);
+      if (opts.json) {
+        emitHeadless({
+          command: "audit",
+          ok: false,
+          verdict: "verify-failed",
+          exitCode: HEADLESS_EXIT.FINDINGS,
+          actions: { fixedCount: fixSummary.fixedCount, reconciledCount: fixSummary.reconciledCount },
+          remaining: {
+            findingsCount: 0,
+            warnings: warningCount,
+            verify: verifyJson(verify),
+          },
+        });
+      }
+      process.exit(1);
+      return;
+    }
+    if (verify && verify.consumerErrors.length > 0) {
+      info(`verify gate passed (${verify.command}) — ${verify.consumerErrors.length} pre-existing consumer error(s) noted but not caused by claude-ds`);
+    } else if (verify?.reason) {
+      info(`No action required. (${verify.reason})`);
+    } else if (verify) {
+      info(`No action required. (verified via ${verify.command})`);
+    } else {
+      info("No action required.");
+    }
     if (opts.json) {
       emitHeadless({
         command: "audit",
@@ -269,7 +313,11 @@ export async function auditCmd(opts: AuditOpts) {
         verdict: "fixed",
         exitCode: HEADLESS_EXIT.OK,
         actions: { fixedCount: fixSummary.fixedCount, reconciledCount: fixSummary.reconciledCount },
-        remaining: { warnings: warningCount, findingsCount: 0 },
+        remaining: {
+          warnings: warningCount,
+          findingsCount: 0,
+          ...(verify ? { verify: verifyJson(verify) } : {}),
+        },
       });
     }
   } else if (warningCount > 0 && !opts.fix) {
@@ -292,6 +340,50 @@ export async function auditCmd(opts: AuditOpts) {
       });
     }
   } else {
+    // Issue #410: if --fix mutated the tree (reconcile deleted orphans,
+    // even with no drift findings to fix), gate the clean verdict on the
+    // consumer's verify. A read-only `audit` (no --fix) skips the gate —
+    // it never wrote bytes so there's nothing for verify to vouch for.
+    if (opts.fix && fixSummary.mutated && !opts.skipVerifyGate) {
+      const verify = await gateVerify(cwd, ctx.manifest.files.map(f => f.path), fixSummary.touchedFiles);
+      if (!verify.ok) {
+        reportRedGate(verify);
+        if (opts.json) {
+          emitHeadless({
+            command: "audit",
+            ok: false,
+            verdict: "verify-failed",
+            exitCode: HEADLESS_EXIT.FINDINGS,
+            actions: { fixedCount: fixSummary.fixedCount, reconciledCount: fixSummary.reconciledCount },
+            remaining: {
+              findingsCount: 0,
+              warnings: warningCount,
+              verify: verifyJson(verify),
+            },
+          });
+        }
+        process.exit(1);
+        return;
+      }
+      if (verify.consumerErrors.length > 0) {
+        info(`verify gate passed (${verify.command}) — ${verify.consumerErrors.length} pre-existing consumer error(s) noted but not caused by claude-ds`);
+      } else {
+        info(verify.reason
+          ? `No action required. (${verify.reason})`
+          : `No action required. (verified via ${verify.command})`);
+      }
+      if (opts.json) {
+        emitHeadless({
+          command: "audit",
+          ok: true,
+          verdict: "clean",
+          exitCode: HEADLESS_EXIT.OK,
+          actions: { fixedCount: fixSummary.fixedCount, reconciledCount: fixSummary.reconciledCount },
+          remaining: { findingsCount: 0, warnings: warningCount, verify: verifyJson(verify) },
+        });
+      }
+      return;
+    }
     info("No action required.");
     printNextStep("audit", { hasFindings: false, buildCmd });
     if (opts.json) {
@@ -305,4 +397,53 @@ export async function auditCmd(opts: AuditOpts) {
       });
     }
   }
+}
+
+/**
+ * Run the consumer verify command and partition errors into
+ * "scaffold/touched" (block the clean verdict) vs "pre-existing consumer"
+ * (warn-only). See `runConsumerVerify` for the full contract.
+ */
+async function gateVerify(
+  cwd: string,
+  managedFiles: string[],
+  touchedFiles: Set<string>,
+): Promise<VerifyResult> {
+  return await runConsumerVerify(cwd, {
+    managedFiles: new Set(managedFiles),
+    touchedFiles,
+    managedRoots: ["design-system/"],
+  });
+}
+
+/** Surface scaffold errors on stderr before exiting non-zero. */
+function reportRedGate(verify: VerifyResult): void {
+  err(
+    `verify gate failed: ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
+  );
+  for (const e of verify.scaffoldErrors.slice(0, 20)) {
+    err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
+  }
+  if (verify.scaffoldErrors.length > 20) {
+    err(`  …and ${verify.scaffoldErrors.length - 20} more`);
+  }
+  if (verify.consumerErrors.length > 0) {
+    err(`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`);
+  }
+  err("Re-run `claude-ds heal` after addressing the listed scaffold errors.");
+}
+
+/** Compact JSON envelope for the verify result on the headless surface. */
+function verifyJson(verify: VerifyResult): Record<string, unknown> {
+  return {
+    ok: verify.ok,
+    command: verify.command,
+    exitCode: verify.exitCode,
+    scaffoldErrorCount: verify.scaffoldErrors.length,
+    consumerErrorCount: verify.consumerErrors.length,
+    scaffoldErrors: verify.scaffoldErrors.slice(0, 20).map(e => ({
+      file: e.file, line: e.line, col: e.col, code: e.code, message: e.message,
+    })),
+    reason: verify.reason,
+  };
 }

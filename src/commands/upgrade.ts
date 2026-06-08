@@ -19,6 +19,7 @@ import { renderDiff } from "../lib/runner.js";
 import { finalizeUpgrade } from "../lib/ops/finalize-upgrade.js";
 import { syncCmd } from "./sync.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
+import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 import {
   renderChangeSummary,
   renderChangesJson,
@@ -163,6 +164,13 @@ export async function upgradeCmd(opts: {
    */
   diff?: boolean;
   json?: boolean;
+  /**
+   * Issue #410: skip the post-apply consumer verify gate. heal's driver
+   * passes this when running upgrade as an inner step — heal owns the
+   * final gate at convergence and a per-step `tsc` invocation would mean N
+   * extra runs per heal iteration.
+   */
+  skipVerifyGate?: boolean;
   cwd?: string;
 }) {
   const cwd = opts.cwd ?? process.cwd();
@@ -310,8 +318,10 @@ export async function upgradeCmd(opts: {
   humanLog("running sync to deliver pack files…");
   // Once upgrade applied bytes the tree is dirty — pass --allow-dirty through
   // to the embedded sync so it doesn't refuse on the very state upgrade just
-  // produced (PRD #325 / sub-issue #328).
-  await syncCmd({ cwd, yes: opts.yes, allowDirty: true });
+  // produced (PRD #325 / sub-issue #328). `skipVerifyGate: true` because the
+  // outer upgrade runs the verify gate below — one tsc invocation per
+  // command surface, not two (#410).
+  await syncCmd({ cwd, yes: opts.yes, allowDirty: true, skipVerifyGate: true });
 
   // Regenerate manifest.generated.ts — migrations may delete it (e.g.
   // manage-manifest@v0.9.0) and the PostToolUse hook won't fire until the
@@ -330,15 +340,77 @@ export async function upgradeCmd(opts: {
     }
   }
 
+  // Issue #410 / PRD #407 — verify gate after the post-apply mutations.
+  // upgrade just ran a migration chain and a sync; before declaring success
+  // we run the consumer's verify and gate the verdict on the result. The
+  // partition treats errors in scaffold/manifest files as scaffold errors
+  // (block); pre-existing consumer errors are warn-only.
+  let verify: VerifyResult | undefined;
+  if (!opts.skipVerifyGate) {
+    const postUpgradeCtx = await loadProject(cwd);
+    verify = await runConsumerVerify(cwd, {
+      managedFiles: new Set(postUpgradeCtx.manifest.files.map(f => f.path)),
+      managedRoots: ["design-system/"],
+    });
+    if (!verify.ok) {
+      reportRedGate(verify);
+      if (opts.json) {
+        emitUpgradeHeadless(
+          HEADLESS_EXIT.FINDINGS,
+          "verify-failed",
+          jsonAccumulator ?? [],
+          { from, to, applied: true, chainLength: chain.length },
+          { findingsCount: 0, verify: verifyJson(verify) },
+        );
+      }
+      process.exit(1);
+      return;
+    }
+    if (verify.consumerErrors.length > 0) {
+      humanLog(`verify gate passed (${verify.command}) — ${verify.consumerErrors.length} pre-existing consumer error(s) noted but not caused by claude-ds`);
+    } else {
+      humanLog(`verify gate green (${verify.command})`);
+    }
+  }
+
   if (opts.json) {
     emitUpgradeHeadless(
       HEADLESS_EXIT.OK,
       "applied",
       jsonAccumulator ?? [],
       { from, to, applied: true, chainLength: chain.length },
-      { findingsCount: 0 },
+      { findingsCount: 0, ...(verify ? { verify: verifyJson(verify) } : {}) },
     );
   }
+}
+
+function reportRedGate(verify: VerifyResult): void {
+  err(
+    `verify gate failed: ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
+  );
+  for (const e of verify.scaffoldErrors.slice(0, 20)) {
+    err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
+  }
+  if (verify.scaffoldErrors.length > 20) {
+    err(`  …and ${verify.scaffoldErrors.length - 20} more`);
+  }
+  if (verify.consumerErrors.length > 0) {
+    err(`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`);
+  }
+}
+
+function verifyJson(verify: VerifyResult): Record<string, unknown> {
+  return {
+    ok: verify.ok,
+    command: verify.command,
+    exitCode: verify.exitCode,
+    scaffoldErrorCount: verify.scaffoldErrors.length,
+    consumerErrorCount: verify.consumerErrors.length,
+    scaffoldErrors: verify.scaffoldErrors.slice(0, 20).map(e => ({
+      file: e.file, line: e.line, col: e.col, code: e.code, message: e.message,
+    })),
+    reason: verify.reason,
+  };
 }
 
 const DS_TIERS = ["atoms", "composites", "patterns"] as const;

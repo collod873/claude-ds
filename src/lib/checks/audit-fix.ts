@@ -76,6 +76,19 @@ export interface AuditFixSummary {
   warningCount: number;
   fixedCount: number;
   remainingFindings: AuditFinding[];
+  /**
+   * Issue #410 / PRD #407 — the verify-gate input. `true` ⇒ this run wrote
+   * bytes (reconcile delete/prune, manifest writes, integrity / drift fix,
+   * exception writes, …) and the caller must run `runConsumerVerify`
+   * before emitting a clean / "No action required" verdict.
+   *
+   * `touchedFiles` is every path the gate should treat as scaffold —
+   * collected from every `run()` call's `applied` changes so the
+   * partition counts errors in files claude-ds just modified as
+   * scaffold errors even when they live outside `design-system/`.
+   */
+  mutated: boolean;
+  touchedFiles: Set<string>;
 }
 
 /**
@@ -111,6 +124,19 @@ export async function runAuditFix(
   let reconciledCount = 0;
   let warningCount = 0;
   let fixedCount = 0;
+  // Touched files accumulated from every `run()` call's applied changes.
+  // Threaded out via `AuditFixSummary` so the verify gate (#410) treats them
+  // as scaffold paths even when they live outside `design-system/`.
+  const touchedFiles = new Set<string>();
+  const recordTouched = (changes: readonly Change[]): void => {
+    for (const c of changes) {
+      if (c.kind === "write" || c.kind === "delete") touchedFiles.add(c.path);
+      else if (c.kind === "rename") {
+        touchedFiles.add(c.path);
+        touchedFiles.add(c.after);
+      }
+    }
+  };
 
   // #171: when --fix is active and we have an adopted project (real
   // `.claude-ds.json` was loaded), run reconcile as a pre-step. This
@@ -160,6 +186,7 @@ export async function runAuditFix(
       if (!manifestReport.failed) {
         info(`tracked ${unexpected.openFindings.length} user extension(s) in consumer manifest`);
       }
+      recordTouched(manifestReport.applied);
     }
     if (unexpected.deprecatedMatches.length > 0) {
       const deleteReport = await run(
@@ -170,6 +197,7 @@ export async function runAuditFix(
       for (const c of deleteReport.applied) {
         if (c.kind === "delete") info(`deleted (deprecated-related): ${c.path}`);
       }
+      recordTouched(deleteReport.applied);
     }
   } else {
     for (const line of formatDeprecatedMatchWarnings(unexpected.deprecatedMatches)) {
@@ -222,6 +250,7 @@ export async function runAuditFix(
       const outcome = rep.ops[0]?.outcome as IntegrityFixResult | undefined;
       if (outcome) integrityResults.push(outcome);
       integrityApplied.push(...rep.applied);
+      recordTouched(rep.applied);
       if (rep.failed) {
         await rollbackChanges(ctx, integrityApplied);
         err(`Integrity-fix pass failed — all changes rolled back. ${rep.failed.error}`);
@@ -388,6 +417,7 @@ export async function runAuditFix(
       err("Fix pass failed — all changes rolled back. Re-run to retry.");
       process.exit(1);
     }
+    recordTouched(fixPassResult.applied);
 
     const driftFixedCount = fixPassResult.results.filter(r => r.fixed).length;
     const driftDeferredCount = fixPassResult.results.filter(r => !r.fixed).length;
@@ -421,7 +451,8 @@ export async function runAuditFix(
       }
       if (remainingExceptions.length < exceptions.length) {
         const removed = exceptions.length - remainingExceptions.length;
-        await run(ctx, [appendExceptions(remainingExceptions)], "apply");
+        const excReport = await run(ctx, [appendExceptions(remainingExceptions)], "apply");
+        recordTouched(excReport.applied);
         info(`${removed} stale exception(s) removed from exceptions.json`);
         exceptions = remainingExceptions;
         suppressedSet.clear();
@@ -472,6 +503,7 @@ export async function runAuditFix(
         if (reFixFindings.length > 0) {
           const reFixResult = await runFixPass(ctx, reFixFindings, {});
           if (!reFixResult.aborted) {
+            recordTouched(reFixResult.applied);
             const reFixedCount = reFixResult.results.filter(r => r.fixed).length;
             if (reFixedCount > 0) {
               fixedCount += reFixedCount;
@@ -505,15 +537,25 @@ export async function runAuditFix(
       return entry;
     });
     const merged = [...exceptions, ...newExceptions];
-    await run(ctx, [appendExceptions(merged)], "apply");
+    const exceptReport = await run(ctx, [appendExceptions(merged)], "apply");
+    recordTouched(exceptReport.applied);
     info(`${newExceptions.length} exception(s) written to design-system/exceptions.json`);
     activeFindings = [];
   }
+
+  // `mutated` is the verify-gate's input: was a byte written by this run?
+  // Reconcile (delete/prune) is counted via `reconciledCount`; every other
+  // mutation lands in `touchedFiles` via `recordTouched`. The set's size
+  // alone misses reconcile's deletes because `runReconcileActions` does
+  // not return the changed paths today, so we fall back to its counter.
+  const mutated = touchedFiles.size > 0 || reconciledCount > 0 || fixedCount > 0;
 
   return {
     reconciledCount,
     warningCount,
     fixedCount,
     remainingFindings: activeFindings,
+    mutated,
+    touchedFiles,
   };
 }

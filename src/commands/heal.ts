@@ -12,6 +12,7 @@ import {
 } from "../lib/ops/pending-answers-scaffold.js";
 import type { PendingDecision } from "../lib/decision/index.js";
 import { driveRemediation } from "../lib/remediation-driver.js";
+import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 
 /**
  * `claude-ds heal` — drive a consumer tree to a fixed point in one command.
@@ -168,7 +169,37 @@ export async function healCmd(opts: HealOpts): Promise<void> {
     });
 
     if (outcome.kind === "converged") {
-      info(`heal: converged in ${outcome.iterations} iteration(s) — 0 changes, 0 findings`);
+      // Issue #410 / PRD #407 — the verify gate. heal mutated the tree
+      // (sync / upgrade / classify / audit --fix all write bytes); before
+      // declaring "converged" we run the consumer's own verify and gate
+      // the success verdict on the result. A red gate on a scaffold file
+      // surfaces the errors and routes the operator to repair; pre-existing
+      // consumer errors are noted but do not flip the verdict.
+      const ctx = await loadProject(cwd);
+      const verify = await runConsumerVerify(cwd, {
+        managedFiles: new Set(ctx.manifest.files.map(f => f.path)),
+        managedRoots: ["design-system/"],
+      });
+      progress.stop();
+      if (!verify.ok) {
+        reportRedGate(verify);
+        if (opts.json) {
+          emitHeadless({
+            command: "heal",
+            ok: false,
+            verdict: "verify-failed",
+            exitCode: HEADLESS_EXIT.FINDINGS,
+            actions: { iterations: outcome.iterations, maxIterations },
+            remaining: { findingsCount: 0, pending: 0, verify: verifyJson(verify) },
+          });
+        }
+        process.exit(1);
+        return;
+      }
+      const consumerNote = verify.consumerErrors.length > 0
+        ? ` — ${verify.consumerErrors.length} pre-existing consumer error(s) noted (not caused by claude-ds)`
+        : "";
+      info(`heal: converged in ${outcome.iterations} iteration(s) — 0 changes, 0 findings, verify gate green${consumerNote}`);
       if (opts.json) {
         emitHeadless({
           command: "heal",
@@ -176,7 +207,7 @@ export async function healCmd(opts: HealOpts): Promise<void> {
           verdict: "converged",
           exitCode: HEADLESS_EXIT.OK,
           actions: { iterations: outcome.iterations, maxIterations },
-          remaining: { findingsCount: 0, pending: 0 },
+          remaining: { findingsCount: 0, pending: 0, verify: verifyJson(verify) },
         });
       }
       return;
@@ -286,4 +317,36 @@ async function reportPendingAndExit(
     });
   }
   process.exit(HEAL_EXIT_PENDING);
+}
+
+/** Surface scaffold errors on stderr. Mirror of `audit.ts:reportRedGate`. */
+function reportRedGate(verify: VerifyResult): void {
+  err(
+    `heal: verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
+  );
+  for (const e of verify.scaffoldErrors.slice(0, 20)) {
+    err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
+  }
+  if (verify.scaffoldErrors.length > 20) {
+    err(`  …and ${verify.scaffoldErrors.length - 20} more`);
+  }
+  if (verify.consumerErrors.length > 0) {
+    err(`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`);
+  }
+  err("Address the listed scaffold errors and re-run `claude-ds heal`.");
+}
+
+/** Compact JSON envelope for the verify result on the headless surface. */
+function verifyJson(verify: VerifyResult): Record<string, unknown> {
+  return {
+    ok: verify.ok,
+    command: verify.command,
+    exitCode: verify.exitCode,
+    scaffoldErrorCount: verify.scaffoldErrors.length,
+    consumerErrorCount: verify.consumerErrors.length,
+    scaffoldErrors: verify.scaffoldErrors.slice(0, 20).map(e => ({
+      file: e.file, line: e.line, col: e.col, code: e.code, message: e.message,
+    })),
+    reason: verify.reason,
+  };
 }
