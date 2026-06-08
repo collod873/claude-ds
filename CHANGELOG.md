@@ -6,6 +6,20 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [1.5.2] — 2026-06-08
+
+Closes the friction-verification loop so "closed but not fixed" becomes machine-checkable. The real CLI output through `adopt → heal → audit --fix` is now a committed, gated artifact: a friction detector parses rendered terminal output, a baseline ratchet enforces that friction can only go down, and golden snapshots pin the human-facing shape so sanitization can't silently drop it. No migrations — a consumer pinned at v1.5.1 runs zero migrations on upgrade.
+
+### Added
+- **Friction detector + committed golden CLI output** (#441, #439). Rendered terminal output for the core flows (`adopt`, `heal`, `audit --fix`, front-door) is captured as reviewable goldens under `tests/e2e/golden/`, and a friction detector scores them so "this command is annoying to use" is a unit-testable property, not a vibe.
+- **Friction baseline ratchet** (#442). A committed `friction-baseline.json` mechanically enforces that friction can only decrease — a regression that adds noise back to CLI output fails CI instead of merging silently.
+- **Interactive-surface coverage for the friction gate** (#443). The gate now also has eyes on the interactive (human) front-door surface, not just the non-interactive path.
+
+### Changed
+- **`heal` collapses the per-file `meta.kind` fix wall to a count** (#448). A consumer with many files needing `meta.kind` no longer gets a screen-filling per-file dump during heal — it's summarized to a count, with detail available behind verbose output.
+
+---
+
 ## [1.5.1] — 2026-06-08
 
 ### Fixed
