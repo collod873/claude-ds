@@ -12,10 +12,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir.js";
+import { readdir } from "node:fs/promises";
 import {
   runE2eHarness,
   parseTscOutput,
   writeReport,
+  writeGoldenOutput,
   type HarnessReport,
 } from "../e2e/harness.js";
 
@@ -247,6 +249,76 @@ describe("e2e harness", () => {
     expect(dup?.detail).toMatch(/2 .* declarations/);
   });
 
+  it("always exposes report.captured mirroring each step's rendered bytes", async () => {
+    // PRD #439: rendered output is now a first-class artifact. `captured` is a
+    // faithful projection of `steps` — same bytes, same order — even without
+    // gate mode, so the friction detector can consume it from any run.
+    await writeFakeCli(cliPath, { healStdout: "heal: rendered line\n" });
+    await writeFakeTsc(tscPath, { exit: 0 });
+
+    const report = await runE2eHarness({ fixtureDir, cliPath, tscPath, workDir });
+
+    expect(report.captured.map((c) => c.name)).toEqual(["adopt", "heal", "tsc"]);
+    // Byte-for-byte fidelity to the recorded step — no test-only rendering path.
+    for (let i = 0; i < report.steps.length; i++) {
+      const s = report.steps[i];
+      const c = report.captured[i];
+      expect(c.stdout).toBe(s.stdout);
+      expect(c.stderr).toBe(s.stderr);
+      expect(c.combined).toBe(s.stdout + s.stderr);
+    }
+    const heal = report.captured.find((c) => c.name === "heal");
+    expect(heal?.combined).toContain("heal: rendered line");
+  });
+
+  it("gate mode goldens each step's rendered output to disk", async () => {
+    // PRD #439 user story #20: golden files make any change to user-facing
+    // output a reviewable diff. One file per step, in run order; body bytes are
+    // verbatim from the captured stream.
+    const goldenDir = join(scratch, "golden");
+    await writeFakeCli(cliPath, { healStdout: "heal: GOLDEN-MARKER\n" });
+    await writeFakeTsc(tscPath, { exit: 0 });
+
+    const report = await runE2eHarness({ fixtureDir, cliPath, tscPath, workDir, goldenDir });
+
+    const files = (await readdir(goldenDir)).sort();
+    expect(files).toEqual(["00-adopt.txt", "01-heal.txt", "02-tsc.txt"]);
+
+    const healGolden = await readFile(join(goldenDir, "01-heal.txt"), "utf8");
+    // Header carries provenance; the goldened body is the exact captured bytes.
+    expect(healGolden).toContain("# command:");
+    expect(healGolden).toContain("# exit: 0");
+    const healCaptured = report.captured.find((c) => c.name === "heal")!;
+    expect(healGolden.endsWith(healCaptured.combined)).toBe(true);
+    expect(healGolden).toContain("heal: GOLDEN-MARKER");
+  });
+
+  it("does not write golden files when goldenDir is omitted (legacy mode)", async () => {
+    await writeFakeCli(cliPath, {});
+    await writeFakeTsc(tscPath, { exit: 0 });
+
+    await runE2eHarness({ fixtureDir, cliPath, tscPath, workDir });
+
+    expect(existsSync(join(scratch, "golden"))).toBe(false);
+  });
+
+  it("writeGoldenOutput returns written paths in step order", async () => {
+    const goldenDir = join(scratch, "golden-direct");
+    const written = await writeGoldenOutput(
+      [
+        { name: "adopt", command: "cli adopt", exitCode: 0, stdout: "a-out", stderr: "", combined: "a-out" },
+        { name: "heal", command: "cli heal", exitCode: 1, stdout: "h-out", stderr: "h-err", combined: "h-outh-err" },
+      ],
+      goldenDir,
+    );
+    expect(written.map((p) => p.replace(goldenDir + "/", ""))).toEqual([
+      "00-adopt.txt",
+      "01-heal.txt",
+    ]);
+    const heal = await readFile(written[1], "utf8");
+    expect(heal.endsWith("h-outh-err")).toBe(true);
+  });
+
   it("parses tsc errors and reports one deviation per error", async () => {
     const tscOut = [
       "design-system/atoms/Input.tsx(7,14): error TS2304: Cannot find name 'Meta'.",
@@ -286,6 +358,7 @@ describe("e2e harness", () => {
       fixture: "stub",
       pass: true,
       steps: [],
+      captured: [],
       deviations: [],
       startedAt: "2026-06-08T00:00:00.000Z",
       finishedAt: "2026-06-08T00:00:01.000Z",

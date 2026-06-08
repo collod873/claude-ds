@@ -3,16 +3,25 @@
  * Crewops-shaped consumer fixture and produces a structured deviation report
  * (the one-time discovery catalogue for parent PRD #407).
  *
- * Headless contract — the harness never asserts against rendered TTY. It
- * observes only:
+ * Headless contract — the bytes this harness captures and asserts on are the
+ * SAME bytes a TTY-blind agent reads back from stdout/stderr. The harness
+ * observes:
  *   - subprocess exit codes
  *   - parsed `--json` payloads where the CLI emits them
  *   - on-disk state of the fixture copy after each step
  *   - the consumer's own `tsc --noEmit` exit + parsed error stream
+ *   - the **rendered stdout/stderr** of each command step (gate mode)
  *
- * That is exactly what a verifying agent that *cannot see TTY output* can
- * also observe (PRD user stories #25 / #26): the bytes that drive the gate
- * are the same bytes the agent reads back.
+ * Rendered output as a first-class artifact (PRD #439) — the harness's
+ * original stance ("never assert against rendered TTY") optimized for what a
+ * TTY-blind agent can see, but had the side effect of making the friction
+ * layer untestable, because 100% of the graded friction lives in the
+ * human-rendered terminal output. That self-imposed ban is now lifted: in
+ * GATE MODE the captured rendered text is written to a golden file (a
+ * reviewable-diff artifact) and exposed to the friction-detector module. The
+ * contract is intact — the capture comes from the SAME built CLI a user runs
+ * (no test-only rendering path), and the bytes goldened are byte-for-byte the
+ * bytes a blind agent reads, which are byte-for-byte the bytes a user sees.
  *
  * Discovery-first: every check that fails appends one entry to
  * `report.deviations` — the run does NOT throw on first failure. That makes
@@ -38,6 +47,40 @@ export interface StepResult {
   stderr: string;
   /** Parsed `--json` payload when the step ran with `--json` and emitted one. */
   json?: unknown;
+}
+
+/**
+ * Rendered output of one command step, exposed for downstream consumers —
+ * principally the friction-detector module (PRD #439), which scans the human
+ * terminal output for the graded friction patterns (self-contradiction, walls
+ * of repeated lines, dishonest convergence, dead-end next-steps, untranslated
+ * jargon, self-block).
+ *
+ * INTERFACE NOTE for the friction-detector agent: import this type from the
+ * harness rather than re-declaring it. `runE2eHarness` returns
+ * `report.captured: CapturedStep[]` (one per command step, in run order; the
+ * `tsc` verify step is included). Feed `stdout`/`stderr`/`combined` to
+ * `scanFriction(captured, context)`. The bytes here are the exact bytes a
+ * TTY-blind agent — and a real user — reads from the built CLI.
+ */
+export interface CapturedStep {
+  /** Logical step name (`adopt`, `heal`, `tsc`) — stable key for matching. */
+  name: string;
+  /** Argv as a single human-readable string. */
+  command: string;
+  exitCode: number;
+  /** Captured stdout bytes, decoded utf8 — verbatim from the built CLI. */
+  stdout: string;
+  /** Captured stderr bytes, decoded utf8 — verbatim from the built CLI. */
+  stderr: string;
+  /**
+   * stdout + stderr concatenated in stream order is NOT reconstructable from
+   * separate buffers, so this is `stdout` then `stderr` — the conventional
+   * "what scrolled past" view for friction scans that don't care which stream
+   * a line came from. Detectors that need stream provenance read the fields
+   * above.
+   */
+  combined: string;
 }
 
 /** Parsed entry from `tsc --noEmit` output. */
@@ -89,6 +132,13 @@ export interface HarnessReport {
   pass: boolean;
   /** Each subprocess the harness ran, in order. */
   steps: StepResult[];
+  /**
+   * Rendered stdout/stderr of each command step, in run order — the
+   * first-class verification artifact the friction-detector module consumes
+   * (PRD #439). Always populated (it is a projection of `steps`); gate mode
+   * additionally goldens it to disk via `writeGoldenOutput`.
+   */
+  captured: CapturedStep[];
   /** Every observed gap from green, in the order they were detected. */
   deviations: Deviation[];
   /** Set when `tsc` ran; absent when an earlier step prevented it. */
@@ -126,6 +176,16 @@ export interface HarnessOpts {
    * out becomes a deviation with exit code `124` (POSIX timeout convention).
    */
   timeoutMs?: number;
+  /**
+   * Gate mode (PRD #439). When set, the harness writes each command step's
+   * rendered stdout/stderr to a golden file under `goldenDir` after the run,
+   * so any unintended change to user-facing output surfaces as a reviewable
+   * diff rather than silent drift. The captured text is ALSO always exposed
+   * on `report.captured` regardless of this option — `goldenDir` only governs
+   * whether it is persisted as golden files. Absent ⇒ no golden files written
+   * (the legacy discovery-catalogue behaviour).
+   */
+  goldenDir?: string;
 }
 
 /**
@@ -177,7 +237,7 @@ export async function runE2eHarness(opts: HarnessOpts): Promise<HarnessReport> {
       evidence: lastLines(adopt.stderr || adopt.stdout, 6),
     });
     // adopt failure → skip downstream; the report still finishes.
-    return finalize();
+    return await finalize();
   }
 
   if (!existsSync(join(opts.workDir, ".claude-ds.json"))) {
@@ -185,7 +245,7 @@ export async function runE2eHarness(opts: HarnessOpts): Promise<HarnessReport> {
       category: "missing-config",
       detail: "adopt exited 0 but did not write .claude-ds.json",
     });
-    return finalize();
+    return await finalize();
   }
 
   // ── heal ─────────────────────────────────────────────────────────────
@@ -274,19 +334,41 @@ export async function runE2eHarness(opts: HarnessOpts): Promise<HarnessReport> {
     }
   }
 
-  return finalize();
+  return await finalize();
 
-  function finalize(): HarnessReport {
-    return {
+  async function finalize(): Promise<HarnessReport> {
+    const captured: CapturedStep[] = steps.map(toCapturedStep);
+    const report: HarnessReport = {
       fixture: fixtureName,
       pass: deviations.length === 0,
       steps,
+      captured,
       deviations,
       tsc,
       startedAt,
       finishedAt: new Date().toISOString(),
     };
+    // Gate mode: persist the rendered output as golden files so any
+    // unintended change to user-facing output is a reviewable diff. This is
+    // the ONLY place rendered output touches disk; the captured text is on
+    // the report regardless, for the friction-detector module to consume.
+    if (opts.goldenDir) {
+      await writeGoldenOutput(captured, opts.goldenDir);
+    }
+    return report;
   }
+}
+
+/** Project a recorded `StepResult` to the consumer-facing `CapturedStep`. */
+function toCapturedStep(s: StepResult): CapturedStep {
+  return {
+    name: s.name,
+    command: s.command,
+    exitCode: s.exitCode,
+    stdout: s.stdout,
+    stderr: s.stderr,
+    combined: s.stdout + s.stderr,
+  };
 }
 
 /** Files the harness expects to exist after `adopt → heal`. */
@@ -441,4 +523,48 @@ async function listTsxFiles(dir: string): Promise<string[]> {
 export async function writeReport(report: HarnessReport, path: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(report, null, 2) + "\n", "utf8");
+}
+
+/**
+ * Write the captured rendered output of each step to golden files under
+ * `goldenDir` (PRD #439, user story #20). One file per step
+ * (`<NN>-<name>.txt`), zero-padded and ordered so the directory listing reads
+ * in run order. Each file holds the EXACT bytes the built CLI emitted to
+ * stdout then stderr — the same bytes a user and a TTY-blind agent see — so a
+ * change to user-facing output shows up as a reviewable diff under version
+ * control rather than silent drift.
+ *
+ * Determinism note: callers that golden these into the repo must run the CLI
+ * with stable env (`FORCE_COLOR=0`, `NO_COLOR=1`, `CI=1` — already forced by
+ * `runStep`) and against a committed snapshot, so the bytes are reproducible.
+ * Volatile tokens (absolute scratch paths, timestamps, durations) are NOT
+ * scrubbed here — that normalization, if needed for a clean diff, belongs to
+ * the gate/detector layer which owns the comparison policy. This helper is a
+ * faithful recorder, not a normalizer.
+ *
+ * Returns the absolute paths written, in step order, so a gate can diff them.
+ */
+export async function writeGoldenOutput(
+  captured: CapturedStep[],
+  goldenDir: string,
+): Promise<string[]> {
+  await mkdir(goldenDir, { recursive: true });
+  const written: string[] = [];
+  let i = 0;
+  for (const step of captured) {
+    const idx = String(i).padStart(2, "0");
+    const safeName = step.name.replace(/[^a-zA-Z0-9._-]+/g, "_");
+    const path = join(goldenDir, `${idx}-${safeName}.txt`);
+    // Header records provenance (command + exit) above a clear delimiter so a
+    // reviewer reads what produced these bytes without consulting the report.
+    const body =
+      `# command: ${step.command}\n` +
+      `# exit: ${step.exitCode}\n` +
+      `# --- stdout/stderr below; bytes are verbatim from the built CLI ---\n` +
+      step.combined;
+    await writeFile(path, body, "utf8");
+    written.push(path);
+    i += 1;
+  }
+  return written;
 }
