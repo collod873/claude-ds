@@ -382,6 +382,16 @@ export async function upgradeCmd(opts: {
     }
   }
 
+  // #349 F21: the applied-migration path must also close with a steering line
+  // — the already-current and no-chain branches above already do, but this
+  // tail printed none, leaving the most common upgrade with no verdict. The
+  // post-upgrade check is read-only `audit`, so #454 routes it as a `→ Verify:`
+  // tip. Gated like the sibling branches: not under --json, and suppressed when
+  // heal/front-door drives upgrade as an inner step and owns the verdict.
+  if (renderMode !== "json" && !opts.skipNextStep) {
+    printNextStep("upgrade", { upgradeOutcome: "applied" });
+  }
+
   if (opts.json) {
     emitUpgradeHeadless(
       HEADLESS_EXIT.OK,

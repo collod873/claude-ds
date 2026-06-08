@@ -158,12 +158,16 @@ describe("upgrade → Next breadcrumb (#349 F21)", () => {
     domain_roots: ["features", "lib"],
   };
 
-  it("upgrade with applied migrations prints a → Next breadcrumb after success", async () => {
+  it("upgrade with applied migrations prints a steering line after success", async () => {
     await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
     const r = await runCli(["upgrade", "--to", "v0.8.0", "--yes"], { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/upgrade complete → v0\.8\.0/);
-    expect(r.stdout).toMatch(/→ Next:/);
+    // #454: the post-upgrade check is read-only `audit`, so the applied tail's
+    // steering is a `→ Verify:` tip, not a `→ Next:` action — matching the
+    // sibling "already-current" case. The F21 mandate is "ends with a steering
+    // line", which this path previously violated (it printed none at all).
+    expect(r.stdout).toMatch(/→ Verify:/);
   });
 
   it("upgrade with no chain (already current) prints a steering line", async () => {
