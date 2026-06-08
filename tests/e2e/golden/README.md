@@ -35,6 +35,29 @@ the bytes a TTY-blind agent reads back from stdout/stderr — the headless
 contract is intact; the capture comes from the **same built CLI a user runs**,
 with no test-only rendering path.
 
+## Changing the output on purpose (`UPDATE_GOLDENS=1`)
+
+The friction gate **asserts** these committed goldens byte-for-byte on every run
+(#464). A run whose rendered output no longer matches a committed golden FAILS —
+the message names each stale file and shows a `-committed / +produced` line diff.
+This is what keeps the goldens from rotting: the artifact built to turn output
+changes into a reviewable diff is no longer subject to silent drift itself.
+
+So when you change user-facing output deliberately, the gate will (correctly)
+fail until you re-golden. The re-golden path:
+
+```
+UPDATE_GOLDENS=1 npm run e2e:friction
+```
+
+That writes the new bytes instead of asserting; then **review the diff and
+commit it** as part of the same change. Without `UPDATE_GOLDENS=1` the gate
+never writes these files, so a normal run can never silently overwrite a golden.
+
+> Re-goldening is a deliberate, reviewed act — never a reflex to make red go
+> green. If a golden changed and you didn't mean to change that output, the diff
+> is a real regression to fix, not a golden to bless.
+
 ## The interactive golden (`15-front-door-interactive.txt`)
 
 One step is the exception to "what a blind agent reads": the bare front door
@@ -59,8 +82,14 @@ gate's policy, applied before comparison. The harness is a faithful recorder.
 ## Producers and consumers
 
 - **Producer:** `writeGoldenOutput(captured, goldenDir)` in
-  `tests/e2e/harness.ts`, invoked automatically by `runE2eHarness` when
-  `goldenDir` is set.
+  `tests/e2e/harness.ts` writes these files; the friction gate only calls it on
+  the `UPDATE_GOLDENS=1` re-golden path. Both the writer and the asserter share
+  one renderer (`renderGoldenFiles`) so the bytes written can never disagree with
+  the bytes asserted.
+- **Asserter (the gate):** `assertGoldenOutput(captured, goldenDir)` compares the
+  run's rendered output against the committed files and the gate throws on any
+  mismatch (#464). Scoped to produced steps — a committed golden with no produced
+  step (e.g. the interactive one on a `script(1)`-less machine) is never flagged.
 - **Consumer (friction detector):** reads `report.captured: CapturedStep[]`
   (the in-memory projection — always populated, gate mode or not) and scans it
   with `scanFriction(captured, context)`.

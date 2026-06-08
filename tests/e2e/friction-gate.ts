@@ -44,7 +44,12 @@ import {
   type FrictionFinding,
   type NextStepRunResult,
 } from "../../src/lib/friction-detector.js";
-import { writeGoldenOutput, captureInteractive, normalizeScratchPath } from "./harness.js";
+import {
+  writeGoldenOutput,
+  assertGoldenOutput,
+  captureInteractive,
+  normalizeScratchPath,
+} from "./harness.js";
 
 /**
  * How many kind-less atoms the gate injects into the scratch copy to manufacture
@@ -246,10 +251,48 @@ export async function captureFrictionRun(
 
   if (opts.goldenDir) {
     await mkdir(opts.goldenDir, { recursive: true });
-    await writeGoldenOutput(steps, opts.goldenDir);
+    await reconcileGoldens(steps, opts.goldenDir);
   }
 
   return { steps, workDir: work };
+}
+
+/**
+ * Reconcile the run's rendered output against the COMMITTED goldens (#464).
+ *
+ * Default path — ASSERT byte-equality and throw on any mismatch, so a committed
+ * golden going stale fails the gate loudly instead of rotting undetected. The
+ * old behaviour wrote the goldens on every run and walked away: the artifact
+ * built to turn output changes into a reviewable diff was itself drifting
+ * silently (e.g. `6d368e7` reclassified five analyzer scripts, shifting `sync`'s
+ * summary, but never re-goldened `05-sync.txt` — the stale golden survived every
+ * test run until a human happened to notice the dirty file).
+ *
+ * Escape hatch — `UPDATE_GOLDENS=1` skips the assertion and PERSISTS the new
+ * bytes. This is the deliberate re-golden path: output changed on purpose? run
+ * with `UPDATE_GOLDENS=1` and commit the diff (see tests/e2e/golden/README.md).
+ */
+async function reconcileGoldens(steps: CapturedStep[], goldenDir: string): Promise<void> {
+  if (process.env.UPDATE_GOLDENS === "1") {
+    const written = await writeGoldenOutput(steps, goldenDir);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[friction-gate] UPDATE_GOLDENS=1 — wrote ${written.length} golden file(s); ` +
+        `review and commit the diff.`,
+    );
+    return;
+  }
+  const mismatches = await assertGoldenOutput(steps, goldenDir);
+  if (mismatches.length === 0) return;
+  const detail = mismatches
+    .map((m) => `  ${m.file} (${m.reason}):\n${m.diff}`)
+    .join("\n");
+  throw new Error(
+    `[friction-gate] committed golden output is stale — ${mismatches.length} file(s) no ` +
+      `longer match the CLI's rendered output (-committed / +produced):\n${detail}\n\n` +
+      `If the output changed on purpose, re-run with UPDATE_GOLDENS=1 and commit the diff ` +
+      `(see tests/e2e/golden/README.md).`,
+  );
 }
 
 /**

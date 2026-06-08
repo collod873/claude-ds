@@ -555,23 +555,110 @@ export async function writeGoldenOutput(
 ): Promise<string[]> {
   await mkdir(goldenDir, { recursive: true });
   const written: string[] = [];
-  let i = 0;
-  for (const step of captured) {
+  for (const { fileName, body } of renderGoldenFiles(captured)) {
+    const path = join(goldenDir, fileName);
+    await writeFile(path, body, "utf8");
+    written.push(path);
+  }
+  return written;
+}
+
+/** The committed name + full byte content of one step's golden file. */
+export interface GoldenFile {
+  /** `NN-<step>.txt` — zero-padded index keeps the dir listing in run order. */
+  fileName: string;
+  /** The full committed bytes: provenance header + verbatim combined output. */
+  body: string;
+}
+
+/**
+ * Render the committed golden representation of each captured step — the single
+ * source of truth for what bytes a golden holds, shared by the writer
+ * ({@link writeGoldenOutput}) and the asserter ({@link assertGoldenOutput}) so
+ * the two can never disagree on format. Pure: index → name → header → body, no
+ * I/O. The header records provenance (command + exit) above a clear delimiter so
+ * a reviewer reads what produced these bytes without consulting the report.
+ */
+export function renderGoldenFiles(captured: CapturedStep[]): GoldenFile[] {
+  return captured.map((step, i) => {
     const idx = String(i).padStart(2, "0");
     const safeName = step.name.replace(/[^a-zA-Z0-9._-]+/g, "_");
-    const path = join(goldenDir, `${idx}-${safeName}.txt`);
-    // Header records provenance (command + exit) above a clear delimiter so a
-    // reviewer reads what produced these bytes without consulting the report.
     const body =
       `# command: ${normalizeCommand(step.command)}\n` +
       `# exit: ${step.exitCode}\n` +
       `# --- stdout/stderr below; bytes are verbatim from the built CLI ---\n` +
       step.combined;
-    await writeFile(path, body, "utf8");
-    written.push(path);
-    i += 1;
+    return { fileName: `${idx}-${safeName}.txt`, body };
+  });
+}
+
+/** One committed golden that no longer matches the run's rendered output. */
+export interface GoldenMismatch {
+  /** Golden file name (`NN-<step>.txt`) that differs from what the run produced. */
+  file: string;
+  /** Why it differs — the committed file is absent, or its bytes don't match. */
+  reason: "missing" | "changed";
+  /** A compact line diff (`-` committed / `+` produced) for the failure message. */
+  diff: string;
+}
+
+/**
+ * Assert that each captured step's rendered output still matches its COMMITTED
+ * golden byte-for-byte, returning every mismatch (the empty array means all
+ * match). This closes the silent-drift gap (#464): {@link writeGoldenOutput}
+ * wrote the goldens on every gate run and walked away, so a committed golden
+ * could rot undetected — the artifact built to turn output changes into a
+ * reviewable diff was itself drifting silently.
+ *
+ * Scoped to the steps the run actually PRODUCED — it never flags a committed
+ * golden that has no corresponding produced step (an "orphan"). That keeps the
+ * interactive PTY step's graceful skip honest: on a `script(1)`-less machine the
+ * gate produces no `front-door-interactive` step, and its committed golden must
+ * NOT then read as a failure. Removing a step for good still needs its stale
+ * golden hand-deleted, same as a baseline key.
+ */
+export async function assertGoldenOutput(
+  captured: CapturedStep[],
+  goldenDir: string,
+): Promise<GoldenMismatch[]> {
+  const mismatches: GoldenMismatch[] = [];
+  for (const { fileName, body } of renderGoldenFiles(captured)) {
+    const path = join(goldenDir, fileName);
+    if (!existsSync(path)) {
+      mismatches.push({
+        file: fileName,
+        reason: "missing",
+        diff: lineDiff("", body),
+      });
+      continue;
+    }
+    const committed = await readFile(path, "utf8");
+    if (committed !== body) {
+      mismatches.push({ file: fileName, reason: "changed", diff: lineDiff(committed, body) });
+    }
   }
-  return written;
+  return mismatches;
+}
+
+/**
+ * Compact line diff for a golden mismatch message: `-` lines are the COMMITTED
+ * bytes, `+` lines are what the run PRODUCED. Caps at the first dozen diverging
+ * lines so a wholesale rewrite doesn't flood the failure output.
+ */
+function lineDiff(committed: string, produced: string): string {
+  const a = committed.split("\n");
+  const b = produced.split("\n");
+  const max = Math.max(a.length, b.length);
+  const out: string[] = [];
+  let shown = 0;
+  for (let i = 0; i < max && shown < 12; i++) {
+    if (a[i] === b[i]) continue;
+    if (a[i] !== undefined) out.push(`    -${a[i]}`);
+    if (b[i] !== undefined) out.push(`    +${b[i]}`);
+    shown += 1;
+  }
+  if (shown === 0) out.push("    (files differ only in trailing newline / length)");
+  return out.join("\n");
 }
 
 /**

@@ -18,6 +18,8 @@ import {
   parseTscOutput,
   writeReport,
   writeGoldenOutput,
+  assertGoldenOutput,
+  type CapturedStep,
   type HarnessReport,
 } from "../e2e/harness.js";
 
@@ -317,6 +319,53 @@ describe("e2e harness", () => {
     ]);
     const heal = await readFile(written[1], "utf8");
     expect(heal.endsWith("h-outh-err")).toBe(true);
+  });
+
+  // #464: the gate WRITES goldens, then must ASSERT them — otherwise a committed
+  // golden rots silently. These cover the asserter the gate now runs by default.
+  it("assertGoldenOutput returns no mismatches when committed goldens match", async () => {
+    const goldenDir = join(scratch, "golden-assert-clean");
+    const steps: CapturedStep[] = [
+      { name: "adopt", command: "cli adopt", exitCode: 0, stdout: "a-out", stderr: "", combined: "a-out" },
+      { name: "heal", command: "cli heal", exitCode: 0, stdout: "h-out", stderr: "", combined: "h-out" },
+    ];
+    await writeGoldenOutput(steps, goldenDir);
+    expect(await assertGoldenOutput(steps, goldenDir)).toEqual([]);
+  });
+
+  it("assertGoldenOutput flags a changed committed golden (silent drift)", async () => {
+    const goldenDir = join(scratch, "golden-assert-changed");
+    const steps: CapturedStep[] = [
+      { name: "sync", command: "cli sync", exitCode: 0, stdout: "37 in sync / 43 seeded", stderr: "", combined: "37 in sync / 43 seeded" },
+    ];
+    await writeGoldenOutput(steps, goldenDir);
+    // The CLI's output shifts (the #464 reclassification scenario) but the golden
+    // was never re-written — exactly the drift the asserter must catch.
+    const shifted: CapturedStep[] = [{ ...steps[0], stdout: "42 in sync / 38 seeded", combined: "42 in sync / 38 seeded" }];
+    const mismatches = await assertGoldenOutput(shifted, goldenDir);
+    expect(mismatches.map((m) => ({ file: m.file, reason: m.reason }))).toEqual([
+      { file: "00-sync.txt", reason: "changed" },
+    ]);
+    expect(mismatches[0].diff).toContain("-37 in sync / 43 seeded");
+    expect(mismatches[0].diff).toContain("+42 in sync / 38 seeded");
+  });
+
+  it("assertGoldenOutput flags a missing committed golden but ignores orphans", async () => {
+    const goldenDir = join(scratch, "golden-assert-missing");
+    // Commit a golden for a step that this run does NOT produce (an orphan, e.g.
+    // the interactive step on a script(1)-less machine) — it must NOT be flagged.
+    await writeGoldenOutput(
+      [{ name: "interactive", command: "cli", exitCode: 0, stdout: "x", stderr: "", combined: "x" }],
+      goldenDir,
+    );
+    // A produced step with no committed golden IS a mismatch (`missing`).
+    const produced: CapturedStep[] = [
+      { name: "adopt", command: "cli adopt", exitCode: 0, stdout: "new", stderr: "", combined: "new" },
+    ];
+    const mismatches = await assertGoldenOutput(produced, goldenDir);
+    expect(mismatches.map((m) => ({ file: m.file, reason: m.reason }))).toEqual([
+      { file: "00-adopt.txt", reason: "missing" },
+    ]);
   });
 
   it("parses tsc errors and reports one deviation per error", async () => {
