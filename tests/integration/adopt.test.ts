@@ -435,7 +435,9 @@ describe("adopt", () => {
 
     // sync with stdin "n" (decline to apply) is the proxy for "re-plan shows no pending changes".
     // It prints the plan preview then exits 0 after "aborted". CLAUDE.md should be "skip".
-    const sync = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "n\n" });
+    // --verbose so the per-file skip line is emitted (#450 collapses the
+    // skip wall to a count by default; the per-file verdict lives behind --verbose).
+    const sync = await runCli(["sync", "--verbose", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "n\n" });
     expect(sync.code).toBe(0);
     expect(sync.stdout).not.toMatch(/abort:.*CLAUDE\.md/);
     expect(sync.stdout).not.toMatch(/rewrite:.*CLAUDE\.md/);

@@ -285,7 +285,36 @@ interface DoctorResult {
   rootDupes?: RootDupeFinding[];
 }
 
-function renderMarkdown(result: DoctorResult): string {
+/**
+ * Bucket present managed-file paths into a small set of tiers for the collapsed
+ * count summary (#452). The full per-file `- [x]` checklist is a wall (~25 lines
+ * here, more on bigger consumers) that buries the verdict; default doctor shows
+ * this summary, `--verbose` restores the per-file list. Order is stable so the
+ * golden stays deterministic.
+ */
+function summarizePresentByTier(present: Finding[]): string[] {
+  const TIERS: { label: string; match: (p: string) => boolean }[] = [
+    { label: "design-system atoms", match: p => p.startsWith("design-system/atoms") },
+    { label: "design-system composites", match: p => p.startsWith("design-system/composites") },
+    { label: "design-system showcase routes", match: p => p.startsWith("app/design") },
+    { label: "design-system scaffold", match: p => p.startsWith("design-system/") },
+    { label: ".claude hooks", match: p => p.startsWith(".claude/hooks") },
+    { label: ".claude (other)", match: p => p.startsWith(".claude/") },
+  ];
+  const counts = new Map<string, number>();
+  const order: string[] = [];
+  for (const f of present) {
+    const tier = TIERS.find(t => t.match(f.canonical))?.label ?? "other managed files";
+    if (!counts.has(tier)) order.push(tier);
+    counts.set(tier, (counts.get(tier) ?? 0) + 1);
+  }
+  // Keep the declared tier order, then any "other" bucket last.
+  const declared = TIERS.map(t => t.label);
+  const ordered = [...declared.filter(l => counts.has(l)), ...order.filter(l => !declared.includes(l))];
+  return ordered.map(tier => `- [x] ${counts.get(tier)} ${tier}`);
+}
+
+function renderMarkdown(result: DoctorResult, verbose: boolean): string {
   const lines: string[] = [];
 
   if (result.mode === "pre-adopt") {
@@ -317,8 +346,13 @@ function renderMarkdown(result: DoctorResult): string {
 
     if (present.length > 0) {
       lines.push("### Already present\n");
-      for (const f of present) {
-        lines.push(`- [x] \`${f.canonical}\``);
+      if (verbose) {
+        for (const f of present) {
+          lines.push(`- [x] \`${f.canonical}\``);
+        }
+      } else {
+        lines.push(...summarizePresentByTier(present));
+        lines.push("(re-run with --verbose to list every file)");
       }
       lines.push("");
     }
@@ -348,8 +382,15 @@ function renderMarkdown(result: DoctorResult): string {
 
     if (present.length > 0) {
       lines.push("### Managed files present\n");
-      for (const f of present) {
-        lines.push(`- [x] \`${f.canonical}\``);
+      if (verbose) {
+        for (const f of present) {
+          lines.push(`- [x] \`${f.canonical}\``);
+        }
+      } else {
+        // #452: collapse the per-file `- [x] \`<path>\`` checklist (a repetition
+        // wall that buries the verdict) to a per-tier count. --verbose restores it.
+        lines.push(...summarizePresentByTier(present));
+        lines.push("(re-run with --verbose to list every file)");
       }
       lines.push("");
     }
@@ -527,7 +568,8 @@ function renderVerifyTable(results: HookVerifyResult[]): string {
   return lines.join("\n");
 }
 
-export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: string; verifyHooks?: boolean; completeness?: boolean; json?: boolean }): Promise<void> {
+export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: string; verifyHooks?: boolean; completeness?: boolean; json?: boolean; verbose?: boolean }): Promise<void> {
+  const verbose = opts.verbose ?? false;
   if (opts.completeness) {
     await runCompletenessCheck({ pack: opts.pack, cwd: opts.cwd });
     return;
@@ -708,7 +750,7 @@ export async function doctorCmd(opts: { pack?: string; ignore?: string; cwd?: st
   // DoctorResult shape. Non-JSON mode still emits the markdown checklist
   // here, byte-identical to today.
   if (!opts.json) {
-    process.stdout.write(renderMarkdown(result));
+    process.stdout.write(renderMarkdown(result, verbose));
   }
 
   // Exit 1 if any findings: lookalikes present, managed files missing, or root dupes detected (#23)

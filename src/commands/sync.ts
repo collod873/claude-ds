@@ -17,8 +17,9 @@ import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 
-export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean; skipVerifyGate?: boolean; skipNextStep?: boolean }) {
+export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean; verbose?: boolean; skipVerifyGate?: boolean; skipNextStep?: boolean }) {
   const cwd = opts.cwd ?? process.cwd();
+  const verbose = opts.verbose ?? false;
   if (opts.json) setJsonMode(true);
   try { await stat(join(cwd, ".claude-ds.json")); } catch {
     const m = ".claude-ds.json absent";
@@ -82,8 +83,29 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
   const decisions = planResult.outcome.decisions;
 
   // Render preview in the existing user-facing format (tests assert on these labels).
-  for (const d of decisions) {
-    info(`${d.displayAction}: ${d.displayPath} — ${d.verdict.reason}`);
+  // #450: by default the per-file `skip: <path> — …` lines are a ~40-line wall
+  // that buries the one `rewrite:` line that actually matters. Keep every
+  // action line (rewrite/create/abort/rewrite-region) visible; collapse the
+  // no-op `skip` decisions to a per-reason count. --verbose lists them all.
+  if (verbose) {
+    for (const d of decisions) {
+      info(`${d.displayAction}: ${d.displayPath} — ${d.verdict.reason}`);
+    }
+  } else {
+    const skips: typeof decisions = [];
+    for (const d of decisions) {
+      if (d.verdict.action === "skip") { skips.push(d); continue; }
+      info(`${d.displayAction}: ${d.displayPath} — ${d.verdict.reason}`);
+    }
+    if (skips.length > 0) {
+      const byReason = new Map<string, number>();
+      for (const d of skips) byReason.set(d.verdict.reason, (byReason.get(d.verdict.reason) ?? 0) + 1);
+      const breakdown = [...byReason.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([reason, n]) => `${n} ${reason}`)
+        .join(", ");
+      info(`skipped ${skips.length} file${skips.length === 1 ? "" : "s"} already in sync (${breakdown}) — re-run with --verbose to list them`);
+    }
   }
 
   // #18d: summarise whether .claude-ds.json config keys (aside from packVersion) will change.

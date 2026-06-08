@@ -42,8 +42,10 @@ describe("CLAUDE.md hybrid+markdown sync (fragment marker bug)", () => {
     const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
     expect(adopt.code).toBe(0);
 
-    // Now sync — CLAUDE.md is already in sync so it must skip, not abort
-    const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
+    // Now sync — CLAUDE.md is already in sync so it must skip, not abort.
+    // --verbose so the per-file skip line is emitted (#450 collapses the skip
+    // wall to a count by default; the per-file verdict lives behind --verbose).
+    const r = await runCli(["sync", "--verbose", "--offline-fixture", "packs/next-react"], { cwd: dir, stdin: "y\n" });
     expect(r.code).toBe(0);
     // Must NOT have aborted on CLAUDE.md
     expect(r.stdout).not.toMatch(/abort:.*CLAUDE\.md/);

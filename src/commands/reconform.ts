@@ -17,6 +17,25 @@ import { reviewExceptions } from "../lib/checks/exception-review.js";
 import { emitStubHint } from "../lib/reports/stub-warning.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 
+/**
+ * Bucket companion paths by their DS tier dir for the collapsed count summary
+ * (#449). `design-system/atoms/Foo.showcase.tsx` → `atoms`; anything outside a
+ * known tier dir falls back to its parent dir name so the count stays honest.
+ */
+function summarizeCompanionsByTier(paths: string[]): string {
+  const counts = new Map<string, number>();
+  for (const p of paths) {
+    const norm = p.replace(/\\/g, "/");
+    const m = norm.match(/design-system\/([^/]+)\//);
+    const tier = m ? m[1] : (norm.split("/").slice(-2, -1)[0] ?? "other");
+    counts.set(tier, (counts.get(tier) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([tier, n]) => `${n} ${tier}`)
+    .join(", ");
+}
+
 export async function reconformCmd(opts: {
   dryRun?: boolean;
   cwd?: string;
@@ -25,9 +44,16 @@ export async function reconformCmd(opts: {
   demoteComposites?: boolean;
   /** Bypass the clean-tree guard (PRD #325 / sub-issue #328). */
   allowDirty?: boolean;
+  /**
+   * Show the full generated source of every backfilled companion (#449).
+   * Default collapses the diff-style stub SOURCE wall — one ~8-line block per
+   * file, a brownfield repetition wall — to a per-tier count summary.
+   */
+  verbose?: boolean;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const dryRun = opts.dryRun ?? false;
+  const verbose = opts.verbose ?? false;
   const backfillMetaFlag = opts.backfillMeta ?? false;
   const fix = opts.fix ?? false;
   const demoteComposites = opts.demoteComposites ?? false;
@@ -99,13 +125,29 @@ export async function reconformCmd(opts: {
     // backfillCompanions runs unconditionally (companion creation is the default
     // reconform UX; only meta backfill is gated on --fix).
     progress.start("phase 2/8: claude-md + companion stubs");
-    const passA = await run(ctx, [migrateClaudeMd, backfillCompanions], mode);
+    // #449: by default suppress the Runner's per-file diff dump (the full stub
+    // SOURCE of each companion — a ~8-line block per file that walls the output
+    // on a brownfield tree). --verbose restores the verbatim source. migrateClaudeMd
+    // shares this batch but is a no-op in steady state, so quieting it costs nothing.
+    const passA = await run(ctx, [migrateClaudeMd, backfillCompanions], mode, { quiet: !verbose });
     const companionsCreated: string[] = [];
     for (const opRpt of passA.ops) {
       if (opRpt.name !== "backfill-companions") continue;
       for (const ch of opRpt.changes) if (ch.kind === "write") companionsCreated.push(join(cwd, ch.path));
     }
-    for (const p of companionsCreated) info(`${dryRun ? "[dry-run] would create" : c.green("created stub")}: ${p}`);
+    if (companionsCreated.length > 0) {
+      const verb = dryRun ? "[dry-run] would create" : c.green("created stub");
+      if (verbose) {
+        // Full per-file list (and, above, the Runner's full source dump).
+        for (const p of companionsCreated) info(`${verb}: ${p}`);
+      } else {
+        // #449: collapse the per-file wall to one per-tier count line. Full
+        // source + per-file list are behind --verbose.
+        const breakdown = summarizeCompanionsByTier(companionsCreated);
+        const n = companionsCreated.length;
+        info(`${verb}: ${n} companion stub${n === 1 ? "" : "s"} (${breakdown}) — re-run with --verbose to see the generated source`);
+      }
+    }
     progress.succeed("phase 2/8: claude-md + companion stubs");
 
     // Phase 3 — meta-export audit (always) + backfill (gated on --backfill-meta).

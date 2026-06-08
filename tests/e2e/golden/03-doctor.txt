@@ -7,32 +7,12 @@ Package manager: **npm**
 
 ### Managed files present
 
-- [x] `design-system/tokens.json`
-- [x] `design-system/contracts.md`
-- [x] `design-system/atoms`
-- [x] `design-system/composites`
-- [x] `design-system/references`
-- [x] `design-system/types`
-- [x] `design-system/icons`
-- [x] `design-system/hooks`
-- [x] `design-system/utils`
-- [x] `design-system/utils/force-state.css`
-- [x] `design-system/utils/portal-scope.module.css`
-- [x] `design-system/README.md`
-- [x] `design-system/exceptions.json`
-- [x] `design-system/failure-log.md`
-- [x] `.claude/hooks/lib/log-failure.sh`
-- [x] `.claude/hooks/README.md`
-- [x] `.claude/hooks/atom-imports.sh`
-- [x] `.claude/hooks/pre-write-ds-manifest.sh`
-- [x] `.claude/hooks/pre-write-ds-similarity.sh`
-- [x] `app/design/page.tsx`
-- [x] `app/design/layout.tsx`
-- [x] `app/design/_showcase-boundary.tsx`
-- [x] `app/design/_filter.tsx`
-- [x] `app/design/_theme-toggle.tsx`
-- [x] `app/design/[...slug]/page.tsx`
-- [x] `app/design/[...slug]/resolve.ts`
+- [x] 1 design-system atoms
+- [x] 1 design-system composites
+- [x] 7 design-system showcase routes
+- [x] 12 design-system scaffold
+- [x] 5 .claude hooks
+(re-run with --verbose to list every file)
 
 ### Exceptions: 0 open
 ## Verdict

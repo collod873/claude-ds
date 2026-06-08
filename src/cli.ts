@@ -166,8 +166,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--dry-run", "preview what sync would do without applying changes")
     .option("--allow-dirty", "bypass the clean-tree guard")
     .option("--json", "emit machine-readable headless contract (issue #408)")
-    .action(async (opts: { offlineFixture?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean }) => {
-      await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd, yes: opts.yes, dryRun: opts.dryRun, allowDirty: opts.allowDirty, json: opts.json });
+    .option("--verbose", "list every skipped file (default: collapse in-sync/seeded skips to a count)")
+    .action(async (opts: { offlineFixture?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean; verbose?: boolean }) => {
+      await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd, yes: opts.yes, dryRun: opts.dryRun, allowDirty: opts.allowDirty, json: opts.json, verbose: opts.verbose });
     });
 
   program
@@ -178,8 +179,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--verify-hooks", "invoke each pack-registered hook with a pass fixture and report results")
     .option("--completeness", "verify consumer has zero local DS infrastructure outside pack-managed scaffold")
     .option("--json", "emit machine output (suppresses the human markdown checklist)")
-    .action(async (opts: { pack?: string; ignore?: string; verifyHooks?: boolean; completeness?: boolean; json?: boolean }) => {
-      await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks, completeness: opts.completeness, json: opts.json, cwd: defaults.cwd });
+    .option("--verbose", "list every managed file present (default: per-tier count)")
+    .action(async (opts: { pack?: string; ignore?: string; verifyHooks?: boolean; completeness?: boolean; json?: boolean; verbose?: boolean }) => {
+      await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks, completeness: opts.completeness, json: opts.json, verbose: opts.verbose, cwd: defaults.cwd });
     });
 
   program
@@ -201,8 +203,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--fix", "write meta stubs and move misclassified files (requires --backfill-meta)")
     .option("--demote-composites", "also move composites with no DS imports back to atoms (requires --fix)")
     .option("--allow-dirty", "bypass the clean-tree guard")
-    .action(async (opts: { dryRun?: boolean; backfillMeta?: boolean; fix?: boolean; demoteComposites?: boolean; allowDirty?: boolean }) => {
-      await reconformCmd({ dryRun: opts.dryRun, backfillMeta: opts.backfillMeta, fix: opts.fix, demoteComposites: opts.demoteComposites, allowDirty: opts.allowDirty, cwd: defaults.cwd });
+    .option("--verbose", "show the full generated source of each backfilled companion (default: per-tier count)")
+    .action(async (opts: { dryRun?: boolean; backfillMeta?: boolean; fix?: boolean; demoteComposites?: boolean; allowDirty?: boolean; verbose?: boolean }) => {
+      await reconformCmd({ dryRun: opts.dryRun, backfillMeta: opts.backfillMeta, fix: opts.fix, demoteComposites: opts.demoteComposites, allowDirty: opts.allowDirty, verbose: opts.verbose, cwd: defaults.cwd });
     });
 
   program
