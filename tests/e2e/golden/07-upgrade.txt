@@ -1,5 +1,5 @@
 # command: node dist/cli.js upgrade --dry-run
 # exit: 0
 # --- stdout/stderr below; bytes are verbatim from the built CLI ---
-already at v1.5.3
+already at v1.6.0
 → Verify: run 'claude-ds audit' to check for drift

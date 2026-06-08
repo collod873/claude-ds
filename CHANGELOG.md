@@ -6,6 +6,39 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [1.6.0] — 2026-06-08
+
+Burns the PRD #439 friction baseline to **zero**: every friction point graded against the real Crewops snapshot — repeated per-file walls, dead-end `→ Next:` breadcrumbs, untranslated jargon, the `sync → heal` self-block — is now gone, and the committed baseline ratchet keeps it that way. The friction gate also grew eyes on the standalone command surface, not just the `adopt` journey. No migrations — a consumer pinned at v1.5.x runs zero migrations on upgrade.
+
+### Added
+- **`--verbose` on `reconform`, `sync`, and `doctor`** (#449, #450, #452). Each command now summarizes its per-file output by default (a count/tier summary) and restores the full per-file detail behind `--verbose`, mirroring the `heal` collapse from v1.5.2 (#448).
+- **Friction grading for the standalone command surface** (a33b894, 62d86c2). The gate now scores every command's rendered output — including `sync` and `enforce` — not only the commands on the `adopt` happy path.
+- **ADR-0022 — multi-part roles and the single-component runner limit** (#455). Records why the role-contract runner can't yet drive a multi-part headless-lib combobox (cmdk/base-ui), why broadening detection alone would be strictly worse, and defers the multi-part model to a tracked follow-up.
+
+### Changed
+- **Per-file output walls collapse to counts by default** (#449, #450, #452). `reconform`'s stub-source dump, `sync`'s `skip: … in sync` wall, and `doctor`'s managed-files checklist no longer bury the signal; action lines like `rewrite:` stay visible.
+- **`→ Next:` vs `→ Verify:` breadcrumb split** (#454). A `→ Next:` line is now a promise that running it advances the project toward clean; read-only checks (`audit`, "verify your build") are emitted as `→ Verify:` tips so they can't dead-end the consumer. The `upgrade` applied-migration path, which previously printed no steering line at all, now closes with a `→ Verify:` tip (#349 F21).
+- **`sync` steers into `heal --allow-dirty`** (#451). `sync` leaves managed writes in the tree; its suggested `heal` now carries the override `heal` already applies to its own inner steps, so the next step actually runs instead of refusing on the tree `sync` just wrote.
+- **`scaffold` is glossed for non-engineers** (#453). The term is defined inline on first use in CLI help and reworded to "managed files" in the dashboard, scorecard, and verify-gate output.
+- **Role-contract soft-skip reads honestly** (#455). The perpetually-dormant skip now names its limitation and points at ADR-0022 instead of looking like benign mid-rollout state.
+- **Friction baseline enforces a removal trigger per key** (#456). Every standing baseline key — not just newly-added ones — must carry a `_removal_triggers` entry, closing the gap the monotonic guard left open.
+
+### Fixed
+- **`upgrade` always ends with a verdict** (#349 F21). The applied-migration success path printed no steering line, leaving the most common upgrade without a closing breadcrumb.
+- **Friction self-block false positive** (#451). The detector misread a `Cannot find module` TypeScript diagnostic as a dirty-tree refusal; it now matches genuine dirty-tree refusals and requires the blocked step to run *after* the creator.
+- **Design catalog dead links** (2479daf). The `/design` catalog no longer ships dead links for showcase-less sub-parts.
+
+---
+
+## [1.5.3] — 2026-06-08
+
+A small follow-up to v1.5.2's friction-verification loop. No migrations.
+
+### Fixed
+- **`heal` ends without self-contradiction** (5a019b4). Inner-loop next-step breadcrumbs are silenced so `heal`'s final "✓ Tree is clean" verdict isn't undercut by a per-step suggestion to run a command the loop already auto-runs.
+
+---
+
 ## [1.5.2] — 2026-06-08
 
 Closes the friction-verification loop so "closed but not fixed" becomes machine-checkable. The real CLI output through `adopt → heal → audit --fix` is now a committed, gated artifact: a friction detector parses rendered terminal output, a baseline ratchet enforces that friction can only go down, and golden snapshots pin the human-facing shape so sanitization can't silently drop it. No migrations — a consumer pinned at v1.5.1 runs zero migrations on upgrade.

@@ -1,4 +1,4 @@
 # command: node dist/cli.js init --pack next-react --yes
 # exit: 0
 # --- stdout/stderr below; bytes are verbatim from the built CLI ---
-initialized claude-ds (next-react @ v1.5.3, mode=block)
+initialized claude-ds (next-react @ v1.6.0, mode=block)
