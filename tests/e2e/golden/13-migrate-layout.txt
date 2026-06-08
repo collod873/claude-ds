@@ -1,0 +1,5 @@
+# command: node dist/cli.js migrate-layout
+# exit: 0
+# --- stdout/stderr below; bytes are verbatim from the built CLI ---
+nothing to migrate
+→ Next: run 'claude-ds heal' to converge the project to clean

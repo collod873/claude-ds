@@ -68,6 +68,14 @@ export interface CapturedStep {
   stdout: string;
   stderr: string;
   combined: string;
+  /**
+   * The tree this step ran against. Optional: most steps share the one post-run
+   * tree, but a step captured on its own scratch copy (a first-run `greet`, a
+   * greenfield `init`, a `git`-seeded `migrate-layout`) records its own dir so
+   * the `next-step-dead-end` liveness runner executes that step's `→ Next:`
+   * suggestion against the SAME tree it was printed on, not the shared one.
+   */
+  workDir?: string;
 }
 
 /**
@@ -157,7 +165,12 @@ function ruleSelfContradiction(input: ScanInput): FrictionFinding[] {
     if (!pm) continue;
     const path = pm[1];
     const neg = NEG.test(line);
-    const pos = POS.test(line);
+    // A line counts as positive only when it is NOT also negative: a phrase like
+    // "no .claude-ds.json found" matches both the negative "no…found" shape and
+    // the bare "found" positive, yet it is a single self-consistent (negative)
+    // statement. Letting negative win stops one line from contradicting itself —
+    // a real contradiction needs a negative line AND a separate positive line.
+    const pos = POS.test(line) && !neg;
     if (!neg && !pos) continue;
     const e = polarity.get(path) ?? { neg: false, pos: false, lines: [] };
     if (neg) e.neg = true;

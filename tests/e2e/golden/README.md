@@ -3,11 +3,16 @@
 This directory is the committed home for the **rendered terminal output** of
 the e2e gate's command steps. The harness's gate mode (`runE2eHarness({ …,
 goldenDir })`) writes one file per step here, named `NN-<step>.txt` in run
-order. The graded sequence is `adopt → heal → audit --fix → doctor →
-classify --dry-run → sync --dry-run → reconcile --dry-run → upgrade --dry-run →
-version --offline → enforce → front door` (`00-adopt.txt` … `10-front-door.txt`),
-plus the interactive front-door capture appended last
-(`11-front-door-interactive.txt`).
+order. The graded sequence is the post-adopt journey on a shared tree
+(`adopt → heal → audit --fix → doctor → classify --dry-run → sync --dry-run →
+reconcile --dry-run → upgrade --dry-run → version --offline → enforce →
+reconform --dry-run`), then alternate-tree captures on their own fresh copies
+(`greet` pre-adopt, greenfield `init`, git-seeded `migrate-layout`), then the
+bare `front door`, with the interactive front-door capture appended last
+(`00-adopt.txt` … `14-front-door.txt`, `15-front-door-interactive.txt`).
+
+A `setup-adopt` step name may appear inside an alternate-tree capture's
+provenance; those setup runs are not goldened — only the named command is.
 
 ## What's in a golden file
 
@@ -30,7 +35,7 @@ the bytes a TTY-blind agent reads back from stdout/stderr — the headless
 contract is intact; the capture comes from the **same built CLI a user runs**,
 with no test-only rendering path.
 
-## The interactive golden (`11-front-door-interactive.txt`)
+## The interactive golden (`15-front-door-interactive.txt`)
 
 One step is the exception to "what a blind agent reads": the bare front door
 captured through a **pseudo-terminal** so the CLI takes its `isTTY()` path

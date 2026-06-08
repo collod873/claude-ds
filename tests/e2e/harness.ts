@@ -739,16 +739,30 @@ function shellQuote(s: string): string {
  *    from the `mkdtemp` path we hold.
  */
 export function normalizePtyCapture(raw: string, cwd: string): string {
+  const s = raw
+    .replace(/\r\n?/g, "\n") // PTY CRLF / lone CR → LF
+    .replace(/\^D\x08*/g, "") // terminal EOF echo: ^D then erasing backspaces
+    .replace(/\x04/g, ""); // raw EOT byte (other PTY flavours)
+  return normalizeScratchPath(s, cwd);
+}
+
+/**
+ * Rewrite every occurrence of a step's scratch `cwd` (and its realpath — macOS
+ * resolves `/tmp`→`/private/tmp` and `/var`→`/private/var`) to the stable token
+ * `<project>`. Commands that never echo their working directory are unaffected
+ * (the replace is a no-op), so this is safe to apply to every captured step; it
+ * only bites the commands that DO print absolute paths (e.g. `reconform`'s
+ * planned-file list), which would otherwise make their golden non-reproducible
+ * across machines and runs.
+ */
+export function normalizeScratchPath(text: string, cwd: string): string {
   let real = cwd;
   try {
     real = realpathSync(cwd);
   } catch {
     /* tree already gone — fall back to the literal path */
   }
-  let s = raw
-    .replace(/\r\n?/g, "\n") // PTY CRLF / lone CR → LF
-    .replace(/\^D\x08*/g, "") // terminal EOF echo: ^D then erasing backspaces
-    .replace(/\x04/g, ""); // raw EOT byte (other PTY flavours)
+  let s = text;
   for (const p of new Set([real, cwd])) {
     if (p) s = s.split(p).join("<project>");
   }

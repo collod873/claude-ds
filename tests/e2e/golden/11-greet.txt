@@ -1,0 +1,5 @@
+# command: node dist/cli.js
+# exit: 2
+# --- stdout/stderr below; bytes are verbatim from the built CLI ---
+claude-ds needs you: decision "first-run-onramp" — Organize your existing components (adopt) or start fresh (init)?
+Re-run with --answers <file> mapping "first-run-onramp" to 0 (adopt) or 1 (init).
