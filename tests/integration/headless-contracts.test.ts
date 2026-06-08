@@ -207,6 +207,30 @@ describe("headless contract — heal", () => {
     expect(result.ok).toBe(false);
     expect(result.verdict).toBe("error");
   });
+
+  it("--dry-run --json on converged tree exits 0 with verdict='clean' (issue #416 — Crewops tripwire signal)", async () => {
+    const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(adopt.code).toBe(0);
+    const r = await runCli(["heal", "--dry-run", "--json"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const result = parseJsonOutput(r.stdout);
+    expect(result.command).toBe("heal");
+    expect(result.ok).toBe(true);
+    expect(result.verdict).toBe("clean");
+    // The planner produced an empty plan — the dry-run reports it on
+    // `actions.plan` so the tripwire's divergence check can compare it
+    // field-by-field against the fixture's payload.
+    expect((result.actions as { plan?: unknown }).plan).toEqual([]);
+  });
+
+  it("--dry-run --json without .claude-ds.json exits 2 (env error)", async () => {
+    const r = await runCli(["heal", "--dry-run", "--json"], { cwd: dir });
+    expect(r.code).toBe(2);
+    const result = parseJsonOutput(r.stdout);
+    expect(result.command).toBe("heal");
+    expect(result.ok).toBe(false);
+    expect(result.verdict).toBe("error");
+  });
 });
 
 describe("headless contract — classify", () => {

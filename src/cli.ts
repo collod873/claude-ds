@@ -247,8 +247,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--allow-dirty", "bypass the clean-tree guard (top-level + sub-command propagation)")
     .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0016) — resolves Pending decisions from a prior heal run")
     .option("--json", "emit machine-readable headless contract (issue #408)")
-    .action(async (opts: { maxIterations?: number; allowDirty?: boolean; answers?: string; json?: boolean }) => {
-      await healCmd({ maxIterations: opts.maxIterations, allowDirty: opts.allowDirty, answers: opts.answers, json: opts.json, cwd: defaults.cwd });
+    .option("--dry-run", "plan the remediation walk without running anything (issue #416 — pairs with --json for the Crewops tripwire)")
+    .action(async (opts: { maxIterations?: number; allowDirty?: boolean; answers?: string; json?: boolean; dryRun?: boolean }) => {
+      await healCmd({ maxIterations: opts.maxIterations, allowDirty: opts.allowDirty, answers: opts.answers, json: opts.json, dryRun: opts.dryRun, cwd: defaults.cwd });
     });
 
   return program;
