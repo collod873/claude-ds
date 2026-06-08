@@ -151,8 +151,14 @@ function stepHeader(step: LoopStep, ctx: ProjectContext, counts: GateFindingCoun
  * plan so the "what you approve" set equals the "what runs" set.
  */
 export interface CascadeDisclosure {
-  /** Human-readable line shown in the preview under the upgrade step. */
+  /** Human-readable line shown in the preview under the origin step. */
   message: string;
+  /** The loop step whose execution flips the driving flag — the disclosure
+   *  renders under this step's header. Today only `upgrade` flips
+   *  `meta_kind_strict`; carried explicitly so a future flag-flipping migration
+   *  that runs under a different step (e.g. a post-upgrade `repair` re-flip)
+   *  attaches its disclosure to the right header without changing the matcher. */
+  originStep: LoopStep;
   /** The loop step the flip drives — appended to the announced plan if absent. */
   triggeredStep: LoopStep;
   /** Number of files the flip rewrites — feeds the triggered step's header count. */
@@ -236,6 +242,7 @@ export async function projectFullPlan(
         const noun = n === 1 ? "file" : "files";
         cascades.push({
           message: `meta_kind_strict: false → true → backfills meta.kind across ${n} ${noun}`,
+          originStep: "upgrade",
           triggeredStep: "audit --fix",
           affectedFiles: n,
         });
@@ -296,25 +303,13 @@ export async function buildCommitmentGate(
     // Blast-radius disclosure (#413): cascades that fire from THIS step's
     // execution. Today only `upgrade` drives a flag-flip cascade, but the
     // projection model is per-step — when a future cascade lands on `sync` or
-    // `repair`, the same loop renders it under its origin.
+    // `repair`, the same loop renders it under its origin via `originStep`.
     for (const c of cascades) {
-      if (cascadeOrigin(c, step)) {
+      if (c.originStep === step) {
         lines.push(`    ${c.message}`);
       }
     }
   }
 
   return lines;
-}
-
-/**
- * Tag each cascade to the loop step whose execution flips its driving flag.
- * Today the only cascade is `meta_kind_strict`, set by the v0.9.0 migration
- * Op `meta-kind-hard` whose Op runs under `upgrade`. Kept as a tiny matcher so
- * a future flag-flipping migration that runs under a different step (e.g. a
- * post-upgrade `repair` re-flip) attaches its disclosure to the right header.
- */
-function cascadeOrigin(c: CascadeDisclosure, step: LoopStep): boolean {
-  if (c.triggeredStep === "audit --fix" && step === "upgrade") return true;
-  return false;
 }
