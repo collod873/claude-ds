@@ -165,4 +165,134 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
     expect(r.code).toBe(0);
     expect(r.stdout).not.toMatch(/→ Next:/);
   });
+
+  // #363: five unexercised commands all skipped the breadcrumb on at least one
+  // completion path. Tests below pin every path that should now end with → Next.
+
+  it("version (default, offline, pinned == installed) prints → Next: with audit", async () => {
+    const { default: pkg } = await import("../../package.json", { with: { type: "json" } });
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: `v${pkg.version}`, pack: "next-react", mode: "warn" }),
+    );
+    const r = await runCli(["version", "--offline"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds audit/);
+  });
+
+  it("version (default, offline, pinned < installed) routes → Next: to upgrade", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v0.1.0", pack: "next-react", mode: "warn" }),
+    );
+    const r = await runCli(["version", "--offline"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds upgrade/);
+  });
+
+  it("version (default, no .claude-ds.json) routes → Next: to adopt", async () => {
+    const r = await runCli(["version", "--offline"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds adopt/);
+  });
+
+  it("version --check (up to date) prints → Next: with audit", async () => {
+    const { default: pkg } = await import("../../package.json", { with: { type: "json" } });
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: `v${pkg.version}`, pack: "next-react", mode: "warn" }),
+    );
+    const r = await runCli(["version", "--check"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds audit/);
+  });
+
+  it("version --check (behind) prints → Next: with upgrade", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v0.1.0", pack: "next-react", mode: "warn" }),
+    );
+    const r = await runCli(["version", "--check"], { cwd: dir });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds upgrade/);
+  });
+
+  it("version --check (no .claude-ds.json) routes → Next: to adopt", async () => {
+    const r = await runCli(["version", "--check"], { cwd: dir });
+    // Exits non-zero (no config to check), but still terminates with a breadcrumb.
+    expect(r.code).not.toBe(0);
+    const combined = r.stdout + r.stderr;
+    expect(combined).toMatch(/→ Next:.*claude-ds adopt/);
+  });
+
+  it("migrate-layout (nothing to migrate) prints → Next:", async () => {
+    const { execFile: execFileCb } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFile = promisify(execFileCb);
+    await execFile("git", ["init"], { cwd: dir });
+    await execFile("git", ["config", "user.email", "t@t"], { cwd: dir });
+    await execFile("git", ["config", "user.name", "t"], { cwd: dir });
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/tokens.json"), "{}");
+    await writeFile(join(dir, "design-system/contracts.md"), "# contracts");
+    await execFile("git", ["add", "design-system/tokens.json", "design-system/contracts.md"], { cwd: dir });
+    await execFile("git", ["commit", "-m", "seed"], { cwd: dir });
+
+    const r = await runCli(["migrate-layout", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/nothing to migrate/);
+    expect(r.stdout).toMatch(/→ Next:/);
+  });
+
+  it("reconform prints → Next: with audit on apply", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }),
+    );
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({ exceptions: [] }));
+    const r = await runCli(["reconform"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds audit/);
+  });
+
+  it("reconform --dry-run prints → Next:", async () => {
+    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+    await mkdir(join(dir, "design-system/composites"), { recursive: true });
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }),
+    );
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({ exceptions: [] }));
+    const r = await runCli(["reconform", "--dry-run"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/→ Next:/);
+  });
+
+  it("enforce (flipped warn→block) prints → Next: with audit", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn", enforce_threshold: 2 }),
+    );
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({ exceptions: [] }));
+    const r = await runCli(["enforce", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/mode flipped to block/);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds audit/);
+  });
+
+  it("enforce (already in block mode) prints → Next: with audit", async () => {
+    await writeFile(
+      join(dir, ".claude-ds.json"),
+      JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "block", enforce_threshold: 2 }),
+    );
+    await mkdir(join(dir, "design-system"), { recursive: true });
+    await writeFile(join(dir, "design-system/exceptions.json"), JSON.stringify({ exceptions: [] }));
+    const r = await runCli(["enforce", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/already in block mode/i);
+    expect(r.stdout).toMatch(/→ Next:.*claude-ds audit/);
+  });
 });
