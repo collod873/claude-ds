@@ -6,6 +6,13 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [1.5.1] — 2026-06-08
+
+### Fixed
+- **`meta.kind`/`meta.role` checker and fixer can no longer disagree** (#438, completing #409's root cause). v1.5.0 fixed the *fixer* (`mergeMetaKind`) to walk balanced braces but left the *checker* and the "missing meta.kind" counter on a naive `[^}]*` regex that stops at the first nested `}`. Any meta whose `kind` sat after a nested brace (`examples: [{…}]`, or fields ordered before `kind`) read as **missing** to the checker while the brace-aware fixer correctly no-op'd — so `audit --fix` looped `0 fixed / N deferred` forever and never converged (the Crewops "90 unfixable findings" symptom). All three now route through one shared brace-aware parser (`src/lib/meta-source.ts`), making disagreement structurally impossible. The identical latent flaw in `metaRoleFromSource` is fixed in the same pass.
+
+---
+
 ## [1.5.0] — 2026-06-08
 
 The complete delivery of PRD #407: make claude-ds **verification-first** so nothing — no command verdict, no release tag — claims success unless a real consumer tree actually verifies green. The whole A1–C4 defect cluster that was *claimed fixed across v1.0.0→v1.4.0 yet still live in source* is now closed and **proven against a real consumer**, not asserted against unit tests.
