@@ -6,6 +6,38 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ---
 
+## [1.4.0] — 2026-06-07
+
+The five previously-unexercised commands (`version`, `migrate`, `migrate-layout`, `reconform`, `enforce`) now feel like the same product as the front door instead of a different one. Probing them under PRD #340 surfaced a cluster of friction — no next-step breadcrumb, monochrome output, silent no-ops, inconsistent exit codes and verbs — all now closed. Alongside that, the AFK agent pipeline and release tooling got more robust: an implement run can no longer silently lose work to the harness idle-timeout, and a forgotten version bump now fails loud instead of quietly stranding `main` unreleased. No migration set — a consumer pinned at v1.3.1 runs zero migrations on upgrade.
+
+### Added
+- **`→ Next:` breadcrumb on every command** (#399, #387, #388). `version`, `migrate-layout`, `reconform`, and `enforce` now print the next-step breadcrumb CONTEXT.md mandates, so the consumer never has to consult the README between commands.
+- **TTY-gated color for the unexercised commands** (#400). `info()` / `err()` route through the same picocolors adapter the front door uses — colored phase headers and verdict lines on a real TTY, plain text when piped.
+
+### Changed
+- **`version --check` clarified** (#395, closing #356/#357/#367/#368). Sharper verb, corrected CHANGELOG path, unified vocabulary, and remote-lookup failures are now surfaced instead of swallowed.
+- **`reconform` exit-code protocol** (#397). Honest exit codes, no more silent no-ops, and a stub hint when there's nothing to do.
+- **`enforce` honors permanent exceptions** (#393) and surfaces recovery guidance on a no-op or gate refusal instead of an opaque exit.
+- **`migrate-layout` drops auto-commit** (#388, closing #359) and branches its next-step on `ctx.kind`.
+- **`migrate` gains `--issue`** and no longer registers a spurious `DRIFT-MISPLACED` exception (#390).
+- **`confirm()` fails loud on a non-TTY** (#392) instead of a silent exit-0 abort.
+
+### Fixed
+- **Implement agent no longer silently loses work on idle-timeout** (#381). The implement prompt forbids the background+busy-wait pattern that starved the harness idle-timeout (a 600s silent gap killed the run before its commits were pushed); the workflow now also pushes committed work even when the implement step fails, so a future stall can't strand work on the runner.
+- **Remediation distinguishes classify-relocatable from unresolvable drift** (#398), so the loop relocates what it can instead of giving up.
+- **`adopt` seeds `meta_kind_strict`** (#396) so a fresh adopt lands at the convergence fixed point.
+- **`migrate-layout` rejects extension mismatches** in lookalike detection (#394).
+- **`migrate` gives a friendly error for a missing source path** (#386, closing #360).
+
+### CI / tooling
+- **Forgot-to-bump detector + fail-loud auto-tag** (#391). A `feat`/`fix` landing on `main` without a `package.json` bump now fails loudly instead of leaving `main` silently unreleased.
+- **README install examples auto-pin on release** (#383), so the pinned `#vX.Y.Z` install command can't lag a version behind.
+
+### Refactor
+- **Consolidated four divergent build-output denylists** (#389, closing #385) into one, so a Vite/Nuxt consumer can't re-trigger the snapshot OOM class fixed in v1.3.1.
+
+---
+
 ## [1.3.1] — 2026-06-07
 
 Patch: fixes a release-blocking out-of-memory crash that hit any real consumer on the very first remediation iteration. The fix is a one-directory-set change in the convergence detector — no behavior change for clean trees, no migration set.
