@@ -58,3 +58,23 @@ jobs:
           name: e2e-report
           path: e2e-report.json
           if-no-files-found: warn
+
+      - name: Self-correcting loop — file follow-up from red gate (issue #416)
+        # When the smoke gate goes red on a PR, route the harness output
+        # through the self-correcting loop module so breakage strings new
+        # work into GitHub automatically instead of dead-ending. The module
+        # dedupes against the existing auto-filed queue, escalates clusters
+        # to a PRD, and stops + escalates to Collin after N=2 consecutive
+        # unproductive rounds (acceptance criteria, PRD #407).
+        #
+        # Gates on `failure()` so a green gate never spawns issue churn,
+        # and on `pull_request` so a red `push` to main (which has its own
+        # release-issue path in auto-tag.yml) doesn't double-file.
+        if: failure() && github.event_name == 'pull_request' && hashFiles('e2e-report.json') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          HARNESS_REPORT: e2e-report.json
+          SOURCE_PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: npx tsx .sandcastle/self-correcting-loop/file-followup.ts
