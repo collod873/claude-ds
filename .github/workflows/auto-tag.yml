@@ -182,18 +182,18 @@ jobs:
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           title="release: auto-tag failed for ${tag} (${short_sha})"
           body=$(cat <<EOF
-\`auto-tag.yml\` failed during a release attempt.
+          \`auto-tag.yml\` failed during a release attempt.
 
-- **Intended tag**: \`${tag}\`
-- **Version**: \`${version}\`
-- **Commit**: \`${GITHUB_SHA}\`
-- **Workflow run**: ${run_url}
+          - **Intended tag**: \`${tag}\`
+          - **Version**: \`${version}\`
+          - **Commit**: \`${GITHUB_SHA}\`
+          - **Workflow run**: ${run_url}
 
-Likely cause: the test gate or ADR-0011 verification gate failed before \`Tag and push\`. Open the run log, fix forward on \`main\`, and push again — \`auto-tag.yml\` will retry on the next push.
+          Likely cause: the test gate or ADR-0011 verification gate failed before \`Tag and push\`. Open the run log, fix forward on \`main\`, and push again — \`auto-tag.yml\` will retry on the next push.
 
-Auto-opened by \`.github/workflows/auto-tag.yml\` (#383). Close when fixed.
-EOF
-)
+          Auto-opened by \`.github/workflows/auto-tag.yml\` (#383). Close when fixed.
+          EOF
+          )
           # If the issue can't be opened (transient API hiccup, permission
           # drift), surface a workflow warning instead of swallowing the
           # error — better noisy than silent (the whole point of this step).
