@@ -49,6 +49,21 @@ describe("next-react manifest", () => {
     expect(pkg?.owned_keys).toContain("devDependencies");
   });
 
+  // #411 (PRD #407 / A3): the scaffolded role-contracts.test.tsx uses
+  // import.meta.glob, a Vite-only ImportMeta augmentation. The pack must ship a
+  // self-contained ambient .d.ts so the scaffold typechecks under the
+  // consumer's plain tsc without vite/client. Pack-managed so sync re-asserts
+  // it and a consumer's hand-edit can't drift it back to broken.
+  it("ships a managed ambient ImportMeta.glob declaration in the contracts scaffold", async () => {
+    const raw = await readFile("packs/next-react/manifest.json", "utf8");
+    const m = parseManifest(raw);
+    const ambient = m.files.find(
+      (f) => f.path === "design-system/contracts/import-meta-glob.d.ts",
+    );
+    expect(ambient).toBeDefined();
+    expect(ambient?.category).toBe("managed");
+  });
+
   it("package.json.seed ships the test devDeps the seeded test files import", async () => {
     const seed = JSON.parse(await readFile("packs/next-react/files/package.json.seed", "utf8"));
     // vitest.setup.ts imports @testing-library/jest-dom/vitest and @testing-library/react.
