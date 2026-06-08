@@ -33,9 +33,8 @@ import {
   runMigrations,
 } from "./migration-framework.js";
 import { MIGRATION_REGISTRY } from "./migration-registry.js";
-import { checkVersionCurrency } from "./version-currency.js";
+import { cliVersion, upgradeHeadline } from "./version-vocab.js";
 import type { LoopStep } from "./remediation-planner.js";
-import pkg from "../../package.json" with { type: "json" };
 
 /**
  * Real finding counts the planner's finding-driven steps respond to. Folded by
@@ -86,7 +85,7 @@ async function previewStepChanges(
     }
     case "upgrade": {
       const from = ctx.cfg.packVersion;
-      const to = `v${pkg.version}`;
+      const to = cliVersion();
       const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
       if (chain.length === 0) return [];
       const report = await runMigrations(ctx, chain, "dry-run", { quiet: true });
@@ -108,12 +107,16 @@ async function previewStepChanges(
 function stepHeader(step: LoopStep, ctx: ProjectContext, counts: GateFindingCounts): string {
   switch (step) {
     case "upgrade": {
+      // Issue #412: route every upgrade headline through `upgradeHeadline` so
+      // an empty chain cannot render `pack X → Y`. The previous header was
+      // synthesised from `(packVersion, pkg.version)` alone — when the CLI
+      // was ahead but no migrations spanned the gap, it falsely promised a
+      // migration while the body printed `(no file changes — version pin
+      // only)`.
       const from = ctx.cfg.packVersion;
-      const to = `v${pkg.version}`;
-      const stale = checkVersionCurrency({ pinned: from, installed: to }).upgradeAvailable;
-      return stale
-        ? `upgrade — pack ${from} → ${to}`
-        : `upgrade — verify migration end-states`;
+      const to = cliVersion();
+      const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
+      return `upgrade — ${upgradeHeadline({ from, to, chainLength: chain.length })}`;
     }
     case "sync":
       return "sync — restore managed scaffold files";
