@@ -171,6 +171,15 @@ export async function upgradeCmd(opts: {
    * extra runs per heal iteration.
    */
   skipVerifyGate?: boolean;
+  /**
+   * Suppress the terminal `→ Next` breadcrumb. The remediation driver passes
+   * this when running upgrade as an inner loop step: heal/front-door owns the
+   * single authoritative verdict at convergence ("✓ Tree is clean"), so a
+   * per-step breadcrumb that names `audit` contradicts it and tells the
+   * operator to run a step the loop already auto-runs (the C2/#414 defect this
+   * closes for the upgrade path).
+   */
+  skipNextStep?: boolean;
   cwd?: string;
 }) {
   const cwd = opts.cwd ?? process.cwd();
@@ -212,7 +221,7 @@ export async function upgradeCmd(opts: {
     // #349 F21: every command ends with a → Next breadcrumb. #344's render
     // policy suppresses all human output under --json, so gate the breadcrumb
     // on the same renderMode rather than emitting it into the JSON surface.
-    if (renderMode !== "json") {
+    if (renderMode !== "json" && !opts.skipNextStep) {
       printNextStep("upgrade", { upgradeOutcome: drifted > 0 ? "repaired" : "no-op" });
     }
     if (opts.json) {
@@ -233,7 +242,7 @@ export async function upgradeCmd(opts: {
     humanLog(`no registered migrations between ${from} and ${to}`);
     humanLog(`pack is at ${from}`);
     const drifted = await verifyEndStates(ctx, from, { ...opts, renderMode, jsonAccumulator });
-    if (renderMode !== "json") {
+    if (renderMode !== "json" && !opts.skipNextStep) {
       printNextStep("upgrade", { upgradeOutcome: drifted > 0 ? "repaired" : "no-op" });
     }
     if (opts.json) {
@@ -321,7 +330,7 @@ export async function upgradeCmd(opts: {
   // produced (PRD #325 / sub-issue #328). `skipVerifyGate: true` because the
   // outer upgrade runs the verify gate below — one tsc invocation per
   // command surface, not two (#410).
-  await syncCmd({ cwd, yes: opts.yes, allowDirty: true, skipVerifyGate: true });
+  await syncCmd({ cwd, yes: opts.yes, allowDirty: true, skipVerifyGate: true, skipNextStep: true });
 
   // Regenerate manifest.generated.ts — migrations may delete it (e.g.
   // manage-manifest@v0.9.0) and the PostToolUse hook won't fire until the

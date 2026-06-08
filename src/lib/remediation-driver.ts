@@ -154,13 +154,16 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
     case "repair":
       // Issue #410: heal owns the final verify gate at convergence — running
       // it inside every inner step would mean N extra tsc invocations per
-      // heal iteration.
+      // heal iteration. `skipNextStep` likewise: the driver's caller owns the
+      // single authoritative verdict ("✓ Tree is clean"), so an inner step's
+      // `→ Next` breadcrumb would contradict it and send the operator to run a
+      // step the loop already auto-runs (the C2/#414 defect this closes).
       return runWithoutExit(() =>
-        upgradeCmd({ cwd, yes: true, allowDirty: true, skipVerifyGate: true }),
+        upgradeCmd({ cwd, yes: true, allowDirty: true, skipVerifyGate: true, skipNextStep: true }),
       );
     case "sync":
       return runWithoutExit(() =>
-        syncCmd({ cwd, yes: true, allowDirty: true, skipVerifyGate: true }),
+        syncCmd({ cwd, yes: true, allowDirty: true, skipVerifyGate: true, skipNextStep: true }),
       );
     case "classify":
       return runWithoutExit(() =>
@@ -170,6 +173,7 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
           allowDirty: true,
           answers,
           pendingSink,
+          skipNextStep: true,
         }),
       );
     case "audit --fix":
@@ -181,6 +185,7 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
           answers,
           pendingSink,
           skipVerifyGate: true,
+          skipNextStep: true,
         }),
       );
     case "migrate-layout":

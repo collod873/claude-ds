@@ -300,6 +300,36 @@ export function SoloLabel() { return <span />; }
     const card = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
     expect(card).not.toContain("padding: 12");
   }, 60000);
+
+  it("inner loop steps emit no `→ Next` breadcrumb when the front door drives to clean", async () => {
+    // Regression for the contradictory-output defect: a stale-pin clean tree
+    // healed to "✓ Tree is clean" but the inner `upgrade` step still printed
+    // "→ Next: run 'claude-ds audit'" — sending the operator to run a step the
+    // loop already auto-ran (the C2/#414 defect, leaked through upgrade). The
+    // driver now passes `skipNextStep: true` to every inner step; the front
+    // door owns the single authoritative verdict. Pinning to v1.0.0 (the latest
+    // registry version, with no migration chain to the current CLI) reproduces
+    // the user's exact "no registered migrations → pin bump only" no-op path.
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const cfgPath = join(dir, ".claude-ds.json");
+    const cfg = JSON.parse(await readFile(cfgPath, "utf8"));
+    cfg.packVersion = "v1.0.0";
+    await writeFile(cfgPath, JSON.stringify(cfg));
+
+    const out = await captureFrontDoor({
+      cwd: dir,
+      interactive: false,
+      yes: true,
+      maxIterations: 5,
+    });
+
+    // Converged on the authoritative verdict, with zero inner-step breadcrumbs
+    // contradicting it.
+    expect(out).toMatch(/Tree is clean/);
+    expect(out).not.toMatch(/→ Next/);
+    expect(out).not.toContain("run 'claude-ds audit'");
+  }, 60000);
 });
 
 /**

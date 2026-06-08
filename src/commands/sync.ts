@@ -17,7 +17,7 @@ import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 
-export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean; skipVerifyGate?: boolean }) {
+export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean; skipVerifyGate?: boolean; skipNextStep?: boolean }) {
   const cwd = opts.cwd ?? process.cwd();
   if (opts.json) setJsonMode(true);
   try { await stat(join(cwd, ".claude-ds.json")); } catch {
@@ -199,7 +199,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
 
   info(`sync complete → ${target}${verify ? ` (verified via ${verify.command})` : ""}`);
   const brownfield = await hasConsumerTierFiles(cwd);
-  printNextStep("sync", { brownfield });
+  if (!opts.skipNextStep) printNextStep("sync", { brownfield });
 
   if (opts.json) {
     emitHeadless({

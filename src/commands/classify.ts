@@ -182,6 +182,13 @@ export async function classifyCmd(opts: {
    * entirety of stdout.
    */
   json?: boolean;
+  /**
+   * Suppress the terminal `→ Next` breadcrumb. The remediation driver passes
+   * this when running classify as an inner loop step — heal/front-door owns
+   * the single authoritative verdict at convergence, so a per-step breadcrumb
+   * would contradict it (the C2/#414 defect this closes for classify).
+   */
+  skipNextStep?: boolean;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   if (opts.json) setJsonMode(true);
@@ -579,7 +586,7 @@ export async function classifyCmd(opts: {
     roleProposals.length === 0
   ) {
     info("classify: no files moved");
-    printNextStep("classify", {});
+    if (!opts.skipNextStep) printNextStep("classify", {});
     if (opts.json) {
       emitHeadless({
         command: "classify",
@@ -594,7 +601,7 @@ export async function classifyCmd(opts: {
   }
 
   info("classify: complete");
-  printNextStep("classify", {});
+  if (!opts.skipNextStep) printNextStep("classify", {});
 
   if (opts.json) {
     emitHeadless({

@@ -67,6 +67,13 @@ export interface AuditOpts {
    * extra runs per heal iteration.
    */
   skipVerifyGate?: boolean;
+  /**
+   * Suppress the terminal `→ Next` breadcrumb. The remediation driver passes
+   * this when running `audit --fix` as an inner loop step — heal/front-door
+   * owns the single authoritative verdict at convergence, so a per-step
+   * breadcrumb would contradict it (the C2/#414 defect this closes for audit).
+   */
+  skipNextStep?: boolean;
   cwd?: string;
 }
 
@@ -250,7 +257,7 @@ export async function auditCmd(opts: AuditOpts) {
       }
       return !isFixable(f.ruleId as DriftRuleId);
     }).length;
-    printNextStep("audit", { hasFindings: true, extractionCount, unfixableCount });
+    if (!opts.skipNextStep) printNextStep("audit", { hasFindings: true, extractionCount, unfixableCount });
     if (opts.json) {
       emitHeadless({
         command: "audit",
@@ -329,7 +336,7 @@ export async function auditCmd(opts: AuditOpts) {
     // defect. Acknowledge the warnings and route the breadcrumb at the
     // command that resolves them (`audit --fix` runs reconcile inline).
     info(`${warningCount} warning(s) — re-run with --fix to auto-resolve.`);
-    printNextStep("audit", { hasActionableWarnings: true, buildCmd });
+    if (!opts.skipNextStep) printNextStep("audit", { hasActionableWarnings: true, buildCmd });
     if (opts.json) {
       emitHeadless({
         command: "audit",
@@ -386,7 +393,7 @@ export async function auditCmd(opts: AuditOpts) {
       return;
     }
     info("No action required.");
-    printNextStep("audit", { hasFindings: false, buildCmd });
+    if (!opts.skipNextStep) printNextStep("audit", { hasFindings: false, buildCmd });
     if (opts.json) {
       emitHeadless({
         command: "audit",
