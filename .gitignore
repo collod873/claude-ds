@@ -4,8 +4,3 @@ dist/
 .tmp-*
 .claude/worktrees/
 e2e-report.json
-# Friction-gate golden output (PRD #439) — regenerated each gate run. Kept as a
-# local reviewable artifact, not committed: the provenance header embeds the
-# absolute CLI path, which is machine-specific. The committed README reserves
-# the directory; the durable committed artifact is friction-baseline.json.
-tests/e2e/golden/*.txt

@@ -1,0 +1,13 @@
+# command: node dist/cli.js adopt --pack next-react --yes
+# exit: 0
+# --- stdout/stderr below; bytes are verbatim from the built CLI ---
+Updated 1 hybrid file(s) (pack-owned regions updated; user-owned content preserved):
+  package.json  (was 123 bytes, now 1124 bytes)
+Pack-owned regions updated; user-owned content preserved.
+To diff before adopt, run: claude-ds doctor --pack <name>
+patched tsconfig.json: added @/design-system/* path alias for src/app layout (#52)
+bootstrapped design-system/manifest.json
+adopted claude-ds (next-react, mode=warn). Run 'enforce' when ready. Detected package manager: npm. Next: npm run ds:build-manifest
+CI scripts installed. Run: npm run ci:hook-contract and npm run ci:consistency
+A starter GitHub Actions workflow was seeded at .github/workflows/claude-ds-governance.yml (delete if not on GH Actions). See docs/ci-wiring.md for details.
+→ Next: run 'claude-ds classify --src <dir>' to migrate existing components

@@ -1,0 +1,7 @@
+# command: node dist/cli.js audit --fix --allow-dirty
+# exit: 0
+# --- stdout/stderr below; bytes are verbatim from the built CLI ---
+evaluated 6 file(s) across 3 tier directories (6 clean, 0 with findings)
+Scaffold: 84/84 ✓
+No action required.
+→ Next: run your build (e.g. npm run build) to verify everything compiles

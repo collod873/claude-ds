@@ -537,10 +537,15 @@ export async function writeReport(report: HarnessReport, path: string): Promise<
  * Determinism note: callers that golden these into the repo must run the CLI
  * with stable env (`FORCE_COLOR=0`, `NO_COLOR=1`, `CI=1` — already forced by
  * `runStep`) and against a committed snapshot, so the bytes are reproducible.
- * Volatile tokens (absolute scratch paths, timestamps, durations) are NOT
- * scrubbed here — that normalization, if needed for a clean diff, belongs to
- * the gate/detector layer which owns the comparison policy. This helper is a
- * faithful recorder, not a normalizer.
+ * These goldens are COMMITTED (the reviewable-diff baseline, US20), so the
+ * header must carry NO machine-specific bytes. The provenance `# command:` line
+ * records the invocation as the built CLI saw it, EXCEPT the absolute path to
+ * the binary (`<home>/.../dist/cli.js`, `<repo>/node_modules/.bin/tsc`) is
+ * rewritten to a stable repo-relative token via `normalizeCommand` — otherwise
+ * a benign copy change would never surface in a PR diff because every machine's
+ * absolute path would dirty the file first. The captured stdout/stderr BODY is
+ * left untouched (verbatim CLI bytes); the CLI runs in a scratch `cwd` and does
+ * not echo absolute paths, so the body is already machine-independent.
  *
  * Returns the absolute paths written, in step order, so a gate can diff them.
  */
@@ -558,7 +563,7 @@ export async function writeGoldenOutput(
     // Header records provenance (command + exit) above a clear delimiter so a
     // reviewer reads what produced these bytes without consulting the report.
     const body =
-      `# command: ${step.command}\n` +
+      `# command: ${normalizeCommand(step.command)}\n` +
       `# exit: ${step.exitCode}\n` +
       `# --- stdout/stderr below; bytes are verbatim from the built CLI ---\n` +
       step.combined;
@@ -567,4 +572,24 @@ export async function writeGoldenOutput(
     i += 1;
   }
   return written;
+}
+
+/**
+ * Strip machine-specific absolute prefixes from a recorded `# command:` line so
+ * the committed golden is byte-identical across machines. The harness invokes
+ * `node <abs>/dist/cli.js …` and `node <abs>/node_modules/.bin/tsc …`; we
+ * rewrite each absolute path argument to start at its repo-relative marker
+ * (`dist/…` or `node_modules/…`), collapsing the leading home/tmp/repo prefix.
+ * Anything not matching a known marker is left as-is — this is a targeted
+ * de-machine-ification, not a general path scrubber, so a future absolute
+ * argument would still be visible (and caught) in review.
+ */
+export function normalizeCommand(command: string): string {
+  // The prefix matcher allows spaces (e.g. a "Claude Projects" home dir) — it
+  // starts at an absolute-path `/` and lazily consumes up to the first
+  // `dist/`|`node_modules/` marker, then keeps the repo-relative tail verbatim.
+  return command.replace(
+    /(^|\s)\/.*?\/((?:dist|node_modules)\/\S+)/g,
+    "$1$2",
+  );
 }
