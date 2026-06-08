@@ -13,6 +13,11 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
 
+> **Friction-fix issues close differently.** An issue graded against real-Crewops
+> terminal output is closed only by removing its friction-baseline entry, gated
+> on the finding no longer reproducing — not by "acceptance criteria look met."
+> See [friction-loop.md](friction-loop.md).
+
 ## When a skill says "publish to the issue tracker"
 
 Create a GitHub issue.

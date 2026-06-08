@@ -23,6 +23,15 @@ paraphrased friction, verified (if at all) against a synthetic fixture that
 *could not exhibit* the friction. The loop had no closing edge: "closed" never
 implied "fixed" (PRD #439).
 
+Terminal friction is the output-surface form of the same defect
+[ADR-0003](0003-completeness-principle.md) names: anything a consumer hand-rolls
+to paper over a claude-ds gap is a claude-ds defect, tracked with a removal
+trigger. And it is the same contract [ADR-0013](0013-actionable-audit-findings.md)
+sets for audit findings — a finding the consumer cannot act on is worse than
+none — applied to the tool's own output rather than only to audit rules. Both
+decisions presumed the friction was *visible* to the verification apparatus;
+the TTY-blind ban made it invisible.
+
 The ban and the goal were in direct conflict. We cannot both refuse to assert
 against rendered output *and* gate on the friction that exists only in rendered
 output.

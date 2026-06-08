@@ -9,7 +9,10 @@ Treat anything outside this file as historical until a decision lands in `docs/a
   consumer repo without breaking it.
 - **Completeness principle** (ADR-0003): anything a consumer hand-rolls for
   design-system concerns is a claude-ds defect. End state for any consumer
-  is zero local DS infrastructure outside the pack-installed scaffold.
+  is zero local DS infrastructure outside the pack-installed scaffold. The
+  output-surface form of this — terminal friction graded against real Crewops —
+  is driven by the friction loop ([docs/agents/friction-loop.md](docs/agents/friction-loop.md),
+  ADR-0020).
 - **Mechanical enforcement** (ADR-0002): constraints are enforced by hooks
   (block at write time) and audit (post-hoc), not by prose guidance. The
   scaffold leaves no surface for drift to occur on (showcase-as-mirror,
