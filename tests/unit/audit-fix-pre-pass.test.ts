@@ -117,7 +117,7 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
       await scaffoldInteractiveDsImports();
       setNonTTY();
 
-      await auditCmd({ fix: true, cwd: dir });
+      const result = await auditCmd({ fix: true, cwd: dir });
 
       // Named exit, not a silent default — error message carries the Decision id
       // and question so the operator can supply --answers and re-run.
@@ -125,7 +125,8 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
       const named = errCalls.find(c => c.includes("audit needs you"));
       expect(named).toBeDefined();
       expect(named).toMatch(/DRIFT-DS-IMPORTS-FEATURE.*user-badge\.tsx/);
-      expect(exitSpy).toHaveBeenCalledWith(2);
+      expect(result.exitCode).toBe(2);
+      expect(result.outcome).toBe("error");
 
       // No exceptions.json is written — auto-deferral retired (ADR-0023).
       expect(await exists(join(dir, "design-system/exceptions.json"))).toBe(false);
@@ -156,13 +157,13 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
       ].join("\n"));
 
       setNonTTY();
-      await auditCmd({ fix: true, cwd: dir });
+      const result = await auditCmd({ fix: true, cwd: dir });
 
       const errCalls = vi.mocked(errLog).mock.calls.map(c => String(c[0]));
       const named = errCalls.find(c => c.includes("audit needs you"));
       expect(named).toBeDefined();
       expect(named).toMatch(/token-tie:padding:12/);
-      expect(exitSpy).toHaveBeenCalledWith(2);
+      expect(result.exitCode).toBe(2);
 
       // No auto-deferred exceptions.json is written.
       expect(await exists(join(dir, "design-system/exceptions.json"))).toBe(false);

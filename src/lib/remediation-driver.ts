@@ -21,6 +21,12 @@
  * The driver never calls `process.exit`: it returns a `DriveOutcome` and the
  * caller owns exit codes, scaffolds, and convergence prose. That keeps `heal`'s
  * stable exit contract (0 / 1 / 2 / 3) entirely in `heal.ts`.
+ *
+ * Issue #437 (ADR-0018) lifted the loop members off `process.exit`: each now
+ * returns a `CommandResult`, so the driver reads the result directly instead of
+ * trapping `process.exit` via the deleted `runWithoutExit` monkeypatch. A
+ * non-zero loop member (audit findings remain → iterate again) no longer needs
+ * a trap to keep it from tearing down the loop — it's a plain function return.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -35,42 +41,6 @@ import { planRemediation, type LoopStep } from "./remediation-planner.js";
 import type { ProgressController } from "./render/tty-layer.js";
 
 export type { LoopStep } from "./remediation-planner.js";
-
-class HealExitSignal extends Error {
-  constructor(public code: number) {
-    super(`drive-exit ${code}`);
-  }
-}
-
-/**
- * Run `fn` with `process.exit` trapped so a sub-command exiting non-zero
- * surfaces as a returned exit code instead of killing the driver loop. Restores
- * the original `process.exit` even when `fn` throws an unrelated error.
- *
- * Shared by both drivers: a non-zero `audit` (findings remain → iterate again)
- * must not tear down the loop, and the front door must not have a sub-command's
- * `process.exit(1)` abort its auto-advance mid-walk.
- */
-export async function runWithoutExit(fn: () => Promise<void>): Promise<number> {
-  const origExit = process.exit;
-  let exitCode = 0;
-  const trap = ((code?: number) => {
-    exitCode = code ?? 0;
-    throw new HealExitSignal(exitCode);
-  }) as never;
-  (process as unknown as { exit: typeof origExit }).exit = trap;
-  try {
-    await fn();
-  } catch (e) {
-    if (!(e instanceof HealExitSignal)) {
-      (process as unknown as { exit: typeof origExit }).exit = origExit;
-      throw e;
-    }
-  } finally {
-    (process as unknown as { exit: typeof origExit }).exit = origExit;
-  }
-  return exitCode;
-}
 
 /**
  * Snapshot every text file under `root`, skipping build/generated output and
@@ -149,45 +119,22 @@ interface DispatchOpts {
  */
 export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<number> {
   const { cwd, answers, pendingSink } = opts;
+  // Issue #437 (ADR-0018): each loop member runs as a plain function and returns
+  // a `CommandResult`. The driver reads only the exit code; it never renders the
+  // returned `nextStep` breadcrumb (heal/front-door own the single authoritative
+  // verdict, so no `→ Next` prints on the loop path) and never opts into the
+  // per-step `verify` gate (heal owns the one gate at convergence — running it
+  // per inner step would mean N extra tsc invocations per heal iteration).
   switch (step) {
     case "upgrade":
     case "repair":
-      // Issue #410: heal owns the final verify gate at convergence — running
-      // it inside every inner step would mean N extra tsc invocations per
-      // heal iteration. `skipNextStep` likewise: the driver's caller owns the
-      // single authoritative verdict ("✓ Tree is clean"), so an inner step's
-      // `→ Next` breadcrumb would contradict it and send the operator to run a
-      // step the loop already auto-runs (the C2/#414 defect this closes).
-      return runWithoutExit(() =>
-        upgradeCmd({ cwd, yes: true, allowDirty: true, skipVerifyGate: true, skipNextStep: true }),
-      );
+      return (await upgradeCmd({ cwd, yes: true, allowDirty: true })).exitCode;
     case "sync":
-      return runWithoutExit(() =>
-        syncCmd({ cwd, yes: true, allowDirty: true, skipVerifyGate: true, skipNextStep: true }),
-      );
+      return (await syncCmd({ cwd, yes: true, allowDirty: true })).exitCode;
     case "classify":
-      return runWithoutExit(() =>
-        classifyCmd({
-          cwd,
-          yes: true,
-          allowDirty: true,
-          answers,
-          pendingSink,
-          skipNextStep: true,
-        }),
-      );
+      return (await classifyCmd({ cwd, yes: true, allowDirty: true, answers, pendingSink })).exitCode;
     case "audit --fix":
-      return runWithoutExit(() =>
-        auditCmd({
-          cwd,
-          fix: true,
-          allowDirty: true,
-          answers,
-          pendingSink,
-          skipVerifyGate: true,
-          skipNextStep: true,
-        }),
-      );
+      return (await auditCmd({ cwd, fix: true, allowDirty: true, answers, pendingSink })).exitCode;
     case "migrate-layout":
     case "reconcile":
     case "reconform":

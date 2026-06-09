@@ -5,8 +5,9 @@ import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
-import { info, err, printNextStep, setJsonMode } from "../lib/log.js";
+import { info, err, setJsonMode } from "../lib/log.js";
 import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
+import { type CommandResult, success, commandError, findingsRemain } from "../lib/command-result.js";
 
 const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
@@ -17,7 +18,7 @@ import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { checkCleanTree } from "../lib/clean-tree.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 
-export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean; verbose?: boolean; skipVerifyGate?: boolean; skipNextStep?: boolean }) {
+export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean; verbose?: boolean; verify?: boolean }): Promise<CommandResult> {
   const cwd = opts.cwd ?? process.cwd();
   const verbose = opts.verbose ?? false;
   if (opts.json) setJsonMode(true);
@@ -25,7 +26,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
     const m = ".claude-ds.json absent";
     err(m);
     if (opts.json) emitHeadless(errorResult("sync", m));
-    process.exit(2);
+    return commandError(2);
   }
 
   // Clean-tree guard (PRD #325 / sub-issue #328). --dry-run never mutates so
@@ -36,7 +37,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
     if (!guard.ok) {
       err(guard.message);
       if (opts.json) emitHeadless(errorResult("sync", guard.message));
-      process.exit(2);
+      return commandError(2);
     }
   }
 
@@ -57,7 +58,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
       const m = `migrate-config failed: ${migrationReport.failed.error}`;
       err(m);
       if (opts.json) emitHeadless(errorResult("sync", m));
-      process.exit(2);
+      return commandError(2);
     }
   }
 
@@ -132,7 +133,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
         remaining: { target },
       });
     }
-    return;
+    return success();
   }
 
   // Apply via the Runner. Plan is cached so this does not re-run diffFile.
@@ -146,7 +147,7 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
     const m = `apply failed at ${report.failed.change.kind}: ${report.failed.error}`;
     err(m);
     if (opts.json) emitHeadless(errorResult("sync", m));
-    process.exit(2);
+    return commandError(2);
   }
 
   // #15: hook/script chmod is now a `Change.mode: "executable"` hint applied by the Runner
@@ -189,13 +190,15 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
   const aborts = decisions.filter(d => d.verdict.action === "abort").length;
   const inSync = writes === 0 && aborts === 0;
 
-  // Verify gate (#410 / PRD #407). Runs only when sync actually wrote bytes
-  // AND the caller did not opt out (heal/driveRemediation owns the final
-  // gate; running it per inner step would mean N tsc invocations per heal
-  // iteration). The gate fails loud on errors in scaffold/touched files
-  // and reports pre-existing consumer errors as warn-only.
+  // Verify gate (#410 / PRD #407). Caller-owned (issue #437 / ADR-0018): the
+  // CLI entry opts in via `verify: true` for a standalone `claude-ds sync`; the
+  // remediation driver omits it because heal owns the single authoritative gate
+  // at convergence — running it per inner step would mean N tsc invocations per
+  // heal iteration. Runs only when sync actually wrote bytes. The gate fails
+  // loud on errors in scaffold/touched files and reports pre-existing consumer
+  // errors as warn-only.
   let verify: VerifyResult | undefined;
-  if (!opts.skipVerifyGate && !inSync) {
+  if (opts.verify && !inSync) {
     const cfgCtx = await loadProject(cwd);
     verify = await runConsumerVerify(cwd, {
       managedFiles: new Set(cfgCtx.manifest.files.map(f => f.path)),
@@ -214,14 +217,12 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
           remaining: { brownfield: false, verify: verifyJson(verify) },
         });
       }
-      process.exit(1);
-      return;
+      return findingsRemain();
     }
   }
 
   info(`sync complete → ${target}${verify ? ` (verified via ${verify.command})` : ""}`);
   const brownfield = await hasConsumerTierFiles(cwd);
-  if (!opts.skipNextStep) printNextStep("sync", { brownfield });
 
   if (opts.json) {
     emitHeadless({
@@ -233,6 +234,11 @@ export async function syncCmd(opts: { offlineFixture?: string; cwd?: string; yes
       remaining: { brownfield, ...(verify ? { verify: verifyJson(verify) } : {}) },
     });
   }
+
+  // The `→ Next` breadcrumb is caller-owned (issue #437 / ADR-0018): return it
+  // for the CLI to render and the driver to discard. Suppressed under --json
+  // (machine surface) by leaving the hint off.
+  return success(opts.json ? undefined : { command: "sync", ctx: { brownfield } });
 }
 
 /** Surface scaffold errors on stderr. */

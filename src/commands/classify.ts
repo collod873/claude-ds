@@ -2,8 +2,9 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { basename, join } from "node:path";
 import picomatch from "picomatch";
-import { info, err, printNextStep, setJsonMode } from "../lib/log.js";
+import { info, err, setJsonMode } from "../lib/log.js";
 import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
+import { type CommandResult, success, commandError } from "../lib/command-result.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, type Tier } from "../lib/classifier.js";
 import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
@@ -182,14 +183,7 @@ export async function classifyCmd(opts: {
    * entirety of stdout.
    */
   json?: boolean;
-  /**
-   * Suppress the terminal `→ Next` breadcrumb. The remediation driver passes
-   * this when running classify as an inner loop step — heal/front-door owns
-   * the single authoritative verdict at convergence, so a per-step breadcrumb
-   * would contradict it (the C2/#414 defect this closes for classify).
-   */
-  skipNextStep?: boolean;
-}): Promise<void> {
+}): Promise<CommandResult> {
   const cwd = opts.cwd ?? process.cwd();
   if (opts.json) setJsonMode(true);
   const dryRun = opts.dryRun ?? false;
@@ -211,8 +205,7 @@ export async function classifyCmd(opts: {
       const m = e instanceof Error ? e.message : String(e);
       err(m);
       if (opts.json) emitHeadless(errorResult("classify", m));
-      process.exit(2);
-      return;
+      return commandError(2);
     }
   }
 
@@ -229,7 +222,7 @@ export async function classifyCmd(opts: {
     }
     err(m);
     if (opts.json) emitHeadless(errorResult("classify", m));
-    process.exit(2);
+    return commandError(2);
   }
 
   const { domainRoots, dsAliases, allowedImports, appDir } = ctx.auditConfig;
@@ -258,7 +251,7 @@ export async function classifyCmd(opts: {
         `Point --src at a specific design-system source dir (e.g. ${srcRoot}/components/ui), ` +
         `or run \`claude-ds classify\` with no --src to reorganize within design-system/.`,
       );
-      process.exit(2);
+      return commandError(2);
     }
 
     // Check source dir exists
@@ -267,11 +260,11 @@ export async function classifyCmd(opts: {
       const s = await stat(srcAbs);
       if (!s.isDirectory()) {
         err(`--src ${srcRel} is not a directory`);
-        process.exit(2);
+        return commandError(2);
       }
     } catch {
       err(`--src ${srcRel} not found`);
-      process.exit(2);
+      return commandError(2);
     }
 
     // Walk and classify each file
@@ -368,7 +361,7 @@ export async function classifyCmd(opts: {
           remaining: {},
         });
       }
-      return;
+      return success();
     }
 
     // Stage every planned move under a single commitment-gate Decision
@@ -420,14 +413,13 @@ export async function classifyCmd(opts: {
               decisionQuestion: e.decisionQuestion,
             }));
           }
-          process.exit(2);
-          return;
+          return commandError(2);
         }
         throw e;
       }
       if (gateAnswer !== 0) {
         info("classify: aborted — no files moved");
-        return;
+        return success();
       }
     }
 
@@ -484,7 +476,7 @@ export async function classifyCmd(opts: {
         remaining: {},
       });
     }
-    return;
+    return success();
   }
 
   // Extraction is structural and lives in classify (ADR-0015): lift any inline
@@ -586,7 +578,6 @@ export async function classifyCmd(opts: {
     roleProposals.length === 0
   ) {
     info("classify: no files moved");
-    if (!opts.skipNextStep) printNextStep("classify", {});
     if (opts.json) {
       emitHeadless({
         command: "classify",
@@ -597,11 +588,10 @@ export async function classifyCmd(opts: {
         remaining: { ambiguityKept, roleProposals: 0 },
       });
     }
-    return;
+    return success(opts.json ? undefined : { command: "classify", ctx: {} });
   }
 
   info("classify: complete");
-  if (!opts.skipNextStep) printNextStep("classify", {});
 
   if (opts.json) {
     emitHeadless({
@@ -618,6 +608,8 @@ export async function classifyCmd(opts: {
       remaining: { ambiguityKept },
     });
   }
+
+  return success(opts.json ? undefined : { command: "classify", ctx: {} });
 
   // Ambiguity pass (ADR-0015, issue #203, PRD #241 / #244, issue #251):
   // Walk design-system/atoms/ and re-classify each file using classifySource —

@@ -305,9 +305,10 @@ export function SoloLabel() { return <span />; }
     // Regression for the contradictory-output defect: a stale-pin clean tree
     // healed to "✓ Tree is clean" but the inner `upgrade` step still printed
     // "→ Next: run 'claude-ds audit'" — sending the operator to run a step the
-    // loop already auto-ran (the C2/#414 defect, leaked through upgrade). The
-    // driver now passes `skipNextStep: true` to every inner step; the front
-    // door owns the single authoritative verdict. Pinning to v1.0.0 (the latest
+    // loop already auto-ran (the C2/#414 defect, leaked through upgrade). Issue
+    // #437 made each loop member return a `CommandResult` whose `→ Next`
+    // breadcrumb is caller-owned; the driver discards it, so the front door owns
+    // the single authoritative verdict. Pinning to v1.0.0 (the latest
     // registry version, with no migration chain to the current CLI) reproduces
     // the user's exact "no registered migrations → pin bump only" no-op path.
     const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
