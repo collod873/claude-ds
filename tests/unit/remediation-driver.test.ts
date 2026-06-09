@@ -11,7 +11,7 @@
  * driven once per iteration so callers can flavor their own logging.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { freshTmpDir, cleanup } from "../helpers/tmpdir";
 import { runCli } from "../helpers/runcli";
@@ -56,6 +56,55 @@ describe("driveRemediation (shared loop)", () => {
     // Empty plan on iteration 1 → the callback fired exactly once, no dispatch.
     expect(iterations).toEqual([1]);
   });
+
+  // #470: the retired `enforce` command is folded into the driver. At
+  // convergence the brain promotes the hook mode WARN → BLOCK once the tree is
+  // clean and the open-exception count is within `enforce_threshold` — the
+  // WARN→BLOCK call a consumer used to hand-type `enforce` for.
+  it("promotes warn→block at convergence when exceptions are within threshold (#470)", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // adopt lands in WARN (brownfield install) — the precondition the fold acts on.
+    const cfgPath = join(dir, ".claude-ds.json");
+    const before = JSON.parse(await readFile(cfgPath, "utf8"));
+    expect(before.mode).toBe("warn");
+
+    const outcome = await driveRemediation({
+      cwd: dir,
+      maxIterations: 3,
+      progress: { ...NOOP_PROGRESS },
+    });
+    expect(outcome.kind).toBe("converged");
+
+    const after = JSON.parse(await readFile(cfgPath, "utf8"));
+    expect(after.mode).toBe("block");
+  }, 30000);
+
+  it("leaves warn untouched at convergence when open exceptions exceed threshold (#470)", async () => {
+    const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const cfgPath = join(dir, ".claude-ds.json");
+
+    // Force threshold below the open-exception count: 1 open exception, threshold 0.
+    const cfg = JSON.parse(await readFile(cfgPath, "utf8"));
+    cfg.enforce_threshold = 0;
+    cfg.mode = "warn";
+    await writeFile(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+    await writeFile(
+      join(dir, "design-system/exceptions.json"),
+      JSON.stringify({ exceptions: [{ rule: "DRIFT-MISPLACED", path: "design-system/atoms/x.tsx", reason: "tracked", issue: "#1" }] }, null, 2) + "\n",
+    );
+
+    const outcome = await driveRemediation({
+      cwd: dir,
+      maxIterations: 3,
+      progress: { ...NOOP_PROGRESS },
+    });
+    expect(outcome.kind).toBe("converged");
+
+    const after = JSON.parse(await readFile(cfgPath, "utf8"));
+    expect(after.mode).toBe("warn");
+  }, 30000);
 
   it("empty plan + unresolvableFindings does NOT silently converge (#379)", async () => {
     // Adopt + heal to a fixed point, then introduce a ROLE-NO-CONTRACT finding

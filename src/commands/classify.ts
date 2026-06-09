@@ -132,41 +132,59 @@ export async function classifyCmd(opts: {
 
   const classified: ClassifiedFile[] = [];
   if (hasSrc) {
-    // Refuse a blind walk of the entire source root (ADR-0005, issue #209).
-    // --src must point at a specific design-system source dir; scanning all of
-    // src/ is what dragged app code (db, emails, lib) into design-system/.
-    const srcRoot = (ctx.cfg.srcRoot ?? "src").replace(/\/$/, "");
-    const norm = (srcRel as string).replace(/^\.\//, "").replace(/\/$/, "");
-    if (norm === srcRoot || norm === "." || norm === "") {
-      err(
-        `refusing to walk the entire source root (${srcRoot}) — that pulls app code into design-system/. ` +
-        `Point --src at a specific design-system source dir (e.g. ${srcRoot}/components/ui), ` +
-        `or run \`claude-ds classify\` with no --src to reorganize within design-system/.`,
-      );
-      return commandError(2);
-    }
-
-    // Check source dir exists
     const srcAbs = join(cwd, srcRel as string);
+    let srcStat;
     try {
-      const s = await stat(srcAbs);
-      if (!s.isDirectory()) {
-        err(`--src ${srcRel} is not a directory`);
-        return commandError(2);
-      }
+      srcStat = await stat(srcAbs);
     } catch {
       err(`--src ${srcRel} not found`);
       return commandError(2);
     }
 
-    // Walk and classify each file
-    const files = await walkComponentDir(cwd, srcRel as string, exclude);
-    for (const fileRel of files) {
+    if (srcStat.isDirectory()) {
+      // Refuse a blind walk of the entire source root (ADR-0005, issue #209).
+      // --src must point at a specific design-system source dir; scanning all of
+      // src/ is what dragged app code (db, emails, lib) into design-system/.
+      const srcRoot = (ctx.cfg.srcRoot ?? "src").replace(/\/$/, "");
+      const norm = (srcRel as string).replace(/^\.\//, "").replace(/\/$/, "");
+      if (norm === srcRoot || norm === "." || norm === "") {
+        err(
+          `refusing to walk the entire source root (${srcRoot}) — that pulls app code into design-system/. ` +
+          `Point --src at a specific design-system source dir (e.g. ${srcRoot}/components/ui), ` +
+          `or run \`claude-ds classify\` with no --src to reorganize within design-system/.`,
+        );
+        return commandError(2);
+      }
+
+      // Walk and classify each file
+      const files = await walkComponentDir(cwd, srcRel as string, exclude);
+      for (const fileRel of files) {
+        let source: string;
+        try {
+          source = await readFile(join(cwd, fileRel), "utf8");
+        } catch {
+          continue;
+        }
+        const verdict = classifySource(source, domainRoots, allowedImports, dsAliases);
+        const tier = verdict.tier;
+        const domainBucket = tier === "feature" ? inferDomainBucket(source, domainRoots) : null;
+        classified.push({ srcRel: fileRel, tier, domainBucket });
+      }
+    } else {
+      // Single-file target (#470). `--src` pointing at one component file
+      // subsumes the retired `migrate <path>` command: the operator named the
+      // file explicitly, so the excluder doesn't apply (the path itself is the
+      // opt-in, exactly as `migrate` treated its `<path>` argument). The file
+      // flows through the same classify-by-tier + commitment-gate machinery as
+      // the directory walk below, so atoms/composites land in their tiers,
+      // features in their domain bucket, and patterns/unknowns are skipped.
+      const fileRel = (srcRel as string).replace(/^\.\//, "");
       let source: string;
       try {
-        source = await readFile(join(cwd, fileRel), "utf8");
+        source = await readFile(srcAbs, "utf8");
       } catch {
-        continue;
+        err(`--src ${srcRel} not readable`);
+        return commandError(2);
       }
       const verdict = classifySource(source, domainRoots, allowedImports, dsAliases);
       const tier = verdict.tier;

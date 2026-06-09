@@ -39,6 +39,10 @@ import type { PendingDecision } from "./decision/index.js";
 import { deriveProjectState } from "./project-state.js";
 import { planRemediation, type LoopStep } from "./remediation-planner.js";
 import type { ProgressController } from "./render/tty-layer.js";
+import { loadProject } from "./project.js";
+import { parseExceptions, openCount, type Exception } from "./exceptions.js";
+import { setConfigMode } from "./ops/set-config-mode.js";
+import { run } from "./runner.js";
 
 export type { LoopStep } from "./remediation-planner.js";
 
@@ -143,6 +147,38 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
   }
 }
 
+/**
+ * Fold the retired `enforce` command into the driver at convergence (#470).
+ *
+ * `enforce` was a hand-typed command that flipped `.claude-ds.json`'s hook mode
+ * WARN → BLOCK once a consumer judged the tree clean enough — gated on the open
+ * (non-permanent) exception count staying within `enforce_threshold`. ADR-0025
+ * says steps the brain owns shouldn't be hand-typed; the WARN→BLOCK call is one
+ * of them. So the driver makes it: when the loop reaches a fixed point, promote
+ * to BLOCK if the tree is in WARN and exceptions are within budget.
+ *
+ * Idempotent and convergence-safe: BLOCK projects no-op (`setConfigMode` emits
+ * no Change on a match), over-threshold projects are simply not promoted, and a
+ * missing/unreadable `exceptions.json` counts as zero open exceptions. The flip
+ * is the terminal act of a converged run — it happens after the snapshot
+ * fixed-point check, so it never re-arms the loop, and a re-run sees BLOCK and
+ * leaves it. The `enforce` command stays registered as a hidden escape hatch.
+ */
+async function promoteModeAtConvergence(cwd: string, progress: ProgressController): Promise<void> {
+  const ctx = await loadProject(cwd);
+  if (ctx.cfg.mode !== "warn") return;
+  let ex: Exception[] = [];
+  try {
+    ex = parseExceptions(await readFile(join(cwd, "design-system/exceptions.json"), "utf8"));
+  } catch {
+    // No (or unreadable) exceptions.json → zero open exceptions, within any threshold.
+  }
+  if (openCount(ex) > ctx.cfg.enforce_threshold) return;
+  const report = await run(ctx, [setConfigMode("block")], "apply");
+  if (report.failed) return;
+  progress.info("enforce: tree clean — promoted hook mode warn → block");
+}
+
 export interface DriveOpts {
   cwd: string;
   /** Iteration ceiling. The caller validates positivity before calling. */
@@ -220,6 +256,7 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
       if (state.unresolvableFindings) {
         return { kind: "exhausted", lastStep: null };
       }
+      await promoteModeAtConvergence(cwd, progress);
       return { kind: "converged", iterations: iter };
     }
 
@@ -263,6 +300,7 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
     const findingsRemain =
       state.classifyNeeded || state.autoFixNeeded || state.unresolvableFindings;
     if (stable && pendingThisIter === 0 && !findingsRemain) {
+      await promoteModeAtConvergence(cwd, progress);
       return { kind: "converged", iterations: iter };
     }
   }
