@@ -1,17 +1,13 @@
-import { readFile, readdir, stat } from "node:fs/promises";
-import type { Dirent } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import picomatch from "picomatch";
 import { info, err, setJsonMode } from "../lib/log.js";
 import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
 import { type CommandResult, success, commandError } from "../lib/command-result.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
-import { classifySource, type Tier } from "../lib/classifier.js";
-import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
-import { parseExceptions, type Exception } from "../lib/exceptions.js";
+import { classifySource } from "../lib/classifier.js";
+import { type FixerPrompt } from "../lib/drift/index.js";
 import { run } from "../lib/runner.js";
 import { moveTierFile } from "../lib/ops/move-tier-file.js";
-import { appendExceptions } from "../lib/ops/append-exceptions.js";
 import type { Operation } from "../lib/operation.js";
 import type { ExtractInlineOutcome } from "../lib/ops/extract-inline-components.js";
 import type { BackfillAtomHelpersOutcome } from "../lib/ops/backfill-atom-helpers.js";
@@ -24,120 +20,16 @@ import {
   type Decision,
   type PendingDecision,
 } from "../lib/decision/index.js";
-
-const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
-const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
-// React components live in `.tsx` by convention. Narrowing the brownfield
-// walk to `.tsx` keeps zero-signal `.ts` server modules (route handlers, db
-// schema, lib utilities, test files) out of design-system/atoms/. This is the
-// remaining gap behind #209's "everything became an atom" reproduction —
-// classifier still defaults a no-signal source to `atom`, but the walker no
-// longer hands it non-React files to default on.
-const SOURCE_EXTS = [".tsx"];
-
-interface ClassifiedFile {
-  srcRel: string; // relative to cwd, e.g. "src/components/button.tsx"
-  tier: Tier;
-  domainBucket: string | null; // set for feature-tier: "features/invoicing"
-}
-
-/** Extract the first domain bucket (e.g. "features/invoicing") a file imports from. */
-function inferDomainBucket(source: string, domainRoots: string[]): string | null {
-  for (const root of domainRoots) {
-    const re = new RegExp(`from\\s+["'][^"']*[/\\\\]${root}[/\\\\]([^/"']+)`);
-    const m = re.exec(source);
-    if (m) return `${root}/${m[1]}`;
-  }
-  return null;
-}
-
-/**
- * Build the predicate that keeps classify's walk inside design-system scope
- * (ADR-0005, issue #209). A cwd-relative path is excluded when it is:
- *   - under design-system/ (already organized),
- *   - under app_dir (routed pages/layouts — never a DS part),
- *   - under a domain root (features/, lib/ — app code by definition), or
- *   - matched by a lookalike_ignore glob the consumer declared out-of-scope.
- * Excluding these dirs means classify can never relocate app code into
- * design-system/ even when --src points at a broad tree.
- */
-function makeExcluder(opts: {
-  appDir: string;
-  domainRoots: string[];
-  ignoreGlobs: string[];
-}): (rel: string) => boolean {
-  const matchIgnore = opts.ignoreGlobs.length > 0
-    ? picomatch(opts.ignoreGlobs, { dot: true })
-    : () => false;
-  const appDir = opts.appDir.replace(/\/$/, "");
-  return (rel: string): boolean => {
-    const segs = rel.split("/");
-    if (segs.includes("design-system")) return true;
-    if (segs.some(s => opts.domainRoots.includes(s))) return true;
-    if (rel === appDir || rel.startsWith(`${appDir}/`)) return true;
-    if (matchIgnore(rel)) return true;
-    return false;
-  };
-}
-
-/** Walk a directory and return .tsx/.ts files (relative to cwd), skipping companions and excluded paths. */
-async function walkComponentDir(
-  cwd: string,
-  srcRel: string,
-  exclude: (rel: string) => boolean,
-): Promise<string[]> {
-  const abs = join(cwd, srcRel);
-  let entries: Dirent[];
-  try {
-    entries = await readdir(abs, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const results: string[] = [];
-  for (const e of entries) {
-    const childRel = `${srcRel}/${e.name}`;
-    if (exclude(childRel)) continue;
-    if (e.isDirectory()) {
-      results.push(...await walkComponentDir(cwd, childRel, exclude));
-      continue;
-    }
-    if (!e.isFile()) continue;
-    if (!SOURCE_EXTS.some(ext => e.name.endsWith(ext))) continue;
-    if (COMPANION_SUFFIXES.some(s => e.name.endsWith(s))) continue;
-    if (SKIP_PATTERNS.some(re => re.test(e.name))) continue;
-    results.push(childRel);
-  }
-  return results;
-}
-
-function tierToDir(tier: "atom" | "composite"): string {
-  return tier === "atom" ? "design-system/atoms" : "design-system/composites";
-}
-
-/**
- * TTY prompt for the single classify commitment-gate. Maps a [y/N] answer onto
- * the [Apply, Skip] options the spine resolver expects (index 0 = Apply, 1 =
- * Skip). `[s]`/blank/no = Skip; anything starting with `y` = Apply. The full
- * preview is printed by the caller before the gate; this helper only owns the
- * yes/no read.
- */
-async function confirmGate(question: string, _options: unknown): Promise<number> {
-  const { createInterface } = await import("node:readline/promises");
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const ans = await rl.question(`${question} [y/N] `);
-    const v = ans.trim().toLowerCase();
-    return v === "y" || v === "yes" ? 0 : 1;
-  } finally {
-    rl.close();
-  }
-}
-
-interface MovePlan {
-  srcRel: string;
-  destRel: string;
-  label: string;
-}
+import {
+  type ClassifiedFile,
+  type MovePlan,
+  inferDomainBucket,
+  makeExcluder,
+  walkComponentDir,
+  tierToDir,
+  confirmGate,
+} from "../lib/classify/scan.js";
+import { applyAmbiguityPass } from "../lib/classify/ambiguity-pass.js";
 
 export async function classifyCmd(opts: {
   /**
@@ -522,7 +414,15 @@ export async function classifyCmd(opts: {
     }
   }
 
-  const ambiguityResult = await applyAmbiguityPass();
+  const ambiguityResult = await applyAmbiguityPass({
+    cwd,
+    domainRoots,
+    allowedImports,
+    dsAliases,
+    suppliedAnswers,
+    prompt: opts.prompt,
+    pendingSink: opts.pendingSink,
+  });
   // Issue #437: the ambiguity pass's non-TTY/unresolved path returns a
   // `CommandResult` instead of `process.exit`-ing — the driver deleted the
   // `runWithoutExit` trap, so a stray exit here would tear down the loop. The
@@ -616,231 +516,4 @@ export async function classifyCmd(opts: {
   }
 
   return success(opts.json ? undefined : { command: "classify", ctx: {} });
-
-  // Ambiguity pass (ADR-0015, issue #203, PRD #241 / #244, issue #251):
-  // Walk design-system/atoms/ and re-classify each file using classifySource —
-  // the same function and arguments that audit's placement-drift rules use, so
-  // the two sides share one boundary.
-  //
-  // Two bands, two behaviours:
-  //   confident composite  (tier=composite, !ambiguous): auto-move unconditionally —
-  //     no prompt, no TTY gate.  This is what audit's DRIFT-MISPLACED and
-  //     DRIFT-MISCLASSIFIED-ATOM fire on; leaving them in atoms/ makes audit
-  //     diverge from classify.
-  //   ambiguous composite  (tier=composite, ambiguous=true, 1-2 DS imports):
-  //     prompt the user when interactive; skip silently when non-interactive
-  //     (audit also skips these, so no convergence gap).
-  //
-  // Hoisted so it runs even when --src has no new files to classify (the common
-  // re-run case: audit flagged a misplaced composite, user re-runs classify to
-  // resolve it, but src is already migrated).
-  async function applyAmbiguityPass(): Promise<{ moved: number; kept: number } | CommandResult> {
-    // Ambiguous-band prompt source: a test-injected `opts.prompt` overrides
-    // everything; otherwise the TTY prompt is used iff stdout is a TTY. Used
-    // as the resolver's TTY callback below — the spine drives the question;
-    // this callback only owns the read.
-    const ambiguityPrompt: FixerPrompt | null =
-      opts.prompt ?? (process.stdout.isTTY === true ? makeTtyPrompt() : null);
-    const promptAvailable = ambiguityPrompt !== null;
-
-    let movedCount = 0;
-    let keptCount = 0;
-    const atomAbs = join(cwd, "design-system/atoms");
-    let atomEntries: Dirent[] = [];
-    try {
-      atomEntries = await readdir(atomAbs, { withFileTypes: true });
-    } catch {
-      atomEntries = [];
-    }
-    const exceptionsToAdd: Exception[] = [];
-    const ambiguityMoves: MovePlan[] = [];
-
-    // Two phases:
-    //   1. Walk atoms/, auto-move confident composites, collect the
-    //      genuinely-ambiguous ones as Ambiguity Decisions.
-    //   2. Route the collected Decisions through the spine resolver — TTY
-    //      prompts, non-TTY with a supplied answer reads it, non-TTY without
-    //      throws (ADR-0023 fail-loud; no silent default).
-    interface AmbiguousAtom {
-      decision: Decision;
-      atomRel: string;
-      fileName: string;
-    }
-    const ambiguousAtoms: AmbiguousAtom[] = [];
-
-    for (const e of atomEntries) {
-      if (!e.isFile() || !e.name.endsWith(".tsx")) continue;
-      if (COMPANION_SUFFIXES.some(s => e.name.endsWith(s))) continue;
-      const atomRel = `design-system/atoms/${e.name}`;
-      let source: string;
-      try {
-        source = await readFile(join(cwd, atomRel), "utf8");
-      } catch {
-        continue;
-      }
-
-      // Use the same classifySource call (same args) that audit's three-signal
-      // checker uses so classify and audit share one classification boundary.
-      const verdict = classifySource(source, domainRoots, allowedImports, dsAliases);
-      if (verdict.tier !== "composite") continue;
-
-      if (!verdict.ambiguous) {
-        // Confident composite: auto-move regardless of TTY / --yes.
-        // This is exactly the case audit's DRIFT-MISPLACED fires on; moving it
-        // unconditionally makes the flow converge without human input (issue #251).
-        const destRel = `design-system/composites/${e.name}`;
-        ambiguityMoves.push({ srcRel: atomRel, destRel, label: "composite — auto-relocated" });
-        continue;
-      }
-
-      // Genuinely ambiguous band (1-2 DS imports): build an Ambiguity Decision
-      // and let the spine resolver decide TTY vs supplied-answer vs fail-loud.
-      const fileName = e.name.replace(/\.tsx$/, "");
-      ambiguousAtoms.push({
-        atomRel,
-        fileName,
-        decision: {
-          id: `classify-ambiguity:${atomRel}`,
-          kind: "ambiguity",
-          question: `${fileName} is in atoms/ but imports multiple design-system components. Is it a simple building block (atom) or does it combine multiple components (composite)?`,
-          options: [
-            { label: "Keep as atom", description: "It is a self-contained building block" },
-            { label: "Move to composites", description: "It combines other components and belongs in composites/" },
-          ],
-        },
-      });
-    }
-
-    if (ambiguousAtoms.length > 0) {
-      let resolved: Record<string, number | "defer">;
-      try {
-        // PRD #325 sub-issue #333 — heal opts INTO collect mode by passing a
-        // `pendingSink`. The resolver returns pending decisions in
-        // `result.pending` instead of throwing; classify treats them as
-        // skipped (leave the file untouched) for this iteration. heal
-        // aggregates them across iterations and surfaces an `--answers`
-        // scaffold.
-        const collect = opts.pendingSink !== undefined;
-        const result = await resolveDecisions(
-          ambiguousAtoms.map(a => a.decision),
-          suppliedAnswers,
-          {
-            // The resolver gates on `isTTY` ANDed with a non-null `prompt` —
-            // treating injected prompts (test path) as TTY keeps the spine the
-            // single switchboard while still honouring `opts.prompt`.
-            isTTY: promptAvailable,
-            collect,
-            prompt: ambiguityPrompt
-              ? async (q, o) => ambiguityPrompt(q, o)
-              : undefined,
-          },
-        );
-        resolved = result.answers;
-        if (opts.pendingSink) {
-          for (const pending of result.pending) opts.pendingSink.push(pending);
-        }
-      } catch (e) {
-        if (e instanceof UnresolvedAmbiguityError) {
-          err(`classify needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`);
-          err(`Re-run with --answers <file> mapping "${e.decisionId}" to 0 (keep) or 1 (move).`);
-          return commandError(2);
-        }
-        throw e;
-      }
-
-      for (const a of ambiguousAtoms) {
-        const answer = resolved[a.decision.id];
-        if (answer === 1) {
-          const destRel = `design-system/composites/${basename(a.atomRel)}`;
-          ambiguityMoves.push({
-            srcRel: a.atomRel,
-            destRel,
-            label: "composite — user confirmed",
-          });
-        } else if (answer === 0) {
-          // Keep as atom — suppress audit's ambiguity findings for this file
-          // going forward. Above the confidence threshold the classifier
-          // verdict is "composite" (unambiguous), so both DRIFT-MISPLACED and
-          // DRIFT-MISCLASSIFIED-ATOM would fire on subsequent audits; the
-          // user's "keep" decision overrides both (PRD #241 / #244).
-          const reason =
-            "classify: user confirmed atom despite multiple component imports";
-          exceptionsToAdd.push({
-            rule: "DRIFT-MISPLACED",
-            path: a.atomRel,
-            reason,
-            permanent: true,
-          });
-          exceptionsToAdd.push({
-            rule: "DRIFT-MISCLASSIFIED-ATOM",
-            path: a.atomRel,
-            reason,
-            permanent: true,
-          });
-          keptCount++;
-          info(`classify: ${a.atomRel} — kept as atom (suppressing future ambiguity findings)`);
-        } else {
-          // "defer"/skip — leave the file untouched; audit will surface it
-          // again next run.
-          info(`classify: ${a.atomRel} — skipped (will be flagged again on next audit)`);
-        }
-      }
-    }
-
-    if (ambiguityMoves.length > 0) {
-      const ctxAmb = await loadProject(cwd);
-      const ops: Operation[] = ambiguityMoves.map(p =>
-        moveTierFile(p.srcRel, p.destRel, { kind: "composite" }),
-      );
-      const report = await run(ctxAmb, ops, "apply");
-      const planBySrc = new Map(ambiguityMoves.map(p => [p.srcRel, p]));
-      for (const c of report.applied) {
-        if (c.kind !== "rename") continue;
-        const p = planBySrc.get(c.path);
-        if (!p) continue;
-        info(`classify: ${p.srcRel} → ${p.destRel} (${p.label})`);
-        movedCount++;
-      }
-      if (report.failed) {
-        err(`classify: ${report.failed.error}`);
-      }
-    }
-
-    if (exceptionsToAdd.length > 0) {
-      const exceptionsPath = join(cwd, "design-system/exceptions.json");
-      let existing: Exception[] = [];
-      try {
-        existing = parseExceptions(await readFile(exceptionsPath, "utf8"));
-      } catch {
-        existing = [];
-      }
-      const ctxEx = await loadProject(cwd);
-      await run(ctxEx, [appendExceptions([...existing, ...exceptionsToAdd])], "apply");
-      info(`classify: ${exceptionsToAdd.length} ambiguity exception(s) written to design-system/exceptions.json`);
-    }
-
-    if (movedCount > 0) {
-      // Relocations changed import paths — rewrite again so references stay resolvable.
-      const { rewriteImports } = await import("../lib/ops/rewrite-imports.js");
-      const ctx4 = await loadProject(cwd);
-      await run(ctx4, [rewriteImports], "apply");
-
-      // Regenerate barrel index files (atoms/index.ts, composites/index.ts, etc.)
-      // so that a file moved from atoms/ to composites/ is no longer re-exported
-      // from the old tier barrel — a stale barrel export would cause TS2307 on the
-      // next tsc run even though audit reports 0 findings (ADR-0015, #264).
-      const { regenIndexes } = await import("../lib/finalizers/regen-indexes.js");
-      const ctx5 = await loadProject(cwd);
-      const indexChanges = await regenIndexes(ctx5);
-      if (indexChanges.length > 0) {
-        const regenOp = {
-          name: "classify-regen-indexes",
-          plan: async () => indexChanges,
-        };
-        await run(ctx5, [regenOp], "apply");
-      }
-    }
-
-    return { moved: movedCount, kept: keptCount };
-  }
 }
