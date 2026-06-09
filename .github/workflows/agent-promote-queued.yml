@@ -1,0 +1,125 @@
+name: Agent Promote Queued
+
+# When an issue closes, find every `agent:queued` issue that declared it as a
+# blocker via the native GitHub issue dependency relation. If any of those
+# dependents have no remaining open blockers, flip `agent:queued` to
+# `agent:implement` so `agent-implement.yml` picks them up.
+#
+# This is the exit ramp from `agent:queued`. The entrance is either a human
+# applying the label or the PRD fan-out dispatcher (agent-implement-prd.yml)
+# parking blocked sub-issues there under dependency-aware fan-out.
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  promote:
+    # Wontfix closes don't unblock anything in a meaningful sense.
+    if: github.event.issue.state_reason != 'not_planned'
+    runs-on: self-hosted
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      # contents: read is required for the checkout step #21 added to load the
+      # shared labels module. An explicit permissions block sets every unlisted
+      # scope to none, so omitting this 404s the private-repo checkout
+      # ("Repository not found") and the wave never promotes.
+      contents: read
+
+    env:
+      CLOSED_NUMBER: ${{ github.event.issue.number }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      # AGENT_PAT is required for the promoted `agent:implement` label to
+      # fire `agent-implement.yml` — labels added via GITHUB_TOKEN do not
+      # trigger downstream workflows. Falls back to GITHUB_TOKEN, in which
+      # case promotion lands but the downstream run won't auto-trigger.
+      AGENT_PAT: ${{ secrets.AGENT_PAT }}
+
+    steps:
+      - name: Checkout main (for the shared labels module)
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          # Check the shared module out to a SEPARATE path so the sparse config
+          # lives in _shared/.git, never the runner's primary checkout dir. A
+          # sparse main checkout here used to leave core.sparseCheckout=on behind,
+          # poisoning the next job's plain checkout (npm install ENOENT). See #24.
+          path: _shared
+          sparse-checkout: .sandcastle/agent-workflows/shared
+          sparse-checkout-cone-mode: false
+
+      - name: Find dependents of the closed issue
+        id: dependents
+        run: |
+          set -euo pipefail
+          owner="${GH_REPO%/*}"
+          repo="${GH_REPO#*/}"
+          # `blocking` is the connection from the closed issue to issues that
+          # declared it as a blocker (i.e. our promotion candidates).
+          dependents=$(gh api graphql \
+            -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { blocking(first: 100) { nodes { number state } } } } }' \
+            -f owner="$owner" -f repo="$repo" -F num="$CLOSED_NUMBER" \
+            --jq '[.data.repository.issue.blocking.nodes[] | select(.state == "OPEN") | .number]')
+          echo "list=$dependents" >> "$GITHUB_OUTPUT"
+          echo "Found dependents: $dependents"
+
+      - name: Evaluate and promote each dependent
+        if: steps.dependents.outputs.list != '[]'
+        env:
+          DEPENDENTS_JSON: ${{ steps.dependents.outputs.list }}
+        run: |
+          set -euo pipefail
+          owner="${GH_REPO%/*}"
+          repo="${GH_REPO#*/}"
+
+          echo "$DEPENDENTS_JSON" | jq -r '.[]' | while read -r y; do
+            echo "::group::Evaluating #$y"
+
+            # Fetch labels + parent for Y in one shot.
+            y_data=$(gh api graphql \
+              -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { labels(first: 50) { nodes { name } } blockedBy(first: 100) { nodes { number state } } } } }' \
+              -f owner="$owner" -f repo="$repo" -F num="$y")
+
+            has_queued=$(echo "$y_data" | jq '[.data.repository.issue.labels.nodes[].name] | index("agent:queued") != null')
+            has_in_progress=$(echo "$y_data" | jq '[.data.repository.issue.labels.nodes[].name] | index("agent:in-progress") != null')
+            remaining_open=$(echo "$y_data" | jq '[.data.repository.issue.blockedBy.nodes[] | select(.state == "OPEN")] | length')
+
+            if [ "$has_queued" != "true" ]; then
+              echo "Skip: #$y is not agent:queued"
+              echo "::endgroup::"
+              continue
+            fi
+
+            if [ "$has_in_progress" = "true" ]; then
+              echo "Skip: #$y is agent:in-progress"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Sub-issues ARE valid promotion candidates under dependency-aware
+            # fan-out: the PRD dispatcher parks blocked sub-issues as
+            # agent:queued, and this workflow releases each as its blockers close.
+            if [ "$remaining_open" -gt 0 ]; then
+              echo "Skip: #$y still has $remaining_open open blocker(s)"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Idempotent flip: re-fetch labels right before mutating to lose
+            # races against a sibling run of this workflow.
+            still_queued=$(gh issue view "$y" --json labels --jq '[.labels[].name] | index("agent:queued") != null')
+            if [ "$still_queued" != "true" ]; then
+              echo "Skip: #$y no longer has agent:queued (lost race)"
+              echo "::endgroup::"
+              continue
+            fi
+
+            echo "Promote: #$y"
+            npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts clear-queued issue "$y"
+            gh issue comment "$y" --body "Unblocked by #${CLOSED_NUMBER} closing — promoting from \`agent:queued\` to \`agent:implement\`."
+            npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-trigger-label issue "$y" implement
+
+            echo "::endgroup::"
+          done

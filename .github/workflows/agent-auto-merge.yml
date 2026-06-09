@@ -1,0 +1,166 @@
+name: Agent Auto-Merge
+
+# When agent review passes and adds `ready-to-merge`, merge the PR and close
+# its linked issues. The close is authored with AGENT_PAT, which fires the
+# `issues:closed` event — so promotion of dependent `agent:queued` issues is
+# owned solely by agent-promote-queued.yml (no inline cascade here), and the
+# parent PRD's auto-close is owned by agent-close-completed-prd.yml. We keep
+# one inline cascade — closing the parent PRD when its last sub-issue lands —
+# as a same-run fallback so the PRD doesn't briefly linger if the event-driven
+# close is delayed; it's idempotent with close-completed-prd.yml.
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+jobs:
+  merge:
+    if: github.event.label.name == 'ready-to-merge'
+    runs-on: self-hosted
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      AGENT_PAT: ${{ secrets.AGENT_PAT }}
+
+    steps:
+      - name: Checkout main (for the shared labels module)
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          # Check the shared module out to a SEPARATE path so the sparse config
+          # lives in _shared/.git, never the runner's primary checkout dir. A
+          # sparse main checkout here used to leave core.sparseCheckout=on behind,
+          # poisoning the next job's plain checkout (npm install ENOENT). See #24.
+          path: _shared
+          sparse-checkout: .sandcastle/agent-workflows/shared
+          sparse-checkout-cone-mode: false
+
+      - name: Merge PR
+        id: merge
+        run: |
+          set -uo pipefail
+          # Decision tree: land a mergeable, non-stale PR; hand stale/conflicting
+          # ones to the rebase robot (which re-arms ready-to-merge on a real
+          # rebase); briefly retry while GitHub is still computing mergeability
+          # (UNKNOWN right after a push).
+          #
+          # We gate on `mergeable` + staleness, NOT on mergeStateStatus=CLEAN.
+          # This repo has no required PR checks — agent review is the merge gate
+          # (it sets ready-to-merge) — and THIS job's own in-progress `merge`
+          # check run holds the PR at UNSTABLE while we poll, so CLEAN is
+          # unreachable from inside the job. Gating on CLEAN deadlocks and
+          # bounces to the rebase robot forever (the merge loop).
+          merged=false
+          rebase=false
+          for attempt in 1 2 3 4 5 6; do
+            data=$(gh pr view "$PR_NUMBER" --json state,mergeable,mergeStateStatus)
+            st=$(echo "$data" | jq -r '.state')
+            m=$(echo "$data" | jq -r '.mergeable')
+            s=$(echo "$data" | jq -r '.mergeStateStatus')
+            if [ "$st" != "OPEN" ]; then
+              echo "PR #$PR_NUMBER is $st — nothing to merge."
+              merged=skip; break
+            fi
+            # Genuinely stale or conflicting → rebase robot. Check this FIRST so a
+            # BEHIND/DIRTY PR is never landed.
+            if [ "$m" = "CONFLICTING" ] || [ "$s" = "DIRTY" ] || [ "$s" = "BEHIND" ]; then
+              echo "PR #$PR_NUMBER is stale/conflicting (mergeable=$m state=$s)."
+              rebase=true; break
+            fi
+            # Mergeable and not stale → land it (UNSTABLE/HAS_HOOKS included).
+            if [ "$m" = "MERGEABLE" ] && [ "$s" != "DRAFT" ]; then
+              if gh pr merge "$PR_NUMBER" --squash --delete-branch; then merged=true; fi
+              break
+            fi
+            echo "Mergeability still computing (mergeable=$m state=$s); retry $attempt..."
+            sleep 5
+          done
+          echo "merged=$merged" >> "$GITHUB_OUTPUT"
+          if [ "$merged" = "true" ] || [ "$merged" = "skip" ]; then
+            exit 0
+          fi
+          # Either a real conflict, or mergeability never settled. Hand to the
+          # rebase robot; on success it re-fires ready-to-merge and we land it
+          # on the next auto-merge pass. Use AGENT_PAT so the labeled event
+          # actually triggers agent-update-branch.
+          if [ "$rebase" = "false" ]; then
+            echo "Mergeability never settled — handing to rebase robot to recompute."
+          fi
+          npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" update-branch
+          gh pr comment "$PR_NUMBER" --body "Auto-merge couldn't fast-forward (a sibling PR likely landed first) — handed to \`agent:update-branch\` to rebase and retry automatically."
+
+      - name: Close linked issues and cascade-close the parent PRD
+        if: steps.merge.outputs.merged == 'true'
+        run: |
+          set -euo pipefail
+          owner="${GH_REPO%/*}"
+          repo="${GH_REPO#*/}"
+
+          body=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+          closed_issues=$(echo "$body" | grep -oiE '(closes|fixes|resolves)\s+#[0-9]+' \
+            | grep -oE '[0-9]+' || true)
+
+          if [ -z "$closed_issues" ]; then
+            echo "No linked issues found."
+            exit 0
+          fi
+
+          for issue in $closed_issues; do
+            state=$(gh issue view "$issue" --json state --jq '.state')
+            if [ "$state" = "OPEN" ]; then
+              echo "Closing #$issue"
+              # Use AGENT_PAT for the close so the on-close triggers fire:
+              # agent-promote-queued.yml (release dependents) and
+              # agent-close-completed-prd.yml (close the parent PRD).
+              # GITHUB_TOKEN closes do not trigger workflows, so the PAT close
+              # is what makes those the single owners of promotion / PRD-close.
+              # Falls back to GITHUB_TOKEN; in that case the event-driven
+              # promotion won't fire, but the inline PRD cascade below still
+              # closes the parent (promotion of dependents waits for the next
+              # PAT-authored close).
+              set +e
+              if [ -n "${AGENT_PAT:-}" ]; then
+                GH_TOKEN="$AGENT_PAT" gh issue close "$issue" --reason completed
+                status=$?
+                if [ "$status" -ne 0 ]; then
+                  echo "AGENT_PAT close failed (status $status); falling back to GITHUB_TOKEN."
+                  gh issue close "$issue" --reason completed
+                fi
+              else
+                gh issue close "$issue" --reason completed
+              fi
+              set -e
+            fi
+
+            # Cascade parent-PRD close. If this issue is a sub-issue and every
+            # sibling is now closed, close the parent PRD too. This duplicates
+            # agent-close-completed-prd.yml (which fires on the PAT-authored
+            # issues:closed above), kept as a same-run fallback against event
+            # delay. Both guard on parent_state==OPEN, so they're idempotent.
+            parent=$(gh api graphql \
+              -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { parent { number } } } }' \
+              -f owner="$owner" -f repo="$repo" -F num="$issue" \
+              --jq '.data.repository.issue.parent.number // empty' 2>/dev/null || echo "")
+            if [ -n "$parent" ]; then
+              open_remaining=$(gh api "repos/${GH_REPO}/issues/${parent}/sub_issues" \
+                --jq '[.[] | select(.state == "open")] | length' 2>/dev/null || echo "0")
+              parent_state=$(gh issue view "$parent" --json state --jq '.state')
+              if [ "$open_remaining" = "0" ] && [ "$parent_state" = "OPEN" ]; then
+                echo "All sub-issues of #$parent are closed — closing the PRD."
+                npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts finish issue "$parent"
+                gh issue close "$parent" --comment "All sub-issues complete — closing this PRD. Implemented across parallel sub-issue PRs."
+              else
+                echo "Parent #$parent: $open_remaining open sub-issue(s) remaining — leaving open."
+              fi
+            fi
+
+            # Promotion of dependents is intentionally NOT done here. The
+            # AGENT_PAT close above fires issues:closed, which triggers
+            # agent-promote-queued.yml — the single owner of that cascade.
+          done

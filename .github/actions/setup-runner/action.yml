@@ -1,0 +1,62 @@
+name: Setup runner for PR mutation
+description: >-
+  The five runner-setup steps every PR-mutating workflow shares: checkout the
+  PR branch, ensure the branch (and optionally main) is available, set up
+  Node 22, install dependencies, and configure the bot git identity.
+
+inputs:
+  token:
+    description: >-
+      Checkout token. Pass AGENT_PAT (which carries the `workflows` scope so
+      pushes can touch .github/workflows/*) falling back to GITHUB_TOKEN.
+    required: true
+  ref:
+    description: The commit to check out (the PR head SHA).
+    required: false
+    default: ${{ github.event.pull_request.head.sha }}
+  branch:
+    description: The PR head branch name to check out by name.
+    required: false
+    default: ${{ github.event.pull_request.head.ref }}
+  fetch-main:
+    description: >-
+      When "true", fetch origin/main first so the run can diff against it.
+      Leave "false" for workflows that bring main in themselves.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout PR branch
+      uses: actions/checkout@v5
+      with:
+        ref: ${{ inputs.ref }}
+        fetch-depth: 0
+        token: ${{ inputs.token }}
+
+    - name: Ensure branch is checked out by name (and main available for diffing)
+      shell: bash
+      env:
+        BRANCH: ${{ inputs.branch }}
+        FETCH_MAIN: ${{ inputs.fetch-main }}
+      run: |
+        if [ "$FETCH_MAIN" = "true" ]; then
+          git fetch origin main:main || git fetch origin main
+        fi
+        git checkout "$BRANCH" 2>/dev/null || git checkout -B "$BRANCH"
+
+    - name: Setup Node.js 22
+      uses: actions/setup-node@v5
+      with:
+        node-version: "22"
+
+    - name: Install dependencies
+      shell: bash
+      run: npm install
+
+    - name: Configure git identity
+      shell: bash
+      run: |
+        git config user.name "claude-code[bot]"
+        git config user.email "claude-code[bot]@users.noreply.github.com"

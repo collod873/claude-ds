@@ -1,0 +1,229 @@
+name: Agent Implement
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  implement:
+    if: github.event.label.name == 'agent:implement'
+    runs-on: self-hosted
+    timeout-minutes: 60
+    concurrency:
+      group: agent-implement-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Detect — does this issue have sub-issues or a parent?
+        id: shape
+        run: |
+          set -euo pipefail
+          # Sub-issues: REST endpoint returns [] if none, list otherwise.
+          sub_count=$(gh api "repos/${GH_REPO}/issues/${ISSUE_NUMBER}/sub_issues" --jq 'length' 2>/dev/null || echo "0")
+          # Parent: queried via GraphQL since REST doesn't expose it on the issue object.
+          owner="${GH_REPO%/*}"
+          repo="${GH_REPO#*/}"
+          parent_number=$(gh api graphql \
+            -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { parent { number } } } }' \
+            -f owner="$owner" -f repo="$repo" -F num="$ISSUE_NUMBER" \
+            --jq '.data.repository.issue.parent.number // empty' 2>/dev/null || echo "")
+          if [ "$sub_count" != "0" ]; then
+            # Issue is a PRD — agent-implement-prd.yml fans it out. Silent skip here.
+            proceed="false"
+          else
+            # Leaf issue — either standalone, or a PRD sub-issue promoted by the
+            # fan-out dispatcher. Either way, implement it directly and in
+            # parallel with its siblings.
+            proceed="true"
+          fi
+          echo "sub_count=$sub_count" >> "$GITHUB_OUTPUT"
+          echo "parent_number=$parent_number" >> "$GITHUB_OUTPUT"
+          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
+
+      - name: Pre-flight — refuse if an open PR already exists for this issue
+        if: steps.shape.outputs.proceed == 'true'
+        id: preflight
+        run: |
+          set -euo pipefail
+          # Find open PRs whose body references "Closes #N" / "Fixes #N" / "Resolves #N".
+          existing=$(gh pr list \
+            --state open \
+            --search "in:body \"#${ISSUE_NUMBER}\"" \
+            --json number,url,body \
+            --jq "[.[] | select(.body | test(\"(?i)(closes|fixes|resolves)\\\\s+#${ISSUE_NUMBER}\\\\b\"))]")
+          count=$(echo "$existing" | jq 'length')
+          if [ "$count" -gt 0 ]; then
+            url=$(echo "$existing" | jq -r '.[0].url')
+            echo "existing_pr_url=$url" >> "$GITHUB_OUTPUT"
+            echo "refused=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "refused=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout main
+        if: steps.shape.outputs.proceed == 'true'
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          # Use AGENT_PAT so pushes can include changes to files under
+          # .github/workflows/ (GITHUB_TOKEN lacks the `workflows` scope).
+          # Falls back to GITHUB_TOKEN if AGENT_PAT is unset; in that case
+          # workflow-file changes will be rejected on push.
+          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Pre-flight refusal — comment + remove label, exit
+        if: steps.preflight.outputs.refused == 'true'
+        env:
+          EXISTING_PR_URL: ${{ steps.preflight.outputs.existing_pr_url }}
+        run: |
+          npx -y tsx .sandcastle/agent-workflows/shared/labels.ts remove-trigger-label issue "$ISSUE_NUMBER" implement
+          gh issue comment "$ISSUE_NUMBER" --body "Refused to run: PR $EXISTING_PR_URL already targets this issue. Close it first, then re-add \`agent:implement\`."
+          exit 0
+
+      - name: Transition labels — remove implement/blocked, add in-progress
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        run: npx -y tsx .sandcastle/agent-workflows/shared/labels.ts start-work issue "$ISSUE_NUMBER" implement
+
+      - name: Compute branch name
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        id: branch
+        run: |
+          slug=$(echo "$ISSUE_TITLE" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' \
+            | cut -c1-50)
+          branch="agent/issue-${ISSUE_NUMBER}-${slug}"
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Create branch
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          git config user.name "claude-code[bot]"
+          git config user.email "claude-code[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+      - name: Setup Node.js 22
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        run: npm install
+
+      - name: Run implement.ts
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        id: implement
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          OUTPUT_DIR: ${{ runner.temp }}
+        run: npx tsx .sandcastle/agent-workflows/implement/implement.ts
+
+      - name: Push branch (preserve committed work even on failure)
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && !cancelled()
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+        # Force-push so we recover from leftover branches whose PR has since
+        # closed/merged. Safe because the preflight step refuses when an open
+        # PR exists for this issue, and the branch name is deterministic from
+        # the issue number — any remote ref here is an orphan.
+        #
+        # Runs even when the implement step FAILED (e.g. the harness idle-timeout
+        # killed a long, silent command) so committed work is never stranded on
+        # the runner — see #381. Skips cleanly when nothing was committed.
+        run: |
+          if [ "$(git rev-list --count main..HEAD)" -eq 0 ]; then
+            echo "No commits beyond main — nothing to push."
+            exit 0
+          fi
+          git push --force origin "$BRANCH"
+
+      # PR title/description are written by the implement step itself: the agent
+      # emits them as the last thing it does, with full context from the work it
+      # just did (see implement.ts / pr-metadata.ts). There is deliberately NO
+      # separate write-pr agent — that was a second cold Opus call re-reading the
+      # diff. implement.ts always writes both files on success (a stub fallback
+      # if the agent never emitted a clean block); the guards below are belt-and
+      # -suspenders so a missing file can never open a PR with an empty title.
+
+      - name: Open PR
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
+        id: open_pr
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          # Create the PR as AGENT_PAT (a user token): GITHUB_TOKEN is blocked from
+          # opening PRs by default ("GitHub Actions is not permitted to create or
+          # approve pull requests"), which would otherwise require every grafted repo
+          # to flip a hidden Actions setting. Falls back to GITHUB_TOKEN if unset.
+          GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          PR_TITLE=$(cat "${RUNNER_TEMP}/pr_title.txt" 2>/dev/null || true)
+          PR_TITLE="${PR_TITLE:-$ISSUE_TITLE}"
+          PR_TITLE="${PR_TITLE:0:256}"
+          BODY_FILE="${RUNNER_TEMP}/pr_description.txt"
+          if [ ! -s "$BODY_FILE" ]; then
+            printf 'Closes #%s\n\nImplemented by the Sandcastle agent workflow.\n' \
+              "$ISSUE_NUMBER" > "$BODY_FILE"
+          fi
+          pr_url=$(gh pr create \
+            --draft \
+            --base main \
+            --head "$BRANCH" \
+            --title "$PR_TITLE" \
+            --body-file "$BODY_FILE" | tail -n1)
+          pr_number=$(basename "$pr_url")
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+
+      - name: Request automated review (chain into agent-review.yml)
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && success()
+        env:
+          PR_NUMBER: ${{ steps.open_pr.outputs.pr_number }}
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+        run: npx -y tsx .sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" review
+
+      - name: Mark blocked on failure
+        if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && failure()
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          reason="(no reason file written — check workflow logs)"
+          if [ -f "${RUNNER_TEMP}/failure_reason.txt" ]; then
+            reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
+          fi
+          branch_note="No branch was pushed (no commits were made)."
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            branch_note="Any commits made before the failure were pushed to \`$BRANCH\` — inspect or retry from there; work was not lost."
+          fi
+          body=$(cat <<EOF
+          \`agent:implement\` run failed.
+
+          **Reason:** $reason
+
+          **Workflow run:** $RUN_URL
+
+          $branch_note
+
+          Re-add \`agent:implement\` to retry.
+          EOF
+          )
+          npx -y tsx .sandcastle/agent-workflows/shared/labels.ts mark-blocked issue "$ISSUE_NUMBER" --body "$body"
+
+      - name: Always remove in-progress
+        if: always() && steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
+        run: npx -y tsx .sandcastle/agent-workflows/shared/labels.ts finish issue "$ISSUE_NUMBER"

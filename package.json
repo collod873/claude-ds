@@ -33,6 +33,8 @@
     "typescript": "^5.4.0"
   },
   "devDependencies": {
+    "@ai-hero/sandcastle": "^0.7.0",
+    "@standard-schema/spec": "^1.1.0",
     "@types/node": "^20.11.0",
     "@types/picomatch": "^4.0.3",
     "jsdom": "^24.1.3",

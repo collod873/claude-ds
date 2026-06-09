@@ -1,0 +1,156 @@
+name: Agent Review
+
+on:
+  # pull_request_target rather than pull_request: the standard pull_request
+  # trigger depends on a generated merge commit, which GitHub fails to
+  # produce when the PR is out-of-date or conflicting. pull_request_target
+  # runs in the base context and does not need the merge commit, so the
+  # labeled event fires reliably.
+  pull_request_target:
+    types: [labeled]
+
+jobs:
+  review:
+    if: github.event.label.name == 'agent:review'
+    runs-on: self-hosted
+    timeout-minutes: 60
+    concurrency:
+      group: agent-mutate-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BRANCH: ${{ github.event.pull_request.head.ref }}
+      BRANCH_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout main (shared labels module + setup-runner action)
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          # Full (non-sparse) checkout: the local composite action and the shared
+          # module must both be on disk before "Setup runner" runs. A sparse
+          # checkout here would leave core.sparseCheckout=on in the runner's
+          # primary checkout dir, poisoning the next job's plain checkout (the
+          # npm-install ENOENT from #24). "Setup runner" re-checks-out the PR head
+          # over this; the extra shallow main checkout is cheap insurance.
+
+      - name: Transition labels — remove trigger + blocked, add in-progress
+        run: npx -y tsx .sandcastle/agent-workflows/shared/labels.ts start-work pr "$PR_NUMBER" review
+
+      - name: Setup runner (checkout, branch, Node 22, deps, git identity)
+        uses: ./.github/actions/setup-runner
+        with:
+          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Capture pre-run HEAD
+        id: pre
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Run review.ts
+        id: review
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OUTPUT_DIR: ${{ runner.temp }}
+        run: npx tsx .sandcastle/agent-workflows/review/review.ts
+
+      - name: Push branch (abort cleanly if non-fast-forward)
+        id: push
+        if: success()
+        run: |
+          # Lease against the SHA we checked out — fails cleanly if anything
+          # pushed to the branch during our run.
+          set +e
+          git push --force-with-lease="refs/heads/$BRANCH:$BRANCH_HEAD_SHA" origin "$BRANCH" 2> push_err.txt
+          status=$?
+          set -e
+          if [ $status -ne 0 ]; then
+            if grep -qiE "without .workflows. permission|refusing to allow a GitHub App to create or update workflow" push_err.txt; then
+              echo "Push rejected: token lacks 'workflows' permission to update .github/workflows/*. Ensure checkout uses AGENT_PAT." > "${RUNNER_TEMP}/failure_reason.txt"
+              cat push_err.txt
+              exit 1
+            fi
+            if grep -qiE "non-fast-forward|rejected|fetch first|stale info" push_err.txt; then
+              echo "Branch advanced during review run." > "${RUNNER_TEMP}/failure_reason.txt"
+              echo "race=true" >> "$GITHUB_OUTPUT"
+              cat push_err.txt
+              exit 1
+            fi
+            cat push_err.txt
+            exit $status
+          fi
+
+      - name: Post PR review (inline comments + summary)
+        if: success()
+        env:
+          PAYLOAD: ${{ runner.temp }}/review_payload.json
+        run: npx tsx .sandcastle/agent-workflows/shared/review-publish.ts post-review "$PR_NUMBER" "$PAYLOAD"
+
+      - name: Mark PR ready for review
+        if: success()
+        run: gh pr ready "$PR_NUMBER" || true
+
+      - name: Apply merge verdict
+        if: success()
+        env:
+          VERDICT_FILE: ${{ runner.temp }}/verdict.txt
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+        run: |
+          set -uo pipefail
+          verdict=""
+          if [ -f "$VERDICT_FILE" ]; then
+            verdict=$(tr -d '[:space:]' < "$VERDICT_FILE")
+          fi
+          echo "Review verdict: '${verdict:-<none>}'"
+          if [ "$verdict" = "approve" ]; then
+            npx -y tsx .sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" ready-to-merge
+          elif [ "$verdict" = "request_changes" ]; then
+            npx -y tsx .sandcastle/agent-workflows/shared/labels.ts mark-blocked pr "$PR_NUMBER" --body "Automated review verdict: **request changes** — holding merge. See the review comments above. Re-add \`agent:review\` after addressing, or merge manually if you disagree."
+          else
+            # No machine-readable verdict (e.g. a PR branch cut before the verdict
+            # change shipped, so it runs the old review.ts). Do NOT auto-block —
+            # fall back to the prior behavior: leave the PR for a manual merge gate.
+            echo "No machine verdict emitted — leaving PR in the manual merge gate (no label change)."
+          fi
+
+      - name: Post thread replies (best-effort)
+        # Best-effort: replies to existing review threads must never fail the
+        # job — the merge verdict is already applied above. review-publish.ts
+        # validates/skips blank comment ids BEFORE the GraphQL node lookup, so a
+        # stale id no longer crashes the step (which used to trip the failure
+        # handler and stamp already-merged PRs `agent:blocked` — #9, PR #17).
+        if: success()
+        continue-on-error: true
+        env:
+          REPLIES: ${{ runner.temp }}/replies.json
+        run: npx tsx .sandcastle/agent-workflows/shared/review-publish.ts post-replies "$PR_NUMBER" "$REPLIES"
+
+      - name: Mark blocked on failure
+        if: failure()
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          reason="(no reason file written — check workflow logs)"
+          if [ -f "${RUNNER_TEMP}/failure_reason.txt" ]; then
+            reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
+          fi
+          body=$(cat <<EOF
+          \`agent:review\` run failed.
+
+          **Reason:** $reason
+
+          **Workflow run:** $RUN_URL
+
+          Re-add \`agent:review\` to retry.
+          EOF
+          )
+          npx -y tsx .sandcastle/agent-workflows/shared/labels.ts mark-blocked pr "$PR_NUMBER" --body "$body"
+
+      - name: Always remove in-progress label
+        if: always()
+        run: npx -y tsx .sandcastle/agent-workflows/shared/labels.ts finish pr "$PR_NUMBER"

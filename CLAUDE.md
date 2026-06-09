@@ -9,7 +9,14 @@ CLI that installs and syncs a shared design-system governance scaffold (hooks, c
 ## Working style
 
 - Roadmap lives in GitHub issues. Check `gh issue list` before assuming what's next.
-- Commit delegated subagent work directly to `main`. No feature branches or worktrees unless I ask — the `agent-*` branches in git history are historical (slice/build era), not current policy.
+- The `agent-*` pipeline (label state machine) is the system of record for delegated work: it opens a branch + PR per sub-issue, reviews, and auto-merges. Let it own branching — don't hand-commit pipeline work to `main`.
+
+## Agent pipeline
+
+This repo runs the Sandcastle AFK pipeline on a self-hosted runner pool. The label state machine drives it: triage to `ready-for-agent`, then `agent:implement` / `agent:review` / `agent:to-issues` / `agent:update-branch` dispatch the matching `.github/workflows/agent-*.yml`. Implement fans unblocked sub-issues into parallel waves, one branch+PR each.
+
+- Decisions live in `docs/adr/`; terminology in `CONTEXT.md`.
+- Review and implement read `.sandcastle/CODING_STANDARDS.md`.
 
 ## Local workflow
 

@@ -1,0 +1,75 @@
+name: Agent Close Completed PRD
+
+# In the parallel fan-out model, each PRD sub-issue closes via its own merged
+# PR. The parent PRD has no "Closes #" reference of its own, so it would linger
+# open forever. This workflow is the cascade: when a sub-issue closes, if every
+# sibling sub-issue of its parent is now closed, close the parent PRD too.
+#
+# SECONDARY PATH ONLY. The common case — a sub-issue closed by agent-auto-merge
+# via GITHUB_TOKEN — does NOT fire this `issues:closed` trigger (GITHUB_TOKEN
+# events don't trigger workflows), so agent-auto-merge.yml inlines the same
+# parent-close cascade. This workflow covers the remaining case: a human closing
+# the last sub-issue by hand (a real PAT close, which does trigger).
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  close-parent:
+    # A wontfix close shouldn't count as the PRD being done.
+    if: github.event.issue.state_reason != 'not_planned'
+    runs-on: self-hosted
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      # contents: read is required for the checkout step #21 added to load the
+      # shared labels module (an explicit permissions block denies every
+      # unlisted scope, 404ing the private-repo checkout otherwise).
+      contents: read
+
+    env:
+      CLOSED_NUMBER: ${{ github.event.issue.number }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout main (for the shared labels module)
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          # Check the shared module out to a SEPARATE path so the sparse config
+          # lives in _shared/.git, never the runner's primary checkout dir. A
+          # sparse main checkout here used to leave core.sparseCheckout=on behind,
+          # poisoning the next job's plain checkout (npm install ENOENT). See #24.
+          path: _shared
+          sparse-checkout: .sandcastle/agent-workflows/shared
+          sparse-checkout-cone-mode: false
+
+      - name: Close parent PRD when all its sub-issues are done
+        run: |
+          set -euo pipefail
+          owner="${GH_REPO%/*}"
+          repo="${GH_REPO#*/}"
+
+          parent=$(gh api graphql \
+            -f query='query($owner: String!, $repo: String!, $num: Int!) { repository(owner: $owner, name: $repo) { issue(number: $num) { parent { number } } } }' \
+            -f owner="$owner" -f repo="$repo" -F num="$CLOSED_NUMBER" \
+            --jq '.data.repository.issue.parent.number // empty' 2>/dev/null || echo "")
+
+          if [ -z "$parent" ]; then
+            echo "#$CLOSED_NUMBER has no parent — nothing to cascade."
+            exit 0
+          fi
+
+          open_remaining=$(gh api "repos/${GH_REPO}/issues/${parent}/sub_issues" \
+            --jq '[.[] | select(.state == "open")] | length' 2>/dev/null || echo "0")
+          parent_state=$(gh issue view "$parent" --json state --jq '.state')
+
+          if [ "$open_remaining" = "0" ] && [ "$parent_state" = "OPEN" ]; then
+            echo "All sub-issues of #$parent are closed — closing the PRD."
+            npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts finish issue "$parent"
+            gh issue close "$parent" --comment "All sub-issues complete — closing this PRD. Implemented across parallel sub-issue PRs."
+          else
+            echo "Parent #$parent: $open_remaining open sub-issue(s) remaining, state $parent_state — leaving open."
+          fi
