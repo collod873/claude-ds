@@ -36,33 +36,33 @@ export type CommandOutcome = "success" | "findings-remain" | "error";
  * breadcrumb (e.g. the `--json` machine surface, or an error path).
  */
 export interface NextStepHint {
-  command: NextStepCommand;
-  ctx: NextStepContext;
+	command: NextStepCommand;
+	ctx: NextStepContext;
 }
 
 export interface CommandResult {
-  outcome: CommandOutcome;
-  /** The exit code the CLI maps to `process.exit`. */
-  exitCode: number;
-  /** Caller-owned next-step breadcrumb; rendered by the CLI, discarded by the driver. */
-  nextStep?: NextStepHint;
+	outcome: CommandOutcome;
+	/** The exit code the CLI maps to `process.exit`. */
+	exitCode: number;
+	/** Caller-owned next-step breadcrumb; rendered by the CLI, discarded by the driver. */
+	nextStep?: NextStepHint;
 }
 
 /** A clean (exit 0) result, optionally carrying a next-step breadcrumb. */
 export function success(nextStep?: NextStepHint): CommandResult {
-  return nextStep
-    ? { outcome: "success", exitCode: 0, nextStep }
-    : { outcome: "success", exitCode: 0 };
+	return nextStep
+		? { outcome: "success", exitCode: 0, nextStep }
+		: { outcome: "success", exitCode: 0 };
 }
 
 /** A findings-remain (exit 1) result — work the command could not finish. */
 export function findingsRemain(nextStep?: NextStepHint): CommandResult {
-  return nextStep
-    ? { outcome: "findings-remain", exitCode: 1, nextStep }
-    : { outcome: "findings-remain", exitCode: 1 };
+	return nextStep
+		? { outcome: "findings-remain", exitCode: 1, nextStep }
+		: { outcome: "findings-remain", exitCode: 1 };
 }
 
 /** A user-input / environment error result (exit 2 by default, 130 for aborts). */
 export function commandError(exitCode = 2): CommandResult {
-  return { outcome: "error", exitCode };
+	return { outcome: "error", exitCode };
 }

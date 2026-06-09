@@ -15,8 +15,8 @@
 import type { Change } from "../operation.js";
 
 export interface SummaryEntry {
-  opName: string;
-  change: Change;
+	opName: string;
+	change: Change;
 }
 
 /**
@@ -29,43 +29,43 @@ export interface SummaryEntry {
 const FLAG_FILES = new Set<string>([".claude-ds.json"]);
 
 interface FlagFlip {
-  key: string;
-  before: string;
-  after: string;
+	key: string;
+	before: string;
+	after: string;
 }
 
 function safeJsonObject(buf: Buffer): Record<string, unknown> | null {
-  try {
-    const v = JSON.parse(buf.toString("utf8"));
-    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
+	try {
+		const v = JSON.parse(buf.toString("utf8"));
+		return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+	} catch {
+		return null;
+	}
 }
 
 function detectFlagFlips(change: Change): FlagFlip[] | null {
-  if (change.kind !== "write" || change.before === null) return null;
-  if (!FLAG_FILES.has(change.path)) return null;
-  const before = safeJsonObject(change.before);
-  const after = safeJsonObject(change.after);
-  if (!before || !after) return null;
-  const flips: FlagFlip[] = [];
-  const keys = new Set<string>([...Object.keys(before), ...Object.keys(after)]);
-  for (const key of keys) {
-    const b = JSON.stringify(before[key]);
-    const a = JSON.stringify(after[key]);
-    if (b !== a) {
-      flips.push({ key, before: b ?? "undefined", after: a ?? "undefined" });
-    }
-  }
-  return flips.length > 0 ? flips : null;
+	if (change.kind !== "write" || change.before === null) return null;
+	if (!FLAG_FILES.has(change.path)) return null;
+	const before = safeJsonObject(change.before);
+	const after = safeJsonObject(change.after);
+	if (!before || !after) return null;
+	const flips: FlagFlip[] = [];
+	const keys = new Set<string>([...Object.keys(before), ...Object.keys(after)]);
+	for (const key of keys) {
+		const b = JSON.stringify(before[key]);
+		const a = JSON.stringify(after[key]);
+		if (b !== a) {
+			flips.push({ key, before: b ?? "undefined", after: a ?? "undefined" });
+		}
+	}
+	return flips.length > 0 ? flips : null;
 }
 
 const IMPORT_RE = /^\s*(?:import\b|export\s+(?:\*|\{|type\s+\{|type\s+\*))/;
 
 interface ImportOnlyResult {
-  importsOnly: boolean;
-  count: number;
+	importsOnly: boolean;
+	count: number;
 }
 
 /**
@@ -75,41 +75,41 @@ interface ImportOnlyResult {
  * disqualifies the short label.
  */
 function detectImportOnlyChange(before: Buffer, after: Buffer): ImportOnlyResult {
-  const beforeLines = before.toString("utf8").split("\n");
-  const afterLines = after.toString("utf8").split("\n");
-  const beforeImports = beforeLines.filter(l => IMPORT_RE.test(l));
-  const afterImports = afterLines.filter(l => IMPORT_RE.test(l));
-  const beforeRest = beforeLines.filter(l => !IMPORT_RE.test(l)).join("\n");
-  const afterRest = afterLines.filter(l => !IMPORT_RE.test(l)).join("\n");
-  if (beforeRest !== afterRest) return { importsOnly: false, count: 0 };
-  const beforeSet = new Set(beforeImports);
-  const afterSet = new Set(afterImports);
-  let count = 0;
-  for (const l of afterSet) if (!beforeSet.has(l)) count++;
-  for (const l of beforeSet) if (!afterSet.has(l)) count++;
-  // Each rewrite is one removal + one addition (or vice-versa) — halve so the
-  // count tracks "imports rewritten," not "lines edited."
-  return { importsOnly: true, count: Math.ceil(count / 2) };
+	const beforeLines = before.toString("utf8").split("\n");
+	const afterLines = after.toString("utf8").split("\n");
+	const beforeImports = beforeLines.filter((l) => IMPORT_RE.test(l));
+	const afterImports = afterLines.filter((l) => IMPORT_RE.test(l));
+	const beforeRest = beforeLines.filter((l) => !IMPORT_RE.test(l)).join("\n");
+	const afterRest = afterLines.filter((l) => !IMPORT_RE.test(l)).join("\n");
+	if (beforeRest !== afterRest) return { importsOnly: false, count: 0 };
+	const beforeSet = new Set(beforeImports);
+	const afterSet = new Set(afterImports);
+	let count = 0;
+	for (const l of afterSet) if (!beforeSet.has(l)) count++;
+	for (const l of beforeSet) if (!afterSet.has(l)) count++;
+	// Each rewrite is one removal + one addition (or vice-versa) — halve so the
+	// count tracks "imports rewritten," not "lines edited."
+	return { importsOnly: true, count: Math.ceil(count / 2) };
 }
 
 function oneLineForChange(change: Change): string {
-  if (change.kind === "abort") {
-    return `! ${change.path}  (skipped: ${change.reason})`;
-  }
-  if (change.kind === "rename") {
-    return `R ${change.path} -> ${change.after}`;
-  }
-  if (change.kind === "delete") {
-    return `D ${change.path}`;
-  }
-  if (change.before === null) {
-    return `A ${change.path}`;
-  }
-  const imports = detectImportOnlyChange(change.before, change.after);
-  if (imports.importsOnly && imports.count > 0) {
-    return `M ${change.path}  (${imports.count} import${imports.count === 1 ? "" : "s"} rewritten)`;
-  }
-  return `M ${change.path}`;
+	if (change.kind === "abort") {
+		return `! ${change.path}  (skipped: ${change.reason})`;
+	}
+	if (change.kind === "rename") {
+		return `R ${change.path} -> ${change.after}`;
+	}
+	if (change.kind === "delete") {
+		return `D ${change.path}`;
+	}
+	if (change.before === null) {
+		return `A ${change.path}`;
+	}
+	const imports = detectImportOnlyChange(change.before, change.after);
+	if (imports.importsOnly && imports.count > 0) {
+		return `M ${change.path}  (${imports.count} import${imports.count === 1 ? "" : "s"} rewritten)`;
+	}
+	return `M ${change.path}`;
 }
 
 /**
@@ -123,66 +123,64 @@ function oneLineForChange(change: Change): string {
  * `colorizeDiffLines` adapter; snapshot tests assert the raw strings.
  */
 export function renderChangeSummary(entries: SummaryEntry[]): string[] {
-  const substantive: { entry: SummaryEntry; flips: FlagFlip[] }[] = [];
-  const regular: SummaryEntry[] = [];
-  let abortCount = 0;
-  const abortReasonCounts = new Map<string, number>();
+	const substantive: { entry: SummaryEntry; flips: FlagFlip[] }[] = [];
+	const regular: SummaryEntry[] = [];
+	let abortCount = 0;
+	const abortReasonCounts = new Map<string, number>();
 
-  for (const entry of entries) {
-    if (entry.change.kind === "abort") {
-      abortCount++;
-      abortReasonCounts.set(
-        entry.change.reason,
-        (abortReasonCounts.get(entry.change.reason) ?? 0) + 1,
-      );
-      continue;
-    }
-    const flips = detectFlagFlips(entry.change);
-    if (flips) {
-      substantive.push({ entry, flips });
-    } else {
-      regular.push(entry);
-    }
-  }
+	for (const entry of entries) {
+		if (entry.change.kind === "abort") {
+			abortCount++;
+			abortReasonCounts.set(
+				entry.change.reason,
+				(abortReasonCounts.get(entry.change.reason) ?? 0) + 1,
+			);
+			continue;
+		}
+		const flips = detectFlagFlips(entry.change);
+		if (flips) {
+			substantive.push({ entry, flips });
+		} else {
+			regular.push(entry);
+		}
+	}
 
-  const lines: string[] = [];
+	const lines: string[] = [];
 
-  if (substantive.length > 0) {
-    lines.push("Substantive changes:");
-    for (const { entry, flips } of substantive) {
-      lines.push(
-        `! ${entry.change.path}  (config flag${flips.length === 1 ? "" : "s"} flipped)`,
-      );
-      for (const flip of flips) {
-        lines.push(`    ${flip.key}: ${flip.before} -> ${flip.after}`);
-      }
-    }
-  }
+	if (substantive.length > 0) {
+		lines.push("Substantive changes:");
+		for (const { entry, flips } of substantive) {
+			lines.push(`! ${entry.change.path}  (config flag${flips.length === 1 ? "" : "s"} flipped)`);
+			for (const flip of flips) {
+				lines.push(`    ${flip.key}: ${flip.before} -> ${flip.after}`);
+			}
+		}
+	}
 
-  if (regular.length > 0) {
-    if (substantive.length > 0) {
-      lines.push("");
-      lines.push("Other changes:");
-    }
-    for (const entry of regular) {
-      lines.push(oneLineForChange(entry.change));
-    }
-  }
+	if (regular.length > 0) {
+		if (substantive.length > 0) {
+			lines.push("");
+			lines.push("Other changes:");
+		}
+		for (const entry of regular) {
+			lines.push(oneLineForChange(entry.change));
+		}
+	}
 
-  if (abortCount > 0) {
-    if (lines.length > 0) lines.push("");
-    lines.push(
-      `Skipped: ${abortCount} file${abortCount === 1 ? "" : "s"} (hand-edited or unsafe to overwrite)`,
-    );
-    if (abortReasonCounts.size > 1) {
-      for (const [reason, n] of abortReasonCounts) {
-        lines.push(`  ${n}x ${reason}`);
-      }
-    }
-  }
+	if (abortCount > 0) {
+		if (lines.length > 0) lines.push("");
+		lines.push(
+			`Skipped: ${abortCount} file${abortCount === 1 ? "" : "s"} (hand-edited or unsafe to overwrite)`,
+		);
+		if (abortReasonCounts.size > 1) {
+			for (const [reason, n] of abortReasonCounts) {
+				lines.push(`  ${n}x ${reason}`);
+			}
+		}
+	}
 
-  if (lines.length === 0) lines.push("No changes.");
-  return lines;
+	if (lines.length === 0) lines.push("No changes.");
+	return lines;
 }
 
 /**
@@ -207,127 +205,146 @@ export function renderChangeSummary(entries: SummaryEntry[]): string[] {
 type Tier = "atom" | "composite" | "pattern" | "token" | "scaffold";
 
 function tierForPath(p: string): Tier {
-  if (p.startsWith("design-system/atoms/")) return "atom";
-  if (p.startsWith("design-system/composites/")) return "composite";
-  if (p.startsWith("design-system/patterns/")) return "pattern";
-  if (p.startsWith("design-system/tokens/")) return "token";
-  return "scaffold";
+	if (p.startsWith("design-system/atoms/")) return "atom";
+	if (p.startsWith("design-system/composites/")) return "composite";
+	if (p.startsWith("design-system/patterns/")) return "pattern";
+	if (p.startsWith("design-system/tokens/")) return "token";
+	return "scaffold";
 }
 
 function pluralTier(tier: Tier, n: number): string {
-  const root = tier === "atom" ? "atom"
-    : tier === "composite" ? "composite"
-    : tier === "pattern" ? "pattern"
-    : tier === "token" ? "token"
-    : "scaffold file";
-  return n === 1 ? root : `${root}s`;
+	const root =
+		tier === "atom"
+			? "atom"
+			: tier === "composite"
+				? "composite"
+				: tier === "pattern"
+					? "pattern"
+					: tier === "token"
+						? "token"
+						: "scaffold file";
+	return n === 1 ? root : `${root}s`;
 }
 
 interface TierBuckets {
-  total: number;
-  byTier: Map<Tier, number>;
+	total: number;
+	byTier: Map<Tier, number>;
 }
 
 function formatTierBreakdown(buckets: TierBuckets): string {
-  const parts: string[] = [];
-  const order: Tier[] = ["atom", "composite", "pattern", "token", "scaffold"];
-  for (const t of order) {
-    const n = buckets.byTier.get(t) ?? 0;
-    if (n > 0) parts.push(`${n} ${pluralTier(t, n)}`);
-  }
-  return parts.join(", ");
+	const parts: string[] = [];
+	const order: Tier[] = ["atom", "composite", "pattern", "token", "scaffold"];
+	for (const t of order) {
+		const n = buckets.byTier.get(t) ?? 0;
+		if (n > 0) parts.push(`${n} ${pluralTier(t, n)}`);
+	}
+	return parts.join(", ");
 }
 
 function bucketChange(buckets: TierBuckets, path: string): void {
-  buckets.total += 1;
-  const t = tierForPath(path);
-  buckets.byTier.set(t, (buckets.byTier.get(t) ?? 0) + 1);
+	buckets.total += 1;
+	const t = tierForPath(path);
+	buckets.byTier.set(t, (buckets.byTier.get(t) ?? 0) + 1);
 }
 
 function emptyBuckets(): TierBuckets {
-  return { total: 0, byTier: new Map() };
+	return { total: 0, byTier: new Map() };
 }
 
 export function renderChangeTierSummary(entries: SummaryEntry[]): string[] {
-  const substantive: { entry: SummaryEntry; flips: FlagFlip[] }[] = [];
-  const added = emptyBuckets();
-  const modified = emptyBuckets();
-  const deleted = emptyBuckets();
-  const renamed = emptyBuckets();
-  let abortCount = 0;
+	const substantive: { entry: SummaryEntry; flips: FlagFlip[] }[] = [];
+	const added = emptyBuckets();
+	const modified = emptyBuckets();
+	const deleted = emptyBuckets();
+	const renamed = emptyBuckets();
+	let abortCount = 0;
 
-  for (const entry of entries) {
-    const c = entry.change;
-    if (c.kind === "abort") { abortCount++; continue; }
-    const flips = detectFlagFlips(c);
-    if (flips) { substantive.push({ entry, flips }); continue; }
-    if (c.kind === "rename") { bucketChange(renamed, c.path); continue; }
-    if (c.kind === "delete") { bucketChange(deleted, c.path); continue; }
-    if (c.kind === "write") {
-      if (c.before === null) bucketChange(added, c.path);
-      else bucketChange(modified, c.path);
-    }
-  }
+	for (const entry of entries) {
+		const c = entry.change;
+		if (c.kind === "abort") {
+			abortCount++;
+			continue;
+		}
+		const flips = detectFlagFlips(c);
+		if (flips) {
+			substantive.push({ entry, flips });
+			continue;
+		}
+		if (c.kind === "rename") {
+			bucketChange(renamed, c.path);
+			continue;
+		}
+		if (c.kind === "delete") {
+			bucketChange(deleted, c.path);
+			continue;
+		}
+		if (c.kind === "write") {
+			if (c.before === null) bucketChange(added, c.path);
+			else bucketChange(modified, c.path);
+		}
+	}
 
-  const lines: string[] = [];
+	const lines: string[] = [];
 
-  if (substantive.length > 0) {
-    lines.push("Substantive changes:");
-    for (const { entry, flips } of substantive) {
-      lines.push(
-        `! ${entry.change.path}  (config flag${flips.length === 1 ? "" : "s"} flipped)`,
-      );
-      for (const flip of flips) {
-        lines.push(`    ${flip.key}: ${flip.before} -> ${flip.after}`);
-      }
-    }
-  }
+	if (substantive.length > 0) {
+		lines.push("Substantive changes:");
+		for (const { entry, flips } of substantive) {
+			lines.push(`! ${entry.change.path}  (config flag${flips.length === 1 ? "" : "s"} flipped)`);
+			for (const flip of flips) {
+				lines.push(`    ${flip.key}: ${flip.before} -> ${flip.after}`);
+			}
+		}
+	}
 
-  const verbs: { verb: string; buckets: TierBuckets }[] = [
-    { verb: "modified", buckets: modified },
-    { verb: "added", buckets: added },
-    { verb: "deleted", buckets: deleted },
-    { verb: "renamed", buckets: renamed },
-  ];
+	const verbs: { verb: string; buckets: TierBuckets }[] = [
+		{ verb: "modified", buckets: modified },
+		{ verb: "added", buckets: added },
+		{ verb: "deleted", buckets: deleted },
+		{ verb: "renamed", buckets: renamed },
+	];
 
-  // Special-case: every non-substantive Change is a managed-scaffold add (the
-  // canonical sync-restores-scaffold path). Render as "Added N scaffold files"
-  // rather than the generic "N files added — N scaffolds" form so the C4
-  // example ("restored N managed scaffold files") matches verbatim.
-  const scaffoldOnly =
-    added.total > 0 && modified.total === 0 && deleted.total === 0 && renamed.total === 0 &&
-    added.byTier.size === 1 && (added.byTier.get("scaffold") ?? 0) === added.total;
-  if (scaffoldOnly) {
-    if (substantive.length > 0) {
-      lines.push("");
-      lines.push("Other changes:");
-    }
-    const n = added.total;
-    lines.push(`Added ${n} scaffold file${n === 1 ? "" : "s"}`);
-  } else {
-    const anyVerb = verbs.some(v => v.buckets.total > 0);
-    if (anyVerb) {
-      if (substantive.length > 0) {
-        lines.push("");
-        lines.push("Other changes:");
-      }
-      for (const { verb, buckets } of verbs) {
-        if (buckets.total === 0) continue;
-        const noun = buckets.total === 1 ? "file" : "files";
-        lines.push(`${buckets.total} ${noun} ${verb} — ${formatTierBreakdown(buckets)}`);
-      }
-    }
-  }
+	// Special-case: every non-substantive Change is a managed-scaffold add (the
+	// canonical sync-restores-scaffold path). Render as "Added N scaffold files"
+	// rather than the generic "N files added — N scaffolds" form so the C4
+	// example ("restored N managed scaffold files") matches verbatim.
+	const scaffoldOnly =
+		added.total > 0 &&
+		modified.total === 0 &&
+		deleted.total === 0 &&
+		renamed.total === 0 &&
+		added.byTier.size === 1 &&
+		(added.byTier.get("scaffold") ?? 0) === added.total;
+	if (scaffoldOnly) {
+		if (substantive.length > 0) {
+			lines.push("");
+			lines.push("Other changes:");
+		}
+		const n = added.total;
+		lines.push(`Added ${n} scaffold file${n === 1 ? "" : "s"}`);
+	} else {
+		const anyVerb = verbs.some((v) => v.buckets.total > 0);
+		if (anyVerb) {
+			if (substantive.length > 0) {
+				lines.push("");
+				lines.push("Other changes:");
+			}
+			for (const { verb, buckets } of verbs) {
+				if (buckets.total === 0) continue;
+				const noun = buckets.total === 1 ? "file" : "files";
+				lines.push(`${buckets.total} ${noun} ${verb} — ${formatTierBreakdown(buckets)}`);
+			}
+		}
+	}
 
-  if (abortCount > 0) {
-    if (lines.length > 0) lines.push("");
-    lines.push(
-      `Skipped: ${abortCount} file${abortCount === 1 ? "" : "s"} (hand-edited or unsafe to overwrite)`,
-    );
-  }
+	if (abortCount > 0) {
+		if (lines.length > 0) lines.push("");
+		lines.push(
+			`Skipped: ${abortCount} file${abortCount === 1 ? "" : "s"} (hand-edited or unsafe to overwrite)`,
+		);
+	}
 
-  if (lines.length === 0) lines.push("No changes.");
-  return lines;
+	if (lines.length === 0) lines.push("No changes.");
+	return lines;
 }
 
 /**
@@ -337,19 +354,19 @@ export function renderChangeTierSummary(entries: SummaryEntry[]): string[] {
  * wanted them would have asked for `--diff`.
  */
 export function renderChangesJson(entries: SummaryEntry[]): string {
-  return JSON.stringify(
-    {
-      changes: entries.map(({ opName, change }) => {
-        const base = { op: opName, kind: change.kind, path: change.path };
-        if (change.kind === "rename") return { ...base, after: change.after };
-        if (change.kind === "abort") return { ...base, reason: change.reason };
-        if (change.kind === "write") {
-          return { ...base, created: change.before === null };
-        }
-        return base;
-      }),
-    },
-    null,
-    2,
-  );
+	return JSON.stringify(
+		{
+			changes: entries.map(({ opName, change }) => {
+				const base = { op: opName, kind: change.kind, path: change.path };
+				if (change.kind === "rename") return { ...base, after: change.after };
+				if (change.kind === "abort") return { ...base, reason: change.reason };
+				if (change.kind === "write") {
+					return { ...base, created: change.before === null };
+				}
+				return base;
+			}),
+		},
+		null,
+		2,
+	);
 }

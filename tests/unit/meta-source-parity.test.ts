@@ -16,71 +16,71 @@
  * pins it against regression.
  */
 import { describe, expect, it } from "vitest";
-import { metaKindFromSource, metaRoleFromSource } from "../../src/lib/three-signal.js";
 import { mergeMetaKind } from "../../src/lib/drift/merge-meta-kind.js";
+import { metaKindFromSource, metaRoleFromSource } from "../../src/lib/three-signal.js";
 
 /** The layouts that broke the old `[^}]*` regex — `kind` after a nested brace. */
 const KIND_PRESENT_BUT_NESTED = {
-  "examples-before-kind": [
-    `export const meta = {`,
-    `  examples: [{ name: "Default" }],`,
-    `  kind: "atom",`,
-    `};`,
-  ].join("\n"),
-  "role + nested props before kind": [
-    `export const meta = {`,
-    `  role: "button",`,
-    `  examples: [{ props: { variant: "x" } }],`,
-    `  kind: "composite",`,
-    `};`,
-  ].join("\n"),
-  "deeply nested examples before kind": [
-    `export const meta = {`,
-    `  examples: [{ name: "a", props: { items: [{ id: 1 }] } }],`,
-    `  kind: "pattern",`,
-    `} as const;`,
-  ].join("\n"),
+	"examples-before-kind": [
+		`export const meta = {`,
+		`  examples: [{ name: "Default" }],`,
+		`  kind: "atom",`,
+		`};`,
+	].join("\n"),
+	"role + nested props before kind": [
+		`export const meta = {`,
+		`  role: "button",`,
+		`  examples: [{ props: { variant: "x" } }],`,
+		`  kind: "composite",`,
+		`};`,
+	].join("\n"),
+	"deeply nested examples before kind": [
+		`export const meta = {`,
+		`  examples: [{ name: "a", props: { items: [{ id: 1 }] } }],`,
+		`  kind: "pattern",`,
+		`} as const;`,
+	].join("\n"),
 };
 
 describe("meta.kind checker/fixer parity", () => {
-  for (const [label, src] of Object.entries(KIND_PRESENT_BUT_NESTED)) {
-    it(`checker sees kind AND fixer no-ops — ${label}`, () => {
-      // Checker: the kind is genuinely present, so it must NOT report missing.
-      expect(metaKindFromSource(src)).not.toBeNull();
-      // Fixer: the kind is present, so merging any tier must be a no-op.
-      expect(mergeMetaKind(src, "atom")).toBe(src);
-    });
-  }
+	for (const [label, src] of Object.entries(KIND_PRESENT_BUT_NESTED)) {
+		it(`checker sees kind AND fixer no-ops — ${label}`, () => {
+			// Checker: the kind is genuinely present, so it must NOT report missing.
+			expect(metaKindFromSource(src)).not.toBeNull();
+			// Fixer: the kind is present, so merging any tier must be a no-op.
+			expect(mergeMetaKind(src, "atom")).toBe(src);
+		});
+	}
 
-  it("reads the correct tier from a kind that sits after a nested brace", () => {
-    expect(metaKindFromSource(KIND_PRESENT_BUT_NESTED["examples-before-kind"])).toBe("atom");
-    expect(metaKindFromSource(KIND_PRESENT_BUT_NESTED["role + nested props before kind"])).toBe(
-      "composite",
-    );
-    expect(
-      metaKindFromSource(KIND_PRESENT_BUT_NESTED["deeply nested examples before kind"]),
-    ).toBe("pattern");
-  });
+	it("reads the correct tier from a kind that sits after a nested brace", () => {
+		expect(metaKindFromSource(KIND_PRESENT_BUT_NESTED["examples-before-kind"])).toBe("atom");
+		expect(metaKindFromSource(KIND_PRESENT_BUT_NESTED["role + nested props before kind"])).toBe(
+			"composite",
+		);
+		expect(metaKindFromSource(KIND_PRESENT_BUT_NESTED["deeply nested examples before kind"])).toBe(
+			"pattern",
+		);
+	});
 });
 
 describe("meta.role reader — same nested-brace flaw (the latent twin)", () => {
-  it("reads role declared after a nested examples brace", () => {
-    const src = [
-      `export const meta = {`,
-      `  examples: [{ name: "Default", props: { open: true } }],`,
-      `  role: "disclosure",`,
-      `} as const;`,
-    ].join("\n");
-    expect(metaRoleFromSource(src)).toBe("disclosure");
-  });
+	it("reads role declared after a nested examples brace", () => {
+		const src = [
+			`export const meta = {`,
+			`  examples: [{ name: "Default", props: { open: true } }],`,
+			`  role: "disclosure",`,
+			`} as const;`,
+		].join("\n");
+		expect(metaRoleFromSource(src)).toBe("disclosure");
+	});
 
-  it("reads a hyphenated role after nested braces", () => {
-    const src = [
-      `export const meta = {`,
-      `  examples: [{ props: {} }],`,
-      `  role: "button-group",`,
-      `};`,
-    ].join("\n");
-    expect(metaRoleFromSource(src)).toBe("button-group");
-  });
+	it("reads a hyphenated role after nested braces", () => {
+		const src = [
+			`export const meta = {`,
+			`  examples: [{ props: {} }],`,
+			`  role: "button-group",`,
+			`};`,
+		].join("\n");
+		expect(metaRoleFromSource(src)).toBe("button-group");
+	});
 });

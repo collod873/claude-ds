@@ -30,18 +30,18 @@
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { auditCmd } from "../commands/audit.js";
+import { classifyCmd } from "../commands/classify.js";
 import { syncCmd } from "../commands/sync.js";
 import { upgradeCmd } from "../commands/upgrade.js";
-import { classifyCmd } from "../commands/classify.js";
-import { auditCmd } from "../commands/audit.js";
 import { SCAN_SKIP_DIRS } from "./build-outputs.js";
 import type { PendingDecision } from "./decision/index.js";
-import { deriveProjectState } from "./project-state.js";
-import { planRemediation, type LoopStep } from "./remediation-planner.js";
-import type { ProgressController } from "./render/tty-layer.js";
-import { loadProject } from "./project.js";
-import { parseExceptions, openCount, type Exception } from "./exceptions.js";
+import { type Exception, openCount, parseExceptions } from "./exceptions.js";
 import { setConfigMode } from "./ops/set-config-mode.js";
+import { loadProject } from "./project.js";
+import { deriveProjectState } from "./project-state.js";
+import { type LoopStep, planRemediation } from "./remediation-planner.js";
+import type { ProgressController } from "./render/tty-layer.js";
 import { run } from "./runner.js";
 
 export type { LoopStep } from "./remediation-planner.js";
@@ -58,46 +58,46 @@ export type { LoopStep } from "./remediation-planner.js";
  * convergence.
  */
 export async function snapshotTree(root: string): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  async function walk(absDir: string): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(absDir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (SCAN_SKIP_DIRS.has(e.name)) continue;
-      const abs = join(absDir, e.name);
-      if (e.isDirectory()) {
-        await walk(abs);
-      } else if (e.isFile()) {
-        const rel = relative(root, abs);
-        try {
-          result.set(rel, await readFile(abs, "utf8"));
-        } catch {
-          // Binary or unreadable — convergence check ignores it.
-        }
-      }
-    }
-  }
-  await walk(root);
-  return result;
+	const result = new Map<string, string>();
+	async function walk(absDir: string): Promise<void> {
+		let entries;
+		try {
+			entries = await readdir(absDir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const e of entries) {
+			if (SCAN_SKIP_DIRS.has(e.name)) continue;
+			const abs = join(absDir, e.name);
+			if (e.isDirectory()) {
+				await walk(abs);
+			} else if (e.isFile()) {
+				const rel = relative(root, abs);
+				try {
+					result.set(rel, await readFile(abs, "utf8"));
+				} catch {
+					// Binary or unreadable — convergence check ignores it.
+				}
+			}
+		}
+	}
+	await walk(root);
+	return result;
 }
 
 export function treesEqual(a: Map<string, string>, b: Map<string, string>): boolean {
-  if (a.size !== b.size) return false;
-  for (const [k, v] of a) {
-    if (b.get(k) !== v) return false;
-  }
-  for (const k of b.keys()) if (!a.has(k)) return false;
-  return true;
+	if (a.size !== b.size) return false;
+	for (const [k, v] of a) {
+		if (b.get(k) !== v) return false;
+	}
+	for (const k of b.keys()) if (!a.has(k)) return false;
+	return true;
 }
 
 interface DispatchOpts {
-  cwd: string;
-  answers: string | undefined;
-  pendingSink: PendingDecision[] | undefined;
+	cwd: string;
+	answers: string | undefined;
+	pendingSink: PendingDecision[] | undefined;
 }
 
 /**
@@ -122,29 +122,30 @@ interface DispatchOpts {
  * for the top-level clean-tree decision before the loop runs.
  */
 export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<number> {
-  const { cwd, answers, pendingSink } = opts;
-  // Issue #437 (ADR-0018): each loop member runs as a plain function and returns
-  // a `CommandResult`. The driver reads only the exit code; it never renders the
-  // returned `nextStep` breadcrumb (heal/front-door own the single authoritative
-  // verdict, so no `→ Next` prints on the loop path) and never opts into the
-  // per-step `verify` gate (heal owns the one gate at convergence — running it
-  // per inner step would mean N extra tsc invocations per heal iteration).
-  switch (step) {
-    case "upgrade":
-    case "repair":
-      return (await upgradeCmd({ cwd, yes: true, allowDirty: true })).exitCode;
-    case "sync":
-      return (await syncCmd({ cwd, yes: true, allowDirty: true })).exitCode;
-    case "classify":
-      return (await classifyCmd({ cwd, yes: true, allowDirty: true, answers, pendingSink })).exitCode;
-    case "audit --fix":
-      return (await auditCmd({ cwd, fix: true, allowDirty: true, answers, pendingSink })).exitCode;
-    case "migrate-layout":
-    case "reconcile":
-    case "reconform":
-      // Reserved-but-unwired (see function comment).
-      return 0;
-  }
+	const { cwd, answers, pendingSink } = opts;
+	// Issue #437 (ADR-0018): each loop member runs as a plain function and returns
+	// a `CommandResult`. The driver reads only the exit code; it never renders the
+	// returned `nextStep` breadcrumb (heal/front-door own the single authoritative
+	// verdict, so no `→ Next` prints on the loop path) and never opts into the
+	// per-step `verify` gate (heal owns the one gate at convergence — running it
+	// per inner step would mean N extra tsc invocations per heal iteration).
+	switch (step) {
+		case "upgrade":
+		case "repair":
+			return (await upgradeCmd({ cwd, yes: true, allowDirty: true })).exitCode;
+		case "sync":
+			return (await syncCmd({ cwd, yes: true, allowDirty: true })).exitCode;
+		case "classify":
+			return (await classifyCmd({ cwd, yes: true, allowDirty: true, answers, pendingSink }))
+				.exitCode;
+		case "audit --fix":
+			return (await auditCmd({ cwd, fix: true, allowDirty: true, answers, pendingSink })).exitCode;
+		case "migrate-layout":
+		case "reconcile":
+		case "reconform":
+			// Reserved-but-unwired (see function comment).
+			return 0;
+	}
 }
 
 /**
@@ -165,48 +166,48 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
  * leaves it. The `enforce` command stays registered as a hidden escape hatch.
  */
 async function promoteModeAtConvergence(cwd: string, progress: ProgressController): Promise<void> {
-  const ctx = await loadProject(cwd);
-  if (ctx.cfg.mode !== "warn") return;
-  let ex: Exception[] = [];
-  try {
-    ex = parseExceptions(await readFile(join(cwd, "design-system/exceptions.json"), "utf8"));
-  } catch {
-    // No (or unreadable) exceptions.json → zero open exceptions, within any threshold.
-  }
-  if (openCount(ex) > ctx.cfg.enforce_threshold) return;
-  const report = await run(ctx, [setConfigMode("block")], "apply");
-  if (report.failed) return;
-  progress.info("enforce: tree clean — promoted hook mode warn → block");
+	const ctx = await loadProject(cwd);
+	if (ctx.cfg.mode !== "warn") return;
+	let ex: Exception[] = [];
+	try {
+		ex = parseExceptions(await readFile(join(cwd, "design-system/exceptions.json"), "utf8"));
+	} catch {
+		// No (or unreadable) exceptions.json → zero open exceptions, within any threshold.
+	}
+	if (openCount(ex) > ctx.cfg.enforce_threshold) return;
+	const report = await run(ctx, [setConfigMode("block")], "apply");
+	if (report.failed) return;
+	progress.info("enforce: tree clean — promoted hook mode warn → block");
 }
 
 export interface DriveOpts {
-  cwd: string;
-  /** Iteration ceiling. The caller validates positivity before calling. */
-  maxIterations: number;
-  /** `--answers` file path forwarded to classify/audit (resolves Ambiguities). */
-  answers?: string;
-  /**
-   * When provided, Ambiguities are collected here instead of prompting/throwing
-   * (heal's headless policy). When omitted, the Decision resolver prompts
-   * inline on a TTY or fails loud non-TTY — the front door's interactive policy.
-   */
-  pendingSink?: PendingDecision[];
-  /** Live progress UI; the driver drives `start`/`succeed`/`info` per step. */
-  progress: ProgressController;
-  /**
-   * Called at the top of each iteration with `(iter, max)`. The caller emits
-   * its own flavored log line (`heal: iteration 1/3`, or the front door's). The
-   * driver stays UI-neutral so neither driver's stdout leaks into the other.
-   */
-  onIteration?: (iter: number, max: number) => void;
-  /**
-   * Issue #414 / C3 — called after a pass's plan is derived, so the driver can
-   * surface the labeled iteration ("pass 2/3 — classify → audit --fix") instead
-   * of a generic "iteration 2/3" line that reads as a stuck loop. Fires after
-   * `onIteration` and before any step dispatches; called only when the plan is
-   * non-empty (an empty plan converges immediately and produces no labeled pass).
-   */
-  onPassPlan?: (iter: number, max: number, plan: LoopStep[]) => void;
+	cwd: string;
+	/** Iteration ceiling. The caller validates positivity before calling. */
+	maxIterations: number;
+	/** `--answers` file path forwarded to classify/audit (resolves Ambiguities). */
+	answers?: string;
+	/**
+	 * When provided, Ambiguities are collected here instead of prompting/throwing
+	 * (heal's headless policy). When omitted, the Decision resolver prompts
+	 * inline on a TTY or fails loud non-TTY — the front door's interactive policy.
+	 */
+	pendingSink?: PendingDecision[];
+	/** Live progress UI; the driver drives `start`/`succeed`/`info` per step. */
+	progress: ProgressController;
+	/**
+	 * Called at the top of each iteration with `(iter, max)`. The caller emits
+	 * its own flavored log line (`heal: iteration 1/3`, or the front door's). The
+	 * driver stays UI-neutral so neither driver's stdout leaks into the other.
+	 */
+	onIteration?: (iter: number, max: number) => void;
+	/**
+	 * Issue #414 / C3 — called after a pass's plan is derived, so the driver can
+	 * surface the labeled iteration ("pass 2/3 — classify → audit --fix") instead
+	 * of a generic "iteration 2/3" line that reads as a stuck loop. Fires after
+	 * `onIteration` and before any step dispatches; called only when the plan is
+	 * non-empty (an empty plan converges immediately and produces no labeled pass).
+	 */
+	onPassPlan?: (iter: number, max: number, plan: LoopStep[]) => void;
 }
 
 /**
@@ -220,9 +221,9 @@ export interface DriveOpts {
  *     `lastStep` is the phase that was running, for the failure message.
  */
 export type DriveOutcome =
-  | { kind: "converged"; iterations: number }
-  | { kind: "pending" }
-  | { kind: "exhausted"; lastStep: LoopStep | null };
+	| { kind: "converged"; iterations: number }
+	| { kind: "pending" }
+	| { kind: "exhausted"; lastStep: LoopStep | null };
 
 /**
  * Walk the shared remediation plan to a fixed point.
@@ -235,75 +236,75 @@ export type DriveOutcome =
  * `planRemediation` lets them disagree about *what to run next* (ADR-0018).
  */
 export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
-  const { cwd, maxIterations, answers, pendingSink, progress } = opts;
-  let lastStep: LoopStep | null = null;
+	const { cwd, maxIterations, answers, pendingSink, progress } = opts;
+	let lastStep: LoopStep | null = null;
 
-  for (let iter = 1; iter <= maxIterations; iter++) {
-    opts.onIteration?.(iter, maxIterations);
-    progress.info(`pass ${iter}/${maxIterations}`);
+	for (let iter = 1; iter <= maxIterations; iter++) {
+		opts.onIteration?.(iter, maxIterations);
+		progress.info(`pass ${iter}/${maxIterations}`);
 
-    // Plan from current state. Re-derived every iteration so steps the previous
-    // iteration completed drop out of the next plan.
-    const state = await deriveProjectState(cwd);
-    const plan = planRemediation(state);
+		// Plan from current state. Re-derived every iteration so steps the previous
+		// iteration completed drop out of the next plan.
+		const state = await deriveProjectState(cwd);
+		const plan = planRemediation(state);
 
-    if (plan.length === 0) {
-      // Empty plan + `unresolvableFindings` means no loop member can clear the
-      // finding (PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT, …). Reporting
-      // `converged` here would be the silent-success #379 set out to prevent —
-      // surface it as non-convergence so heal exits loudly and the operator
-      // sees the audit findings instead of a "Tree is clean" message.
-      if (state.unresolvableFindings) {
-        return { kind: "exhausted", lastStep: null };
-      }
-      await promoteModeAtConvergence(cwd, progress);
-      return { kind: "converged", iterations: iter };
-    }
+		if (plan.length === 0) {
+			// Empty plan + `unresolvableFindings` means no loop member can clear the
+			// finding (PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT, …). Reporting
+			// `converged` here would be the silent-success #379 set out to prevent —
+			// surface it as non-convergence so heal exits loudly and the operator
+			// sees the audit findings instead of a "Tree is clean" message.
+			if (state.unresolvableFindings) {
+				return { kind: "exhausted", lastStep: null };
+			}
+			await promoteModeAtConvergence(cwd, progress);
+			return { kind: "converged", iterations: iter };
+		}
 
-    // C3 (#414) — surface the labeled pass with the plan it'll run, so the
-    // operator sees what work this pass is doing rather than a bare counter.
-    opts.onPassPlan?.(iter, maxIterations, plan);
+		// C3 (#414) — surface the labeled pass with the plan it'll run, so the
+		// operator sees what work this pass is doing rather than a bare counter.
+		opts.onPassPlan?.(iter, maxIterations, plan);
 
-    const before = await snapshotTree(cwd);
-    const pendingBefore = pendingSink?.length ?? 0;
+		const before = await snapshotTree(cwd);
+		const pendingBefore = pendingSink?.length ?? 0;
 
-    for (const step of plan) {
-      lastStep = step;
-      progress.start(step);
-      await dispatchStep(step, { cwd, answers, pendingSink });
-      progress.succeed(step);
-    }
+		for (const step of plan) {
+			lastStep = step;
+			progress.start(step);
+			await dispatchStep(step, { cwd, answers, pendingSink });
+			progress.succeed(step);
+		}
 
-    const after = await snapshotTree(cwd);
-    const stable = treesEqual(before, after);
-    const pendingThisIter = (pendingSink?.length ?? 0) - pendingBefore;
+		const after = await snapshotTree(cwd);
+		const stable = treesEqual(before, after);
+		const pendingThisIter = (pendingSink?.length ?? 0) - pendingBefore;
 
-    // Partial fixed point (sub-issue #333): bytes stable but Ambiguities were
-    // collected as Pending. Further iterations cannot progress without operator
-    // input — surface it so heal can write a scaffold and exit on the named
-    // PENDING code rather than spinning to the ceiling-failure exit.
-    if (stable && pendingThisIter > 0) {
-      return { kind: "pending" };
-    }
+		// Partial fixed point (sub-issue #333): bytes stable but Ambiguities were
+		// collected as Pending. Further iterations cannot progress without operator
+		// input — surface it so heal can write a scaffold and exit on the named
+		// PENDING code rather than spinning to the ceiling-failure exit.
+		if (stable && pendingThisIter > 0) {
+			return { kind: "pending" };
+		}
 
-    // Fixed point: this iteration ran the full plan and changed zero bytes.
-    // Gate convergence on the findings-side booleans so a lingering upgrade
-    // signal whose chain is empty (#300's shape) doesn't masquerade as
-    // unresolved findings — but real unfixable findings (classify/autoFix that
-    // the dispatchers could not clear) keep the loop going to the ceiling,
-    // which is honestly "did not converge" rather than silent success.
-    // `unresolvableFindings` is the post-#379 signal for unfixable findings no
-    // loop step can clear (PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT,
-    // INTEGRITY-UNRESOLVABLE-IMPORT): without it the deriver had to fold them
-    // into `classifyNeeded` to keep the convergence check honest, embedding
-    // the false assumption that classify owns every unfixable rule.
-    const findingsRemain =
-      state.classifyNeeded || state.autoFixNeeded || state.unresolvableFindings;
-    if (stable && pendingThisIter === 0 && !findingsRemain) {
-      await promoteModeAtConvergence(cwd, progress);
-      return { kind: "converged", iterations: iter };
-    }
-  }
+		// Fixed point: this iteration ran the full plan and changed zero bytes.
+		// Gate convergence on the findings-side booleans so a lingering upgrade
+		// signal whose chain is empty (#300's shape) doesn't masquerade as
+		// unresolved findings — but real unfixable findings (classify/autoFix that
+		// the dispatchers could not clear) keep the loop going to the ceiling,
+		// which is honestly "did not converge" rather than silent success.
+		// `unresolvableFindings` is the post-#379 signal for unfixable findings no
+		// loop step can clear (PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT,
+		// INTEGRITY-UNRESOLVABLE-IMPORT): without it the deriver had to fold them
+		// into `classifyNeeded` to keep the convergence check honest, embedding
+		// the false assumption that classify owns every unfixable rule.
+		const findingsRemain =
+			state.classifyNeeded || state.autoFixNeeded || state.unresolvableFindings;
+		if (stable && pendingThisIter === 0 && !findingsRemain) {
+			await promoteModeAtConvergence(cwd, progress);
+			return { kind: "converged", iterations: iter };
+		}
+	}
 
-  return { kind: "exhausted", lastStep };
+	return { kind: "exhausted", lastStep };
 }

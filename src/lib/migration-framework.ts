@@ -1,24 +1,24 @@
 import type { Operation } from "./operation.js";
 import type { ProjectContext } from "./project.js";
-import { run, type RunMode, type RunOptions, type RunReport } from "./runner.js";
+import { type RunMode, type RunOptions, type RunReport, run } from "./runner.js";
 
 export interface MigrationVersion {
-  version: string;
-  ops: Operation[];
+	version: string;
+	ops: Operation[];
 }
 
 /** Parse semver string (strips pre-release suffix) → [major, minor, patch]. */
 function parseSemver(v: string): [number, number, number] {
-  const m = v.replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!m) return [0, 0, 0];
-  return [Number(m[1]), Number(m[2]), Number(m[3])];
+	const m = v.replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
+	if (!m) return [0, 0, 0];
+	return [Number(m[1]), Number(m[2]), Number(m[3])];
 }
 
 /** Numeric semver comparator: negative if a < b, 0 if equal, positive if a > b. */
 function semverCompare(a: string, b: string): number {
-  const [a1, a2, a3] = parseSemver(a);
-  const [b1, b2, b3] = parseSemver(b);
-  return a1 - b1 || a2 - b2 || a3 - b3;
+	const [a1, a2, a3] = parseSemver(a);
+	const [b1, b2, b3] = parseSemver(b);
+	return a1 - b1 || a2 - b2 || a3 - b3;
 }
 
 /**
@@ -29,15 +29,13 @@ function semverCompare(a: string, b: string): number {
  * → returns [v0.8.0 set, v0.9.0 set]
  */
 export function computeMigrationChain(
-  from: string,
-  to: string,
-  registry: MigrationVersion[],
+	from: string,
+	to: string,
+	registry: MigrationVersion[],
 ): MigrationVersion[] {
-  return [...registry]
-    .sort((a, b) => semverCompare(a.version, b.version))
-    .filter((mv) =>
-      semverCompare(mv.version, from) > 0 && semverCompare(mv.version, to) <= 0,
-    );
+	return [...registry]
+		.sort((a, b) => semverCompare(a.version, b.version))
+		.filter((mv) => semverCompare(mv.version, from) > 0 && semverCompare(mv.version, to) <= 0);
 }
 
 /**
@@ -54,12 +52,12 @@ export function computeMigrationChain(
  * holds today."
  */
 export function computeVerificationChain(
-  packVersion: string,
-  registry: MigrationVersion[],
+	packVersion: string,
+	registry: MigrationVersion[],
 ): MigrationVersion[] {
-  return [...registry]
-    .sort((a, b) => semverCompare(a.version, b.version))
-    .filter((mv) => semverCompare(mv.version, packVersion) <= 0);
+	return [...registry]
+		.sort((a, b) => semverCompare(a.version, b.version))
+		.filter((mv) => semverCompare(mv.version, packVersion) <= 0);
 }
 
 /**
@@ -67,11 +65,11 @@ export function computeVerificationChain(
  * Ops across every version in the chain are batched into a single Runner call.
  */
 export async function runMigrations(
-  ctx: ProjectContext,
-  chain: MigrationVersion[],
-  mode: RunMode,
-  options: RunOptions = {},
+	ctx: ProjectContext,
+	chain: MigrationVersion[],
+	mode: RunMode,
+	options: RunOptions = {},
 ): Promise<RunReport> {
-  const allOps: Operation[] = chain.flatMap((mv) => mv.ops);
-  return run(ctx, allOps, mode, options);
+	const allOps: Operation[] = chain.flatMap((mv) => mv.ops);
+	return run(ctx, allOps, mode, options);
 }

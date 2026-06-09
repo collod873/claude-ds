@@ -32,17 +32,17 @@ export type OwnedConcernId = "OWNED-TOKEN-LINT";
 export type SupersedingRuleId = DriftRuleId | IntegrityRuleId;
 
 export interface OwnedConcernFinding {
-  concernId: OwnedConcernId;
-  file: string;
-  supersededBy: SupersedingRuleId | null;
-  message: string;
+	concernId: OwnedConcernId;
+	file: string;
+	supersededBy: SupersedingRuleId | null;
+	message: string;
 }
 
 export interface OwnedConcernInput {
-  /** Relative file path, e.g. "scripts/lint-tokens.ts". */
-  file: string;
-  /** Full source text. The detector reads this and the path only. */
-  source: string;
+	/** Relative file path, e.g. "scripts/lint-tokens.ts". */
+	file: string;
+	/** Full source text. The detector reads this and the path only. */
+	source: string;
 }
 
 /**
@@ -55,8 +55,8 @@ export interface OwnedConcernInput {
  * false-negative `✓ Completeness OK`.
  */
 export interface OwnedConcern {
-  id: OwnedConcernId;
-  description: string;
-  supersededBy: SupersedingRuleId | null;
-  detect: (input: OwnedConcernInput) => OwnedConcernFinding | null;
+	id: OwnedConcernId;
+	description: string;
+	supersededBy: SupersedingRuleId | null;
+	detect: (input: OwnedConcernInput) => OwnedConcernFinding | null;
 }

@@ -11,11 +11,11 @@
  */
 
 export interface ColorAdapter {
-  green(s: string): string;
-  red(s: string): string;
-  dim(s: string): string;
-  bold(s: string): string;
-  cyan(s: string): string;
+	green(s: string): string;
+	red(s: string): string;
+	dim(s: string): string;
+	bold(s: string): string;
+	cyan(s: string): string;
 }
 
 const id = (s: string): string => s;
@@ -25,9 +25,9 @@ const id = (s: string): string => s;
  * unchanged so the byte-stream is identical to today's `console.log` output.
  */
 export const identityColor: ColorAdapter = {
-  green: id,
-  red: id,
-  dim: id,
-  bold: id,
-  cyan: id,
+	green: id,
+	red: id,
+	dim: id,
+	bold: id,
+	cyan: id,
 };

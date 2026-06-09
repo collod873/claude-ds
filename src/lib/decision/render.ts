@@ -12,11 +12,11 @@ import type { Decision } from "./types.js";
  * pure lines.
  */
 export function renderDecision(d: Decision): string[] {
-  const lines: string[] = [];
-  lines.push(d.question);
-  d.options.forEach((opt, i) => {
-    lines.push(`  [${i + 1}] ${opt.label} — ${opt.description}`);
-  });
-  lines.push("  [s] Skip/defer");
-  return lines;
+	const lines: string[] = [];
+	lines.push(d.question);
+	d.options.forEach((opt, i) => {
+		lines.push(`  [${i + 1}] ${opt.label} — ${opt.description}`);
+	});
+	lines.push("  [s] Skip/defer");
+	return lines;
 }

@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { type Exception, serializeExceptions } from "../exceptions.js";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
-import { serializeExceptions, type Exception } from "../exceptions.js";
 
 const EXCEPTIONS_PATH = "design-system/exceptions.json";
 
@@ -20,25 +20,25 @@ const EXCEPTIONS_PATH = "design-system/exceptions.json";
  * Emits no Change when the serialized content equals what is already on disk.
  */
 export function appendExceptions(entries: Exception[]): Operation {
-  return {
-    name: "audit-append-exceptions",
-    async plan(ctx: ProjectContext): Promise<Change[]> {
-      const abs = join(ctx.cwd, EXCEPTIONS_PATH);
-      let before: Buffer | null = null;
-      try {
-        before = await readFile(abs);
-      } catch (e: unknown) {
-        const code = (e as NodeJS.ErrnoException).code;
-        if (code !== "ENOENT") throw e;
-        before = null;
-      }
+	return {
+		name: "audit-append-exceptions",
+		async plan(ctx: ProjectContext): Promise<Change[]> {
+			const abs = join(ctx.cwd, EXCEPTIONS_PATH);
+			let before: Buffer | null = null;
+			try {
+				before = await readFile(abs);
+			} catch (e: unknown) {
+				const code = (e as NodeJS.ErrnoException).code;
+				if (code !== "ENOENT") throw e;
+				before = null;
+			}
 
-      if (before === null && entries.length === 0) return [];
+			if (before === null && entries.length === 0) return [];
 
-      const after = Buffer.from(serializeExceptions(entries), "utf8");
-      if (before && before.equals(after)) return [];
+			const after = Buffer.from(serializeExceptions(entries), "utf8");
+			if (before && before.equals(after)) return [];
 
-      return [{ kind: "write", path: EXCEPTIONS_PATH, before, after }];
-    },
-  };
+			return [{ kind: "write", path: EXCEPTIONS_PATH, before, after }];
+		},
+	};
 }

@@ -10,5 +10,5 @@
  * pretty surface stays dormant regardless of stderr/stdin.
  */
 export function isTTY(): boolean {
-  return process.stdout.isTTY === true;
+	return process.stdout.isTTY === true;
 }

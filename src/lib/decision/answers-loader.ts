@@ -16,28 +16,28 @@ import type { AnswerBag, DecisionAnswer } from "./types.js";
  * the file and re-run.
  */
 export async function loadAnswersFile(path: string): Promise<AnswerBag> {
-  const raw = await readFile(path, "utf8");
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`--answers ${path}: invalid JSON — ${msg}`);
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`--answers ${path}: top-level must be a JSON object keyed by Decision id`);
-  }
-  const bag: AnswerBag = {};
-  for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
-    if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
-      bag[id] = value as DecisionAnswer;
-    } else if (value === "defer") {
-      bag[id] = "defer";
-    } else {
-      throw new Error(
-        `--answers ${path}: entry "${id}" must be a non-negative integer or "defer" (got ${JSON.stringify(value)})`,
-      );
-    }
-  }
-  return bag;
+	const raw = await readFile(path, "utf8");
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (e) {
+		const msg = e instanceof Error ? e.message : String(e);
+		throw new Error(`--answers ${path}: invalid JSON — ${msg}`);
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error(`--answers ${path}: top-level must be a JSON object keyed by Decision id`);
+	}
+	const bag: AnswerBag = {};
+	for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+		if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+			bag[id] = value as DecisionAnswer;
+		} else if (value === "defer") {
+			bag[id] = "defer";
+		} else {
+			throw new Error(
+				`--answers ${path}: entry "${id}" must be a non-negative integer or "defer" (got ${JSON.stringify(value)})`,
+			);
+		}
+	}
+	return bag;
 }

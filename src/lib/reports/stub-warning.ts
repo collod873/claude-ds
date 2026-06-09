@@ -4,7 +4,11 @@ import type { ProjectContext } from "../project.js";
 
 /** Read a file and return its contents, or null if absent/unreadable. */
 async function readOrNull(p: string): Promise<string | null> {
-  try { return await readFile(p, "utf8"); } catch { return null; }
+	try {
+		return await readFile(p, "utf8");
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -24,30 +28,41 @@ async function readOrNull(p: string): Promise<string | null> {
  * as a dead end. A distinct prefix keeps the guidance without that promise.
  */
 export async function emitStubHint(ctx: ProjectContext): Promise<void> {
-  const { cwd, packDir } = ctx;
-  const targets = [
-    { rel: "design-system/contracts.md", recipe: "describe your DS's per-component bundle, import rules, and review cadence (see the seed for the canonical structure)" },
-    { rel: "design-system/tokens.json", recipe: "add the colors / spacing / motion / shadow / z-index scales your app actually uses (extend or replace the seed entries)" },
-  ];
+	const { cwd, packDir } = ctx;
+	const targets = [
+		{
+			rel: "design-system/contracts.md",
+			recipe:
+				"describe your DS's per-component bundle, import rules, and review cadence (see the seed for the canonical structure)",
+		},
+		{
+			rel: "design-system/tokens.json",
+			recipe:
+				"add the colors / spacing / motion / shadow / z-index scales your app actually uses (extend or replace the seed entries)",
+		},
+	];
 
-  const untouched: { rel: string; recipe: string; reason: "absent" | "verbatim-seed" }[] = [];
-  for (const t of targets) {
-    const seed = await readOrNull(join(packDir, "files", t.rel));
-    if (seed === null) continue;
-    const current = await readOrNull(join(cwd, t.rel));
-    if (current === null) {
-      untouched.push({ ...t, reason: "absent" });
-    } else if (current === seed) {
-      untouched.push({ ...t, reason: "verbatim-seed" });
-    }
-  }
-  if (untouched.length === 0) return;
+	const untouched: { rel: string; recipe: string; reason: "absent" | "verbatim-seed" }[] = [];
+	for (const t of targets) {
+		const seed = await readOrNull(join(packDir, "files", t.rel));
+		if (seed === null) continue;
+		const current = await readOrNull(join(cwd, t.rel));
+		if (current === null) {
+			untouched.push({ ...t, reason: "absent" });
+		} else if (current === seed) {
+			untouched.push({ ...t, reason: "verbatim-seed" });
+		}
+	}
+	if (untouched.length === 0) return;
 
-  const lines: string[] = ["", "→ Customize: consolidate these seeded files (still the pack defaults — edit to silence):"];
-  for (const u of untouched) {
-    const tag = u.reason === "absent" ? "missing" : "untouched seed";
-    lines.push(`  ${u.rel} (${tag}) — ${u.recipe}`);
-  }
-  lines.push("");
-  process.stdout.write(lines.join("\n") + "\n");
+	const lines: string[] = [
+		"",
+		"→ Customize: consolidate these seeded files (still the pack defaults — edit to silence):",
+	];
+	for (const u of untouched) {
+		const tag = u.reason === "absent" ? "missing" : "untouched seed";
+		lines.push(`  ${u.rel} (${tag}) — ${u.recipe}`);
+	}
+	lines.push("");
+	process.stdout.write(lines.join("\n") + "\n");
 }

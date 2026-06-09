@@ -23,12 +23,12 @@
 export const META_DECL_RE = /\bexport\s+const\s+meta\s*(?::\s*[^=]+?)?=\s*\{/;
 
 export interface MetaBody {
-  /** Index of the meta object's opening `{`. */
-  openIdx: number;
-  /** Index of the matching `}`, or -1 when the braces are unbalanced (malformed). */
-  closeIdx: number;
-  /** Text strictly between the braces; "" when malformed. */
-  body: string;
+	/** Index of the meta object's opening `{`. */
+	openIdx: number;
+	/** Index of the matching `}`, or -1 when the braces are unbalanced (malformed). */
+	closeIdx: number;
+	/** Text strictly between the braces; "" when malformed. */
+	body: string;
 }
 
 /**
@@ -38,12 +38,12 @@ export interface MetaBody {
  * callers can distinguish "no meta" from "malformed meta".
  */
 export function findMetaBody(source: string): MetaBody | null {
-  const m = META_DECL_RE.exec(source);
-  if (!m) return null;
-  const openIdx = m.index + m[0].length - 1;
-  const closeIdx = findMatchingBrace(source, openIdx);
-  if (closeIdx === -1) return { openIdx, closeIdx, body: "" };
-  return { openIdx, closeIdx, body: source.slice(openIdx + 1, closeIdx) };
+	const m = META_DECL_RE.exec(source);
+	if (!m) return null;
+	const openIdx = m.index + m[0].length - 1;
+	const closeIdx = findMatchingBrace(source, openIdx);
+	if (closeIdx === -1) return { openIdx, closeIdx, body: "" };
+	return { openIdx, closeIdx, body: source.slice(openIdx + 1, closeIdx) };
 }
 
 /**
@@ -52,53 +52,53 @@ export function findMetaBody(source: string): MetaBody | null {
  * comments. Returns `-1` when the source is unbalanced (malformed).
  */
 export function findMatchingBrace(source: string, openIdx: number): number {
-  let depth = 0;
-  let inString: string | null = null;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = openIdx; i < source.length; i++) {
-    const ch = source[i];
-    const next = i + 1 < source.length ? source[i + 1] : "";
-    if (inLineComment) {
-      if (ch === "\n") inLineComment = false;
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i++;
-      }
-      continue;
-    }
-    if (inString) {
-      if (ch === "\\") {
-        i++; // skip the escaped char
-        continue;
-      }
-      if (ch === inString) inString = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      inString = ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i++;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i++;
-      continue;
-    }
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
+	let depth = 0;
+	let inString: string | null = null;
+	let inLineComment = false;
+	let inBlockComment = false;
+	for (let i = openIdx; i < source.length; i++) {
+		const ch = source[i];
+		const next = i + 1 < source.length ? source[i + 1] : "";
+		if (inLineComment) {
+			if (ch === "\n") inLineComment = false;
+			continue;
+		}
+		if (inBlockComment) {
+			if (ch === "*" && next === "/") {
+				inBlockComment = false;
+				i++;
+			}
+			continue;
+		}
+		if (inString) {
+			if (ch === "\\") {
+				i++; // skip the escaped char
+				continue;
+			}
+			if (ch === inString) inString = null;
+			continue;
+		}
+		if (ch === '"' || ch === "'" || ch === "`") {
+			inString = ch;
+			continue;
+		}
+		if (ch === "/" && next === "/") {
+			inLineComment = true;
+			i++;
+			continue;
+		}
+		if (ch === "/" && next === "*") {
+			inBlockComment = true;
+			i++;
+			continue;
+		}
+		if (ch === "{") depth++;
+		else if (ch === "}") {
+			depth--;
+			if (depth === 0) return i;
+		}
+	}
+	return -1;
 }
 
 /**
@@ -112,76 +112,76 @@ export function findMatchingBrace(source: string, openIdx: number): number {
  * (value), so they can never drift apart.
  */
 function topLevelKeyValueStart(body: string, key: string): number {
-  let depth = 0;
-  let inString: string | null = null;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = 0; i < body.length; i++) {
-    const ch = body[i];
-    const next = i + 1 < body.length ? body[i + 1] : "";
-    if (inLineComment) {
-      if (ch === "\n") inLineComment = false;
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i++;
-      }
-      continue;
-    }
-    if (inString) {
-      if (ch === "\\") {
-        i++;
-        continue;
-      }
-      if (ch === inString) inString = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      inString = ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i++;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i++;
-      continue;
-    }
-    if (ch === "{" || ch === "[" || ch === "(") {
-      depth++;
-      continue;
-    }
-    if (ch === "}" || ch === "]" || ch === ")") {
-      depth--;
-      continue;
-    }
-    if (depth === 0 && /[A-Za-z_$]/.test(ch)) {
-      let j = i;
-      while (j < body.length && /[\w$]/.test(body[j])) j++;
-      const ident = body.slice(i, j);
-      if (ident === key) {
-        let k = j;
-        while (k < body.length && /\s/.test(body[k])) k++;
-        if (body[k] === ":") {
-          k++;
-          while (k < body.length && /\s/.test(body[k])) k++;
-          return k;
-        }
-      }
-      i = j - 1; // -1 because the loop will i++ next
-    }
-  }
-  return -1;
+	let depth = 0;
+	let inString: string | null = null;
+	let inLineComment = false;
+	let inBlockComment = false;
+	for (let i = 0; i < body.length; i++) {
+		const ch = body[i];
+		const next = i + 1 < body.length ? body[i + 1] : "";
+		if (inLineComment) {
+			if (ch === "\n") inLineComment = false;
+			continue;
+		}
+		if (inBlockComment) {
+			if (ch === "*" && next === "/") {
+				inBlockComment = false;
+				i++;
+			}
+			continue;
+		}
+		if (inString) {
+			if (ch === "\\") {
+				i++;
+				continue;
+			}
+			if (ch === inString) inString = null;
+			continue;
+		}
+		if (ch === '"' || ch === "'" || ch === "`") {
+			inString = ch;
+			continue;
+		}
+		if (ch === "/" && next === "/") {
+			inLineComment = true;
+			i++;
+			continue;
+		}
+		if (ch === "/" && next === "*") {
+			inBlockComment = true;
+			i++;
+			continue;
+		}
+		if (ch === "{" || ch === "[" || ch === "(") {
+			depth++;
+			continue;
+		}
+		if (ch === "}" || ch === "]" || ch === ")") {
+			depth--;
+			continue;
+		}
+		if (depth === 0 && /[A-Za-z_$]/.test(ch)) {
+			let j = i;
+			while (j < body.length && /[\w$]/.test(body[j])) j++;
+			const ident = body.slice(i, j);
+			if (ident === key) {
+				let k = j;
+				while (k < body.length && /\s/.test(body[k])) k++;
+				if (body[k] === ":") {
+					k++;
+					while (k < body.length && /\s/.test(body[k])) k++;
+					return k;
+				}
+			}
+			i = j - 1; // -1 because the loop will i++ next
+		}
+	}
+	return -1;
 }
 
 /** Does the object body declare `key:` at top level (depth 0)? */
 export function hasTopLevelKey(body: string, key: string): boolean {
-  return topLevelKeyValueStart(body, key) !== -1;
+	return topLevelKeyValueStart(body, key) !== -1;
 }
 
 /**
@@ -190,20 +190,20 @@ export function hasTopLevelKey(body: string, key: string): boolean {
  * Unescapes the literal's contents (single, double, or backtick quoted).
  */
 export function topLevelStringValue(body: string, key: string): string | null {
-  const start = topLevelKeyValueStart(body, key);
-  if (start === -1) return null;
-  const quote = body[start];
-  if (quote !== '"' && quote !== "'" && quote !== "`") return null;
-  let value = "";
-  for (let i = start + 1; i < body.length; i++) {
-    const ch = body[i];
-    if (ch === "\\") {
-      value += body[i + 1] ?? "";
-      i++;
-      continue;
-    }
-    if (ch === quote) return value;
-    value += ch;
-  }
-  return null; // unterminated literal — treat as absent
+	const start = topLevelKeyValueStart(body, key);
+	if (start === -1) return null;
+	const quote = body[start];
+	if (quote !== '"' && quote !== "'" && quote !== "`") return null;
+	let value = "";
+	for (let i = start + 1; i < body.length; i++) {
+		const ch = body[i];
+		if (ch === "\\") {
+			value += body[i + 1] ?? "";
+			i++;
+			continue;
+		}
+		if (ch === quote) return value;
+		value += ch;
+	}
+	return null; // unterminated literal — treat as absent
 }

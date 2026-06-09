@@ -14,10 +14,17 @@ import type { ProjectContext } from "./project.js";
  * the same way as any other planned outcome.
  */
 export type Change =
-  | { kind: "write"; path: string; before: Buffer | null; after: Buffer; mode?: "executable"; note?: Record<string, unknown> }
-  | { kind: "delete"; path: string; before: Buffer }
-  | { kind: "rename"; path: string; after: string }
-  | { kind: "abort"; path: string; reason: string };
+	| {
+			kind: "write";
+			path: string;
+			before: Buffer | null;
+			after: Buffer;
+			mode?: "executable";
+			note?: Record<string, unknown>;
+	  }
+	| { kind: "delete"; path: string; before: Buffer }
+	| { kind: "rename"; path: string; after: string }
+	| { kind: "abort"; path: string; reason: string };
 
 /**
  * The dual return shape of `plan()`. `changes` is the byte-level plan the Runner
@@ -28,8 +35,8 @@ export type Change =
  * on the Op handle.
  */
 export interface PlanResult<TOutcome = void> {
-  changes: Change[];
-  outcome: TOutcome;
+	changes: Change[];
+	outcome: TOutcome;
 }
 
 /**
@@ -38,9 +45,7 @@ export interface PlanResult<TOutcome = void> {
  * non-byte outcome declare it via `Operation<TOutcome>` and return the explicit
  * `{ changes, outcome }` shape so TypeScript can enforce that `outcome` is set.
  */
-export type PlanReturn<TOutcome> = [TOutcome] extends [void]
-  ? Change[]
-  : PlanResult<TOutcome>;
+export type PlanReturn<TOutcome> = [TOutcome] extends [void] ? Change[] : PlanResult<TOutcome>;
 
 /**
  * A planned mutation phase. `plan()` reads the filesystem through `ctx` and
@@ -54,6 +59,6 @@ export type PlanReturn<TOutcome> = [TOutcome] extends [void]
  * return `Change[]` directly.
  */
 export interface Operation<TOutcome = void> {
-  name: string;
-  plan(ctx: ProjectContext): Promise<PlanReturn<TOutcome>>;
+	name: string;
+	plan(ctx: ProjectContext): Promise<PlanReturn<TOutcome>>;
 }

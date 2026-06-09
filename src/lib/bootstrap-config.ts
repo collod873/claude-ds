@@ -14,8 +14,8 @@ import { join } from "node:path";
  * here.
  */
 export async function writeBootstrapClaudeDsConfig(
-  cwd: string,
-  cfg: Record<string, unknown>,
+	cwd: string,
+	cfg: Record<string, unknown>,
 ): Promise<void> {
-  await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
+	await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
 }

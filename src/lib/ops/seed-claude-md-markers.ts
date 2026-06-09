@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Manifest } from "../manifest.js";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
-import type { Manifest } from "../manifest.js";
 
 const OPEN_MARKER = "<!-- >>> claude-ds managed >>> -->";
 
@@ -23,42 +23,44 @@ const OPEN_MARKER = "<!-- >>> claude-ds managed >>> -->";
  * Scope: CLAUDE.md only (the #82 carve-out case). Non-CLAUDE.md hybrid
  *   targets are not seeded here — that is explicitly out of scope (#86).
  */
-export function makeSeedClaudeMdMarkers(opts: { manifest?: Manifest; packDir?: string } = {}): Operation {
-  return {
-    name: "seed-claude-md-markers",
-    async plan(ctx: ProjectContext): Promise<Change[]> {
-      const manifest = opts.manifest ?? ctx.manifest;
-      const packDir = opts.packDir ?? ctx.packDir;
+export function makeSeedClaudeMdMarkers(
+	opts: { manifest?: Manifest; packDir?: string } = {},
+): Operation {
+	return {
+		name: "seed-claude-md-markers",
+		async plan(ctx: ProjectContext): Promise<Change[]> {
+			const manifest = opts.manifest ?? ctx.manifest;
+			const packDir = opts.packDir ?? ctx.packDir;
 
-      // Only act if the pack has a hybrid+markdown CLAUDE.md entry.
-      const entry = manifest.files.find(f => f.path === "CLAUDE.md");
-      if (!entry || entry.category !== "hybrid" || entry.format !== "markdown") return [];
+			// Only act if the pack has a hybrid+markdown CLAUDE.md entry.
+			const entry = manifest.files.find((f) => f.path === "CLAUDE.md");
+			if (!entry || entry.category !== "hybrid" || entry.format !== "markdown") return [];
 
-      const target = ctx.cfg.claude_md_target;
-      if (!(await ctx.exists(target))) return []; // missing → syncPackFiles handles it (rewrite)
+			const target = ctx.cfg.claude_md_target;
+			if (!(await ctx.exists(target))) return []; // missing → syncPackFiles handles it (rewrite)
 
-      const targetAbs = join(ctx.cwd, target);
-      const current = await readFile(targetAbs, "utf8");
+			const targetAbs = join(ctx.cwd, target);
+			const current = await readFile(targetAbs, "utf8");
 
-      // Already has markers — nothing to do.
-      if (current.includes(OPEN_MARKER)) return [];
+			// Already has markers — nothing to do.
+			if (current.includes(OPEN_MARKER)) return [];
 
-      // Read the fragment to embed (empty inner is fine — syncPackFiles fills it).
-      // We embed the fragment content so the marker pair is non-empty from the start,
-      // which lets the subsequent diffFile "marker region in sync" check pass cleanly.
-      const fragment = await readFile(join(packDir, "files", "CLAUDE.md.fragment"), "utf8");
-      const block = `${OPEN_MARKER}\n${fragment}\n<!-- <<< claude-ds managed <<< -->\n`;
-      const sep = current.endsWith("\n") ? "" : "\n";
-      const after = `${current}${sep}\n## claude-ds\n${block}`;
+			// Read the fragment to embed (empty inner is fine — syncPackFiles fills it).
+			// We embed the fragment content so the marker pair is non-empty from the start,
+			// which lets the subsequent diffFile "marker region in sync" check pass cleanly.
+			const fragment = await readFile(join(packDir, "files", "CLAUDE.md.fragment"), "utf8");
+			const block = `${OPEN_MARKER}\n${fragment}\n<!-- <<< claude-ds managed <<< -->\n`;
+			const sep = current.endsWith("\n") ? "" : "\n";
+			const after = `${current}${sep}\n## claude-ds\n${block}`;
 
-      return [
-        {
-          kind: "write",
-          path: target,
-          before: Buffer.from(current, "utf8"),
-          after: Buffer.from(after, "utf8"),
-        },
-      ];
-    },
-  };
+			return [
+				{
+					kind: "write",
+					path: target,
+					before: Buffer.from(current, "utf8"),
+					after: Buffer.from(after, "utf8"),
+				},
+			];
+		},
+	};
 }

@@ -1,8 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, writeFile, rm } from "node:fs/promises";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { scanOwnedConcerns } from "../../src/lib/owned-concerns/scanner.js";
 
 /**
@@ -64,145 +63,153 @@ main();
 `;
 
 async function fresh(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), "owned-scanner-"));
+	return await mkdtemp(join(tmpdir(), "owned-scanner-"));
 }
 
 describe("scanOwnedConcerns", () => {
-  let dir: string;
-  beforeEach(async () => { dir = await fresh(); });
-  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+	let dir: string;
+	beforeEach(async () => {
+		dir = await fresh();
+	});
+	afterEach(async () => {
+		await rm(dir, { recursive: true, force: true });
+	});
 
-  it("returns an empty list on a clean tree (no shadow infrastructure)", async () => {
-    await mkdir(join(dir, "src"), { recursive: true });
-    await writeFile(join(dir, "src", "index.ts"), "export const x = 1;\n");
-    await writeFile(join(dir, "README.md"), "# clean repo\n");
-    const findings = await scanOwnedConcerns({
-      cwd: dir,
-      manifestPaths: new Set<string>(),
-      generatedPatterns: [],
-    });
-    expect(findings).toEqual([]);
-  });
+	it("returns an empty list on a clean tree (no shadow infrastructure)", async () => {
+		await mkdir(join(dir, "src"), { recursive: true });
+		await writeFile(join(dir, "src", "index.ts"), "export const x = 1;\n");
+		await writeFile(join(dir, "README.md"), "# clean repo\n");
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: [],
+		});
+		expect(findings).toEqual([]);
+	});
 
-  it("flags a shadow lint-tokens.ts under scripts/", async () => {
-    await mkdir(join(dir, "scripts"), { recursive: true });
-    await writeFile(join(dir, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
-    const findings = await scanOwnedConcerns({
-      cwd: dir,
-      manifestPaths: new Set<string>(),
-      generatedPatterns: [],
-    });
-    expect(findings).toHaveLength(1);
-    const f = findings[0];
-    expect(f.file).toBe("scripts/lint-tokens.ts");
-    expect(f.concernId).toBe("OWNED-TOKEN-LINT");
-    expect(f.supersededBy).toBe("DRIFT-TOKEN-PARITY");
-    expect(typeof f.line).toBe("number");
-    // The detect message describes the detection. The supersession +
-    // remove-or-flag recommendation lives in formatOwnedConcernFinding,
-    // the chokepoint that enforces issue #348's gate.
-    expect(f.message).toContain("scripts/lint-tokens.ts");
-  });
+	it("flags a shadow lint-tokens.ts under scripts/", async () => {
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await writeFile(join(dir, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: [],
+		});
+		expect(findings).toHaveLength(1);
+		const f = findings[0];
+		expect(f.file).toBe("scripts/lint-tokens.ts");
+		expect(f.concernId).toBe("OWNED-TOKEN-LINT");
+		expect(f.supersededBy).toBe("DRIFT-TOKEN-PARITY");
+		expect(typeof f.line).toBe("number");
+		// The detect message describes the detection. The supersession +
+		// remove-or-flag recommendation lives in formatOwnedConcernFinding,
+		// the chokepoint that enforces issue #348's gate.
+		expect(f.message).toContain("scripts/lint-tokens.ts");
+	});
 
-  it("excludes pack-managed paths (manifest.files[]) before detection", async () => {
-    // Same shadow-infra-shaped source as lint-tokens, but living at a
-    // path the pack itself ships. The pack's own scripts must never be
-    // flagged as shadow infrastructure.
-    await mkdir(join(dir, "scripts"), { recursive: true });
-    await writeFile(join(dir, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
-    const findings = await scanOwnedConcerns({
-      cwd: dir,
-      manifestPaths: new Set(["scripts/lint-tokens.ts"]),
-      generatedPatterns: [],
-    });
-    expect(findings).toEqual([]);
-  });
+	it("excludes pack-managed paths (manifest.files[]) before detection", async () => {
+		// Same shadow-infra-shaped source as lint-tokens, but living at a
+		// path the pack itself ships. The pack's own scripts must never be
+		// flagged as shadow infrastructure.
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await writeFile(join(dir, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set(["scripts/lint-tokens.ts"]),
+			generatedPatterns: [],
+		});
+		expect(findings).toEqual([]);
+	});
 
-  it("skips files matching manifest generated_patterns", async () => {
-    await mkdir(join(dir, "design-system", "references"), { recursive: true });
-    // Generated showcase carrying lint-tokens-shaped source — still must
-    // not flag because the file is hook-generated, not hand-rolled.
-    await writeFile(
-      join(dir, "design-system", "references", "Button.showcase.tsx"),
-      LINT_TOKENS_SRC,
-    );
-    const findings = await scanOwnedConcerns({
-      cwd: dir,
-      manifestPaths: new Set<string>(),
-      generatedPatterns: ["design-system/references/*.showcase.tsx"],
-    });
-    expect(findings).toEqual([]);
-  });
+	it("skips files matching manifest generated_patterns", async () => {
+		await mkdir(join(dir, "design-system", "references"), { recursive: true });
+		// Generated showcase carrying lint-tokens-shaped source — still must
+		// not flag because the file is hook-generated, not hand-rolled.
+		await writeFile(
+			join(dir, "design-system", "references", "Button.showcase.tsx"),
+			LINT_TOKENS_SRC,
+		);
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: ["design-system/references/*.showcase.tsx"],
+		});
+		expect(findings).toEqual([]);
+	});
 
-  it("skips dependency/build/VCS directories", async () => {
-    for (const dep of ["node_modules", "dist", ".git", ".next"]) {
-      await mkdir(join(dir, dep, "scripts"), { recursive: true });
-      await writeFile(join(dir, dep, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
-    }
-    const findings = await scanOwnedConcerns({
-      cwd: dir,
-      manifestPaths: new Set<string>(),
-      generatedPatterns: [],
-    });
-    expect(findings).toEqual([]);
-  });
+	it("skips dependency/build/VCS directories", async () => {
+		for (const dep of ["node_modules", "dist", ".git", ".next"]) {
+			await mkdir(join(dir, dep, "scripts"), { recursive: true });
+			await writeFile(join(dir, dep, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
+		}
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: [],
+		});
+		expect(findings).toEqual([]);
+	});
 
-  it("stays silent on a non-DS script with zero DS signal", async () => {
-    await mkdir(join(dir, "scripts"), { recursive: true });
-    await writeFile(join(dir, "scripts", "check-where-chain.sh"), CHECK_WHERE_CHAIN_SRC);
-    const findings = await scanOwnedConcerns({
-      cwd: dir,
-      manifestPaths: new Set<string>(),
-      generatedPatterns: [],
-    });
-    expect(findings).toEqual([]);
-  });
+	it("stays silent on a non-DS script with zero DS signal", async () => {
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await writeFile(join(dir, "scripts", "check-where-chain.sh"), CHECK_WHERE_CHAIN_SRC);
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: [],
+		});
+		expect(findings).toEqual([]);
+	});
 
-  it("over a mixed tree, flags exactly the shadow file and nothing else", async () => {
-    // Mixed-fixture tree mirroring Crewops:
-    //  - scripts/lint-tokens.ts        → SHADOW (must flag)
-    //  - scripts/update-tokens.ts      → pack-managed (manifest)
-    //  - scripts/check-where-chain.sh  → non-DS, zero signal
-    //  - design-system/references/Button.showcase.tsx → generated_patterns
-    //  - src/index.ts                  → ordinary app code
-    //  - node_modules/foo/lint-tokens.ts → dependency-skipped
-    await mkdir(join(dir, "scripts"), { recursive: true });
-    await mkdir(join(dir, "design-system", "references"), { recursive: true });
-    await mkdir(join(dir, "src"), { recursive: true });
-    await mkdir(join(dir, "node_modules", "foo"), { recursive: true });
+	it("over a mixed tree, flags exactly the shadow file and nothing else", async () => {
+		// Mixed-fixture tree mirroring Crewops:
+		//  - scripts/lint-tokens.ts        → SHADOW (must flag)
+		//  - scripts/update-tokens.ts      → pack-managed (manifest)
+		//  - scripts/check-where-chain.sh  → non-DS, zero signal
+		//  - design-system/references/Button.showcase.tsx → generated_patterns
+		//  - src/index.ts                  → ordinary app code
+		//  - node_modules/foo/lint-tokens.ts → dependency-skipped
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await mkdir(join(dir, "design-system", "references"), { recursive: true });
+		await mkdir(join(dir, "src"), { recursive: true });
+		await mkdir(join(dir, "node_modules", "foo"), { recursive: true });
 
-    await writeFile(join(dir, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
-    await writeFile(join(dir, "scripts", "update-tokens.ts"), UPDATE_TOKENS_SRC);
-    await writeFile(join(dir, "scripts", "check-where-chain.sh"), CHECK_WHERE_CHAIN_SRC);
-    await writeFile(
-      join(dir, "design-system", "references", "Button.showcase.tsx"),
-      LINT_TOKENS_SRC,
-    );
-    await writeFile(join(dir, "src", "index.ts"), "export const x = 1;\n");
-    await writeFile(join(dir, "node_modules", "foo", "lint-tokens.ts"), LINT_TOKENS_SRC);
+		await writeFile(join(dir, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
+		await writeFile(join(dir, "scripts", "update-tokens.ts"), UPDATE_TOKENS_SRC);
+		await writeFile(join(dir, "scripts", "check-where-chain.sh"), CHECK_WHERE_CHAIN_SRC);
+		await writeFile(
+			join(dir, "design-system", "references", "Button.showcase.tsx"),
+			LINT_TOKENS_SRC,
+		);
+		await writeFile(join(dir, "src", "index.ts"), "export const x = 1;\n");
+		await writeFile(join(dir, "node_modules", "foo", "lint-tokens.ts"), LINT_TOKENS_SRC);
 
-    const findings = await scanOwnedConcerns({
-      cwd: dir,
-      manifestPaths: new Set(["scripts/update-tokens.ts"]),
-      generatedPatterns: ["design-system/references/*.showcase.tsx"],
-    });
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set(["scripts/update-tokens.ts"]),
+			generatedPatterns: ["design-system/references/*.showcase.tsx"],
+		});
 
-    expect(findings.map(f => f.file)).toEqual(["scripts/lint-tokens.ts"]);
-    expect(findings[0].concernId).toBe("OWNED-TOKEN-LINT");
-    expect(findings[0].supersededBy).toBe("DRIFT-TOKEN-PARITY");
-  });
+		expect(findings.map((f) => f.file)).toEqual(["scripts/lint-tokens.ts"]);
+		expect(findings[0].concernId).toBe("OWNED-TOKEN-LINT");
+		expect(findings[0].supersededBy).toBe("DRIFT-TOKEN-PARITY");
+	});
 
-  it("findings carry { file, line, concernId, supersededBy, message }", async () => {
-    await mkdir(join(dir, "scripts"), { recursive: true });
-    await writeFile(join(dir, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
-    const findings = await scanOwnedConcerns({
-      cwd: dir,
-      manifestPaths: new Set<string>(),
-      generatedPatterns: [],
-    });
-    expect(findings).toHaveLength(1);
-    expect(Object.keys(findings[0]).sort()).toEqual(
-      ["concernId", "file", "line", "message", "supersededBy"],
-    );
-  });
+	it("findings carry { file, line, concernId, supersededBy, message }", async () => {
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await writeFile(join(dir, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: [],
+		});
+		expect(findings).toHaveLength(1);
+		expect(Object.keys(findings[0]).sort()).toEqual([
+			"concernId",
+			"file",
+			"line",
+			"message",
+			"supersededBy",
+		]);
+	});
 });

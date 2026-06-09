@@ -13,18 +13,18 @@ import type { ProjectContext } from "../project.js";
  * config-key flip now flows through the Runner like any other byte.
  */
 export function setConfigMode(mode: "warn" | "block"): Operation {
-  return {
-    name: "set-config-mode",
-    async plan(ctx: ProjectContext): Promise<Change[]> {
-      const cfgRel = ".claude-ds.json";
-      const abs = join(ctx.cwd, cfgRel);
-      const before = await readFile(abs);
-      const parsed = JSON.parse(before.toString("utf8")) as Record<string, unknown>;
-      if (parsed.mode === mode) return [];
-      parsed.mode = mode;
-      const after = Buffer.from(JSON.stringify(parsed, null, 2) + "\n", "utf8");
-      if (before.equals(after)) return [];
-      return [{ kind: "write", path: cfgRel, before, after }];
-    },
-  };
+	return {
+		name: "set-config-mode",
+		async plan(ctx: ProjectContext): Promise<Change[]> {
+			const cfgRel = ".claude-ds.json";
+			const abs = join(ctx.cwd, cfgRel);
+			const before = await readFile(abs);
+			const parsed = JSON.parse(before.toString("utf8")) as Record<string, unknown>;
+			if (parsed.mode === mode) return [];
+			parsed.mode = mode;
+			const after = Buffer.from(JSON.stringify(parsed, null, 2) + "\n", "utf8");
+			if (before.equals(after)) return [];
+			return [{ kind: "write", path: cfgRel, before, after }];
+		},
+	};
 }

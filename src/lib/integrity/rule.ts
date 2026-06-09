@@ -8,23 +8,23 @@ import type { Severity } from "../severity.js";
  * `exceptions.json` forever); do not remove or rename.
  */
 export type IntegrityRuleId =
-  | "INTEGRITY-UNPARSEABLE"
-  | "INTEGRITY-ORPHANED-FROM"
-  | "INTEGRITY-UNRESOLVABLE-IMPORT"
-  | "INTEGRITY-UNRESOLVED-SYMBOL"
-  | "INTEGRITY-DUPLICATE-DECL";
+	| "INTEGRITY-UNPARSEABLE"
+	| "INTEGRITY-ORPHANED-FROM"
+	| "INTEGRITY-UNRESOLVABLE-IMPORT"
+	| "INTEGRITY-UNRESOLVED-SYMBOL"
+	| "INTEGRITY-DUPLICATE-DECL";
 
 export interface IntegrityFinding {
-  ruleId: IntegrityRuleId;
-  file: string;
-  message: string;
+	ruleId: IntegrityRuleId;
+	file: string;
+	message: string;
 }
 
 export interface IntegrityFixResult {
-  finding: IntegrityFinding;
-  fixed: boolean;
-  message: string;
-  changes: Change[];
+	finding: IntegrityFinding;
+	fixed: boolean;
+	message: string;
+	changes: Change[];
 }
 
 /**
@@ -51,41 +51,41 @@ export interface IntegrityFixResult {
  * `ProjectContext`, so integrity and drift share one audit-config source.
  */
 export type IntegrityRule =
-  | {
-      id: IntegrityRuleId;
-      severity: Severity;
-      description: string;
-      blocking?: boolean;
-      detect: (
-        file: string,
-        source: string,
-        ctx?: ProjectContext,
-      ) => IntegrityFinding[] | Promise<IntegrityFinding[]>;
-      fixable: false;
-      /**
-       * Mirrors `DriftRule.classifyRelocatable` (#379). True when `classify`
-       * is the owning remedy for findings of this integrity rule (e.g. an
-       * unresolved symbol that a tier move would heal as classify rewrites
-       * importers). False when no shipped step in the canonical loop can
-       * clear the finding — UNRESOLVABLE-IMPORT today, since classify does
-       * not invent missing files. `deriveProjectState` reads this to keep
-       * heal's convergence check honest: a non-relocatable unfixable
-       * integrity finding sets `unresolvableFindings` rather than the
-       * misleading `classifyNeeded`, so the loop never silently converges
-       * with the finding outstanding.
-       */
-      classifyRelocatable: boolean;
-    }
-  | {
-      id: IntegrityRuleId;
-      severity: Severity;
-      description: string;
-      blocking?: boolean;
-      detect: (
-        file: string,
-        source: string,
-        ctx?: ProjectContext,
-      ) => IntegrityFinding[] | Promise<IntegrityFinding[]>;
-      fixable: true;
-      fix: (finding: IntegrityFinding, ctx: ProjectContext) => Promise<IntegrityFixResult>;
-    };
+	| {
+			id: IntegrityRuleId;
+			severity: Severity;
+			description: string;
+			blocking?: boolean;
+			detect: (
+				file: string,
+				source: string,
+				ctx?: ProjectContext,
+			) => IntegrityFinding[] | Promise<IntegrityFinding[]>;
+			fixable: false;
+			/**
+			 * Mirrors `DriftRule.classifyRelocatable` (#379). True when `classify`
+			 * is the owning remedy for findings of this integrity rule (e.g. an
+			 * unresolved symbol that a tier move would heal as classify rewrites
+			 * importers). False when no shipped step in the canonical loop can
+			 * clear the finding — UNRESOLVABLE-IMPORT today, since classify does
+			 * not invent missing files. `deriveProjectState` reads this to keep
+			 * heal's convergence check honest: a non-relocatable unfixable
+			 * integrity finding sets `unresolvableFindings` rather than the
+			 * misleading `classifyNeeded`, so the loop never silently converges
+			 * with the finding outstanding.
+			 */
+			classifyRelocatable: boolean;
+	  }
+	| {
+			id: IntegrityRuleId;
+			severity: Severity;
+			description: string;
+			blocking?: boolean;
+			detect: (
+				file: string,
+				source: string,
+				ctx?: ProjectContext,
+			) => IntegrityFinding[] | Promise<IntegrityFinding[]>;
+			fixable: true;
+			fix: (finding: IntegrityFinding, ctx: ProjectContext) => Promise<IntegrityFixResult>;
+	  };

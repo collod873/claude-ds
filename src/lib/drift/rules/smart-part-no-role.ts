@@ -19,29 +19,29 @@ import type { DriftFinding, DriftRule, DriftRuleInput } from "../rule.js";
  * in `classify` and `exceptions.json`, never in a fixer.
  */
 function detect(input: DriftRuleInput): DriftFinding | null {
-  const { file, locationTier, metaRole, isSmartPart, roleContractsStrict } = input;
-  if (!roleContractsStrict) return null;
-  if (locationTier !== "atom" && locationTier !== "composite") return null;
-  if (!isSmartPart) return null;
-  if (metaRole) return null;
-  return {
-    ruleId: "DRIFT-SMART-PART-NO-ROLE",
-    file,
-    message:
-      "smart DS part (uses state/effect/context) declares no meta.role — run `claude-ds classify` to propose a role, or mark presentational, or relocate to features/",
-  };
+	const { file, locationTier, metaRole, isSmartPart, roleContractsStrict } = input;
+	if (!roleContractsStrict) return null;
+	if (locationTier !== "atom" && locationTier !== "composite") return null;
+	if (!isSmartPart) return null;
+	if (metaRole) return null;
+	return {
+		ruleId: "DRIFT-SMART-PART-NO-ROLE",
+		file,
+		message:
+			"smart DS part (uses state/effect/context) declares no meta.role — run `claude-ds classify` to propose a role, or mark presentational, or relocate to features/",
+	};
 }
 
 export const smartPartNoRoleRule: DriftRule = {
-  id: "DRIFT-SMART-PART-NO-ROLE",
-  severity: "error",
-  description:
-    "Smart DS part (uses state/effect/context) declares no meta.role; gated by role_contracts_strict",
-  detect,
-  fixable: false,
-  // classify's role-proposer pass (PRD #301 / #312) writes meta.role when a
-  // shipped contract anchor matches; the unmatched arms route to candidate-
-  // feature / tracked-exception, which still flow through classify as the
-  // owning step.
-  classifyRelocatable: true,
+	id: "DRIFT-SMART-PART-NO-ROLE",
+	severity: "error",
+	description:
+		"Smart DS part (uses state/effect/context) declares no meta.role; gated by role_contracts_strict",
+	detect,
+	fixable: false,
+	// classify's role-proposer pass (PRD #301 / #312) writes meta.role when a
+	// shipped contract anchor matches; the unmatched arms route to candidate-
+	// feature / tracked-exception, which still flow through classify as the
+	// owning step.
+	classifyRelocatable: true,
 };

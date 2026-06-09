@@ -1,40 +1,36 @@
+import { validateFixerOutput } from "../fixer-validate.js";
+import { info } from "../log.js";
 import type { Change, Operation, PlanResult } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 import type { Severity } from "../severity.js";
-import { validateFixerOutput } from "../fixer-validate.js";
-import { info } from "../log.js";
 import { INTEGRITY_RULES, INTEGRITY_RULES_BY_ID } from "./registry.js";
-import type {
-  IntegrityFinding,
-  IntegrityFixResult,
-  IntegrityRuleId,
-} from "./rule.js";
+import type { IntegrityFinding, IntegrityFixResult, IntegrityRuleId } from "./rule.js";
 
 export type {
-  IntegrityFinding,
-  IntegrityFixResult,
-  IntegrityRule,
-  IntegrityRuleId,
+	IntegrityFinding,
+	IntegrityFixResult,
+	IntegrityRule,
+	IntegrityRuleId,
 } from "./rule.js";
 
 /** Human-readable description for an integrity rule id. */
 export function integrityRuleDescription(id: IntegrityRuleId): string {
-  return INTEGRITY_RULES_BY_ID[id].description;
+	return INTEGRITY_RULES_BY_ID[id].description;
 }
 
 /** Severity for an integrity rule id. */
 export function integrityRuleSeverity(id: IntegrityRuleId): Severity {
-  return INTEGRITY_RULES_BY_ID[id].severity;
+	return INTEGRITY_RULES_BY_ID[id].severity;
 }
 
 /** All registered integrity rule ids, in canonical registry order. */
 export function allIntegrityRuleIds(): IntegrityRuleId[] {
-  return Object.keys(INTEGRITY_RULES_BY_ID) as IntegrityRuleId[];
+	return Object.keys(INTEGRITY_RULES_BY_ID) as IntegrityRuleId[];
 }
 
 /** True if the integrity rule has a fixer. */
 export function isIntegrityFixable(id: IntegrityRuleId): boolean {
-  return INTEGRITY_RULES_BY_ID[id].fixable;
+	return INTEGRITY_RULES_BY_ID[id].fixable;
 }
 
 /**
@@ -44,8 +40,8 @@ export function isIntegrityFixable(id: IntegrityRuleId): boolean {
  * them (audit owns the remedy via `isIntegrityFixable`).
  */
 export function isIntegrityClassifyRelocatable(id: IntegrityRuleId): boolean {
-  const rule = INTEGRITY_RULES_BY_ID[id];
-  return rule.fixable ? false : rule.classifyRelocatable;
+	const rule = INTEGRITY_RULES_BY_ID[id];
+	return rule.fixable ? false : rule.classifyRelocatable;
 }
 
 /**
@@ -55,7 +51,7 @@ export function isIntegrityClassifyRelocatable(id: IntegrityRuleId): boolean {
  * can't drift into `blocking === true` and get a different answer.
  */
 export function isIntegrityBlocking(id: IntegrityRuleId): boolean {
-  return INTEGRITY_RULES_BY_ID[id].blocking !== false;
+	return INTEGRITY_RULES_BY_ID[id].blocking !== false;
 }
 
 /**
@@ -69,28 +65,32 @@ export function isIntegrityBlocking(id: IntegrityRuleId): boolean {
  * synchronously and the array path picks them up.
  */
 export function evaluateIntegrity(file: string, source: string): IntegrityFinding[];
-export function evaluateIntegrity(file: string, source: string, ctx: ProjectContext): Promise<IntegrityFinding[]>;
 export function evaluateIntegrity(
-  file: string,
-  source: string,
-  ctx?: ProjectContext,
+	file: string,
+	source: string,
+	ctx: ProjectContext,
+): Promise<IntegrityFinding[]>;
+export function evaluateIntegrity(
+	file: string,
+	source: string,
+	ctx?: ProjectContext,
 ): IntegrityFinding[] | Promise<IntegrityFinding[]> {
-  if (!ctx) {
-    const findings: IntegrityFinding[] = [];
-    for (const rule of INTEGRITY_RULES) {
-      const r = rule.detect(file, source);
-      if (Array.isArray(r)) findings.push(...r);
-    }
-    return findings;
-  }
+	if (!ctx) {
+		const findings: IntegrityFinding[] = [];
+		for (const rule of INTEGRITY_RULES) {
+			const r = rule.detect(file, source);
+			if (Array.isArray(r)) findings.push(...r);
+		}
+		return findings;
+	}
 
-  return (async () => {
-    const findings: IntegrityFinding[] = [];
-    for (const rule of INTEGRITY_RULES) {
-      findings.push(...(await rule.detect(file, source, ctx)));
-    }
-    return findings;
-  })();
+	return (async () => {
+		const findings: IntegrityFinding[] = [];
+		for (const rule of INTEGRITY_RULES) {
+			findings.push(...(await rule.detect(file, source, ctx)));
+		}
+		return findings;
+	})();
 }
 
 /**
@@ -112,44 +112,42 @@ export function evaluateIntegrity(
  * skip-and-continue established for drift in PRD #221.
  */
 export interface IntegrityFixerOperation extends Operation<IntegrityFixResult> {
-  finding: IntegrityFinding;
+	finding: IntegrityFinding;
 }
 
-export function integrityFixerAsOperation(
-  finding: IntegrityFinding,
-): IntegrityFixerOperation {
-  return {
-    name: finding.ruleId,
-    finding,
-    async plan(ctx: ProjectContext): Promise<PlanResult<IntegrityFixResult>> {
-      const rule = INTEGRITY_RULES_BY_ID[finding.ruleId];
-      if (!rule.fixable) {
-        return {
-          changes: [],
-          outcome: {
-            finding,
-            fixed: false,
-            message: `No auto-fix available for ${finding.ruleId} — manually repair ${finding.file}`,
-            changes: [],
-          },
-        };
-      }
-      const r = await rule.fix(finding, ctx);
+export function integrityFixerAsOperation(finding: IntegrityFinding): IntegrityFixerOperation {
+	return {
+		name: finding.ruleId,
+		finding,
+		async plan(ctx: ProjectContext): Promise<PlanResult<IntegrityFixResult>> {
+			const rule = INTEGRITY_RULES_BY_ID[finding.ruleId];
+			if (!rule.fixable) {
+				return {
+					changes: [],
+					outcome: {
+						finding,
+						fixed: false,
+						message: `No auto-fix available for ${finding.ruleId} — manually repair ${finding.file}`,
+						changes: [],
+					},
+				};
+			}
+			const r = await rule.fix(finding, ctx);
 
-      if (r.fixed && r.changes.length > 0) {
-        for (const ch of r.changes) {
-          const gate = validateFixerOutput(ch, finding.ruleId);
-          if (gate) {
-            info(gate.message);
-            return {
-              changes: [{ kind: "abort", path: finding.file, reason: gate.message }],
-              outcome: { finding, fixed: false, message: gate.message, changes: [] },
-            };
-          }
-        }
-      }
+			if (r.fixed && r.changes.length > 0) {
+				for (const ch of r.changes) {
+					const gate = validateFixerOutput(ch, finding.ruleId);
+					if (gate) {
+						info(gate.message);
+						return {
+							changes: [{ kind: "abort", path: finding.file, reason: gate.message }],
+							outcome: { finding, fixed: false, message: gate.message, changes: [] },
+						};
+					}
+				}
+			}
 
-      return { changes: r.fixed ? r.changes : [], outcome: r };
-    },
-  };
+			return { changes: r.fixed ? r.changes : [], outcome: r };
+		},
+	};
 }

@@ -1,9 +1,9 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
-import { metaRoleFromSource } from "../three-signal.js";
 import { proposeRole } from "../role-proposer.js";
+import { metaRoleFromSource } from "../three-signal.js";
 
 /** Dirs scanned for `.tsx` smart parts that might need a `meta.role` proposal. */
 const SCAN_DIRS = ["design-system/atoms", "design-system/composites"];
@@ -20,18 +20,18 @@ const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
  * absorb the kind line.
  */
 const META_KIND_LITERAL_RE =
-  /(\bmeta\b[^=]*=[^{]*\{[\s\S]*?\bkind\s*:\s*["'](?:atom|composite)["'])/;
+	/(\bmeta\b[^=]*=[^{]*\{[\s\S]*?\bkind\s*:\s*["'](?:atom|composite)["'])/;
 
 export interface MetaRoleProposal {
-  file: string;
-  proposal:
-    | { kind: "role"; role: string; written: boolean }
-    | { kind: "candidate-feature" }
-    | { kind: "tracked-exception" };
+	file: string;
+	proposal:
+		| { kind: "role"; role: string; written: boolean }
+		| { kind: "candidate-feature" }
+		| { kind: "tracked-exception" };
 }
 
 export interface ProposeMetaRoleOutcome {
-  proposals: MetaRoleProposal[];
+	proposals: MetaRoleProposal[];
 }
 
 /**
@@ -57,82 +57,82 @@ export interface ProposeMetaRoleOutcome {
  * fix the source and re-run.
  */
 export function proposeMetaRole(): Operation<ProposeMetaRoleOutcome> {
-  return {
-    name: "classify-propose-meta-role",
-    async plan(ctx: ProjectContext) {
-      const changes: Change[] = [];
-      const proposals: MetaRoleProposal[] = [];
+	return {
+		name: "classify-propose-meta-role",
+		async plan(ctx: ProjectContext) {
+			const changes: Change[] = [];
+			const proposals: MetaRoleProposal[] = [];
 
-      for (const scanRel of SCAN_DIRS) {
-        const scanAbs = join(ctx.cwd, scanRel);
-        if (!(await ctx.exists(scanRel))) continue;
+			for (const scanRel of SCAN_DIRS) {
+				const scanAbs = join(ctx.cwd, scanRel);
+				if (!(await ctx.exists(scanRel))) continue;
 
-        let entries: string[];
-        try {
-          entries = await readdir(scanAbs);
-        } catch {
-          continue;
-        }
+				let entries: string[];
+				try {
+					entries = await readdir(scanAbs);
+				} catch {
+					continue;
+				}
 
-        for (const entry of entries) {
-          if (!entry.endsWith(".tsx")) continue;
-          if (COMPANION_SUFFIXES.some(s => entry.endsWith(s))) continue;
-          if (SKIP_PATTERNS.some(re => re.test(entry))) continue;
+				for (const entry of entries) {
+					if (!entry.endsWith(".tsx")) continue;
+					if (COMPANION_SUFFIXES.some((s) => entry.endsWith(s))) continue;
+					if (SKIP_PATTERNS.some((re) => re.test(entry))) continue;
 
-          const entryAbs = join(scanAbs, entry);
-          const s = await stat(entryAbs).catch(() => null);
-          if (!s || !s.isFile()) continue;
+					const entryAbs = join(scanAbs, entry);
+					const s = await stat(entryAbs).catch(() => null);
+					if (!s || !s.isFile()) continue;
 
-          const source = await readFile(entryAbs, "utf8").catch(() => null);
-          if (source === null) continue;
+					const source = await readFile(entryAbs, "utf8").catch(() => null);
+					if (source === null) continue;
 
-          // Already-declared roles are the consumer's intent. Skip — no
-          // proposal, no rewrite. The shipped contract runs against them
-          // regardless; audit's `DRIFT-ROLE-NO-CONTRACT` is the surface for
-          // a declared role that lacks a contract.
-          if (metaRoleFromSource(source) !== null) continue;
+					// Already-declared roles are the consumer's intent. Skip — no
+					// proposal, no rewrite. The shipped contract runs against them
+					// regardless; audit's `DRIFT-ROLE-NO-CONTRACT` is the surface for
+					// a declared role that lacks a contract.
+					if (metaRoleFromSource(source) !== null) continue;
 
-          const proposal = proposeRole(source, ctx.auditConfig.domainRoots);
-          if (proposal === null) continue;
+					const proposal = proposeRole(source, ctx.auditConfig.domainRoots);
+					if (proposal === null) continue;
 
-          const relPath = join(scanRel, entry);
-          if (proposal.kind === "candidate-feature") {
-            proposals.push({ file: relPath, proposal: { kind: "candidate-feature" } });
-            continue;
-          }
-          if (proposal.kind === "tracked-exception") {
-            proposals.push({ file: relPath, proposal: { kind: "tracked-exception" } });
-            continue;
-          }
+					const relPath = join(scanRel, entry);
+					if (proposal.kind === "candidate-feature") {
+						proposals.push({ file: relPath, proposal: { kind: "candidate-feature" } });
+						continue;
+					}
+					if (proposal.kind === "tracked-exception") {
+						proposals.push({ file: relPath, proposal: { kind: "tracked-exception" } });
+						continue;
+					}
 
-          const after = injectRoleAfterKind(source, proposal.role);
-          if (after === null) {
-            // Meta block didn't match the kind-field anchor — surface the
-            // proposal without a write so the user can hand-edit. Audit will
-            // keep flagging the missing role on subsequent runs.
-            proposals.push({
-              file: relPath,
-              proposal: { kind: "role", role: proposal.role, written: false },
-            });
-            continue;
-          }
+					const after = injectRoleAfterKind(source, proposal.role);
+					if (after === null) {
+						// Meta block didn't match the kind-field anchor — surface the
+						// proposal without a write so the user can hand-edit. Audit will
+						// keep flagging the missing role on subsequent runs.
+						proposals.push({
+							file: relPath,
+							proposal: { kind: "role", role: proposal.role, written: false },
+						});
+						continue;
+					}
 
-          changes.push({
-            kind: "write",
-            path: relPath,
-            before: Buffer.from(source, "utf8"),
-            after: Buffer.from(after, "utf8"),
-          });
-          proposals.push({
-            file: relPath,
-            proposal: { kind: "role", role: proposal.role, written: true },
-          });
-        }
-      }
+					changes.push({
+						kind: "write",
+						path: relPath,
+						before: Buffer.from(source, "utf8"),
+						after: Buffer.from(after, "utf8"),
+					});
+					proposals.push({
+						file: relPath,
+						proposal: { kind: "role", role: proposal.role, written: true },
+					});
+				}
+			}
 
-      return { changes, outcome: { proposals } };
-    },
-  };
+			return { changes, outcome: { proposals } };
+		},
+	};
 }
 
 /**
@@ -141,6 +141,6 @@ export function proposeMetaRole(): Operation<ProposeMetaRoleOutcome> {
  * anchor — the caller surfaces that as an un-written proposal.
  */
 function injectRoleAfterKind(source: string, role: string): string | null {
-  if (!META_KIND_LITERAL_RE.test(source)) return null;
-  return source.replace(META_KIND_LITERAL_RE, `$1, role: "${role}"`);
+	if (!META_KIND_LITERAL_RE.test(source)) return null;
+	return source.replace(META_KIND_LITERAL_RE, `$1, role: "${role}"`);
 }

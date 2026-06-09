@@ -29,40 +29,40 @@ import { findMetaBody, hasTopLevelKey } from "../meta-source.js";
  * checker and this fixer can never disagree about whether `kind` is present.
  */
 export function mergeMetaKind(source: string, tier: Tier): string {
-  const meta = findMetaBody(source);
-  if (!meta) return appendFreshMeta(source, tier);
+	const meta = findMetaBody(source);
+	if (!meta) return appendFreshMeta(source, tier);
 
-  const { openIdx: openBraceIdx, closeIdx: closeBraceIdx, body } = meta;
-  // Malformed source — bail rather than risk producing nonsense.
-  if (closeBraceIdx === -1) return source;
+	const { openIdx: openBraceIdx, closeIdx: closeBraceIdx, body } = meta;
+	// Malformed source — bail rather than risk producing nonsense.
+	if (closeBraceIdx === -1) return source;
 
-  if (hasTopLevelKey(body, "kind")) return source;
+	if (hasTopLevelKey(body, "kind")) return source;
 
-  const before = source.slice(0, openBraceIdx + 1);
-  const after = source.slice(closeBraceIdx);
+	const before = source.slice(0, openBraceIdx + 1);
+	const after = source.slice(closeBraceIdx);
 
-  // Empty object → render the kind compactly inside the existing `{}`.
-  if (body.trim() === "") {
-    return before + ` kind: "${tier}" as const ` + after;
-  }
+	// Empty object → render the kind compactly inside the existing `{}`.
+	if (body.trim() === "") {
+		return before + ` kind: "${tier}" as const ` + after;
+	}
 
-  if (body.includes("\n")) {
-    // Multiline: match the indent of the first existing field.
-    const indent = detectFieldIndent(body);
-    const insertion = `\n${indent}kind: "${tier}" as const,`;
-    return before + insertion + body + after;
-  }
+	if (body.includes("\n")) {
+		// Multiline: match the indent of the first existing field.
+		const indent = detectFieldIndent(body);
+		const insertion = `\n${indent}kind: "${tier}" as const,`;
+		return before + insertion + body + after;
+	}
 
-  // Single-line: drop the kind in just after the opening brace, normalising
-  // the gap between `{` and the first field to a single space so the output
-  // reads cleanly regardless of the input's leading whitespace.
-  const trimmedBody = body.replace(/^[ \t]+/, "");
-  return before + ` kind: "${tier}" as const, ` + trimmedBody + after;
+	// Single-line: drop the kind in just after the opening brace, normalising
+	// the gap between `{` and the first field to a single space so the output
+	// reads cleanly regardless of the input's leading whitespace.
+	const trimmedBody = body.replace(/^[ \t]+/, "");
+	return before + ` kind: "${tier}" as const, ` + trimmedBody + after;
 }
 
 function appendFreshMeta(source: string, tier: Tier): string {
-  const metaExport = `\nexport const meta = { kind: "${tier}" as const, examples: [] };\n`;
-  return source.trimEnd() + "\n" + metaExport;
+	const metaExport = `\nexport const meta = { kind: "${tier}" as const, examples: [] };\n`;
+	return source.trimEnd() + "\n" + metaExport;
 }
 
 /**
@@ -71,6 +71,6 @@ function appendFreshMeta(source: string, tier: Tier): string {
  * when the body has no precedent (e.g. only a trailing comment).
  */
 function detectFieldIndent(body: string): string {
-  const m = body.match(/\n([ \t]+)\S/);
-  return m ? m[1] : "  ";
+	const m = body.match(/\n([ \t]+)\S/);
+	return m ? m[1] : "  ";
 }

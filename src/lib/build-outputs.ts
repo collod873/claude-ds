@@ -23,12 +23,7 @@
  * runs should skip these — `node_modules` is enormous and never contains
  * DS-managed code, and `.git` / `.hg` / `.svn` are opaque binary metadata.
  */
-export const VCS_DEPS_DIRS: ReadonlySet<string> = new Set([
-  "node_modules",
-  ".git",
-  ".hg",
-  ".svn",
-]);
+export const VCS_DEPS_DIRS: ReadonlySet<string> = new Set(["node_modules", ".git", ".hg", ".svn"]);
 
 /**
  * Framework build outputs and tool caches. None of these are ever DS-managed:
@@ -42,19 +37,19 @@ export const VCS_DEPS_DIRS: ReadonlySet<string> = new Set([
  * caches the loop should never read into its snapshot.
  */
 export const BUILD_OUTPUT_DIRS: ReadonlySet<string> = new Set([
-  ".next",
-  ".nuxt",
-  ".vite",
-  ".parcel-cache",
-  ".vercel",
-  ".turbo",
-  ".cache",
-  "dist",
-  "build",
-  "out",
-  "coverage",
-  "test-results",
-  "playwright-report",
+	".next",
+	".nuxt",
+	".vite",
+	".parcel-cache",
+	".vercel",
+	".turbo",
+	".cache",
+	"dist",
+	"build",
+	"out",
+	"coverage",
+	"test-results",
+	"playwright-report",
 ]);
 
 /**
@@ -63,6 +58,6 @@ export const BUILD_OUTPUT_DIRS: ReadonlySet<string> = new Set([
  * Callers that need to add extras union this with their own set.
  */
 export const SCAN_SKIP_DIRS: ReadonlySet<string> = new Set([
-  ...VCS_DEPS_DIRS,
-  ...BUILD_OUTPUT_DIRS,
+	...VCS_DEPS_DIRS,
+	...BUILD_OUTPUT_DIRS,
 ]);

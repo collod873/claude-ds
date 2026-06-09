@@ -6,8 +6,8 @@ import { analyzeResolution } from "./resolve-symbols.js";
  * `RepairEnv` only when the origin is *unique and proven* — never a guess.
  */
 export interface SymbolSource {
-  specifier: string;
-  kind: "named" | "default";
+	specifier: string;
+	kind: "named" | "default";
 }
 
 /**
@@ -22,7 +22,7 @@ export interface SymbolSource {
  * `analyzeResolution` stays a pure single-file pass.
  */
 export interface RepairEnv {
-  resolve(symbol: string): SymbolSource | null;
+	resolve(symbol: string): SymbolSource | null;
 }
 
 /**
@@ -36,9 +36,9 @@ export interface RepairEnv {
  * flag the rest.
  */
 export interface RepairResult {
-  source: string;
-  repaired: boolean;
-  remaining: string[];
+	source: string;
+	repaired: boolean;
+	remaining: string[];
 }
 
 /**
@@ -48,57 +48,57 @@ export interface RepairResult {
  * — a wrong import would compile-then-break a consumer, against the north star.
  */
 export function repairUnresolvedSymbols(
-  source: string,
-  fileName: string,
-  env: RepairEnv,
+	source: string,
+	fileName: string,
+	env: RepairEnv,
 ): RepairResult {
-  const { unresolved, typeOnlySymbols } = analyzeResolution(source, fileName);
+	const { unresolved, typeOnlySymbols } = analyzeResolution(source, fileName);
 
-  const remaining: string[] = [];
-  const named = new Map<string, Set<string>>(); // specifier → named value symbols
-  const namedTypeOnly = new Map<string, Set<string>>(); // specifier → type-only symbols
-  const defaults: Array<{ symbol: string; specifier: string }> = [];
+	const remaining: string[] = [];
+	const named = new Map<string, Set<string>>(); // specifier → named value symbols
+	const namedTypeOnly = new Map<string, Set<string>>(); // specifier → type-only symbols
+	const defaults: Array<{ symbol: string; specifier: string }> = [];
 
-  for (const symbol of unresolved) {
-    const found = env.resolve(symbol);
-    if (!found) {
-      remaining.push(symbol);
-      continue;
-    }
-    if (found.kind === "default") {
-      defaults.push({ symbol, specifier: found.specifier });
-    } else if (typeOnlySymbols.has(symbol)) {
-      // Symbol appears only in type position: emit `import type { X }` so the
-      // import is safe for consumers with `isolatedModules` / `verbatimModuleSyntax`
-      // and for packages that export the symbol as a type-only export.
-      const set = namedTypeOnly.get(found.specifier) ?? new Set<string>();
-      set.add(symbol);
-      namedTypeOnly.set(found.specifier, set);
-    } else {
-      const set = named.get(found.specifier) ?? new Set<string>();
-      set.add(symbol);
-      named.set(found.specifier, set);
-    }
-  }
+	for (const symbol of unresolved) {
+		const found = env.resolve(symbol);
+		if (!found) {
+			remaining.push(symbol);
+			continue;
+		}
+		if (found.kind === "default") {
+			defaults.push({ symbol, specifier: found.specifier });
+		} else if (typeOnlySymbols.has(symbol)) {
+			// Symbol appears only in type position: emit `import type { X }` so the
+			// import is safe for consumers with `isolatedModules` / `verbatimModuleSyntax`
+			// and for packages that export the symbol as a type-only export.
+			const set = namedTypeOnly.get(found.specifier) ?? new Set<string>();
+			set.add(symbol);
+			namedTypeOnly.set(found.specifier, set);
+		} else {
+			const set = named.get(found.specifier) ?? new Set<string>();
+			set.add(symbol);
+			named.set(found.specifier, set);
+		}
+	}
 
-  if (named.size === 0 && namedTypeOnly.size === 0 && defaults.length === 0) {
-    return { source, repaired: false, remaining };
-  }
+	if (named.size === 0 && namedTypeOnly.size === 0 && defaults.length === 0) {
+		return { source, repaired: false, remaining };
+	}
 
-  const lines: string[] = [];
-  for (const { symbol, specifier } of defaults) {
-    lines.push(`import ${symbol} from "${specifier}";`);
-  }
-  for (const [specifier, symbols] of [...named.entries()].sort()) {
-    const names = [...symbols].sort().join(", ");
-    lines.push(`import { ${names} } from "${specifier}";`);
-  }
-  for (const [specifier, symbols] of [...namedTypeOnly.entries()].sort()) {
-    const names = [...symbols].sort().join(", ");
-    lines.push(`import type { ${names} } from "${specifier}";`);
-  }
+	const lines: string[] = [];
+	for (const { symbol, specifier } of defaults) {
+		lines.push(`import ${symbol} from "${specifier}";`);
+	}
+	for (const [specifier, symbols] of [...named.entries()].sort()) {
+		const names = [...symbols].sort().join(", ");
+		lines.push(`import { ${names} } from "${specifier}";`);
+	}
+	for (const [specifier, symbols] of [...namedTypeOnly.entries()].sort()) {
+		const names = [...symbols].sort().join(", ");
+		lines.push(`import type { ${names} } from "${specifier}";`);
+	}
 
-  return { source: insertImports(source, lines), repaired: true, remaining };
+	return { source: insertImports(source, lines), repaired: true, remaining };
 }
 
 /**
@@ -107,12 +107,12 @@ export function repairUnresolvedSymbols(
  * stay the first statement). Idempotent ordering is the caller's concern.
  */
 function insertImports(source: string, importLines: string[]): string {
-  const block = importLines.join("\n") + "\n";
-  const directive = /^(\s*(?:"use (?:client|server)"|'use (?:client|server)');?[ \t]*\r?\n)/;
-  const m = source.match(directive);
-  if (m) {
-    const at = m[0].length;
-    return source.slice(0, at) + block + source.slice(at);
-  }
-  return block + source;
+	const block = importLines.join("\n") + "\n";
+	const directive = /^(\s*(?:"use (?:client|server)"|'use (?:client|server)');?[ \t]*\r?\n)/;
+	const m = source.match(directive);
+	if (m) {
+		const at = m[0].length;
+		return source.slice(0, at) + block + source.slice(at);
+	}
+	return block + source;
 }

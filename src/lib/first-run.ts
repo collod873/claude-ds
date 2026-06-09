@@ -32,16 +32,21 @@ export const GREET_INIT_INDEX = 1;
 export const DEFAULT_PACK = "next-react";
 
 export interface FirstRunState {
-  /** True when `.claude-ds.json` exists in the cwd. */
-  hasConfig: boolean;
-  /** Framework name (pack id) when detected from `package.json` deps, else null. */
-  framework: string | null;
-  /** True when at least one `.tsx` / `.jsx` consumer component file exists. */
-  hasExistingComponents: boolean;
+	/** True when `.claude-ds.json` exists in the cwd. */
+	hasConfig: boolean;
+	/** Framework name (pack id) when detected from `package.json` deps, else null. */
+	framework: string | null;
+	/** True when at least one `.tsx` / `.jsx` consumer component file exists. */
+	hasExistingComponents: boolean;
 }
 
 async function exists(p: string): Promise<boolean> {
-  try { await stat(p); return true; } catch { return false; }
+	try {
+		await stat(p);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -50,10 +55,10 @@ async function exists(p: string): Promise<boolean> {
  * first component file it finds since `hasExistingComponents` is a boolean.
  */
 export async function detectFirstRun(cwd: string): Promise<FirstRunState> {
-  const hasConfig = await exists(join(cwd, ".claude-ds.json"));
-  const framework = await detectFramework(cwd);
-  const hasExistingComponents = await hasAnyComponentFile(cwd);
-  return { hasConfig, framework, hasExistingComponents };
+	const hasConfig = await exists(join(cwd, ".claude-ds.json"));
+	const framework = await detectFramework(cwd);
+	const hasExistingComponents = await hasAnyComponentFile(cwd);
+	return { hasConfig, framework, hasExistingComponents };
 }
 
 /**
@@ -64,31 +69,31 @@ export async function detectFirstRun(cwd: string): Promise<FirstRunState> {
  * is explicitly out of scope (PRD's "Out of Scope" section).
  */
 async function detectFramework(cwd: string): Promise<string | null> {
-  const pkgPath = join(cwd, "package.json");
-  if (!(await exists(pkgPath))) return null;
-  let pkg: unknown;
-  try {
-    pkg = JSON.parse(await readFile(pkgPath, "utf8"));
-  } catch {
-    return null;
-  }
-  if (typeof pkg !== "object" || pkg === null) return null;
-  const deps = mergeDeps(pkg as Record<string, unknown>);
-  if ("react" in deps || "next" in deps) return DEFAULT_PACK;
-  return null;
+	const pkgPath = join(cwd, "package.json");
+	if (!(await exists(pkgPath))) return null;
+	let pkg: unknown;
+	try {
+		pkg = JSON.parse(await readFile(pkgPath, "utf8"));
+	} catch {
+		return null;
+	}
+	if (typeof pkg !== "object" || pkg === null) return null;
+	const deps = mergeDeps(pkg as Record<string, unknown>);
+	if ("react" in deps || "next" in deps) return DEFAULT_PACK;
+	return null;
 }
 
 function mergeDeps(pkg: Record<string, unknown>): Record<string, string> {
-  const merged: Record<string, string> = {};
-  for (const field of ["dependencies", "devDependencies", "peerDependencies"]) {
-    const v = pkg[field];
-    if (typeof v === "object" && v !== null) {
-      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-        if (typeof val === "string") merged[k] = val;
-      }
-    }
-  }
-  return merged;
+	const merged: Record<string, string> = {};
+	for (const field of ["dependencies", "devDependencies", "peerDependencies"]) {
+		const v = pkg[field];
+		if (typeof v === "object" && v !== null) {
+			for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+				if (typeof val === "string") merged[k] = val;
+			}
+		}
+	}
+	return merged;
 }
 
 /**
@@ -98,25 +103,25 @@ function mergeDeps(pkg: Record<string, unknown>): Record<string, string> {
  * greenfield. Short-circuits the first time a component file is found.
  */
 async function hasAnyComponentFile(cwd: string): Promise<boolean> {
-  async function walk(dir: string): Promise<boolean> {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return false;
-    }
-    for (const e of entries) {
-      if (SCAN_SKIP_DIRS.has(e.name)) continue;
-      if (e.name.startsWith(".")) continue; // .git, .next handled above; skip all dotdirs
-      if (e.isFile()) {
-        if (e.name.endsWith(".tsx") || e.name.endsWith(".jsx")) return true;
-      } else if (e.isDirectory()) {
-        if (await walk(join(dir, e.name))) return true;
-      }
-    }
-    return false;
-  }
-  return walk(cwd);
+	async function walk(dir: string): Promise<boolean> {
+		let entries;
+		try {
+			entries = await readdir(dir, { withFileTypes: true });
+		} catch {
+			return false;
+		}
+		for (const e of entries) {
+			if (SCAN_SKIP_DIRS.has(e.name)) continue;
+			if (e.name.startsWith(".")) continue; // .git, .next handled above; skip all dotdirs
+			if (e.isFile()) {
+				if (e.name.endsWith(".tsx") || e.name.endsWith(".jsx")) return true;
+			} else if (e.isDirectory()) {
+				if (await walk(join(dir, e.name))) return true;
+			}
+		}
+		return false;
+	}
+	return walk(cwd);
 }
 
 /**
@@ -127,21 +132,21 @@ async function hasAnyComponentFile(cwd: string): Promise<boolean> {
  * via the resolver's named throw (ADR-0023).
  */
 export function buildGreetDecision(state: FirstRunState): Decision {
-  return {
-    id: GREET_DECISION_ID,
-    kind: "ambiguity",
-    question: "Organize your existing components (adopt) or start fresh (init)?",
-    options: [
-      {
-        label: "Organize existing (adopt)",
-        description: state.hasExistingComponents
-          ? "you have components on disk — adopt installs the scaffold around them"
-          : "install the scaffold next to whatever code already exists",
-      },
-      {
-        label: "Start fresh (init)",
-        description: "lay down the pack scaffold in an empty tree",
-      },
-    ],
-  };
+	return {
+		id: GREET_DECISION_ID,
+		kind: "ambiguity",
+		question: "Organize your existing components (adopt) or start fresh (init)?",
+		options: [
+			{
+				label: "Organize existing (adopt)",
+				description: state.hasExistingComponents
+					? "you have components on disk — adopt installs the scaffold around them"
+					: "install the scaffold next to whatever code already exists",
+			},
+			{
+				label: "Start fresh (init)",
+				description: "lay down the pack scaffold in an empty tree",
+			},
+		],
+	};
 }

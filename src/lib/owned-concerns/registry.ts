@@ -15,7 +15,7 @@ import { ownedTokenLintRule } from "./rules/owned-token-lint.js";
  * the registry exists to avoid.
  */
 export const OWNED_CONCERNS_BY_ID: Record<OwnedConcernId, OwnedConcern> = {
-  "OWNED-TOKEN-LINT": ownedTokenLintRule,
+	"OWNED-TOKEN-LINT": ownedTokenLintRule,
 };
 
 /**
@@ -27,6 +27,4 @@ export const OWNED_CONCERNS_BY_ID: Record<OwnedConcernId, OwnedConcern> = {
  * Derived from `OWNED_CONCERNS_BY_ID` so the typed record's totality check
  * propagates here — the array can't silently miss a concern.
  */
-export const OWNED_CONCERNS: readonly OwnedConcern[] = Object.values(
-  OWNED_CONCERNS_BY_ID,
-);
+export const OWNED_CONCERNS: readonly OwnedConcern[] = Object.values(OWNED_CONCERNS_BY_ID);

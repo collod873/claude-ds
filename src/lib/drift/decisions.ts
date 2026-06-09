@@ -27,12 +27,12 @@ export type DecisionAnswer = number | "defer";
  * `opts.prompt(question, options)` directly.
  */
 export interface FixerDecisionPoint {
-  key: DecisionKey;
-  question: string;
-  options: PromptOption[];
+	key: DecisionKey;
+	question: string;
+	options: PromptOption[];
 }
 
 /** Canonical key for a (rule, file) pair — `"${ruleId}:${file}"`. */
 export function findingKey(finding: { ruleId: string; file: string }): FindingKey {
-  return `${finding.ruleId}:${finding.file}`;
+	return `${finding.ruleId}:${finding.file}`;
 }

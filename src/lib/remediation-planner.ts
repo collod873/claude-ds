@@ -21,14 +21,14 @@
  */
 
 export type LoopStep =
-  | "upgrade"
-  | "sync"
-  | "repair"
-  | "migrate-layout"
-  | "reconcile"
-  | "classify"
-  | "reconform"
-  | "audit --fix";
+	| "upgrade"
+	| "sync"
+	| "repair"
+	| "migrate-layout"
+	| "reconcile"
+	| "classify"
+	| "reconform"
+	| "audit --fix";
 
 /**
  * ADR-0018 canonical order. Exported so the tests can pin the order without
@@ -37,14 +37,14 @@ export type LoopStep =
  * code-level refactor.
  */
 export const CANONICAL_ORDER: readonly LoopStep[] = [
-  "upgrade",
-  "sync",
-  "repair",
-  "migrate-layout",
-  "reconcile",
-  "classify",
-  "reconform",
-  "audit --fix",
+	"upgrade",
+	"sync",
+	"repair",
+	"migrate-layout",
+	"reconcile",
+	"classify",
+	"reconform",
+	"audit --fix",
 ];
 
 /**
@@ -55,45 +55,45 @@ export const CANONICAL_ORDER: readonly LoopStep[] = [
  * *whether* to run, not *how much*; the driver surfaces counts in the gate UI.
  */
 export interface ProjectState {
-  /** Pinned `packVersion` is older than the installed CLI. ADR-0011 addendum
-   *  (#341): "upgrade available" fires only when a newer version actually
-   *  exists. */
-  upgradeAvailable: boolean;
-  /** A managed file is missing or its bytes drifted from the manifest. ADR-
-   *  0018 names this a "scaffold gap," reserving "drift" for the `DRIFT-`
-   *  audit family. Healed by `sync`. */
-  scaffoldGap: boolean;
-  /** End-state of one or more applied migrations has regressed at the current
-   *  `packVersion` (flipped flag, deleted managed file). ADR-0011 addendum
-   *  (#341): surfaced as "repair needed: N settings regressed," never as
-   *  "upgrade." */
-  repairNeeded: boolean;
-  /** Pre-current pack layout detected — files in legacy locations the current
-   *  manifest no longer recognizes. */
-  layoutMigrationNeeded: boolean;
-  /** Root-level dupes of canonical files, deprecated paths from prior pack
-   *  versions, or dangling hooks. */
-  reconcileNeeded: boolean;
-  /** Inline components need extraction, or other findings audit cannot
-   *  auto-repair that classify owns. */
-  classifyNeeded: boolean;
-  /** Companion files / meta / claude-md migration / role-proposer work
-   *  reconform owns. */
-  reconformNeeded: boolean;
-  /** Auto-fixable drift or integrity findings remain. */
-  autoFixNeeded: boolean;
-  /**
-   * Unfixable findings remain whose remedy no canonical-order step owns
-   * (DRIFT-PATTERN-NO-SLOTS, DRIFT-PATTERN-IMPORTS-PATTERN,
-   * DRIFT-ROLE-NO-CONTRACT, INTEGRITY-UNRESOLVABLE-IMPORT — anything with
-   * `fixable: false` and `classifyRelocatable: false`). Does NOT drive a
-   * step in the plan — there is no loop member that can resolve them —
-   * but the headless driver reads this signal so heal does not silently
-   * declare convergence with real ERROR findings outstanding (#379). The
-   * remedies live outside the loop: hand-edit, `exceptions.json`, or
-   * waiting for the pack to ship machinery.
-   */
-  unresolvableFindings: boolean;
+	/** Pinned `packVersion` is older than the installed CLI. ADR-0011 addendum
+	 *  (#341): "upgrade available" fires only when a newer version actually
+	 *  exists. */
+	upgradeAvailable: boolean;
+	/** A managed file is missing or its bytes drifted from the manifest. ADR-
+	 *  0018 names this a "scaffold gap," reserving "drift" for the `DRIFT-`
+	 *  audit family. Healed by `sync`. */
+	scaffoldGap: boolean;
+	/** End-state of one or more applied migrations has regressed at the current
+	 *  `packVersion` (flipped flag, deleted managed file). ADR-0011 addendum
+	 *  (#341): surfaced as "repair needed: N settings regressed," never as
+	 *  "upgrade." */
+	repairNeeded: boolean;
+	/** Pre-current pack layout detected — files in legacy locations the current
+	 *  manifest no longer recognizes. */
+	layoutMigrationNeeded: boolean;
+	/** Root-level dupes of canonical files, deprecated paths from prior pack
+	 *  versions, or dangling hooks. */
+	reconcileNeeded: boolean;
+	/** Inline components need extraction, or other findings audit cannot
+	 *  auto-repair that classify owns. */
+	classifyNeeded: boolean;
+	/** Companion files / meta / claude-md migration / role-proposer work
+	 *  reconform owns. */
+	reconformNeeded: boolean;
+	/** Auto-fixable drift or integrity findings remain. */
+	autoFixNeeded: boolean;
+	/**
+	 * Unfixable findings remain whose remedy no canonical-order step owns
+	 * (DRIFT-PATTERN-NO-SLOTS, DRIFT-PATTERN-IMPORTS-PATTERN,
+	 * DRIFT-ROLE-NO-CONTRACT, INTEGRITY-UNRESOLVABLE-IMPORT — anything with
+	 * `fixable: false` and `classifyRelocatable: false`). Does NOT drive a
+	 * step in the plan — there is no loop member that can resolve them —
+	 * but the headless driver reads this signal so heal does not silently
+	 * declare convergence with real ERROR findings outstanding (#379). The
+	 * remedies live outside the loop: hand-edit, `exceptions.json`, or
+	 * waiting for the pack to ship machinery.
+	 */
+	unresolvableFindings: boolean;
 }
 
 /**
@@ -109,14 +109,14 @@ export interface ProjectState {
  * iteration produced zero on-disk changes (ADR-0003 fixed-point guarantee).
  */
 export function planRemediation(state: ProjectState): LoopStep[] {
-  const plan: LoopStep[] = [];
-  if (state.upgradeAvailable) plan.push("upgrade");
-  if (state.scaffoldGap) plan.push("sync");
-  if (state.repairNeeded) plan.push("repair");
-  if (state.layoutMigrationNeeded) plan.push("migrate-layout");
-  if (state.reconcileNeeded) plan.push("reconcile");
-  if (state.classifyNeeded) plan.push("classify");
-  if (state.reconformNeeded) plan.push("reconform");
-  if (state.autoFixNeeded) plan.push("audit --fix");
-  return plan;
+	const plan: LoopStep[] = [];
+	if (state.upgradeAvailable) plan.push("upgrade");
+	if (state.scaffoldGap) plan.push("sync");
+	if (state.repairNeeded) plan.push("repair");
+	if (state.layoutMigrationNeeded) plan.push("migrate-layout");
+	if (state.reconcileNeeded) plan.push("reconcile");
+	if (state.classifyNeeded) plan.push("classify");
+	if (state.reconformNeeded) plan.push("reconform");
+	if (state.autoFixNeeded) plan.push("audit --fix");
+	return plan;
 }

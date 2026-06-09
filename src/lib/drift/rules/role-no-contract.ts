@@ -24,27 +24,26 @@ import type { DriftFinding, DriftRule, DriftRuleInput } from "../rule.js";
  * regardless of the strict-flag rollout.
  */
 function detect(input: DriftRuleInput): DriftFinding | null {
-  const { file, locationTier, metaRole } = input;
-  if (locationTier !== "atom" && locationTier !== "composite") return null;
-  if (!metaRole) return null;
-  if (hasShippedContract(metaRole)) return null;
-  return {
-    ruleId: "DRIFT-ROLE-NO-CONTRACT",
-    file,
-    message:
-      `meta.role "${metaRole}" has no shipped contract — register the gap in exceptions.json with a tracked upstream issue (removal trigger: the contract ships)`,
-  };
+	const { file, locationTier, metaRole } = input;
+	if (locationTier !== "atom" && locationTier !== "composite") return null;
+	if (!metaRole) return null;
+	if (hasShippedContract(metaRole)) return null;
+	return {
+		ruleId: "DRIFT-ROLE-NO-CONTRACT",
+		file,
+		message: `meta.role "${metaRole}" has no shipped contract — register the gap in exceptions.json with a tracked upstream issue (removal trigger: the contract ships)`,
+	};
 }
 
 export const roleNoContractRule: DriftRule = {
-  id: "DRIFT-ROLE-NO-CONTRACT",
-  severity: "info",
-  description:
-    "DS file declares a meta.role for which the pack ships no contract; document via exceptions.json",
-  detect,
-  fixable: false,
-  // The remedy is upstream (pack ships the contract) or downstream
-  // (consumer registers a tracked exception); no loop step touches the
-  // consumer's file to resolve it.
-  classifyRelocatable: false,
+	id: "DRIFT-ROLE-NO-CONTRACT",
+	severity: "info",
+	description:
+		"DS file declares a meta.role for which the pack ships no contract; document via exceptions.json",
+	detect,
+	fixable: false,
+	// The remedy is upstream (pack ships the contract) or downstream
+	// (consumer registers a tracked exception); no loop step touches the
+	// consumer's file to resolve it.
+	classifyRelocatable: false,
 };

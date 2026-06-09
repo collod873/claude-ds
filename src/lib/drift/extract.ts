@@ -8,24 +8,27 @@
  * component's surrounding local declarations).
  */
 export function extractUntilStatement(source: string, start: number): string {
-  let depth = 0;
-  let inString: string | null = null;
-  for (let i = start; i < source.length; i++) {
-    const c = source[i];
-    if (inString) {
-      if (c === inString && source[i - 1] !== "\\") inString = null;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") { inString = c; continue; }
-    if (c === "{" || c === "(" || c === "[") depth++;
-    if (c === "}" || c === ")" || c === "]") depth--;
-    if (depth === 0 && c === ";") return source.slice(start, i + 1);
-    if (depth === 0 && c === "\n" && i > start + 10) {
-      const remaining = source.slice(i + 1).trimStart();
-      if (/^(export|import|const|let|var|function|class|type|interface|\/\/)/.test(remaining)) {
-        return source.slice(start, i);
-      }
-    }
-  }
-  return source.slice(start);
+	let depth = 0;
+	let inString: string | null = null;
+	for (let i = start; i < source.length; i++) {
+		const c = source[i];
+		if (inString) {
+			if (c === inString && source[i - 1] !== "\\") inString = null;
+			continue;
+		}
+		if (c === '"' || c === "'" || c === "`") {
+			inString = c;
+			continue;
+		}
+		if (c === "{" || c === "(" || c === "[") depth++;
+		if (c === "}" || c === ")" || c === "]") depth--;
+		if (depth === 0 && c === ";") return source.slice(start, i + 1);
+		if (depth === 0 && c === "\n" && i > start + 10) {
+			const remaining = source.slice(i + 1).trimStart();
+			if (/^(export|import|const|let|var|function|class|type|interface|\/\/)/.test(remaining)) {
+				return source.slice(start, i);
+			}
+		}
+	}
+	return source.slice(start);
 }

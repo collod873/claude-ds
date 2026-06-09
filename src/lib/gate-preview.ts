@@ -24,21 +24,21 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { run } from "./runner.js";
-import type { ProjectContext } from "./project.js";
-import type { SummaryEntry } from "./render/index.js";
-import { renderChangeSummary, renderChangeTierSummary } from "./render/index.js";
-import { makeSyncPackFiles } from "./ops/sync-pack-files.js";
 import {
-  computeMigrationChain,
-  computeVerificationChain,
-  runMigrations,
+	computeMigrationChain,
+	computeVerificationChain,
+	runMigrations,
 } from "./migration-framework.js";
 import { MIGRATION_REGISTRY } from "./migration-registry.js";
-import { cliVersion, upgradeHeadline } from "./version-vocab.js";
+import { makeSyncPackFiles } from "./ops/sync-pack-files.js";
+import type { ProjectContext } from "./project.js";
 import type { LoopStep } from "./remediation-planner.js";
-import { metaKindFromSource } from "./three-signal.js";
+import type { SummaryEntry } from "./render/index.js";
+import { renderChangeSummary, renderChangeTierSummary } from "./render/index.js";
 import { walkDir } from "./reports/unexpected-files.js";
+import { run } from "./runner.js";
+import { metaKindFromSource } from "./three-signal.js";
+import { cliVersion, upgradeHeadline } from "./version-vocab.js";
 
 /**
  * Real finding counts the planner's finding-driven steps respond to. Folded by
@@ -47,27 +47,27 @@ import { walkDir } from "./reports/unexpected-files.js";
  * said is wrong.
  */
 export interface GateFindingCounts {
-  /** Non-auto-fixable findings classify extracts or relocates (inline
-   *  components, misplaced files). The front door's `unfixableCount`, which
-   *  already subsumes extraction — so this is a single, non-overlapping total. */
-  classifyCount: number;
-  /** Auto-fixable drift/integrity findings `audit --fix` repairs. */
-  autoFixableCount: number;
+	/** Non-auto-fixable findings classify extracts or relocates (inline
+	 *  components, misplaced files). The front door's `unfixableCount`, which
+	 *  already subsumes extraction — so this is a single, non-overlapping total. */
+	classifyCount: number;
+	/** Auto-fixable drift/integrity findings `audit --fix` repairs. */
+	autoFixableCount: number;
 }
 
 function summaryEntriesFromRun(
-  ops: ReadonlyArray<{ name: string; changes: ReadonlyArray<SummaryEntry["change"]> }>,
+	ops: ReadonlyArray<{ name: string; changes: ReadonlyArray<SummaryEntry["change"]> }>,
 ): SummaryEntry[] {
-  const entries: SummaryEntry[] = [];
-  for (const op of ops) {
-    for (const change of op.changes) entries.push({ opName: op.name, change });
-  }
-  return entries;
+	const entries: SummaryEntry[] = [];
+	for (const op of ops) {
+		for (const change of op.changes) entries.push({ opName: op.name, change });
+	}
+	return entries;
 }
 
 /** Indent a rendered summary block under its step header. */
 function indent(lines: string[]): string[] {
-  return lines.map(l => `    ${l}`);
+	return lines.map((l) => `    ${l}`);
 }
 
 /**
@@ -77,70 +77,70 @@ function indent(lines: string[]): string[] {
  * previewed by count, not by Change.
  */
 async function previewStepChanges(
-  ctx: ProjectContext,
-  step: LoopStep,
+	ctx: ProjectContext,
+	step: LoopStep,
 ): Promise<SummaryEntry[] | null> {
-  switch (step) {
-    case "sync": {
-      // The same Op `syncCmd` plans — its dry-run Change[] is exactly the
-      // managed-file writes apply will make.
-      const report = await run(ctx, [makeSyncPackFiles({})], "dry-run", { quiet: true });
-      return summaryEntriesFromRun(report.ops);
-    }
-    case "upgrade": {
-      const from = ctx.cfg.packVersion;
-      const to = cliVersion();
-      const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
-      if (chain.length === 0) return [];
-      const report = await runMigrations(ctx, chain, "dry-run", { quiet: true });
-      return summaryEntriesFromRun(report.ops);
-    }
-    case "repair": {
-      // Repair re-applies migrations whose end-state drifted (#300). The
-      // verification chain's dry-run names exactly those Changes.
-      const verifyChain = computeVerificationChain(ctx.cfg.packVersion, MIGRATION_REGISTRY);
-      if (verifyChain.length === 0) return [];
-      const report = await runMigrations(ctx, verifyChain, "dry-run", { quiet: true });
-      return summaryEntriesFromRun(report.ops);
-    }
-    default:
-      return null;
-  }
+	switch (step) {
+		case "sync": {
+			// The same Op `syncCmd` plans — its dry-run Change[] is exactly the
+			// managed-file writes apply will make.
+			const report = await run(ctx, [makeSyncPackFiles({})], "dry-run", { quiet: true });
+			return summaryEntriesFromRun(report.ops);
+		}
+		case "upgrade": {
+			const from = ctx.cfg.packVersion;
+			const to = cliVersion();
+			const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
+			if (chain.length === 0) return [];
+			const report = await runMigrations(ctx, chain, "dry-run", { quiet: true });
+			return summaryEntriesFromRun(report.ops);
+		}
+		case "repair": {
+			// Repair re-applies migrations whose end-state drifted (#300). The
+			// verification chain's dry-run names exactly those Changes.
+			const verifyChain = computeVerificationChain(ctx.cfg.packVersion, MIGRATION_REGISTRY);
+			if (verifyChain.length === 0) return [];
+			const report = await runMigrations(ctx, verifyChain, "dry-run", { quiet: true });
+			return summaryEntriesFromRun(report.ops);
+		}
+		default:
+			return null;
+	}
 }
 
 function stepHeader(step: LoopStep, ctx: ProjectContext, counts: GateFindingCounts): string {
-  switch (step) {
-    case "upgrade": {
-      // Issue #412: route every upgrade headline through `upgradeHeadline` so
-      // an empty chain cannot render `pack X → Y`. The previous header was
-      // synthesised from `(packVersion, pkg.version)` alone — when the CLI
-      // was ahead but no migrations spanned the gap, it falsely promised a
-      // migration while the body printed `(no file changes — version pin
-      // only)`.
-      const from = ctx.cfg.packVersion;
-      const to = cliVersion();
-      const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
-      return `upgrade — ${upgradeHeadline({ from, to, chainLength: chain.length })}`;
-    }
-    case "sync":
-      return "sync — restore managed scaffold files";
-    case "repair":
-      return "repair — restore drifted migration end-states";
-    case "classify": {
-      const n = counts.classifyCount;
-      const noun = n === 1 ? "component" : "components";
-      return `classify — extract / relocate ${n} ${noun}`;
-    }
-    case "audit --fix": {
-      const n = counts.autoFixableCount;
-      const noun = n === 1 ? "finding" : "findings";
-      return `audit --fix — auto-repair ${n} ${noun}`;
-    }
-    case "migrate-layout":
-    case "reconcile":
-    case "reconform":
-      return step;
-  }
+	switch (step) {
+		case "upgrade": {
+			// Issue #412: route every upgrade headline through `upgradeHeadline` so
+			// an empty chain cannot render `pack X → Y`. The previous header was
+			// synthesised from `(packVersion, pkg.version)` alone — when the CLI
+			// was ahead but no migrations spanned the gap, it falsely promised a
+			// migration while the body printed `(no file changes — version pin
+			// only)`.
+			const from = ctx.cfg.packVersion;
+			const to = cliVersion();
+			const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
+			return `upgrade — ${upgradeHeadline({ from, to, chainLength: chain.length })}`;
+		}
+		case "sync":
+			return "sync — restore managed scaffold files";
+		case "repair":
+			return "repair — restore drifted migration end-states";
+		case "classify": {
+			const n = counts.classifyCount;
+			const noun = n === 1 ? "component" : "components";
+			return `classify — extract / relocate ${n} ${noun}`;
+		}
+		case "audit --fix": {
+			const n = counts.autoFixableCount;
+			const noun = n === 1 ? "finding" : "findings";
+			return `audit --fix — auto-repair ${n} ${noun}`;
+		}
+		case "migrate-layout":
+		case "reconcile":
+		case "reconform":
+			return step;
+	}
 }
 
 /**
@@ -154,24 +154,24 @@ function stepHeader(step: LoopStep, ctx: ProjectContext, counts: GateFindingCoun
  * plan so the "what you approve" set equals the "what runs" set.
  */
 export interface CascadeDisclosure {
-  /** Human-readable line shown in the preview under the origin step. */
-  message: string;
-  /** The loop step whose execution flips the driving flag — the disclosure
-   *  renders under this step's header. Today only `upgrade` flips
-   *  `meta_kind_strict`; carried explicitly so a future flag-flipping migration
-   *  that runs under a different step (e.g. a post-upgrade `repair` re-flip)
-   *  attaches its disclosure to the right header without changing the matcher. */
-  originStep: LoopStep;
-  /** The loop step the flip drives — appended to the announced plan if absent. */
-  triggeredStep: LoopStep;
-  /** Number of files the flip rewrites — feeds the triggered step's header count. */
-  affectedFiles: number;
+	/** Human-readable line shown in the preview under the origin step. */
+	message: string;
+	/** The loop step whose execution flips the driving flag — the disclosure
+	 *  renders under this step's header. Today only `upgrade` flips
+	 *  `meta_kind_strict`; carried explicitly so a future flag-flipping migration
+	 *  that runs under a different step (e.g. a post-upgrade `repair` re-flip)
+	 *  attaches its disclosure to the right header without changing the matcher. */
+	originStep: LoopStep;
+	/** The loop step the flip drives — appended to the announced plan if absent. */
+	triggeredStep: LoopStep;
+	/** Number of files the flip rewrites — feeds the triggered step's header count. */
+	affectedFiles: number;
 }
 
 const DRIFT_TIER_DIRS = [
-  "design-system/atoms",
-  "design-system/composites",
-  "design-system/patterns",
+	"design-system/atoms",
+	"design-system/composites",
+	"design-system/patterns",
 ];
 
 /**
@@ -184,24 +184,25 @@ const DRIFT_TIER_DIRS = [
  * will actually find.
  */
 async function countDsFilesMissingMetaKind(cwd: string): Promise<number> {
-  let count = 0;
-  for (const dir of DRIFT_TIER_DIRS) {
-    const files = await walkDir(cwd, dir);
-    for (const f of files) {
-      if (!f.endsWith(".tsx")) continue;
-      if (f.endsWith(".showcase.tsx") || f.endsWith(".test.tsx") || f.endsWith(".stories.tsx")) continue;
-      const sub = f.slice(dir.length + 1);
-      if (sub.includes("/")) continue;
-      let source: string;
-      try {
-        source = await readFile(join(cwd, f), "utf8");
-      } catch {
-        continue;
-      }
-      if (metaKindFromSource(source) === null) count++;
-    }
-  }
-  return count;
+	let count = 0;
+	for (const dir of DRIFT_TIER_DIRS) {
+		const files = await walkDir(cwd, dir);
+		for (const f of files) {
+			if (!f.endsWith(".tsx")) continue;
+			if (f.endsWith(".showcase.tsx") || f.endsWith(".test.tsx") || f.endsWith(".stories.tsx"))
+				continue;
+			const sub = f.slice(dir.length + 1);
+			if (sub.includes("/")) continue;
+			let source: string;
+			try {
+				source = await readFile(join(cwd, f), "utf8");
+			} catch {
+				continue;
+			}
+			if (metaKindFromSource(source) === null) count++;
+		}
+	}
+	return count;
 }
 
 /**
@@ -221,43 +222,43 @@ async function countDsFilesMissingMetaKind(cwd: string): Promise<number> {
  *     `autoFixableCount`. Pure projection — no I/O is mutated.
  */
 export async function projectFullPlan(
-  ctx: ProjectContext,
-  initialPlan: LoopStep[],
+	ctx: ProjectContext,
+	initialPlan: LoopStep[],
 ): Promise<{
-  plan: LoopStep[];
-  cascades: CascadeDisclosure[];
-  metaKindBackfillCount: number;
+	plan: LoopStep[];
+	cascades: CascadeDisclosure[];
+	metaKindBackfillCount: number;
 }> {
-  const cascades: CascadeDisclosure[] = [];
-  let metaKindBackfillCount = 0;
+	const cascades: CascadeDisclosure[] = [];
+	let metaKindBackfillCount = 0;
 
-  if (initialPlan.includes("upgrade") && !ctx.auditConfig.metaKindStrict) {
-    const from = ctx.cfg.packVersion;
-    const to = cliVersion();
-    const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
-    const flipsMetaKindStrict = chain.some((mv) =>
-      mv.ops.some((op) => op.name === "meta-kind-hard@v0.9.0"),
-    );
-    if (flipsMetaKindStrict) {
-      const n = await countDsFilesMissingMetaKind(ctx.cwd);
-      if (n > 0) {
-        metaKindBackfillCount = n;
-        const noun = n === 1 ? "file" : "files";
-        cascades.push({
-          message: `meta_kind_strict: false → true → backfills meta.kind across ${n} ${noun}`,
-          originStep: "upgrade",
-          triggeredStep: "audit --fix",
-          affectedFiles: n,
-        });
-      }
-    }
-  }
+	if (initialPlan.includes("upgrade") && !ctx.auditConfig.metaKindStrict) {
+		const from = ctx.cfg.packVersion;
+		const to = cliVersion();
+		const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
+		const flipsMetaKindStrict = chain.some((mv) =>
+			mv.ops.some((op) => op.name === "meta-kind-hard@v0.9.0"),
+		);
+		if (flipsMetaKindStrict) {
+			const n = await countDsFilesMissingMetaKind(ctx.cwd);
+			if (n > 0) {
+				metaKindBackfillCount = n;
+				const noun = n === 1 ? "file" : "files";
+				cascades.push({
+					message: `meta_kind_strict: false → true → backfills meta.kind across ${n} ${noun}`,
+					originStep: "upgrade",
+					triggeredStep: "audit --fix",
+					affectedFiles: n,
+				});
+			}
+		}
+	}
 
-  const plan: LoopStep[] = [...initialPlan];
-  for (const c of cascades) {
-    if (!plan.includes(c.triggeredStep)) plan.push(c.triggeredStep);
-  }
-  return { plan, cascades, metaKindBackfillCount };
+	const plan: LoopStep[] = [...initialPlan];
+	for (const c of cascades) {
+		if (!plan.includes(c.triggeredStep)) plan.push(c.triggeredStep);
+	}
+	return { plan, cascades, metaKindBackfillCount };
 }
 
 /**
@@ -273,68 +274,70 @@ export async function projectFullPlan(
  * these, then the single `[Enter]` gate prompt.
  */
 export interface GateOpts {
-  /**
-   * Issue #414 / C4. When false (default), byte-deterministic step previews
-   * collapse to a per-tier summary (`90 files modified — 45 atoms, 45
-   * composites`); when true, the full one-line-per-file list is rendered.
-   * The gate's promise — "I'll fix these N things" — is the same either way;
-   * verbose only changes how much detail the operator sees while consenting.
-   */
-  verbose?: boolean;
+	/**
+	 * Issue #414 / C4. When false (default), byte-deterministic step previews
+	 * collapse to a per-tier summary (`90 files modified — 45 atoms, 45
+	 * composites`); when true, the full one-line-per-file list is rendered.
+	 * The gate's promise — "I'll fix these N things" — is the same either way;
+	 * verbose only changes how much detail the operator sees while consenting.
+	 */
+	verbose?: boolean;
 }
 
 export async function buildCommitmentGate(
-  ctx: ProjectContext,
-  plan: LoopStep[],
-  counts: GateFindingCounts,
-  opts: GateOpts = {},
+	ctx: ProjectContext,
+	plan: LoopStep[],
+	counts: GateFindingCounts,
+	opts: GateOpts = {},
 ): Promise<string[]> {
-  const { plan: projected, cascades, metaKindBackfillCount } = await projectFullPlan(ctx, plan);
+	const { plan: projected, cascades, metaKindBackfillCount } = await projectFullPlan(ctx, plan);
 
-  const effectiveCounts: GateFindingCounts = {
-    classifyCount: counts.classifyCount,
-    // The cascade projects findings that today's strict=false scan cannot see;
-    // sum them into the announced count so the header equals what audit --fix
-    // will actually repair after the upstream flip lands (#413 AC).
-    autoFixableCount: counts.autoFixableCount + metaKindBackfillCount,
-  };
+	const effectiveCounts: GateFindingCounts = {
+		classifyCount: counts.classifyCount,
+		// The cascade projects findings that today's strict=false scan cannot see;
+		// sum them into the announced count so the header equals what audit --fix
+		// will actually repair after the upstream flip lands (#413 AC).
+		autoFixableCount: counts.autoFixableCount + metaKindBackfillCount,
+	};
 
-  const lines: string[] = [];
-  lines.push("");
-  lines.push(`I'll bring this tree to clean — ${projected.length} step${projected.length === 1 ? "" : "s"}:`);
-  lines.push(`  ${projected.join(" → ")}`);
-  // C3 convergence explainer: name the bounded loop so "pass 1/3" later
-  // reads as planned, not stuck.
-  lines.push("  Converging until no drift — up to 3 passes.");
-  lines.push("");
+	const lines: string[] = [];
+	lines.push("");
+	lines.push(
+		`I'll bring this tree to clean — ${projected.length} step${projected.length === 1 ? "" : "s"}:`,
+	);
+	lines.push(`  ${projected.join(" → ")}`);
+	// C3 convergence explainer: name the bounded loop so "pass 1/3" later
+	// reads as planned, not stuck.
+	lines.push("  Converging until no drift — up to 3 passes.");
+	lines.push("");
 
-  const render = opts.verbose ? renderChangeSummary : renderChangeTierSummary;
+	const render = opts.verbose ? renderChangeSummary : renderChangeTierSummary;
 
-  for (const step of projected) {
-    lines.push(stepHeader(step, ctx, effectiveCounts));
-    const entries = await previewStepChanges(ctx, step);
-    if (entries !== null) {
-      if (entries.length === 0) {
-        lines.push("    (no file changes — version pin only)");
-      } else {
-        lines.push(...indent(render(entries)));
-      }
-    }
-    // Blast-radius disclosure (#413): cascades that fire from THIS step's
-    // execution. Today only `upgrade` drives a flag-flip cascade, but the
-    // projection model is per-step — when a future cascade lands on `sync` or
-    // `repair`, the same loop renders it under its origin via `originStep`.
-    for (const c of cascades) {
-      if (c.originStep === step) {
-        lines.push(`    ${c.message}`);
-      }
-    }
-  }
+	for (const step of projected) {
+		lines.push(stepHeader(step, ctx, effectiveCounts));
+		const entries = await previewStepChanges(ctx, step);
+		if (entries !== null) {
+			if (entries.length === 0) {
+				lines.push("    (no file changes — version pin only)");
+			} else {
+				lines.push(...indent(render(entries)));
+			}
+		}
+		// Blast-radius disclosure (#413): cascades that fire from THIS step's
+		// execution. Today only `upgrade` drives a flag-flip cascade, but the
+		// projection model is per-step — when a future cascade lands on `sync` or
+		// `repair`, the same loop renders it under its origin via `originStep`.
+		for (const c of cascades) {
+			if (c.originStep === step) {
+				lines.push(`    ${c.message}`);
+			}
+		}
+	}
 
-  if (!opts.verbose) {
-    lines.push("");
-    lines.push("  (re-run with --verbose for the full per-file change list)");
-  }
+	if (!opts.verbose) {
+		lines.push("");
+		lines.push("  (re-run with --verbose for the full per-file change list)");
+	}
 
-  return lines;
+	return lines;
 }

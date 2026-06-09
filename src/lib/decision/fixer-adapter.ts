@@ -15,17 +15,14 @@ import type { Decision, DecisionId } from "./types.js";
  * `FindingKey × DecisionKey` lookup the fixers do.
  */
 export function fixerDecisionId(finding: FindingKey, point: FixerDecisionPoint): DecisionId {
-  return `${finding}::${point.key}`;
+	return `${finding}::${point.key}`;
 }
 
-export function decisionFromFixerPoint(
-  finding: FindingKey,
-  point: FixerDecisionPoint,
-): Decision {
-  return {
-    id: fixerDecisionId(finding, point),
-    kind: "ambiguity",
-    question: point.question,
-    options: point.options.map(o => ({ label: o.label, description: o.description })),
-  };
+export function decisionFromFixerPoint(finding: FindingKey, point: FixerDecisionPoint): Decision {
+	return {
+		id: fixerDecisionId(finding, point),
+		kind: "ambiguity",
+		question: point.question,
+		options: point.options.map((o) => ({ label: o.label, description: o.description })),
+	};
 }

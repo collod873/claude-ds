@@ -1,35 +1,40 @@
 #!/usr/bin/env node
-import { Command } from "commander";
-import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
-import pkg from "../package.json" with { type: "json" };
-import { versionCmd } from "./commands/version.js";
-import { initCmd } from "./commands/init.js";
-import { auditCmd } from "./commands/audit.js";
-import { adoptCmd } from "./commands/adopt.js";
-import { enforceCmd } from "./commands/enforce.js";
-import { syncCmd } from "./commands/sync.js";
-import { doctorCmd } from "./commands/doctor.js";
-import { migrateLayoutCmd } from "./commands/migrate-layout.js";
-import { reconformCmd } from "./commands/reconform.js";
-import { reconcileCmd } from "./commands/reconcile.js";
-import { upgradeCmd } from "./commands/upgrade.js";
-import { classifyCmd } from "./commands/classify.js";
-import { healCmd } from "./commands/heal.js";
-import { frontDoorCmd } from "./commands/front-door.js";
-import { greetCmd } from "./commands/greet.js";
-import { isTTY } from "./lib/render/index.js";
-import { printNextStep } from "./lib/log.js";
-import type { CommandResult } from "./lib/command-result.js";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Command } from "commander";
+import pkg from "../package.json" with { type: "json" };
+import { adoptCmd } from "./commands/adopt.js";
+import { auditCmd } from "./commands/audit.js";
+import { classifyCmd } from "./commands/classify.js";
+import { doctorCmd } from "./commands/doctor.js";
+import { enforceCmd } from "./commands/enforce.js";
+import { frontDoorCmd } from "./commands/front-door.js";
+import { greetCmd } from "./commands/greet.js";
+import { healCmd } from "./commands/heal.js";
+import { initCmd } from "./commands/init.js";
+import { migrateLayoutCmd } from "./commands/migrate-layout.js";
+import { reconcileCmd } from "./commands/reconcile.js";
+import { reconformCmd } from "./commands/reconform.js";
+import { syncCmd } from "./commands/sync.js";
+import { upgradeCmd } from "./commands/upgrade.js";
+import { versionCmd } from "./commands/version.js";
+import type { CommandResult } from "./lib/command-result.js";
+import { printNextStep } from "./lib/log.js";
+import { isTTY } from "./lib/render/index.js";
 
 export interface ProgramDefaults {
-  cwd?: string;
+	cwd?: string;
 }
 
 async function configExists(cwd: string): Promise<boolean> {
-  try { await stat(join(cwd, ".claude-ds.json")); return true; } catch { return false; }
+	try {
+		await stat(join(cwd, ".claude-ds.json"));
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -40,251 +45,454 @@ async function configExists(cwd: string): Promise<boolean> {
  * finish cleanly.
  */
 function finishCommand(result: CommandResult): void {
-  if (result.nextStep) printNextStep(result.nextStep.command, result.nextStep.ctx);
-  if (result.exitCode !== 0) process.exit(result.exitCode);
+	if (result.nextStep) printNextStep(result.nextStep.command, result.nextStep.ctx);
+	if (result.exitCode !== 0) process.exit(result.exitCode);
 }
 
 export function buildProgram(defaults: ProgramDefaults = {}): Command {
-  const program = new Command();
-  program
-    .name("claude-ds")
-    .description(
-      "Design-system governance CLI — installs and syncs the scaffold (the managed design-system files this tool owns).\n" +
-        "Run `claude-ds` with no command to start: first run greets and routes you to init/adopt;\n" +
-        "an adopted project shows a health dashboard. The commands below are the entry onramps + read-only inspection;\n" +
-        "`heal` drives the rest under the hood (ADR-0025).",
-    )
-    .version(`v${pkg.version}`, "-V");
+	const program = new Command();
+	program
+		.name("claude-ds")
+		.description(
+			"Design-system governance CLI — installs and syncs the scaffold (the managed design-system files this tool owns).\n" +
+				"Run `claude-ds` with no command to start: first run greets and routes you to init/adopt;\n" +
+				"an adopted project shows a health dashboard. The commands below are the entry onramps + read-only inspection;\n" +
+				"`heal` drives the rest under the hood (ADR-0025).",
+		)
+		.version(`v${pkg.version}`, "-V");
 
-  // ADR-0025: the help billing above lists only what a consumer chooses
-  // between — drivers (`claude-ds`, `heal`), entries (`init`/`adopt`), and
-  // read-only inspection (`doctor`/`audit`/`version`). The steps `heal`
-  // sequences under the hood (`sync`, `upgrade`, `classify`, `audit --fix`)
-  // and the reserved-but-unwired slots (`migrate-layout`, `reconcile`,
-  // `reconform`) stay registered but hidden. This footer names them so a
-  // maintainer reaching for one knows it exists without re-promoting it.
-  program.addHelpText(
-    "after",
-    "\nUnder the hood: `heal` sequences sync → upgrade → classify → audit --fix" +
-      " to a fixed point — you don't run these by hand (ADR-0025).",
-  );
+	// ADR-0025: the help billing above lists only what a consumer chooses
+	// between — drivers (`claude-ds`, `heal`), entries (`init`/`adopt`), and
+	// read-only inspection (`doctor`/`audit`/`version`). The steps `heal`
+	// sequences under the hood (`sync`, `upgrade`, `classify`, `audit --fix`)
+	// and the reserved-but-unwired slots (`migrate-layout`, `reconcile`,
+	// `reconform`) stay registered but hidden. This footer names them so a
+	// maintainer reaching for one knows it exists without re-promoting it.
+	program.addHelpText(
+		"after",
+		"\nUnder the hood: `heal` sequences sync → upgrade → classify → audit --fix" +
+			" to a fixed point — you don't run these by hand (ADR-0025).",
+	);
 
-  // Positional-options mode means an option declared on the parent (`--answers`
-  // on the bare action below) only consumes its value when it appears BEFORE
-  // the first positional argument (the subcommand name). Without this,
-  // commander would steal `--answers` from `audit`/`classify`/`heal` because
-  // parent options otherwise win regardless of position. Pinned by the audit
-  // and heal integration tests that pass `--answers` to subcommands.
-  program.enablePositionalOptions();
+	// Positional-options mode means an option declared on the parent (`--answers`
+	// on the bare action below) only consumes its value when it appears BEFORE
+	// the first positional argument (the subcommand name). Without this,
+	// commander would steal `--answers` from `audit`/`classify`/`heal` because
+	// parent options otherwise win regardless of position. Pinned by the audit
+	// and heal integration tests that pass `--answers` to subcommands.
+	program.enablePositionalOptions();
 
-  // Bare `claude-ds` default action.
-  //
-  // First-run greet (PRD #325 sub-issue #334): when no `.claude-ds.json`
-  // exists, route to the greet — TTY prompts the Ambiguity Decision and
-  // dispatches to init/adopt; non-TTY with `--answers` resolves silently and
-  // dispatches; non-TTY with no `--answers` fails loud naming the Decision.
-  //
-  // Otherwise (config exists), the dashboard front door from sub-issue #331
-  // applies: TTY composes doctor structural state + a read-only audit pass
-  // and renders the dashboard; non-TTY keeps today's commander help output —
-  // the dashboard is a human surface, and the agent/automation contract for
-  // an adopted project stays exactly the bytes it shipped with.
-  program
-    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0023) — used by the first-run greet")
-    .option("--verbose", "show the full per-file change list in the commitment-gate preview (default: per-tier summary)")
-    .action(async (opts: { answers?: string; verbose?: boolean }) => {
-      const cwd = defaults.cwd ?? process.cwd();
-      if (!(await configExists(cwd))) {
-        await greetCmd({ cwd, answers: opts.answers });
-        return;
-      }
-      if (isTTY()) {
-        // Forward `--answers` so the interactive driver can resolve genuine
-        // Ambiguities it pauses on without a second invocation (ADR-0023).
-        await frontDoorCmd({ cwd, answers: opts.answers, verbose: opts.verbose });
-      } else {
-        program.outputHelp();
-      }
-    });
+	// Bare `claude-ds` default action.
+	//
+	// First-run greet (PRD #325 sub-issue #334): when no `.claude-ds.json`
+	// exists, route to the greet — TTY prompts the Ambiguity Decision and
+	// dispatches to init/adopt; non-TTY with `--answers` resolves silently and
+	// dispatches; non-TTY with no `--answers` fails loud naming the Decision.
+	//
+	// Otherwise (config exists), the dashboard front door from sub-issue #331
+	// applies: TTY composes doctor structural state + a read-only audit pass
+	// and renders the dashboard; non-TTY keeps today's commander help output —
+	// the dashboard is a human surface, and the agent/automation contract for
+	// an adopted project stays exactly the bytes it shipped with.
+	program
+		.option(
+			"--answers <file>",
+			"JSON bag of pre-supplied Decision answers (ADR-0023) — used by the first-run greet",
+		)
+		.option(
+			"--verbose",
+			"show the full per-file change list in the commitment-gate preview (default: per-tier summary)",
+		)
+		.action(async (opts: { answers?: string; verbose?: boolean }) => {
+			const cwd = defaults.cwd ?? process.cwd();
+			if (!(await configExists(cwd))) {
+				await greetCmd({ cwd, answers: opts.answers });
+				return;
+			}
+			if (isTTY()) {
+				// Forward `--answers` so the interactive driver can resolve genuine
+				// Ambiguities it pauses on without a second invocation (ADR-0023).
+				await frontDoorCmd({ cwd, answers: opts.answers, verbose: opts.verbose });
+			} else {
+				program.outputHelp();
+			}
+		});
 
-  program
-    .command("version")
-    .description("print installed vs. latest version")
-    .option("--offline", "skip remote latest-tag lookup")
-    .option("--check", "compare pinned version in .claude-ds.json to installed; exit non-zero if different")
-    .action(async (opts: { offline?: boolean; check?: boolean }) => {
-      await versionCmd({ offline: opts.offline, check: opts.check, cwd: defaults.cwd });
-    });
+	program
+		.command("version")
+		.description("print installed vs. latest version")
+		.option("--offline", "skip remote latest-tag lookup")
+		.option(
+			"--check",
+			"compare pinned version in .claude-ds.json to installed; exit non-zero if different",
+		)
+		.action(async (opts: { offline?: boolean; check?: boolean }) => {
+			await versionCmd({ offline: opts.offline, check: opts.check, cwd: defaults.cwd });
+		});
 
-  program
-    .command("init")
-    .description("greenfield bootstrap — full scaffold, hooks in BLOCK mode")
-    .requiredOption("--pack <name>", "pack to install")
-    .option("--yes", "skip confirmation prompt")
-    .action(async (opts: { pack: string; yes?: boolean }) => {
-      await initCmd({ pack: opts.pack, yes: opts.yes, cwd: defaults.cwd });
-    });
+	program
+		.command("init")
+		.description("greenfield bootstrap — full scaffold, hooks in BLOCK mode")
+		.requiredOption("--pack <name>", "pack to install")
+		.option("--yes", "skip confirmation prompt")
+		.action(async (opts: { pack: string; yes?: boolean }) => {
+			await initCmd({ pack: opts.pack, yes: opts.yes, cwd: defaults.cwd });
+		});
 
-  program
-    .command("audit")
-    .description("read-only conformance report (--fix auto-remediates deterministic issues)")
-    .option("--pack <name>", "pack to audit against")
-    .option("--suggest-removals", "suggest ad-hoc files for removal")
-    .option("--fix", "auto-fix fixable drift findings")
-    .option("--except", "write exceptions for unresolved drift findings")
-    .option("--reason <text>", "reason for exception (used with --except)")
-    .option("--issue <ref>", "tracking issue link (used with --except)")
-    .option("--permanent", "mark exceptions as permanent (used with --except)")
-    .option("--verbose", "show full scaffold inventory (present + missing)")
-    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0023)")
-    .option("--allow-dirty", "bypass the clean-tree guard (only meaningful with --fix)")
-    .option("--json", "emit machine-readable headless contract (issue #408)")
-    .action(async (opts: { pack?: string; suggestRemovals?: boolean; fix?: boolean; except?: boolean; reason?: string; issue?: string; permanent?: boolean; verbose?: boolean; answers?: string; allowDirty?: boolean; json?: boolean }) => {
-      finishCommand(await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals, fix: opts.fix, except: opts.except, reason: opts.reason, issue: opts.issue, permanent: opts.permanent, verbose: opts.verbose, answers: opts.answers, allowDirty: opts.allowDirty, json: opts.json, verify: true, cwd: defaults.cwd }));
-    });
+	program
+		.command("audit")
+		.description("read-only conformance report (--fix auto-remediates deterministic issues)")
+		.option("--pack <name>", "pack to audit against")
+		.option("--suggest-removals", "suggest ad-hoc files for removal")
+		.option("--fix", "auto-fix fixable drift findings")
+		.option("--except", "write exceptions for unresolved drift findings")
+		.option("--reason <text>", "reason for exception (used with --except)")
+		.option("--issue <ref>", "tracking issue link (used with --except)")
+		.option("--permanent", "mark exceptions as permanent (used with --except)")
+		.option("--verbose", "show full scaffold inventory (present + missing)")
+		.option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0023)")
+		.option("--allow-dirty", "bypass the clean-tree guard (only meaningful with --fix)")
+		.option("--json", "emit machine-readable headless contract (issue #408)")
+		.action(
+			async (opts: {
+				pack?: string;
+				suggestRemovals?: boolean;
+				fix?: boolean;
+				except?: boolean;
+				reason?: string;
+				issue?: string;
+				permanent?: boolean;
+				verbose?: boolean;
+				answers?: string;
+				allowDirty?: boolean;
+				json?: boolean;
+			}) => {
+				finishCommand(
+					await auditCmd({
+						pack: opts.pack,
+						suggestRemovals: opts.suggestRemovals,
+						fix: opts.fix,
+						except: opts.except,
+						reason: opts.reason,
+						issue: opts.issue,
+						permanent: opts.permanent,
+						verbose: opts.verbose,
+						answers: opts.answers,
+						allowDirty: opts.allowDirty,
+						json: opts.json,
+						verify: true,
+						cwd: defaults.cwd,
+					}),
+				);
+			},
+		);
 
-  program
-    .command("adopt")
-    .description("brownfield install — scaffold + hooks in WARN mode")
-    .option("--pack <name>", "pack to adopt (auto-detected when only one pack is available)")
-    .option("--yes", "skip confirmation prompt (no-op, kept for back-compat)")
-    .option("--dry-run", "preview what adopt would do without applying changes")
-    .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
-    .option("--allow-dirty", "bypass the clean-tree guard")
-    .option("--json", "emit machine-readable headless contract (issue #408)")
-    .action(async (opts: { pack?: string; yes?: boolean; dryRun?: boolean; ignore?: string; allowDirty?: boolean; json?: boolean }) => {
-      await adoptCmd({ pack: opts.pack, yes: opts.yes, dryRun: opts.dryRun, ignore: opts.ignore, allowDirty: opts.allowDirty, json: opts.json, cwd: defaults.cwd });
-    });
+	program
+		.command("adopt")
+		.description("brownfield install — scaffold + hooks in WARN mode")
+		.option("--pack <name>", "pack to adopt (auto-detected when only one pack is available)")
+		.option("--yes", "skip confirmation prompt (no-op, kept for back-compat)")
+		.option("--dry-run", "preview what adopt would do without applying changes")
+		.option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
+		.option("--allow-dirty", "bypass the clean-tree guard")
+		.option("--json", "emit machine-readable headless contract (issue #408)")
+		.action(
+			async (opts: {
+				pack?: string;
+				yes?: boolean;
+				dryRun?: boolean;
+				ignore?: string;
+				allowDirty?: boolean;
+				json?: boolean;
+			}) => {
+				await adoptCmd({
+					pack: opts.pack,
+					yes: opts.yes,
+					dryRun: opts.dryRun,
+					ignore: opts.ignore,
+					allowDirty: opts.allowDirty,
+					json: opts.json,
+					cwd: defaults.cwd,
+				});
+			},
+		);
 
-  // #470: `migrate <path>` is retired. classify (run by the driver) owns
-  // extraction (ADR-0015); `classify --src <file>` covers the single-file move
-  // migrate served. The `--tier`-forcing + exception escape hatch is dropped —
-  // force the placement, then sanction it with `audit --except`.
+	// #470: `migrate <path>` is retired. classify (run by the driver) owns
+	// extraction (ADR-0015); `classify --src <file>` covers the single-file move
+	// migrate served. The `--tier`-forcing + exception escape hatch is dropped —
+	// force the placement, then sanction it with `audit --except`.
 
-  // #470: `enforce`'s WARN→BLOCK flip is folded into the driver's convergence
-  // step (`promoteModeAtConvergence`) — the brain promotes mode once the tree
-  // is clean and exceptions are within threshold, so a consumer never hand-types
-  // it. The command stays registered + hidden as a debug/escape-hatch path (a
-  // demoted command is hidden, not removed — CLAUDE.md prime directive).
-  program
-    .command("enforce", { hidden: true })
-    .description("flip hooks WARN → BLOCK (gated on exception-count threshold)")
-    .option("--yes", "skip confirmation prompt")
-    .action(async (opts: { yes?: boolean }) => {
-      await enforceCmd({ yes: opts.yes, cwd: defaults.cwd });
-    });
+	// #470: `enforce`'s WARN→BLOCK flip is folded into the driver's convergence
+	// step (`promoteModeAtConvergence`) — the brain promotes mode once the tree
+	// is clean and exceptions are within threshold, so a consumer never hand-types
+	// it. The command stays registered + hidden as a debug/escape-hatch path (a
+	// demoted command is hidden, not removed — CLAUDE.md prime directive).
+	program
+		.command("enforce", { hidden: true })
+		.description("flip hooks WARN → BLOCK (gated on exception-count threshold)")
+		.option("--yes", "skip confirmation prompt")
+		.action(async (opts: { yes?: boolean }) => {
+			await enforceCmd({ yes: opts.yes, cwd: defaults.cwd });
+		});
 
-  // Loop member (ADR-0025): a step the driver sequences inside the heal loop,
-  // not a command a consumer hand-types. `hidden` demotes it from `--help`
-  // billing while keeping it registered and runnable for maintainers/tests.
-  program
-    .command("sync", { hidden: true })
-    .description("update managed files to the pinned release (diff + confirm)")
-    .option("--offline-fixture <path>", "use local pack directory instead of fetching upstream")
-    .option("-y, --yes", "skip confirmation prompt (no-op, kept for back-compat)")
-    .option("--dry-run", "preview what sync would do without applying changes")
-    .option("--allow-dirty", "bypass the clean-tree guard")
-    .option("--json", "emit machine-readable headless contract (issue #408)")
-    .option("--verbose", "list every skipped file (default: collapse in-sync/seeded skips to a count)")
-    .action(async (opts: { offlineFixture?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean; verbose?: boolean }) => {
-      finishCommand(await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd, yes: opts.yes, dryRun: opts.dryRun, allowDirty: opts.allowDirty, json: opts.json, verbose: opts.verbose, verify: true }));
-    });
+	// Loop member (ADR-0025): a step the driver sequences inside the heal loop,
+	// not a command a consumer hand-types. `hidden` demotes it from `--help`
+	// billing while keeping it registered and runnable for maintainers/tests.
+	program
+		.command("sync", { hidden: true })
+		.description("update managed files to the pinned release (diff + confirm)")
+		.option("--offline-fixture <path>", "use local pack directory instead of fetching upstream")
+		.option("-y, --yes", "skip confirmation prompt (no-op, kept for back-compat)")
+		.option("--dry-run", "preview what sync would do without applying changes")
+		.option("--allow-dirty", "bypass the clean-tree guard")
+		.option("--json", "emit machine-readable headless contract (issue #408)")
+		.option(
+			"--verbose",
+			"list every skipped file (default: collapse in-sync/seeded skips to a count)",
+		)
+		.action(
+			async (opts: {
+				offlineFixture?: string;
+				yes?: boolean;
+				dryRun?: boolean;
+				allowDirty?: boolean;
+				json?: boolean;
+				verbose?: boolean;
+			}) => {
+				finishCommand(
+					await syncCmd({
+						offlineFixture: opts.offlineFixture,
+						cwd: defaults.cwd,
+						yes: opts.yes,
+						dryRun: opts.dryRun,
+						allowDirty: opts.allowDirty,
+						json: opts.json,
+						verbose: opts.verbose,
+						verify: true,
+					}),
+				);
+			},
+		);
 
-  program
-    .command("doctor")
-    .description("health check — lookalikes, drift, hook verification")
-    .option("--pack <name>", "pack to check against")
-    .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
-    .option("--verify-hooks", "invoke each pack-registered hook with a pass fixture and report results")
-    .option("--completeness", "verify consumer has zero local DS infrastructure outside pack-managed scaffold")
-    .option("--json", "emit machine output (suppresses the human markdown checklist)")
-    .option("--verbose", "list every managed file present (default: per-tier count)")
-    .action(async (opts: { pack?: string; ignore?: string; verifyHooks?: boolean; completeness?: boolean; json?: boolean; verbose?: boolean }) => {
-      await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks, completeness: opts.completeness, json: opts.json, verbose: opts.verbose, cwd: defaults.cwd });
-    });
+	program
+		.command("doctor")
+		.description("health check — lookalikes, drift, hook verification")
+		.option("--pack <name>", "pack to check against")
+		.option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
+		.option(
+			"--verify-hooks",
+			"invoke each pack-registered hook with a pass fixture and report results",
+		)
+		.option(
+			"--completeness",
+			"verify consumer has zero local DS infrastructure outside pack-managed scaffold",
+		)
+		.option("--json", "emit machine output (suppresses the human markdown checklist)")
+		.option("--verbose", "list every managed file present (default: per-tier count)")
+		.action(
+			async (opts: {
+				pack?: string;
+				ignore?: string;
+				verifyHooks?: boolean;
+				completeness?: boolean;
+				json?: boolean;
+				verbose?: boolean;
+			}) => {
+				await doctorCmd({
+					pack: opts.pack,
+					ignore: opts.ignore,
+					verifyHooks: opts.verifyHooks,
+					completeness: opts.completeness,
+					json: opts.json,
+					verbose: opts.verbose,
+					cwd: defaults.cwd,
+				});
+			},
+		);
 
-  // Reserved planner slot (ADR-0025 / ADR-0018): has a slot in
-  // `CANONICAL_ORDER` but its `deriveProjectState` detection is unwired, so the
-  // driver can't sequence it yet. Kept registered + runnable standalone but
-  // demoted from `--help` billing until a future PRD wires the detection.
-  program
-    .command("migrate-layout", { hidden: true })
-    .description("rename lookalike files to canonical paths (git mv)")
-    .option("--pack <name>", "pack to migrate layout for")
-    .option("--yes", "skip confirmation prompt")
-    .option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
-    .option("--allow-dirty", "bypass the clean-tree guard")
-    .action(async (opts: { pack?: string; yes?: boolean; ignore?: string; allowDirty?: boolean }) => {
-      await migrateLayoutCmd({ pack: opts.pack, yes: opts.yes, ignore: opts.ignore, allowDirty: opts.allowDirty, cwd: defaults.cwd });
-    });
+	// Reserved planner slot (ADR-0025 / ADR-0018): has a slot in
+	// `CANONICAL_ORDER` but its `deriveProjectState` detection is unwired, so the
+	// driver can't sequence it yet. Kept registered + runnable standalone but
+	// demoted from `--help` billing until a future PRD wires the detection.
+	program
+		.command("migrate-layout", { hidden: true })
+		.description("rename lookalike files to canonical paths (git mv)")
+		.option("--pack <name>", "pack to migrate layout for")
+		.option("--yes", "skip confirmation prompt")
+		.option("--ignore <globs>", "comma-separated globs to exclude from lookalike detection")
+		.option("--allow-dirty", "bypass the clean-tree guard")
+		.action(
+			async (opts: { pack?: string; yes?: boolean; ignore?: string; allowDirty?: boolean }) => {
+				await migrateLayoutCmd({
+					pack: opts.pack,
+					yes: opts.yes,
+					ignore: opts.ignore,
+					allowDirty: opts.allowDirty,
+					cwd: defaults.cwd,
+				});
+			},
+		);
 
-  // Reserved planner slot (ADR-0025 / ADR-0018) — unwired detection; demoted
-  // from `--help` billing. See `migrate-layout` above.
-  program
-    .command("reconform", { hidden: true })
-    .description("fill missing companion files and run conformance checks")
-    .option("--dry-run", "report what would happen without mutating anything")
-    .option("--backfill-meta", "audit and backfill missing meta exports + run classification audit")
-    .option("--fix", "write meta stubs and move misclassified files (requires --backfill-meta)")
-    .option("--demote-composites", "also move composites with no DS imports back to atoms (requires --fix)")
-    .option("--allow-dirty", "bypass the clean-tree guard")
-    .option("--verbose", "show the full generated source of each backfilled companion (default: per-tier count)")
-    .action(async (opts: { dryRun?: boolean; backfillMeta?: boolean; fix?: boolean; demoteComposites?: boolean; allowDirty?: boolean; verbose?: boolean }) => {
-      await reconformCmd({ dryRun: opts.dryRun, backfillMeta: opts.backfillMeta, fix: opts.fix, demoteComposites: opts.demoteComposites, allowDirty: opts.allowDirty, verbose: opts.verbose, cwd: defaults.cwd });
-    });
+	// Reserved planner slot (ADR-0025 / ADR-0018) — unwired detection; demoted
+	// from `--help` billing. See `migrate-layout` above.
+	program
+		.command("reconform", { hidden: true })
+		.description("fill missing companion files and run conformance checks")
+		.option("--dry-run", "report what would happen without mutating anything")
+		.option("--backfill-meta", "audit and backfill missing meta exports + run classification audit")
+		.option("--fix", "write meta stubs and move misclassified files (requires --backfill-meta)")
+		.option(
+			"--demote-composites",
+			"also move composites with no DS imports back to atoms (requires --fix)",
+		)
+		.option("--allow-dirty", "bypass the clean-tree guard")
+		.option(
+			"--verbose",
+			"show the full generated source of each backfilled companion (default: per-tier count)",
+		)
+		.action(
+			async (opts: {
+				dryRun?: boolean;
+				backfillMeta?: boolean;
+				fix?: boolean;
+				demoteComposites?: boolean;
+				allowDirty?: boolean;
+				verbose?: boolean;
+			}) => {
+				await reconformCmd({
+					dryRun: opts.dryRun,
+					backfillMeta: opts.backfillMeta,
+					fix: opts.fix,
+					demoteComposites: opts.demoteComposites,
+					allowDirty: opts.allowDirty,
+					verbose: opts.verbose,
+					cwd: defaults.cwd,
+				});
+			},
+		);
 
-  // Reserved planner slot (ADR-0025 / ADR-0018) — unwired detection; demoted
-  // from `--help` billing. See `migrate-layout` above.
-  program
-    .command("reconcile", { hidden: true })
-    .description("prune orphaned/deprecated files")
-    .option("--dry-run", "report orphans and collisions without deleting anything")
-    .option("--force", "delete all findings without prompting")
-    .action(async (opts: { dryRun?: boolean; force?: boolean }) => {
-      await reconcileCmd({ dryRun: opts.dryRun, force: opts.force, cwd: defaults.cwd });
-    });
+	// Reserved planner slot (ADR-0025 / ADR-0018) — unwired detection; demoted
+	// from `--help` billing. See `migrate-layout` above.
+	program
+		.command("reconcile", { hidden: true })
+		.description("prune orphaned/deprecated files")
+		.option("--dry-run", "report orphans and collisions without deleting anything")
+		.option("--force", "delete all findings without prompting")
+		.action(async (opts: { dryRun?: boolean; force?: boolean }) => {
+			await reconcileCmd({ dryRun: opts.dryRun, force: opts.force, cwd: defaults.cwd });
+		});
 
-  // Loop member (ADR-0025) — demoted from `--help` billing. See `sync` above.
-  program
-    .command("upgrade", { hidden: true })
-    .description("bump the pinned version in .claude-ds.json")
-    .option("--to <version>", "target pack version (default: installed CLI version)")
-    .option("--dry-run", "preview migration changes without applying them")
-    .option("--yes", "skip confirmation prompt")
-    .option("--allow-dirty", "bypass the clean-tree guard")
-    .option("--diff", "render the full unified diff instead of the one-line-per-file summary")
-    .option("--json", "emit machine output and suppress the human render")
-    .action(async (opts: { to?: string; dryRun?: boolean; yes?: boolean; allowDirty?: boolean; diff?: boolean; json?: boolean }) => {
-      finishCommand(await upgradeCmd({ to: opts.to, dryRun: opts.dryRun, yes: opts.yes, allowDirty: opts.allowDirty, diff: opts.diff, json: opts.json, verify: true, cwd: defaults.cwd }));
-    });
+	// Loop member (ADR-0025) — demoted from `--help` billing. See `sync` above.
+	program
+		.command("upgrade", { hidden: true })
+		.description("bump the pinned version in .claude-ds.json")
+		.option("--to <version>", "target pack version (default: installed CLI version)")
+		.option("--dry-run", "preview migration changes without applying them")
+		.option("--yes", "skip confirmation prompt")
+		.option("--allow-dirty", "bypass the clean-tree guard")
+		.option("--diff", "render the full unified diff instead of the one-line-per-file summary")
+		.option("--json", "emit machine output and suppress the human render")
+		.action(
+			async (opts: {
+				to?: string;
+				dryRun?: boolean;
+				yes?: boolean;
+				allowDirty?: boolean;
+				diff?: boolean;
+				json?: boolean;
+			}) => {
+				finishCommand(
+					await upgradeCmd({
+						to: opts.to,
+						dryRun: opts.dryRun,
+						yes: opts.yes,
+						allowDirty: opts.allowDirty,
+						diff: opts.diff,
+						json: opts.json,
+						verify: true,
+						cwd: defaults.cwd,
+					}),
+				);
+			},
+		);
 
-  // Loop member (ADR-0025) — demoted from `--help` billing. See `sync` above.
-  program
-    .command("classify", { hidden: true })
-    .description("categorize existing files into DS tiers")
-    .option("--src <dir>", "opt-in: pull design-system parts from this source dir into design-system/ (omit to only reorganize within design-system/)")
-    .option("--dry-run", "show classification plan without moving any files")
-    .option("--yes", "skip the apply-moves commitment-gate (ADR-0023)")
-    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0023)")
-    .option("--allow-dirty", "accepted for compatibility (no-op since PRD #340 F7 — classify's commitment-gate is the safety, git is the undo)")
-    .option("--json", "emit machine-readable headless contract (issue #408)")
-    .action(async (opts: { src?: string; dryRun?: boolean; yes?: boolean; answers?: string; allowDirty?: boolean; json?: boolean }) => {
-      finishCommand(await classifyCmd({ src: opts.src, dryRun: opts.dryRun, yes: opts.yes, answers: opts.answers, allowDirty: opts.allowDirty, json: opts.json, cwd: defaults.cwd }));
-    });
+	// Loop member (ADR-0025) — demoted from `--help` billing. See `sync` above.
+	program
+		.command("classify", { hidden: true })
+		.description("categorize existing files into DS tiers")
+		.option(
+			"--src <dir>",
+			"opt-in: pull design-system parts from this source dir into design-system/ (omit to only reorganize within design-system/)",
+		)
+		.option("--dry-run", "show classification plan without moving any files")
+		.option("--yes", "skip the apply-moves commitment-gate (ADR-0023)")
+		.option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0023)")
+		.option(
+			"--allow-dirty",
+			"accepted for compatibility (no-op since PRD #340 F7 — classify's commitment-gate is the safety, git is the undo)",
+		)
+		.option("--json", "emit machine-readable headless contract (issue #408)")
+		.action(
+			async (opts: {
+				src?: string;
+				dryRun?: boolean;
+				yes?: boolean;
+				answers?: string;
+				allowDirty?: boolean;
+				json?: boolean;
+			}) => {
+				finishCommand(
+					await classifyCmd({
+						src: opts.src,
+						dryRun: opts.dryRun,
+						yes: opts.yes,
+						answers: opts.answers,
+						allowDirty: opts.allowDirty,
+						json: opts.json,
+						cwd: defaults.cwd,
+					}),
+				);
+			},
+		);
 
-  program
-    .command("heal")
-    .description("loop sync → upgrade → classify → audit --fix until convergence (max 3 iterations)")
-    .option("--max-iterations <n>", "override iteration ceiling (default 3)", (v) => parseInt(v, 10))
-    .option("--allow-dirty", "bypass the clean-tree guard (top-level + sub-command propagation)")
-    .option("--answers <file>", "JSON bag of pre-supplied Decision answers (ADR-0023) — resolves Pending decisions from a prior heal run")
-    .option("--json", "emit machine-readable headless contract (issue #408)")
-    .option("--dry-run", "plan the remediation walk without running anything (issue #416 — pairs with --json for the Crewops tripwire)")
-    .action(async (opts: { maxIterations?: number; allowDirty?: boolean; answers?: string; json?: boolean; dryRun?: boolean }) => {
-      await healCmd({ maxIterations: opts.maxIterations, allowDirty: opts.allowDirty, answers: opts.answers, json: opts.json, dryRun: opts.dryRun, cwd: defaults.cwd });
-    });
+	program
+		.command("heal")
+		.description(
+			"loop sync → upgrade → classify → audit --fix until convergence (max 3 iterations)",
+		)
+		.option("--max-iterations <n>", "override iteration ceiling (default 3)", (v) =>
+			parseInt(v, 10),
+		)
+		.option("--allow-dirty", "bypass the clean-tree guard (top-level + sub-command propagation)")
+		.option(
+			"--answers <file>",
+			"JSON bag of pre-supplied Decision answers (ADR-0023) — resolves Pending decisions from a prior heal run",
+		)
+		.option("--json", "emit machine-readable headless contract (issue #408)")
+		.option(
+			"--dry-run",
+			"plan the remediation walk without running anything (issue #416 — pairs with --json for the Crewops tripwire)",
+		)
+		.action(
+			async (opts: {
+				maxIterations?: number;
+				allowDirty?: boolean;
+				answers?: string;
+				json?: boolean;
+				dryRun?: boolean;
+			}) => {
+				await healCmd({
+					maxIterations: opts.maxIterations,
+					allowDirty: opts.allowDirty,
+					answers: opts.answers,
+					json: opts.json,
+					dryRun: opts.dryRun,
+					cwd: defaults.cwd,
+				});
+			},
+		);
 
-  return program;
+	return program;
 }
 
 // Only auto-parse when executed as the main module (i.e. real CLI invocation).
@@ -293,9 +501,11 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 const self = fileURLToPath(import.meta.url);
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === self;
 if (isMain) {
-  buildProgram().parseAsync(process.argv).catch((e: unknown) => {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error(`error: ${msg}`);
-    process.exit(1);
-  });
+	buildProgram()
+		.parseAsync(process.argv)
+		.catch((e: unknown) => {
+			const msg = e instanceof Error ? e.message : String(e);
+			console.error(`error: ${msg}`);
+			process.exit(1);
+		});
 }

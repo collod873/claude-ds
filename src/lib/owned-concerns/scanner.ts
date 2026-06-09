@@ -1,12 +1,9 @@
-import { readFile, readdir } from "node:fs/promises";
-import { join, extname } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { extname, join } from "node:path";
 import { SCAN_SKIP_DIRS } from "../build-outputs.js";
 import { isManifestOrKeepfile } from "../manifest.js";
 import { OWNED_CONCERNS } from "./registry.js";
-import type {
-  OwnedConcernId,
-  SupersedingRuleId,
-} from "./rule.js";
+import type { OwnedConcernId, SupersedingRuleId } from "./rule.js";
 
 /**
  * One Owned-concern scanner finding, the unit the doctor surfaces.
@@ -16,26 +13,26 @@ import type {
  * format `file:line` uniformly with drift/integrity output.
  */
 export interface OwnedConcernScannerFinding {
-  file: string;
-  line: number;
-  concernId: OwnedConcernId;
-  /**
-   * The shipped capability that covers this concern's failure mode, or `null`
-   * when no shipped pack rule does. `null` is the "possible shadow DS infra"
-   * path: completeness flags the file but never recommends deletion (ADR-0017
-   * addendum, issue #348).
-   */
-  supersededBy: SupersedingRuleId | null;
-  message: string;
+	file: string;
+	line: number;
+	concernId: OwnedConcernId;
+	/**
+	 * The shipped capability that covers this concern's failure mode, or `null`
+	 * when no shipped pack rule does. `null` is the "possible shadow DS infra"
+	 * path: completeness flags the file but never recommends deletion (ADR-0017
+	 * addendum, issue #348).
+	 */
+	supersededBy: SupersedingRuleId | null;
+	message: string;
 }
 
 export interface ScanOwnedConcernsOptions {
-  /** Repo root to walk. */
-  cwd: string;
-  /** Manifest `files[].path` — excluded before detection. */
-  manifestPaths: Set<string>;
-  /** Manifest `generated_patterns` — excluded before detection. */
-  generatedPatterns: string[];
+	/** Repo root to walk. */
+	cwd: string;
+	/** Manifest `files[].path` — excluded before detection. */
+	manifestPaths: Set<string>;
+	/** Manifest `generated_patterns` — excluded before detection. */
+	generatedPatterns: string[];
 }
 
 /**
@@ -45,43 +42,43 @@ export interface ScanOwnedConcernsOptions {
  * shadow-infra instance appears in a missing extension.
  */
 const SCANNABLE_EXTS: ReadonlySet<string> = new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".sh",
-  ".bash",
-  ".py",
-  ".rb",
-  ".md",
+	".ts",
+	".tsx",
+	".js",
+	".jsx",
+	".mjs",
+	".cjs",
+	".sh",
+	".bash",
+	".py",
+	".rb",
+	".md",
 ]);
 
 async function walkRepo(cwd: string): Promise<string[]> {
-  const results: string[] = [];
-  async function walk(rel: string): Promise<void> {
-    const abs = rel ? join(cwd, rel) : cwd;
-    let entries: import("node:fs").Dirent[];
-    try {
-      entries = await readdir(abs, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (e.isDirectory()) {
-        if (SCAN_SKIP_DIRS.has(e.name)) continue;
-        const childRel = rel ? `${rel}/${e.name}` : e.name;
-        await walk(childRel);
-        continue;
-      }
-      if (!e.isFile()) continue;
-      const childRel = rel ? `${rel}/${e.name}` : e.name;
-      results.push(childRel);
-    }
-  }
-  await walk("");
-  return results;
+	const results: string[] = [];
+	async function walk(rel: string): Promise<void> {
+		const abs = rel ? join(cwd, rel) : cwd;
+		let entries: import("node:fs").Dirent[];
+		try {
+			entries = await readdir(abs, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const e of entries) {
+			if (e.isDirectory()) {
+				if (SCAN_SKIP_DIRS.has(e.name)) continue;
+				const childRel = rel ? `${rel}/${e.name}` : e.name;
+				await walk(childRel);
+				continue;
+			}
+			if (!e.isFile()) continue;
+			const childRel = rel ? `${rel}/${e.name}` : e.name;
+			results.push(childRel);
+		}
+	}
+	await walk("");
+	return results;
 }
 
 /**
@@ -99,43 +96,43 @@ async function walkRepo(cwd: string): Promise<string[]> {
  * land in the registry and the scanner picks them up unchanged.
  */
 export async function scanOwnedConcerns(
-  opts: ScanOwnedConcernsOptions,
+	opts: ScanOwnedConcernsOptions,
 ): Promise<OwnedConcernScannerFinding[]> {
-  const { cwd, manifestPaths, generatedPatterns } = opts;
+	const { cwd, manifestPaths, generatedPatterns } = opts;
 
-  let isGenerated: ((path: string) => boolean) | null = null;
-  if (generatedPatterns.length > 0) {
-    const { default: picomatch } = await import("picomatch");
-    isGenerated = picomatch(generatedPatterns, { dot: true });
-  }
+	let isGenerated: ((path: string) => boolean) | null = null;
+	if (generatedPatterns.length > 0) {
+		const { default: picomatch } = await import("picomatch");
+		isGenerated = picomatch(generatedPatterns, { dot: true });
+	}
 
-  const files = await walkRepo(cwd);
-  const findings: OwnedConcernScannerFinding[] = [];
+	const files = await walkRepo(cwd);
+	const findings: OwnedConcernScannerFinding[] = [];
 
-  for (const file of files) {
-    if (isManifestOrKeepfile(file, manifestPaths)) continue;
-    if (isGenerated && isGenerated(file)) continue;
-    if (!SCANNABLE_EXTS.has(extname(file))) continue;
+	for (const file of files) {
+		if (isManifestOrKeepfile(file, manifestPaths)) continue;
+		if (isGenerated && isGenerated(file)) continue;
+		if (!SCANNABLE_EXTS.has(extname(file))) continue;
 
-    let source: string;
-    try {
-      source = await readFile(join(cwd, file), "utf8");
-    } catch {
-      continue;
-    }
+		let source: string;
+		try {
+			source = await readFile(join(cwd, file), "utf8");
+		} catch {
+			continue;
+		}
 
-    for (const concern of OWNED_CONCERNS) {
-      const hit = concern.detect({ file, source });
-      if (!hit) continue;
-      findings.push({
-        file: hit.file,
-        line: 1,
-        concernId: hit.concernId,
-        supersededBy: hit.supersededBy,
-        message: hit.message,
-      });
-    }
-  }
+		for (const concern of OWNED_CONCERNS) {
+			const hit = concern.detect({ file, source });
+			if (!hit) continue;
+			findings.push({
+				file: hit.file,
+				line: 1,
+				concernId: hit.concernId,
+				supersededBy: hit.supersededBy,
+				message: hit.message,
+			});
+		}
+	}
 
-  return findings;
+	return findings;
 }

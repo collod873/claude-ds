@@ -8,8 +8,8 @@ import type { ColorAdapter } from "./color.js";
  * mirrors the planned-Change tuples the Runner already iterates in dry-run.
  */
 export interface DiffEntry {
-  opName: string;
-  change: Change;
+	opName: string;
+	change: Change;
 }
 
 /**
@@ -23,13 +23,13 @@ export interface DiffEntry {
  * lines verbatim.
  */
 export function renderCommitmentGateDiff(entries: DiffEntry[]): string[] {
-  const lines: string[] = [];
-  for (const { opName, change } of entries) {
-    for (const line of renderDiff(opName, change).split("\n")) {
-      lines.push(line);
-    }
-  }
-  return lines;
+	const lines: string[] = [];
+	for (const { opName, change } of entries) {
+		for (const line of renderDiff(opName, change).split("\n")) {
+			lines.push(line);
+		}
+	}
+	return lines;
 }
 
 /**
@@ -43,10 +43,10 @@ export function renderCommitmentGateDiff(entries: DiffEntry[]): string[] {
  *   else    → unchanged
  */
 export function colorizeDiffLines(lines: string[], color: ColorAdapter): string[] {
-  return lines.map(line => {
-    if (line.startsWith("+")) return color.green(line);
-    if (line.startsWith("-")) return color.red(line);
-    if (line.startsWith("[")) return color.dim(line);
-    return line;
-  });
+	return lines.map((line) => {
+		if (line.startsWith("+")) return color.green(line);
+		if (line.startsWith("-")) return color.red(line);
+		if (line.startsWith("[")) return color.dim(line);
+		return line;
+	});
 }

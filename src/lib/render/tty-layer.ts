@@ -11,17 +11,17 @@
  * `ColorAdapter` and the printer wires one in. That is the single seam.
  */
 
-import pc from "picocolors";
 import ora, { type Ora } from "ora";
-import { identityColor, type ColorAdapter } from "./color.js";
+import pc from "picocolors";
+import { type ColorAdapter, identityColor } from "./color.js";
 import { isTTY } from "./tty.js";
 
 const ttyColor: ColorAdapter = {
-  green: pc.green,
-  red: pc.red,
-  dim: pc.dim,
-  bold: pc.bold,
-  cyan: pc.cyan,
+	green: pc.green,
+	red: pc.red,
+	dim: pc.dim,
+	bold: pc.bold,
+	cyan: pc.cyan,
 };
 
 /**
@@ -32,7 +32,7 @@ const ttyColor: ColorAdapter = {
  * render module without dragging this file in (see the structural test).
  */
 export function loadColorAdapter(): ColorAdapter {
-  return isTTY() ? ttyColor : identityColor;
+	return isTTY() ? ttyColor : identityColor;
 }
 
 /**
@@ -41,8 +41,8 @@ export function loadColorAdapter(): ColorAdapter {
  * trailing newline at the end so output composes with breadcrumb prints.
  */
 export function printLines(lines: string[]): void {
-  if (lines.length === 0) return;
-  process.stdout.write(lines.join("\n") + "\n");
+	if (lines.length === 0) return;
+	process.stdout.write(lines.join("\n") + "\n");
 }
 
 /**
@@ -57,119 +57,121 @@ export function printLines(lines: string[]): void {
  * process doesn't keep a SIGINT listener alive.
  */
 export interface ProgressController {
-  /** Begin (or replace) the active phase. Subsequent succeed/fail commits it. */
-  start(text: string): void;
-  /** Persist the active phase as completed (✔). */
-  succeed(text?: string): void;
-  /** Persist the active phase as failed (✖). The heal ceiling failure uses this. */
-  fail(text?: string): void;
-  /**
-   * Print a status line above the spinner — used for the heal iteration
-   * counter so the user can see the convergence loop progressing without
-   * losing the current phase's spinner.
-   */
-  info(text: string): void;
-  /** Tear down: clear any active spinner, restore the cursor, drop SIGINT. */
-  stop(): void;
-  /** True when a phase is currently spinning (start without succeed/fail/stop). */
-  readonly active: boolean;
-  /** False on non-TTY — the no-op controller. Lets callers branch only when needed. */
-  readonly enabled: boolean;
+	/** Begin (or replace) the active phase. Subsequent succeed/fail commits it. */
+	start(text: string): void;
+	/** Persist the active phase as completed (✔). */
+	succeed(text?: string): void;
+	/** Persist the active phase as failed (✖). The heal ceiling failure uses this. */
+	fail(text?: string): void;
+	/**
+	 * Print a status line above the spinner — used for the heal iteration
+	 * counter so the user can see the convergence loop progressing without
+	 * losing the current phase's spinner.
+	 */
+	info(text: string): void;
+	/** Tear down: clear any active spinner, restore the cursor, drop SIGINT. */
+	stop(): void;
+	/** True when a phase is currently spinning (start without succeed/fail/stop). */
+	readonly active: boolean;
+	/** False on non-TTY — the no-op controller. Lets callers branch only when needed. */
+	readonly enabled: boolean;
 }
 
 const NOOP_PROGRESS: ProgressController = {
-  start() {},
-  succeed() {},
-  fail() {},
-  info() {},
-  stop() {},
-  active: false,
-  enabled: false,
+	start() {},
+	succeed() {},
+	fail() {},
+	info() {},
+	stop() {},
+	active: false,
+	enabled: false,
 };
 
 export function createProgress(): ProgressController {
-  if (!isTTY()) return NOOP_PROGRESS;
+	if (!isTTY()) return NOOP_PROGRESS;
 
-  let spinner: Ora | null = null;
-  let active = false;
-  let sigintInstalled = false;
+	let spinner: Ora | null = null;
+	let active = false;
+	let sigintInstalled = false;
 
-  const onSigint = (): void => {
-    if (spinner) {
-      spinner.stop();
-      spinner = null;
-    }
-    active = false;
-  };
+	const onSigint = (): void => {
+		if (spinner) {
+			spinner.stop();
+			spinner = null;
+		}
+		active = false;
+	};
 
-  const installSigint = (): void => {
-    if (sigintInstalled) return;
-    process.once("SIGINT", onSigint);
-    sigintInstalled = true;
-  };
+	const installSigint = (): void => {
+		if (sigintInstalled) return;
+		process.once("SIGINT", onSigint);
+		sigintInstalled = true;
+	};
 
-  const removeSigint = (): void => {
-    if (!sigintInstalled) return;
-    process.removeListener("SIGINT", onSigint);
-    sigintInstalled = false;
-  };
+	const removeSigint = (): void => {
+		if (!sigintInstalled) return;
+		process.removeListener("SIGINT", onSigint);
+		sigintInstalled = false;
+	};
 
-  installSigint();
+	installSigint();
 
-  const makeSpinner = (text: string): Ora =>
-    ora({
-      text,
-      stream: process.stderr,
-      // discardStdin puts stdin in raw mode, which interferes with the test
-      // harness (and any other stdin consumer). Spinner UX doesn't need it.
-      discardStdin: false,
-    });
+	const makeSpinner = (text: string): Ora =>
+		ora({
+			text,
+			stream: process.stderr,
+			// discardStdin puts stdin in raw mode, which interferes with the test
+			// harness (and any other stdin consumer). Spinner UX doesn't need it.
+			discardStdin: false,
+		});
 
-  return {
-    start(text) {
-      if (spinner) spinner.stop();
-      spinner = makeSpinner(text);
-      spinner.start();
-      active = true;
-    },
-    succeed(text) {
-      if (spinner) {
-        spinner.succeed(text);
-        spinner = null;
-      } else if (text !== undefined) {
-        process.stderr.write(`✔ ${text}\n`);
-      }
-      active = false;
-    },
-    fail(text) {
-      if (spinner) {
-        spinner.fail(text);
-        spinner = null;
-      } else if (text !== undefined) {
-        process.stderr.write(`✖ ${text}\n`);
-      }
-      active = false;
-    },
-    info(text) {
-      if (spinner) {
-        const current = spinner.text;
-        spinner.stop();
-        process.stderr.write(`${text}\n`);
-        spinner = makeSpinner(current);
-        spinner.start();
-      } else {
-        process.stderr.write(`${text}\n`);
-      }
-    },
-    stop() {
-      if (spinner) {
-        spinner.stop();
-        spinner = null;
-      }
-      active = false;
-      removeSigint();
-    },
-    get active() { return active; },
-    enabled: true,
-  };
+	return {
+		start(text) {
+			if (spinner) spinner.stop();
+			spinner = makeSpinner(text);
+			spinner.start();
+			active = true;
+		},
+		succeed(text) {
+			if (spinner) {
+				spinner.succeed(text);
+				spinner = null;
+			} else if (text !== undefined) {
+				process.stderr.write(`✔ ${text}\n`);
+			}
+			active = false;
+		},
+		fail(text) {
+			if (spinner) {
+				spinner.fail(text);
+				spinner = null;
+			} else if (text !== undefined) {
+				process.stderr.write(`✖ ${text}\n`);
+			}
+			active = false;
+		},
+		info(text) {
+			if (spinner) {
+				const current = spinner.text;
+				spinner.stop();
+				process.stderr.write(`${text}\n`);
+				spinner = makeSpinner(current);
+				spinner.start();
+			} else {
+				process.stderr.write(`${text}\n`);
+			}
+		},
+		stop() {
+			if (spinner) {
+				spinner.stop();
+				spinner = null;
+			}
+			active = false;
+			removeSigint();
+		},
+		get active() {
+			return active;
+		},
+		enabled: true,
+	};
 }

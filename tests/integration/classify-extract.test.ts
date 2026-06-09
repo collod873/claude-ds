@@ -1,44 +1,44 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { runCli } from "../helpers/runcli";
-import { freshTmpDir, cleanup } from "../helpers/tmpdir";
-import { mkdir, writeFile, readFile, access } from "node:fs/promises";
-import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runCli } from "../helpers/runcli";
+import { cleanup, freshTmpDir } from "../helpers/tmpdir";
 
 const BASE_CFG = {
-  packVersion: "v0.8.0",
-  pack: "next-react",
-  mode: "warn",
-  enforce_threshold: 10,
-  removed: [],
-  lookalike_ignore: [],
-  app_dir: "app",
-  claude_md_target: ".claude/CLAUDE.md",
-  domain_roots: ["features", "lib"],
+	packVersion: "v0.8.0",
+	pack: "next-react",
+	mode: "warn",
+	enforce_threshold: 10,
+	removed: [],
+	lookalike_ignore: [],
+	app_dir: "app",
+	claude_md_target: ".claude/CLAUDE.md",
+	domain_roots: ["features", "lib"],
 };
 
 // A tsconfig + ambient JSX shim that lets the produced files compile with the
 // project's own tsc — no react/@types needed. `@/*` maps to the fixture root so
 // the atom import classify writes (`@/design-system/atoms/...`) resolves.
 const TSCONFIG = JSON.stringify(
-  {
-    compilerOptions: {
-      target: "ES2022",
-      module: "ESNext",
-      moduleResolution: "Bundler",
-      strict: true,
-      esModuleInterop: true,
-      skipLibCheck: true,
-      noEmit: true,
-      jsx: "preserve",
-      baseUrl: ".",
-      paths: { "@/*": ["*"] },
-    },
-    include: ["design-system", "utils", "jsx.d.ts"],
-  },
-  null,
-  2,
+	{
+		compilerOptions: {
+			target: "ES2022",
+			module: "ESNext",
+			moduleResolution: "Bundler",
+			strict: true,
+			esModuleInterop: true,
+			skipLibCheck: true,
+			noEmit: true,
+			jsx: "preserve",
+			baseUrl: ".",
+			paths: { "@/*": ["*"] },
+		},
+		include: ["design-system", "utils", "jsx.d.ts"],
+	},
+	null,
+	2,
 );
 
 const JSX_SHIM = `declare namespace JSX {
@@ -105,95 +105,95 @@ const FORMAT_STUB = `export function formatDay(label: string): string {
 `;
 
 async function readDsAtom(dir: string, kebab: string): Promise<string> {
-  return readFile(join(dir, "design-system", "atoms", `${kebab}.tsx`), "utf8");
+	return readFile(join(dir, "design-system", "atoms", `${kebab}.tsx`), "utf8");
 }
 
 function runTsc(dir: string): { status: number | null; out: string } {
-  const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
-  const tscBin = join(projectRoot, "node_modules", ".bin", "tsc");
-  const r = spawnSync(tscBin, ["--noEmit", "-p", "tsconfig.json"], {
-    cwd: dir,
-    encoding: "utf8",
-    timeout: 60_000,
-  });
-  return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
+	const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
+	const tscBin = join(projectRoot, "node_modules", ".bin", "tsc");
+	const r = spawnSync(tscBin, ["--noEmit", "-p", "tsconfig.json"], {
+		cwd: dir,
+		encoding: "utf8",
+		timeout: 60_000,
+	});
+	return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
 }
 
 describe("classify — inline component extraction", () => {
-  let dir: string;
-  beforeEach(async () => {
-    dir = await freshTmpDir();
-  });
-  afterEach(async () => {
-    await cleanup(dir);
-  });
+	let dir: string;
+	beforeEach(async () => {
+		dir = await freshTmpDir();
+	});
+	afterEach(async () => {
+		await cleanup(dir);
+	});
 
-  async function scaffold(): Promise<void> {
-    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
-    await writeFile(join(dir, "tsconfig.json"), TSCONFIG);
-    await writeFile(join(dir, "jsx.d.ts"), JSX_SHIM);
-    await mkdir(join(dir, "src/components"), { recursive: true });
-    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-    await mkdir(join(dir, "design-system/composites"), { recursive: true });
-    await mkdir(join(dir, "utils"), { recursive: true });
-    await writeFile(join(dir, "design-system/atoms/button.tsx"), BUTTON_STUB);
-    await writeFile(join(dir, "utils/format.ts"), FORMAT_STUB);
-    await writeFile(join(dir, "src/components/calendar.tsx"), CALENDAR_TSX);
-  }
+	async function scaffold(): Promise<void> {
+		await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+		await writeFile(join(dir, "tsconfig.json"), TSCONFIG);
+		await writeFile(join(dir, "jsx.d.ts"), JSX_SHIM);
+		await mkdir(join(dir, "src/components"), { recursive: true });
+		await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+		await mkdir(join(dir, "design-system/composites"), { recursive: true });
+		await mkdir(join(dir, "utils"), { recursive: true });
+		await writeFile(join(dir, "design-system/atoms/button.tsx"), BUTTON_STUB);
+		await writeFile(join(dir, "utils/format.ts"), FORMAT_STUB);
+		await writeFile(join(dir, "src/components/calendar.tsx"), CALENDAR_TSX);
+	}
 
-  it("extracts an inline component into its own atom and rewires the parent", async () => {
-    await scaffold();
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+	it("extracts an inline component into its own atom and rewires the parent", async () => {
+		await scaffold();
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    // New atom file exists with the extracted component + meta.kind atom.
-    const atom = await readDsAtom(dir, "day-list");
-    expect(atom).toMatch(/export function DayList\b/);
-    expect(atom).toMatch(/kind:\s*["']atom["']/);
+		// New atom file exists with the extracted component + meta.kind atom.
+		const atom = await readDsAtom(dir, "day-list");
+		expect(atom).toMatch(/export function DayList\b/);
+		expect(atom).toMatch(/kind:\s*["']atom["']/);
 
-    // Carried dependencies: the import it referenced, the moved helper + type.
-    expect(atom).toMatch(/import \{ formatDay \} from "@\/utils\/format"/);
-    expect(atom).toMatch(/function pad\(/);
-    expect(atom).toMatch(/type DayProps =/);
-    // WEEK_LENGTH is used by the parent too, so it is copied (present in both).
-    expect(atom).toMatch(/const WEEK_LENGTH = 7/);
-    // It must NOT carry the Button import (parent uses it, the atom doesn't).
-    expect(atom).not.toMatch(/atoms\/button/);
+		// Carried dependencies: the import it referenced, the moved helper + type.
+		expect(atom).toMatch(/import \{ formatDay \} from "@\/utils\/format"/);
+		expect(atom).toMatch(/function pad\(/);
+		expect(atom).toMatch(/type DayProps =/);
+		// WEEK_LENGTH is used by the parent too, so it is copied (present in both).
+		expect(atom).toMatch(/const WEEK_LENGTH = 7/);
+		// It must NOT carry the Button import (parent uses it, the atom doesn't).
+		expect(atom).not.toMatch(/atoms\/button/);
 
-    // Parent: body removed, atom imported, copied const retained.
-    const parent = await readFile(join(dir, "design-system/composites/calendar.tsx"), "utf8");
-    expect(parent).not.toMatch(/function DayList\b/);
-    expect(parent).not.toMatch(/function pad\(/);
-    expect(parent).not.toMatch(/type DayProps =/);
-    expect(parent).toMatch(/import \{ DayList \} from "@\/design-system\/atoms\/day-list"/);
-    expect(parent).toMatch(/const WEEK_LENGTH = 7/);
-  });
+		// Parent: body removed, atom imported, copied const retained.
+		const parent = await readFile(join(dir, "design-system/composites/calendar.tsx"), "utf8");
+		expect(parent).not.toMatch(/function DayList\b/);
+		expect(parent).not.toMatch(/function pad\(/);
+		expect(parent).not.toMatch(/type DayProps =/);
+		expect(parent).toMatch(/import \{ DayList \} from "@\/design-system\/atoms\/day-list"/);
+		expect(parent).toMatch(/const WEEK_LENGTH = 7/);
+	});
 
-  it("produces tsc-clean output (no missing imports, no duplicate decls)", async () => {
-    await scaffold();
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+	it("produces tsc-clean output (no missing imports, no duplicate decls)", async () => {
+		await scaffold();
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("prints an end-of-run summary of extracted components", async () => {
-    await scaffold();
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/extracted 1 inline component/i);
-    expect(r.stdout).toMatch(/DayList/);
-    expect(r.stdout).toMatch(/design-system\/atoms\/day-list\.tsx/);
-  });
+	it("prints an end-of-run summary of extracted components", async () => {
+		await scaffold();
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		expect(r.stdout).toMatch(/extracted 1 inline component/i);
+		expect(r.stdout).toMatch(/DayList/);
+		expect(r.stdout).toMatch(/design-system\/atoms\/day-list\.tsx/);
+	});
 
-  it("handles a composite with two inline components in one pass", async () => {
-    await scaffold();
-    // Replace calendar with a two-inline-component composite.
-    await writeFile(
-      join(dir, "src/components/dashboard.tsx"),
-      `import { Button } from "@/design-system/atoms/button";
+	it("handles a composite with two inline components in one pass", async () => {
+		await scaffold();
+		// Replace calendar with a two-inline-component composite.
+		await writeFile(
+			join(dir, "src/components/dashboard.tsx"),
+			`import { Button } from "@/design-system/atoms/button";
 
 function StatTile(props: { value: number }) {
   // A standalone stat tile, clearly its own atom.
@@ -248,33 +248,33 @@ export function Dashboard() {
   );
 }
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    await expect(access(join(dir, "design-system/atoms/stat-tile.tsx"))).resolves.toBeUndefined();
-    await expect(access(join(dir, "design-system/atoms/trend-badge.tsx"))).resolves.toBeUndefined();
+		await expect(access(join(dir, "design-system/atoms/stat-tile.tsx"))).resolves.toBeUndefined();
+		await expect(access(join(dir, "design-system/atoms/trend-badge.tsx"))).resolves.toBeUndefined();
 
-    const parent = await readFile(join(dir, "design-system/composites/dashboard.tsx"), "utf8");
-    expect(parent).toMatch(/import \{ StatTile \} from "@\/design-system\/atoms\/stat-tile"/);
-    expect(parent).toMatch(/import \{ TrendBadge \} from "@\/design-system\/atoms\/trend-badge"/);
-    expect(parent).not.toMatch(/function StatTile\b/);
-    expect(parent).not.toMatch(/function TrendBadge\b/);
+		const parent = await readFile(join(dir, "design-system/composites/dashboard.tsx"), "utf8");
+		expect(parent).toMatch(/import \{ StatTile \} from "@\/design-system\/atoms\/stat-tile"/);
+		expect(parent).toMatch(/import \{ TrendBadge \} from "@\/design-system\/atoms\/trend-badge"/);
+		expect(parent).not.toMatch(/function StatTile\b/);
+		expect(parent).not.toMatch(/function TrendBadge\b/);
 
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("self-import guard: a name colliding with the new atom's path is not re-imported into itself", async () => {
-    await scaffold();
-    // The parent already imports a `DayList` from the very path the extracted
-    // atom will occupy. Naively carrying that import would make day-list.tsx
-    // import itself. The guard must drop it.
-    await writeFile(
-      join(dir, "src/components/calendar.tsx"),
-      `import { Button } from "@/design-system/atoms/button";
+	it("self-import guard: a name colliding with the new atom's path is not re-imported into itself", async () => {
+		await scaffold();
+		// The parent already imports a `DayList` from the very path the extracted
+		// atom will occupy. Naively carrying that import would make day-list.tsx
+		// import itself. The guard must drop it.
+		await writeFile(
+			join(dir, "src/components/calendar.tsx"),
+			`import { Button } from "@/design-system/atoms/button";
 import { DayList } from "@/design-system/atoms/day-list";
 
 function DayList(props: { days: string[] }) {
@@ -308,32 +308,32 @@ export function Calendar() {
   );
 }
 `,
-    );
-    // The pre-existing atom the parent imports.
-    await writeFile(
-      join(dir, "design-system/atoms/day-list.tsx"),
-      `export function DayList(props: { days: string[] }) {\n  return <ul>{props.days.length}</ul>;\n}\n\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
-    );
+		);
+		// The pre-existing atom the parent imports.
+		await writeFile(
+			join(dir, "design-system/atoms/day-list.tsx"),
+			`export function DayList(props: { days: string[] }) {\n  return <ul>{props.days.length}</ul>;\n}\n\nexport const meta = { kind: "atom" as const, examples: [] };\n`,
+		);
 
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    const atom = await readDsAtom(dir, "day-list");
-    // The atom must not import its own path.
-    expect(atom).not.toMatch(/from "@\/design-system\/atoms\/day-list"/);
-  });
+		const atom = await readDsAtom(dir, "day-list");
+		// The atom must not import its own path.
+		expect(atom).not.toMatch(/from "@\/design-system\/atoms\/day-list"/);
+	});
 
-  it("carries a parent-exported type referenced by the extracted component (and keeps the parent's export)", async () => {
-    await scaffold();
-    // Mirrors the crewops baseline regression: the composite EXPORTS a type
-    // (PageHeaderAction) that an inline component references in its props, plus a
-    // transitive type (Tone) reached only through the first. Before the fix the
-    // closure short-circuited on `exported`, so neither type made it into the
-    // atom → 26 TS2304 "Cannot find name" errors. The parent's export must also
-    // survive (external files import it), so the type is copied, never moved.
-    await writeFile(
-      join(dir, "src/components/page-header.tsx"),
-      `import { Button } from "@/design-system/atoms/button";
+	it("carries a parent-exported type referenced by the extracted component (and keeps the parent's export)", async () => {
+		await scaffold();
+		// Mirrors the crewops baseline regression: the composite EXPORTS a type
+		// (PageHeaderAction) that an inline component references in its props, plus a
+		// transitive type (Tone) reached only through the first. Before the fix the
+		// closure short-circuited on `exported`, so neither type made it into the
+		// atom → 26 TS2304 "Cannot find name" errors. The parent's export must also
+		// survive (external files import it), so the type is copied, never moved.
+		await writeFile(
+			join(dir, "src/components/page-header.tsx"),
+			`import { Button } from "@/design-system/atoms/button";
 
 export type Tone = "primary" | "ghost";
 
@@ -372,39 +372,39 @@ export function PageHeader(props: { actions: PageHeaderAction[] }) {
   );
 }
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    // The atom carries both the directly-referenced type and its transitive dep.
-    const atom = await readDsAtom(dir, "action-button");
-    expect(atom).toMatch(/export function ActionButton\b/);
-    expect(atom).toMatch(/type PageHeaderAction =/);
-    expect(atom).toMatch(/type Tone =/);
+		// The atom carries both the directly-referenced type and its transitive dep.
+		const atom = await readDsAtom(dir, "action-button");
+		expect(atom).toMatch(/export function ActionButton\b/);
+		expect(atom).toMatch(/type PageHeaderAction =/);
+		expect(atom).toMatch(/type Tone =/);
 
-    // The parent keeps its exports intact — copied, not moved.
-    const parent = await readFile(join(dir, "design-system/composites/page-header.tsx"), "utf8");
-    expect(parent).toMatch(/export type PageHeaderAction =/);
-    expect(parent).toMatch(/export type Tone =/);
-    expect(parent).not.toMatch(/function ActionButton\b/);
+		// The parent keeps its exports intact — copied, not moved.
+		const parent = await readFile(join(dir, "design-system/composites/page-header.tsx"), "utf8");
+		expect(parent).toMatch(/export type PageHeaderAction =/);
+		expect(parent).toMatch(/export type Tone =/);
+		expect(parent).not.toMatch(/function ActionButton\b/);
 
-    // And it all compiles — no TS2304.
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		// And it all compiles — no TS2304.
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("leaves inline a component that references an exported runtime decl (no dangling TS2304)", async () => {
-    // Regression for issue #250: classify produced atoms that referenced e.g.
-    // `comboboxTriggerVariants` — an `export const … = cva(…)` in the parent —
-    // without declaring or importing it, causing TS2304 on every consumer.
-    // The fix: if the transitive closure of a to-be-extracted component touches
-    // an exported runtime local, skip extraction entirely (option 1).
-    await scaffold();
-    await writeFile(
-      join(dir, "src/components/combobox.tsx"),
-      `import { Button } from "@/design-system/atoms/button";
+	it("leaves inline a component that references an exported runtime decl (no dangling TS2304)", async () => {
+		// Regression for issue #250: classify produced atoms that referenced e.g.
+		// `comboboxTriggerVariants` — an `export const … = cva(…)` in the parent —
+		// without declaring or importing it, causing TS2304 on every consumer.
+		// The fix: if the transitive closure of a to-be-extracted component touches
+		// an exported runtime local, skip extraction entirely (option 1).
+		await scaffold();
+		await writeFile(
+			join(dir, "src/components/combobox.tsx"),
+			`import { Button } from "@/design-system/atoms/button";
 
 // Exported runtime value — must stay in the parent; cannot be carried or
 // imported without a tier-layering violation.
@@ -439,34 +439,32 @@ export function Combobox() {
   );
 }
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    // Option 1 fix: the component stays inline — no atom is written.
-    // Access should reject (file does not exist).
-    await expect(
-      access(join(dir, "design-system/atoms/combobox-trigger.tsx")),
-    ).rejects.toThrow();
+		// Option 1 fix: the component stays inline — no atom is written.
+		// Access should reject (file does not exist).
+		await expect(access(join(dir, "design-system/atoms/combobox-trigger.tsx"))).rejects.toThrow();
 
-    // Whether extracted or not, tsc must be clean — no TS2304 dangling refs.
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		// Whether extracted or not, tsc must be clean — no TS2304 dangling refs.
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("keeps a shared type alias in the parent when a guard-skipped sibling still references it (no TS2304)", async () => {
-    // Regression for issue #250 (second facet): a non-exported type alias used by
-    // BOTH the inline component being extracted AND a sibling component that is
-    // ultimately skipped by the exported-runtime guard must not be removed from the
-    // parent. Before the fix, `protectedRanges` included the (unconfirmed) sibling's
-    // body, so `referencedOutside` wrongly returned false → the type was moved out,
-    // leaving the parent with a dangling TS2304 on the type name.
-    await scaffold();
-    await writeFile(
-      join(dir, "src/components/form-field.tsx"),
-      `import { Button } from "@/design-system/atoms/button";
+	it("keeps a shared type alias in the parent when a guard-skipped sibling still references it (no TS2304)", async () => {
+		// Regression for issue #250 (second facet): a non-exported type alias used by
+		// BOTH the inline component being extracted AND a sibling component that is
+		// ultimately skipped by the exported-runtime guard must not be removed from the
+		// parent. Before the fix, `protectedRanges` included the (unconfirmed) sibling's
+		// body, so `referencedOutside` wrongly returned false → the type was moved out,
+		// leaving the parent with a dangling TS2304 on the type name.
+		await scaffold();
+		await writeFile(
+			join(dir, "src/components/form-field.tsx"),
+			`import { Button } from "@/design-system/atoms/button";
 
 // Exported runtime value — causes the sibling FormFieldPanel to be skipped.
 export const formFieldVariants = { base: "field", error: "field-error" };
@@ -534,42 +532,37 @@ export function FormField() {
   );
 }
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    // FormFieldRoot is extracted; FormFieldPanel is not (guard fires on exportedRuntime).
-    const atomPath = join(dir, "design-system/atoms/form-field-root.tsx");
-    await expect(access(atomPath)).resolves.toBeUndefined();
-    await expect(
-      access(join(dir, "design-system/atoms/form-field-panel.tsx")),
-    ).rejects.toThrow();
+		// FormFieldRoot is extracted; FormFieldPanel is not (guard fires on exportedRuntime).
+		const atomPath = join(dir, "design-system/atoms/form-field-root.tsx");
+		await expect(access(atomPath)).resolves.toBeUndefined();
+		await expect(access(join(dir, "design-system/atoms/form-field-panel.tsx"))).rejects.toThrow();
 
-    // The parent must still declare `Requirement` — FormFieldPanel still uses it.
-    const parent = await readFile(
-      join(dir, "design-system/composites/form-field.tsx"),
-      "utf8",
-    );
-    expect(parent).toMatch(/type Requirement =/);
+		// The parent must still declare `Requirement` — FormFieldPanel still uses it.
+		const parent = await readFile(join(dir, "design-system/composites/form-field.tsx"), "utf8");
+		expect(parent).toMatch(/type Requirement =/);
 
-    // And the whole project must typecheck — no TS2304 from either file.
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		// And the whole project must typecheck — no TS2304 from either file.
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("keeps a shared runtime decl in the parent when a guard-skipped sibling still references it (no TS2552)", async () => {
-    // Regression for issue #250 (second facet): a non-exported runtime decl (here
-    // a hook function `useComboboxCtx`) used by BOTH the inline component being
-    // extracted AND a guard-skipped sibling must not be removed from the parent.
-    // Before the fix, `protectedRanges` included the unconfirmed sibling's range,
-    // so `referencedOutside` wrongly returned false → the function was moved out,
-    // leaving the parent with a dangling TS2552 for `useComboboxCtx`.
-    await scaffold();
-    await writeFile(
-      join(dir, "src/components/combobox.tsx"),
-      `import { Button } from "@/design-system/atoms/button";
+	it("keeps a shared runtime decl in the parent when a guard-skipped sibling still references it (no TS2552)", async () => {
+		// Regression for issue #250 (second facet): a non-exported runtime decl (here
+		// a hook function `useComboboxCtx`) used by BOTH the inline component being
+		// extracted AND a guard-skipped sibling must not be removed from the parent.
+		// Before the fix, `protectedRanges` included the unconfirmed sibling's range,
+		// so `referencedOutside` wrongly returned false → the function was moved out,
+		// leaving the parent with a dangling TS2552 for `useComboboxCtx`.
+		await scaffold();
+		await writeFile(
+			join(dir, "src/components/combobox.tsx"),
+			`import { Button } from "@/design-system/atoms/button";
 
 // Exported runtime const — causes Combobox (the sibling) to be skipped.
 export const comboboxVariants = { default: "btn", open: "btn-open" };
@@ -631,48 +624,43 @@ function Combobox() {
 
 export { Combobox };
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    // ComboboxItem is extracted; Combobox is not (guard fires on exportedRuntime).
-    await expect(
-      access(join(dir, "design-system/atoms/combobox-item.tsx")),
-    ).resolves.toBeUndefined();
-    await expect(
-      access(join(dir, "design-system/atoms/combobox.tsx")),
-    ).rejects.toThrow();
+		// ComboboxItem is extracted; Combobox is not (guard fires on exportedRuntime).
+		await expect(
+			access(join(dir, "design-system/atoms/combobox-item.tsx")),
+		).resolves.toBeUndefined();
+		await expect(access(join(dir, "design-system/atoms/combobox.tsx"))).rejects.toThrow();
 
-    // The parent must still declare `useComboboxCtx` — Combobox still calls it.
-    const parent = await readFile(
-      join(dir, "design-system/composites/combobox.tsx"),
-      "utf8",
-    );
-    expect(parent).toMatch(/function useComboboxCtx\b/);
+		// The parent must still declare `useComboboxCtx` — Combobox still calls it.
+		const parent = await readFile(join(dir, "design-system/composites/combobox.tsx"), "utf8");
+		expect(parent).toMatch(/function useComboboxCtx\b/);
 
-    // And the whole project must typecheck — no TS2552 / TS2304 from either file.
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		// And the whole project must typecheck — no TS2552 / TS2304 from either file.
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("keeps a non-exported type alias in the parent when it is used ONLY in type position inside an exported type (no TS2304)", async () => {
-    // Regression for issue #250 (type-position facet): the extracted component
-    // references an exported type alias (FormFieldProps) that in turn references a
-    // non-exported type (Requirement). Requirement appears ONLY in type position —
-    // inside the body of FormFieldProps, nowhere at runtime. Before the fix,
-    // protectedRanges included FormFieldProps's range (even though it is exported and
-    // stays in the parent), so Requirement's occurrence inside FormFieldProps was
-    // treated as "inside a protected range" → referencedOutside returned false →
-    // Requirement was MOVED into the atom and removed from the parent → parent
-    // TS2304: "Cannot find name 'Requirement'".
-    // Fix: exported decls are excluded from protectedRanges so their body's
-    // references remain visible as live parent references.
-    await scaffold();
-    await writeFile(
-      join(dir, "src/components/form-field.tsx"),
-      `import { Button } from "@/design-system/atoms/button";
+	it("keeps a non-exported type alias in the parent when it is used ONLY in type position inside an exported type (no TS2304)", async () => {
+		// Regression for issue #250 (type-position facet): the extracted component
+		// references an exported type alias (FormFieldProps) that in turn references a
+		// non-exported type (Requirement). Requirement appears ONLY in type position —
+		// inside the body of FormFieldProps, nowhere at runtime. Before the fix,
+		// protectedRanges included FormFieldProps's range (even though it is exported and
+		// stays in the parent), so Requirement's occurrence inside FormFieldProps was
+		// treated as "inside a protected range" → referencedOutside returned false →
+		// Requirement was MOVED into the atom and removed from the parent → parent
+		// TS2304: "Cannot find name 'Requirement'".
+		// Fix: exported decls are excluded from protectedRanges so their body's
+		// references remain visible as live parent references.
+		await scaffold();
+		await writeFile(
+			join(dir, "src/components/form-field.tsx"),
+			`import { Button } from "@/design-system/atoms/button";
 
 // Non-exported type used ONLY in type position inside an exported type.
 // The extracted component references FormFieldProps which transitively refs Requirement.
@@ -715,55 +703,52 @@ export function FormField(props: FormFieldProps) {
   );
 }
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    // FormFieldRoot is extracted into its own atom.
-    const atomPath = join(dir, "design-system/atoms/form-field-root.tsx");
-    await expect(access(atomPath)).resolves.toBeUndefined();
+		// FormFieldRoot is extracted into its own atom.
+		const atomPath = join(dir, "design-system/atoms/form-field-root.tsx");
+		await expect(access(atomPath)).resolves.toBeUndefined();
 
-    // The atom carries both the exported type and the non-exported dep.
-    const atom = await readDsAtom(dir, "form-field-root");
-    expect(atom).toMatch(/export function FormFieldRoot\b/);
-    expect(atom).toMatch(/type FormFieldProps =/);
-    expect(atom).toMatch(/type Requirement =/);
+		// The atom carries both the exported type and the non-exported dep.
+		const atom = await readDsAtom(dir, "form-field-root");
+		expect(atom).toMatch(/export function FormFieldRoot\b/);
+		expect(atom).toMatch(/type FormFieldProps =/);
+		expect(atom).toMatch(/type Requirement =/);
 
-    // The parent keeps Requirement: FormFieldProps is exported (stays) and still
-    // references Requirement, so Requirement must NOT be moved out.
-    const parent = await readFile(
-      join(dir, "design-system/composites/form-field.tsx"),
-      "utf8",
-    );
-    expect(parent).toMatch(/type Requirement =/);
-    expect(parent).toMatch(/export type FormFieldProps =/);
-    expect(parent).not.toMatch(/function FormFieldRoot\b/);
+		// The parent keeps Requirement: FormFieldProps is exported (stays) and still
+		// references Requirement, so Requirement must NOT be moved out.
+		const parent = await readFile(join(dir, "design-system/composites/form-field.tsx"), "utf8");
+		expect(parent).toMatch(/type Requirement =/);
+		expect(parent).toMatch(/export type FormFieldProps =/);
+		expect(parent).not.toMatch(/function FormFieldRoot\b/);
 
-    // No TS2304 in either file — the critical assertion.
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		// No TS2304 in either file — the critical assertion.
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("keeps a non-exported type in the parent when it is exported via a separate export statement (Failure A — no TS2304)", async () => {
-    // Regression for issue #250 (Failure A): `FormFieldProps` is declared WITHOUT
-    // an inline `export` keyword — so `isExported` returns false and prior code
-    // added its range to `protectedRanges`. Its body references a non-exported
-    // `type Requirement`. Because the occurrence of `Requirement` was inside
-    // `FormFieldProps`'s (wrongly) protected range, `referencedOutside` returned
-    // false → `Requirement` was MOVED out and removed from the parent → parent
-    // TS2304: "Cannot find name 'Requirement'".
-    //
-    // Shape: non-exported `type FormFieldProps = { req?: Requirement }` declared
-    // on its own line, then exported via a separate `export type { FormFieldProps }`
-    // statement later in the file. The inline-export test above uses
-    // `export type FormFieldProps = ...` which has a different `isExported` result
-    // and does NOT reproduce this bug.
-    await scaffold();
-    await writeFile(
-      join(dir, "src/components/form-field.tsx"),
-      `import { Button } from "@/design-system/atoms/button";
+	it("keeps a non-exported type in the parent when it is exported via a separate export statement (Failure A — no TS2304)", async () => {
+		// Regression for issue #250 (Failure A): `FormFieldProps` is declared WITHOUT
+		// an inline `export` keyword — so `isExported` returns false and prior code
+		// added its range to `protectedRanges`. Its body references a non-exported
+		// `type Requirement`. Because the occurrence of `Requirement` was inside
+		// `FormFieldProps`'s (wrongly) protected range, `referencedOutside` returned
+		// false → `Requirement` was MOVED out and removed from the parent → parent
+		// TS2304: "Cannot find name 'Requirement'".
+		//
+		// Shape: non-exported `type FormFieldProps = { req?: Requirement }` declared
+		// on its own line, then exported via a separate `export type { FormFieldProps }`
+		// statement later in the file. The inline-export test above uses
+		// `export type FormFieldProps = ...` which has a different `isExported` result
+		// and does NOT reproduce this bug.
+		await scaffold();
+		await writeFile(
+			join(dir, "src/components/form-field.tsx"),
+			`import { Button } from "@/design-system/atoms/button";
 
 // Non-exported type — no inline \`export\` keyword here.
 type Requirement = "required" | "optional";
@@ -809,52 +794,49 @@ export function FormField(props: FormFieldProps) {
   );
 }
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    // FormFieldRoot is extracted into its own atom.
-    const atomPath = join(dir, "design-system/atoms/form-field-root.tsx");
-    await expect(access(atomPath)).resolves.toBeUndefined();
+		// FormFieldRoot is extracted into its own atom.
+		const atomPath = join(dir, "design-system/atoms/form-field-root.tsx");
+		await expect(access(atomPath)).resolves.toBeUndefined();
 
-    // The atom carries both types.
-    const atom = await readDsAtom(dir, "form-field-root");
-    expect(atom).toMatch(/export function FormFieldRoot\b/);
-    expect(atom).toMatch(/type FormFieldProps =/);
-    expect(atom).toMatch(/type Requirement =/);
+		// The atom carries both types.
+		const atom = await readDsAtom(dir, "form-field-root");
+		expect(atom).toMatch(/export function FormFieldRoot\b/);
+		expect(atom).toMatch(/type FormFieldProps =/);
+		expect(atom).toMatch(/type Requirement =/);
 
-    // The parent must keep Requirement: FormFieldProps stays (re-exported) and
-    // still references Requirement, so Requirement must NOT be moved out.
-    const parent = await readFile(
-      join(dir, "design-system/composites/form-field.tsx"),
-      "utf8",
-    );
-    expect(parent).toMatch(/type Requirement =/);
-    expect(parent).toMatch(/type FormFieldProps =/);
-    expect(parent).not.toMatch(/function FormFieldRoot\b/);
+		// The parent must keep Requirement: FormFieldProps stays (re-exported) and
+		// still references Requirement, so Requirement must NOT be moved out.
+		const parent = await readFile(join(dir, "design-system/composites/form-field.tsx"), "utf8");
+		expect(parent).toMatch(/type Requirement =/);
+		expect(parent).toMatch(/type FormFieldProps =/);
+		expect(parent).not.toMatch(/function FormFieldRoot\b/);
 
-    // No TS2304 in either file — the critical assertion.
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		// No TS2304 in either file — the critical assertion.
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("transitively keeps a type dep when the type that references it is retained in the parent (Failure B — no TS2304)", async () => {
-    // Regression for issue #250 (Failure B): `SortState` is kept in the parent
-    // because it is referenced by exported code outside `confirmedRanges`, but its
-    // body references `SortDirection`. In prior code `SortState`'s range was in
-    // `protectedRanges`, hiding the `SortDirection` reference → `referencedOutside`
-    // returned false → `SortDirection` was MOVED out → parent TS2304:
-    // "Cannot find name 'SortDirection'".
-    //
-    // Fix: the move-vs-copy decision now uses a transitive-closure computation:
-    // keeping `SortState` in the parent automatically keeps everything `SortState`
-    // references, including `SortDirection`.
-    await scaffold();
-    await writeFile(
-      join(dir, "src/components/data-table.tsx"),
-      `import { Button } from "@/design-system/atoms/button";
+	it("transitively keeps a type dep when the type that references it is retained in the parent (Failure B — no TS2304)", async () => {
+		// Regression for issue #250 (Failure B): `SortState` is kept in the parent
+		// because it is referenced by exported code outside `confirmedRanges`, but its
+		// body references `SortDirection`. In prior code `SortState`'s range was in
+		// `protectedRanges`, hiding the `SortDirection` reference → `referencedOutside`
+		// returned false → `SortDirection` was MOVED out → parent TS2304:
+		// "Cannot find name 'SortDirection'".
+		//
+		// Fix: the move-vs-copy decision now uses a transitive-closure computation:
+		// keeping `SortState` in the parent automatically keeps everything `SortState`
+		// references, including `SortDirection`.
+		await scaffold();
+		await writeFile(
+			join(dir, "src/components/data-table.tsx"),
+			`import { Button } from "@/design-system/atoms/button";
 
 // Two non-exported types: SortDirection is only referenced inside SortState.
 // SortState is referenced by the exported DataTableProps → it must stay in the
@@ -899,52 +881,49 @@ export function DataTable(props: DataTableProps) {
   );
 }
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    // SortIndicator is extracted into its own atom.
-    const atomPath = join(dir, "design-system/atoms/sort-indicator.tsx");
-    await expect(access(atomPath)).resolves.toBeUndefined();
+		// SortIndicator is extracted into its own atom.
+		const atomPath = join(dir, "design-system/atoms/sort-indicator.tsx");
+		await expect(access(atomPath)).resolves.toBeUndefined();
 
-    // The atom carries both SortState and SortDirection.
-    const atom = await readDsAtom(dir, "sort-indicator");
-    expect(atom).toMatch(/export function SortIndicator\b/);
-    expect(atom).toMatch(/type SortState =/);
-    expect(atom).toMatch(/type SortDirection =/);
+		// The atom carries both SortState and SortDirection.
+		const atom = await readDsAtom(dir, "sort-indicator");
+		expect(atom).toMatch(/export function SortIndicator\b/);
+		expect(atom).toMatch(/type SortState =/);
+		expect(atom).toMatch(/type SortDirection =/);
 
-    // The parent must keep BOTH SortDirection and SortState: DataTableProps
-    // (exported) references SortState, and SortState references SortDirection.
-    const parent = await readFile(
-      join(dir, "design-system/composites/data-table.tsx"),
-      "utf8",
-    );
-    expect(parent).toMatch(/type SortDirection =/);
-    expect(parent).toMatch(/type SortState =/);
-    expect(parent).not.toMatch(/function SortIndicator\b/);
+		// The parent must keep BOTH SortDirection and SortState: DataTableProps
+		// (exported) references SortState, and SortState references SortDirection.
+		const parent = await readFile(join(dir, "design-system/composites/data-table.tsx"), "utf8");
+		expect(parent).toMatch(/type SortDirection =/);
+		expect(parent).toMatch(/type SortState =/);
+		expect(parent).not.toMatch(/function SortIndicator\b/);
 
-    // No TS2304 in either file — the critical assertion.
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		// No TS2304 in either file — the critical assertion.
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("does not extract from a file with no inline components (relocation only)", async () => {
-    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
-    await mkdir(join(dir, "src/components"), { recursive: true });
-    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-    await writeFile(
-      join(dir, "src/components/badge.tsx"),
-      `export function Badge() { return <span />; }\n`,
-    );
+	it("does not extract from a file with no inline components (relocation only)", async () => {
+		await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+		await mkdir(join(dir, "src/components"), { recursive: true });
+		await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+		await writeFile(
+			join(dir, "src/components/badge.tsx"),
+			`export function Badge() { return <span />; }\n`,
+		);
 
-    const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
-    expect(r.stdout).not.toMatch(/extracted/i);
-    // The atom moved, but nothing new was created beyond the move.
-    await expect(access(join(dir, "design-system/atoms/badge.tsx"))).resolves.toBeUndefined();
-  });
+		const r = await runCli(["classify", "--src", "src/components", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		expect(r.stdout).not.toMatch(/extracted/i);
+		// The atom moved, but nothing new was created beyond the move.
+		await expect(access(join(dir, "design-system/atoms/badge.tsx"))).resolves.toBeUndefined();
+	});
 });
 
 // ── Backfill-helper-closure tests (issue #261) ────────────────────────────────
@@ -963,42 +942,42 @@ export function DataTable(props: DataTableProps) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("classify — backfill helper closure into pre-existing atoms (issue #261)", () => {
-  let dir: string;
-  beforeEach(async () => {
-    dir = await freshTmpDir();
-  });
-  afterEach(async () => {
-    await cleanup(dir);
-  });
+	let dir: string;
+	beforeEach(async () => {
+		dir = await freshTmpDir();
+	});
+	afterEach(async () => {
+		await cleanup(dir);
+	});
 
-  async function scaffoldBase(): Promise<void> {
-    await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
-    await writeFile(join(dir, "tsconfig.json"), TSCONFIG);
-    await writeFile(join(dir, "jsx.d.ts"), JSX_SHIM);
-    await mkdir(join(dir, "design-system/atoms"), { recursive: true });
-    await mkdir(join(dir, "design-system/composites"), { recursive: true });
-  }
+	async function scaffoldBase(): Promise<void> {
+		await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+		await writeFile(join(dir, "tsconfig.json"), TSCONFIG);
+		await writeFile(join(dir, "jsx.d.ts"), JSX_SHIM);
+		await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+		await mkdir(join(dir, "design-system/composites"), { recursive: true });
+	}
 
-  it("backfills a parent-local non-exported helper into a dangling atom", async () => {
-    // Mirrors the Crewops month-grid / calendar-view case:
-    //   - atom `month-grid.tsx` references `startOfMonthGrid` which is not declared/imported
-    //   - composite `calendar-view.tsx` declares private `startOfMonthGrid`
-    // After classify, the atom must contain `startOfMonthGrid` and tsc must pass.
-    await scaffoldBase();
+	it("backfills a parent-local non-exported helper into a dangling atom", async () => {
+		// Mirrors the Crewops month-grid / calendar-view case:
+		//   - atom `month-grid.tsx` references `startOfMonthGrid` which is not declared/imported
+		//   - composite `calendar-view.tsx` declares private `startOfMonthGrid`
+		// After classify, the atom must contain `startOfMonthGrid` and tsc must pass.
+		await scaffoldBase();
 
-    await writeFile(
-      join(dir, "design-system/atoms/month-grid.tsx"),
-      `export function MonthGrid({ anchor }: { anchor: Date }) {
+		await writeFile(
+			join(dir, "design-system/atoms/month-grid.tsx"),
+			`export function MonthGrid({ anchor }: { anchor: Date }) {
   const start = startOfMonthGrid(anchor);
   return <div>{start.toISOString()}</div>;
 }
 export const meta = { kind: "atom" as const, examples: [] };
 `,
-    );
+		);
 
-    await writeFile(
-      join(dir, "design-system/composites/calendar-view.tsx"),
-      `import { MonthGrid } from "@/design-system/atoms/month-grid";
+		await writeFile(
+			join(dir, "design-system/composites/calendar-view.tsx"),
+			`import { MonthGrid } from "@/design-system/atoms/month-grid";
 
 function startOfMonthGrid(d: Date): Date {
   const x = new Date(d);
@@ -1011,42 +990,42 @@ export function CalendarView({ anchor }: { anchor: Date }) {
 }
 export const meta = { kind: "composite" as const, examples: [] };
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    // The atom now contains the carried helper
-    const atom = await readFile(join(dir, "design-system/atoms/month-grid.tsx"), "utf8");
-    expect(atom).toMatch(/function startOfMonthGrid/);
-    expect(atom).toMatch(/export function MonthGrid/);
-    // No dangling marker
-    expect(atom).not.toMatch(/EXTRACTION_NEEDED/);
+		// The atom now contains the carried helper
+		const atom = await readFile(join(dir, "design-system/atoms/month-grid.tsx"), "utf8");
+		expect(atom).toMatch(/function startOfMonthGrid/);
+		expect(atom).toMatch(/export function MonthGrid/);
+		// No dangling marker
+		expect(atom).not.toMatch(/EXTRACTION_NEEDED/);
 
-    // tsc must be clean
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		// tsc must be clean
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("backfills a transitive helper chain (helper depends on another helper)", async () => {
-    // atom references `buildMonthGrid`, which itself calls `addDays` and `startOfMonthGrid`.
-    // All three are private in the composite. All three must be carried.
-    await scaffoldBase();
+	it("backfills a transitive helper chain (helper depends on another helper)", async () => {
+		// atom references `buildMonthGrid`, which itself calls `addDays` and `startOfMonthGrid`.
+		// All three are private in the composite. All three must be carried.
+		await scaffoldBase();
 
-    await writeFile(
-      join(dir, "design-system/atoms/month-grid.tsx"),
-      `export function MonthGrid({ anchor }: { anchor: Date }) {
+		await writeFile(
+			join(dir, "design-system/atoms/month-grid.tsx"),
+			`export function MonthGrid({ anchor }: { anchor: Date }) {
   const days = buildMonthGrid(anchor);
   return <div>{days.length}</div>;
 }
 export const meta = { kind: "atom" as const, examples: [] };
 `,
-    );
+		);
 
-    await writeFile(
-      join(dir, "design-system/composites/calendar-view.tsx"),
-      `import { MonthGrid } from "@/design-system/atoms/month-grid";
+		await writeFile(
+			join(dir, "design-system/composites/calendar-view.tsx"),
+			`import { MonthGrid } from "@/design-system/atoms/month-grid";
 
 function startOfMonthGrid(d: Date): Date {
   const x = new Date(d);
@@ -1072,43 +1051,43 @@ export function CalendarView({ anchor }: { anchor: Date }) {
 }
 export const meta = { kind: "composite" as const, examples: [] };
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    const atom = await readFile(join(dir, "design-system/atoms/month-grid.tsx"), "utf8");
-    // All three helpers must be in the atom
-    expect(atom).toMatch(/function buildMonthGrid/);
-    expect(atom).toMatch(/function startOfMonthGrid/);
-    expect(atom).toMatch(/function addDays/);
-    expect(atom).not.toMatch(/EXTRACTION_NEEDED/);
+		const atom = await readFile(join(dir, "design-system/atoms/month-grid.tsx"), "utf8");
+		// All three helpers must be in the atom
+		expect(atom).toMatch(/function buildMonthGrid/);
+		expect(atom).toMatch(/function startOfMonthGrid/);
+		expect(atom).toMatch(/function addDays/);
+		expect(atom).not.toMatch(/EXTRACTION_NEEDED/);
 
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 
-  it("EXTRACTION_NEEDED fallback: leaves a marker when a helper is exported (cannot be safely carried)", async () => {
-    // The atom references `clampValue` which IS in the composite, but it is
-    // exported there (exported runtime value — duplicating it would give it two
-    // runtime identities; importing from the composite would be atom→composite
-    // layering violation). classify must NOT carry it. It must add the marker.
-    await scaffoldBase();
+	it("EXTRACTION_NEEDED fallback: leaves a marker when a helper is exported (cannot be safely carried)", async () => {
+		// The atom references `clampValue` which IS in the composite, but it is
+		// exported there (exported runtime value — duplicating it would give it two
+		// runtime identities; importing from the composite would be atom→composite
+		// layering violation). classify must NOT carry it. It must add the marker.
+		await scaffoldBase();
 
-    await writeFile(
-      join(dir, "design-system/atoms/clamp-box.tsx"),
-      `export function ClampBox({ value }: { value: number }) {
+		await writeFile(
+			join(dir, "design-system/atoms/clamp-box.tsx"),
+			`export function ClampBox({ value }: { value: number }) {
   const clamped = clampValue(value);
   return <div>{clamped}</div>;
 }
 export const meta = { kind: "atom" as const, examples: [] };
 `,
-    );
+		);
 
-    await writeFile(
-      join(dir, "design-system/composites/clamp-view.tsx"),
-      `import { ClampBox } from "@/design-system/atoms/clamp-box";
+		await writeFile(
+			join(dir, "design-system/composites/clamp-view.tsx"),
+			`import { ClampBox } from "@/design-system/atoms/clamp-box";
 
 // Exported runtime value — cannot be safely carried into atom.
 export function clampValue(v: number): number {
@@ -1120,101 +1099,101 @@ export function ClampView({ value }: { value: number }) {
 }
 export const meta = { kind: "composite" as const, examples: [] };
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    const atom = await readFile(join(dir, "design-system/atoms/clamp-box.tsx"), "utf8");
-    // Marker must be present — closure hit an exported decl
-    expect(atom).toMatch(/EXTRACTION_NEEDED/);
-    // clampValue must NOT have been invented or carried into the atom
-    expect(atom).not.toMatch(/function clampValue/);
-  });
+		const atom = await readFile(join(dir, "design-system/atoms/clamp-box.tsx"), "utf8");
+		// Marker must be present — closure hit an exported decl
+		expect(atom).toMatch(/EXTRACTION_NEEDED/);
+		// clampValue must NOT have been invented or carried into the atom
+		expect(atom).not.toMatch(/function clampValue/);
+	});
 
-  it("no EXTRACTION_NEEDED marker when helper simply is not in any composite (left for audit --fix)", async () => {
-    // The atom references `mysteryHelper` which exists in no composite.
-    // That means it's a missing IMPORT (not a parent-local symbol), which
-    // audit --fix handles. backfillAtomHelpers must leave the atom unchanged.
-    await scaffoldBase();
+	it("no EXTRACTION_NEEDED marker when helper simply is not in any composite (left for audit --fix)", async () => {
+		// The atom references `mysteryHelper` which exists in no composite.
+		// That means it's a missing IMPORT (not a parent-local symbol), which
+		// audit --fix handles. backfillAtomHelpers must leave the atom unchanged.
+		await scaffoldBase();
 
-    const originalAtom = `export function MysteryGrid({ anchor }: { anchor: Date }) {
+		const originalAtom = `export function MysteryGrid({ anchor }: { anchor: Date }) {
   const result = mysteryHelper(anchor);
   return <div>{result}</div>;
 }
 export const meta = { kind: "atom" as const, examples: [] };
 `;
-    await writeFile(join(dir, "design-system/atoms/mystery-grid.tsx"), originalAtom);
+		await writeFile(join(dir, "design-system/atoms/mystery-grid.tsx"), originalAtom);
 
-    await writeFile(
-      join(dir, "design-system/composites/some-view.tsx"),
-      `import { MysteryGrid } from "@/design-system/atoms/mystery-grid";
+		await writeFile(
+			join(dir, "design-system/composites/some-view.tsx"),
+			`import { MysteryGrid } from "@/design-system/atoms/mystery-grid";
 
 export function SomeView({ anchor }: { anchor: Date }) {
   return <MysteryGrid anchor={anchor} />;
 }
 export const meta = { kind: "composite" as const, examples: [] };
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    const atom = await readFile(join(dir, "design-system/atoms/mystery-grid.tsx"), "utf8");
-    // No EXTRACTION_NEEDED marker — this is a missing import, not a parent-local symbol
-    expect(atom).not.toMatch(/EXTRACTION_NEEDED/);
-    // Atom content unchanged (backfill didn't touch it)
-    expect(atom).toBe(originalAtom);
-  });
+		const atom = await readFile(join(dir, "design-system/atoms/mystery-grid.tsx"), "utf8");
+		// No EXTRACTION_NEEDED marker — this is a missing import, not a parent-local symbol
+		expect(atom).not.toMatch(/EXTRACTION_NEEDED/);
+		// Atom content unchanged (backfill didn't touch it)
+		expect(atom).toBe(originalAtom);
+	});
 
-  it("control: an atom with no unresolved symbols is left unchanged", async () => {
-    // The atom is already self-contained. classify must not modify it.
-    await scaffoldBase();
+	it("control: an atom with no unresolved symbols is left unchanged", async () => {
+		// The atom is already self-contained. classify must not modify it.
+		await scaffoldBase();
 
-    const originalAtom = `export function CleanAtom({ label }: { label: string }) {
+		const originalAtom = `export function CleanAtom({ label }: { label: string }) {
   return <span>{label}</span>;
 }
 export const meta = { kind: "atom" as const, examples: [] };
 `;
-    await writeFile(join(dir, "design-system/atoms/clean-atom.tsx"), originalAtom);
+		await writeFile(join(dir, "design-system/atoms/clean-atom.tsx"), originalAtom);
 
-    await writeFile(
-      join(dir, "design-system/composites/clean-view.tsx"),
-      `import { CleanAtom } from "@/design-system/atoms/clean-atom";
+		await writeFile(
+			join(dir, "design-system/composites/clean-view.tsx"),
+			`import { CleanAtom } from "@/design-system/atoms/clean-atom";
 
 export function CleanView() {
   return <CleanAtom label="hello" />;
 }
 export const meta = { kind: "composite" as const, examples: [] };
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    // Atom content must be unchanged (no spurious helper motion)
-    const atom = await readFile(join(dir, "design-system/atoms/clean-atom.tsx"), "utf8");
-    expect(atom).toBe(originalAtom);
-  });
+		// Atom content must be unchanged (no spurious helper motion)
+		const atom = await readFile(join(dir, "design-system/atoms/clean-atom.tsx"), "utf8");
+		expect(atom).toBe(originalAtom);
+	});
 
-  it("helper is COPIED (not moved) when the composite also uses it in its own code", async () => {
-    // The composite defines `formatDate` (private), used by BOTH the atom AND the composite.
-    // After classify: atom gets `formatDate`, composite KEEPS `formatDate`.
-    await scaffoldBase();
+	it("helper is COPIED (not moved) when the composite also uses it in its own code", async () => {
+		// The composite defines `formatDate` (private), used by BOTH the atom AND the composite.
+		// After classify: atom gets `formatDate`, composite KEEPS `formatDate`.
+		await scaffoldBase();
 
-    await writeFile(
-      join(dir, "design-system/atoms/event-chip.tsx"),
-      `export function EventChip({ date }: { date: Date }) {
+		await writeFile(
+			join(dir, "design-system/atoms/event-chip.tsx"),
+			`export function EventChip({ date }: { date: Date }) {
   const label = formatDate(date);
   return <span>{label}</span>;
 }
 export const meta = { kind: "atom" as const, examples: [] };
 `,
-    );
+		);
 
-    await writeFile(
-      join(dir, "design-system/composites/calendar-view.tsx"),
-      `import { EventChip } from "@/design-system/atoms/event-chip";
+		await writeFile(
+			join(dir, "design-system/composites/calendar-view.tsx"),
+			`import { EventChip } from "@/design-system/atoms/event-chip";
 
 function formatDate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -1231,20 +1210,23 @@ export function CalendarView({ date }: { date: Date }) {
 }
 export const meta = { kind: "composite" as const, examples: [] };
 `,
-    );
+		);
 
-    const r = await runCli(["classify", "--yes"], { cwd: dir });
-    expect(r.code).toBe(0);
+		const r = await runCli(["classify", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
 
-    const atom = await readFile(join(dir, "design-system/atoms/event-chip.tsx"), "utf8");
-    expect(atom).toMatch(/function formatDate/);
+		const atom = await readFile(join(dir, "design-system/atoms/event-chip.tsx"), "utf8");
+		expect(atom).toMatch(/function formatDate/);
 
-    // Composite must still declare `formatDate` (its own code uses it)
-    const composite = await readFile(join(dir, "design-system/composites/calendar-view.tsx"), "utf8");
-    expect(composite).toMatch(/function formatDate/);
+		// Composite must still declare `formatDate` (its own code uses it)
+		const composite = await readFile(
+			join(dir, "design-system/composites/calendar-view.tsx"),
+			"utf8",
+		);
+		expect(composite).toMatch(/function formatDate/);
 
-    const tsc = runTsc(dir);
-    if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
-    expect(tsc.status).toBe(0);
-  }, 90_000);
+		const tsc = runTsc(dir);
+		if (tsc.status !== 0) throw new Error(`tsc failed:\n${tsc.out}`);
+		expect(tsc.status).toBe(0);
+	}, 90_000);
 });

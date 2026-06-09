@@ -11,9 +11,9 @@ import ts from "typescript";
  * `DUPLICATE-DECL` finding must persist for these. Honest partial repair.
  */
 export interface DedupeResult {
-  source: string;
-  deduped: boolean;
-  remaining: string[];
+	source: string;
+	deduped: boolean;
+	remaining: string[];
 }
 
 /**
@@ -25,11 +25,11 @@ export interface DedupeResult {
  * — the real Crewops corruption — provably mergeable rather than a guess.
  */
 function bodyIdentity(decl: ts.FunctionDeclaration, sf: ts.SourceFile): string {
-  return decl.getText(sf).replace(/^(?:export\s+|default\s+|declare\s+)+/, "");
+	return decl.getText(sf).replace(/^(?:export\s+|default\s+|declare\s+)+/, "");
 }
 
 function isExported(decl: ts.FunctionDeclaration): boolean {
-  return decl.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+	return decl.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
 }
 
 /**
@@ -46,46 +46,46 @@ function isExported(decl: ts.FunctionDeclaration): boolean {
  * AST-only, no disk.
  */
 export function dedupeDuplicateFns(source: string, fileName = "file.tsx"): DedupeResult {
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
-  const byName = new Map<string, ts.FunctionDeclaration[]>();
-  for (const stmt of sf.statements) {
-    if (ts.isFunctionDeclaration(stmt) && stmt.name && stmt.body) {
-      const name = stmt.name.text;
-      const list = byName.get(name) ?? [];
-      list.push(stmt);
-      byName.set(name, list);
-    }
-  }
+	const byName = new Map<string, ts.FunctionDeclaration[]>();
+	for (const stmt of sf.statements) {
+		if (ts.isFunctionDeclaration(stmt) && stmt.name && stmt.body) {
+			const name = stmt.name.text;
+			const list = byName.get(name) ?? [];
+			list.push(stmt);
+			byName.set(name, list);
+		}
+	}
 
-  const remaining: string[] = [];
-  const removals: Array<{ start: number; end: number }> = [];
+	const remaining: string[] = [];
+	const removals: Array<{ start: number; end: number }> = [];
 
-  for (const [name, decls] of byName) {
-    if (decls.length < 2) continue;
-    const canonical = bodyIdentity(decls[0], sf);
-    const allIdentical = decls.every(d => bodyIdentity(d, sf) === canonical);
-    if (!allIdentical) {
-      remaining.push(name);
-      continue;
-    }
-    // Keep one — the exported twin if present (preserves the public surface),
-    // else the first; remove every other (with its leading trivia).
-    const keep = decls.find(isExported) ?? decls[0];
-    for (const d of decls) {
-      if (d === keep) continue;
-      removals.push({ start: d.getFullStart(), end: d.getEnd() });
-    }
-  }
+	for (const [name, decls] of byName) {
+		if (decls.length < 2) continue;
+		const canonical = bodyIdentity(decls[0], sf);
+		const allIdentical = decls.every((d) => bodyIdentity(d, sf) === canonical);
+		if (!allIdentical) {
+			remaining.push(name);
+			continue;
+		}
+		// Keep one — the exported twin if present (preserves the public surface),
+		// else the first; remove every other (with its leading trivia).
+		const keep = decls.find(isExported) ?? decls[0];
+		for (const d of decls) {
+			if (d === keep) continue;
+			removals.push({ start: d.getFullStart(), end: d.getEnd() });
+		}
+	}
 
-  if (removals.length === 0) {
-    return { source, deduped: false, remaining: remaining.sort() };
-  }
+	if (removals.length === 0) {
+		return { source, deduped: false, remaining: remaining.sort() };
+	}
 
-  removals.sort((a, b) => b.start - a.start);
-  let out = source;
-  for (const r of removals) {
-    out = out.slice(0, r.start) + out.slice(r.end);
-  }
-  return { source: out, deduped: true, remaining: remaining.sort() };
+	removals.sort((a, b) => b.start - a.start);
+	let out = source;
+	for (const r of removals) {
+		out = out.slice(0, r.start) + out.slice(r.end);
+	}
+	return { source: out, deduped: true, remaining: remaining.sort() };
 }
