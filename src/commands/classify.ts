@@ -522,7 +522,13 @@ export async function classifyCmd(opts: {
     }
   }
 
-  const { moved: ambiguityMoved, kept: ambiguityKept } = await applyAmbiguityPass();
+  const ambiguityResult = await applyAmbiguityPass();
+  // Issue #437: the ambiguity pass's non-TTY/unresolved path returns a
+  // `CommandResult` instead of `process.exit`-ing — the driver deleted the
+  // `runWithoutExit` trap, so a stray exit here would tear down the loop. The
+  // caller (CLI/driver) owns the exit.
+  if ("outcome" in ambiguityResult) return ambiguityResult;
+  const { moved: ambiguityMoved, kept: ambiguityKept } = ambiguityResult;
 
   // Role proposal pass (PRD #301 / #312, ADR-0016). After tier moves /
   // extraction / ambiguity have settled the files, walk atoms/composites and
@@ -628,7 +634,7 @@ export async function classifyCmd(opts: {
   // Hoisted so it runs even when --src has no new files to classify (the common
   // re-run case: audit flagged a misplaced composite, user re-runs classify to
   // resolve it, but src is already migrated).
-  async function applyAmbiguityPass(): Promise<{ moved: number; kept: number }> {
+  async function applyAmbiguityPass(): Promise<{ moved: number; kept: number } | CommandResult> {
     // Ambiguous-band prompt source: a test-injected `opts.prompt` overrides
     // everything; otherwise the TTY prompt is used iff stdout is a TTY. Used
     // as the resolver's TTY callback below — the spine drives the question;
@@ -737,8 +743,7 @@ export async function classifyCmd(opts: {
         if (e instanceof UnresolvedAmbiguityError) {
           err(`classify needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`);
           err(`Re-run with --answers <file> mapping "${e.decisionId}" to 0 (keep) or 1 (move).`);
-          process.exit(2);
-          return { moved: 0, kept: 0 };
+          return commandError(2);
         }
         throw e;
       }

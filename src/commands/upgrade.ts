@@ -334,7 +334,12 @@ export async function upgradeCmd(opts: {
   // no `verify` (the outer upgrade owns the single verify gate below — one tsc
   // invocation per command surface, not two, #410) and its returned breadcrumb
   // hint is discarded (upgrade owns the verdict, #437).
-  await syncCmd({ cwd, yes: opts.yes, allowDirty: true });
+  // Propagate a failed embedded sync (apply/migrate-config error). Before #437
+  // sync `process.exit`-ed on failure, tearing down upgrade; now it returns, so
+  // a non-zero result must short-circuit here rather than be masked by a later
+  // "upgrade complete" success.
+  const syncResult = await syncCmd({ cwd, yes: opts.yes, allowDirty: true });
+  if (syncResult.exitCode !== 0) return syncResult;
 
   // Regenerate manifest.generated.ts — migrations may delete it (e.g.
   // manage-manifest@v0.9.0) and the PostToolUse hook won't fire until the

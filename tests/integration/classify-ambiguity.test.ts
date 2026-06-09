@@ -215,9 +215,12 @@ describe("classify ambiguity spine integration (PRD #325 / ADR-0023)", () => {
     // No injected prompt, no TTY, no --answers. ADR-0023: an Ambiguity in
     // these conditions must throw, not silently pick a default. The audit-fix
     // pre-pass would have silently auto-deferred under ADR-0014; here we must
-    // exit non-zero with the Decision id surfaced.
-    await classifyCmd({ src: "src/components", cwd: dir });
-    expect(exitSpy).toHaveBeenCalledWith(2);
+    // exit non-zero with the Decision id surfaced. Issue #437: the command
+    // returns a `CommandResult` instead of `process.exit`-ing — the caller maps
+    // the code, so the loop driver isn't torn down on this path.
+    const result = await classifyCmd({ src: "src/components", cwd: dir });
+    expect(result).toEqual({ outcome: "error", exitCode: 2 });
+    expect(exitSpy).not.toHaveBeenCalled();
     const errCalls = errSpy.mock.calls.map(c => c.map(String).join(" "));
     const named = errCalls.find(c => c.includes("classify needs you"));
     expect(named).toBeDefined();
