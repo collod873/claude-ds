@@ -35,9 +35,21 @@ jobs:
         env:
           TEST_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           REPO: ${{ github.repository }}
+          # The repo is private and npm resolves `github:` over ssh, which the
+          # runner's service environment can't auth. Rewrite npm's spawned git
+          # to authenticated https via env-scoped config — never the host
+          # gitconfig (the runner shares this machine with a human).
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ github.token }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+          GIT_CONFIG_KEY_1: url.https://x-access-token:${{ github.token }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_1: git@github.com:
+          GIT_CONFIG_KEY_2: url.https://x-access-token:${{ github.token }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_2: https://github.com/
         run: |
           set -euo pipefail
           EXPECTED="v$(node -p "require('./package.json').version")"
+          echo "checkpoint: expecting $EXPECTED at $TEST_SHA"
 
           SCRATCH=$(mktemp -d)
           # Fresh npm cache: the self-hosted runner's persistent cache must not
@@ -48,6 +60,7 @@ jobs:
           git -C "$SCRATCH" init -q
           printf '{"name":"scratch-consumer","private":true}\n' > "$SCRATCH/package.json"
           cd "$SCRATCH"
+          echo "checkpoint: scratch consumer repo ready"
 
           GOT=$(npx --yes "github:${REPO}#${TEST_SHA}" -V)
           if [ "$GOT" != "$EXPECTED" ]; then
