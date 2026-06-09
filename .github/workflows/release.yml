@@ -18,7 +18,9 @@ jobs:
           fetch-depth: 0 # full history so release notes can diff from the prior tag
       - uses: actions/setup-node@v5
         with:
-          node-version: "22"
+          # Build releases on the canonical dev Node so local dev, CI default,
+          # and the published artifact agree (.nvmrc is the single source).
+          node-version-file: .nvmrc
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint

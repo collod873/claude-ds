@@ -15,11 +15,19 @@ concurrency:
 jobs:
   ci:
     runs-on: self-hosted
+    strategy:
+      # Test every Node major inside the engines range (>=20): the floor, the
+      # maintenance LTS, and the current LTS (.nvmrc pins 24 for dev/release).
+      # fail-fast off so one version's failure doesn't hide the others' results.
+      fail-fast: false
+      matrix:
+        node-version: [20, 22, 24]
+    name: ci (node ${{ matrix.node-version }})
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: "22"
+          node-version: ${{ matrix.node-version }}
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
