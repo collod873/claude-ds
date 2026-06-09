@@ -1,0 +1,30 @@
+name: Release
+
+# Tag-driven: `npm run release <bump>` pushes a v* tag and this reacts to it.
+# Rebuild from the tagged tree, then cut a GitHub Release with auto-generated
+# notes (the commit log since the previous tag is the changelog).
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history so release notes can diff from the prior tag
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes

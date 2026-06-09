@@ -7,7 +7,7 @@ Shared design-system governance and scaffold CLI. Installs a consistent `design-
 The bare command with no subcommand is the front door. `cd` into any project and run:
 
 ```sh
-npx github:collod873/claude-ds#v1.6.0
+npx github:collod873/claude-ds#semver:^1
 ```
 
 It routes itself:
@@ -18,9 +18,9 @@ It routes itself:
 
 From the greet you land in the scaffold; from there `heal` (below) drives it to a fixed point. Everything else in this README is what runs *under* the front door — you usually just type the bare command.
 
-Pin every invocation to a release tag. The CLI never auto-updates.
+`#semver:^1` resolves to the **latest released `1.x` tag** — never `main`. You always get the newest non-breaking version (breaking changes ship as a major bump, so they never reach you until you move to `^2`). The exact resolved version is recorded in your `.claude-ds.json`; re-syncs pull the latest compatible release and stage any migrations.
 
-> **Dev/preview only.** The maintainer can run `npx github:collod873/claude-ds#main` to test unreleased work against a sandbox project. Consumers should always pin a tag — `#main` is a moving target and has no version contract.
+> **Dev/preview only.** The maintainer can run `npx github:collod873/claude-ds#main` to test unreleased work against a sandbox project. Consumers should use the `#semver:^1` range — `#main` is a moving target and has no version contract.
 
 ## Install (explicit onramps)
 
@@ -28,10 +28,10 @@ If you'd rather skip the greet and call the onramp directly:
 
 ```sh
 # Greenfield — bootstrap a new project with the full scaffold
-npx github:collod873/claude-ds#v1.6.0 init --pack next-react
+npx github:collod873/claude-ds#semver:^1 init --pack next-react
 
 # Brownfield — adopt into an existing project
-npx github:collod873/claude-ds#v1.6.0 adopt --pack next-react
+npx github:collod873/claude-ds#semver:^1 adopt --pack next-react
 ```
 
 ## Commands
