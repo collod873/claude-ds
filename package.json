@@ -9,7 +9,6 @@
     "dist/",
     "packs/next-react/files/",
     "packs/next-react/manifest.json",
-    "packs/next-react/MIGRATIONS.md",
     "README.md",
     "CHANGELOG.md"
   ],
