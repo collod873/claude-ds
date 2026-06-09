@@ -43,7 +43,7 @@ Everything else runs *under* the driver — see the appendix.
 | Command | Kind | Purpose |
 |---|---|---|
 | `claude-ds` | Driver | The front door — greets on first run, shows the dashboard once adopted |
-| `heal` | Driver | Self-converging brownfield loop — drives `sync → upgrade → classify → audit --fix` to a fixed point |
+| `heal` | Driver | Self-converging brownfield loop — drives `sync → upgrade → classify → audit --fix` to a fixed point, then promotes hooks `WARN → BLOCK` once the tree is clean and open exceptions are within threshold |
 | `init` | Entry | Greenfield bootstrap — full scaffold, hooks in BLOCK mode |
 | `adopt` | Entry | Brownfield install — scaffold + hooks in WARN mode |
 | `doctor` | Inspection | Health check — lookalikes, drift, hook verification |

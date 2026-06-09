@@ -29,22 +29,31 @@ const LOOP_MEMBERS = ["sync", "upgrade", "classify"];
 const RESERVED_SLOTS = ["migrate-layout", "reconcile", "reconform"];
 
 describe("command surface (ADR-0025)", () => {
-  it("bills drivers + entries + inspection (plus legacy migrate/enforce, pending #470) in --help", () => {
-    // `migrate` and `enforce` are neither driver/entry/inspection — they are
-    // the legacy commands ADR-0025 scopes out, billed until #470 retires/folds
-    // them. They stay in this snapshot deliberately, not by oversight.
+  it("bills exactly drivers + entries + inspection in --help", () => {
+    // #470 resolved the two legacy commands ADR-0025 scoped out: `migrate` is
+    // retired (classify owns the single-file move, ADR-0015) and `enforce` is
+    // folded into the driver's convergence step (a hidden debug path remains).
+    // The visible surface is now exactly drivers (`heal`) + entries
+    // (`adopt`/`init`) + read-only inspection (`audit`/`doctor`/`version`).
     expect(visibleCommands().sort()).toMatchInlineSnapshot(`
       [
         "adopt",
         "audit",
         "doctor",
-        "enforce",
         "heal",
         "init",
-        "migrate",
         "version",
       ]
     `);
+  });
+
+  it("retires the migrate command entirely (#470)", () => {
+    expect(registeredCommands()).not.toContain("migrate");
+  });
+
+  it("keeps enforce registered as a hidden debug path, demoted from billing (#470)", () => {
+    expect(registeredCommands()).toContain("enforce");
+    expect(visibleCommands()).not.toContain("enforce");
   });
 
   it("demotes loop members from the help billing", () => {

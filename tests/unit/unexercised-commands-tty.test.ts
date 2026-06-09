@@ -1,8 +1,9 @@
 /**
- * Issue #370 — the five previously unexercised commands (`version`,
- * `migrate`, `migrate-layout`, `reconform`, `enforce`) used to emit plain
+ * Issue #370 — the previously unexercised commands (`version`,
+ * `migrate-layout`, `reconform`, `enforce`) used to emit plain
  * `console.log` / `info()` lines with no TTY-gated color and no spinner for
- * the multi-second waits. The fix:
+ * the multi-second waits. (`migrate` was on this list until #470 retired it.)
+ * The fix:
  *
  *   1. routes their phase headers / verdict lines through the `colors()`
  *      adapter exported from `lib/log.ts` (picocolors on TTY, identity off),
@@ -27,16 +28,15 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const cmdDir = join(here, "..", "..", "src", "commands");
 
-const FIVE_UNEXERCISED = [
+const UNEXERCISED = [
   "version.ts",
-  "migrate.ts",
   "migrate-layout.ts",
   "reconform.ts",
   "enforce.ts",
 ];
 
-describe("#370 — five unexercised commands wire the TTY color adapter", () => {
-  it.each(FIVE_UNEXERCISED)(
+describe("#370 — unexercised commands wire the TTY color adapter", () => {
+  it.each(UNEXERCISED)(
     "%s imports `colors` from lib/log.js so phase/verdict lines colorize on TTY",
     async (filename) => {
       const src = await readFile(join(cmdDir, filename), "utf8");

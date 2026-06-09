@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command, Option } from "commander";
+import { Command } from "commander";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import pkg from "../package.json" with { type: "json" };
@@ -7,7 +7,6 @@ import { versionCmd } from "./commands/version.js";
 import { initCmd } from "./commands/init.js";
 import { auditCmd } from "./commands/audit.js";
 import { adoptCmd } from "./commands/adopt.js";
-import { migrateCmd } from "./commands/migrate.js";
 import { enforceCmd } from "./commands/enforce.js";
 import { syncCmd } from "./commands/sync.js";
 import { doctorCmd } from "./commands/doctor.js";
@@ -157,29 +156,18 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
       await adoptCmd({ pack: opts.pack, yes: opts.yes, dryRun: opts.dryRun, ignore: opts.ignore, allowDirty: opts.allowDirty, json: opts.json, cwd: defaults.cwd });
     });
 
-  program
-    .command("migrate")
-    .description("move one component into the managed layout (registers an exception only when --tier forces a misplacement)")
-    .argument("<path>", "source component path")
-    .option("--reason <text>", "reason for exception (required only when --tier creates a misplacement)")
-    .option("--issue <ref>", "issue link (URL or #N) recorded on the exception (required only when --tier creates a misplacement)")
-    .addOption(new Option("--tier <tier>", "force tier: atom or composite").choices(["atom", "composite"]))
-    .option("--rename <name>", "destination filename override")
-    .option("--yes", "skip confirmation prompt")
-    .action(async (source: string, opts: { reason?: string; issue?: string; tier?: string; rename?: string; yes?: boolean }) => {
-      await migrateCmd({
-        source,
-        reason: opts.reason,
-        issue: opts.issue,
-        tier: opts.tier as "atom" | "composite" | undefined,
-        rename: opts.rename,
-        yes: opts.yes,
-        cwd: defaults.cwd,
-      });
-    });
+  // #470: `migrate <path>` is retired. classify (run by the driver) owns
+  // extraction (ADR-0015); `classify --src <file>` covers the single-file move
+  // migrate served. The `--tier`-forcing + exception escape hatch is dropped —
+  // force the placement, then sanction it with `audit --except`.
 
+  // #470: `enforce`'s WARN→BLOCK flip is folded into the driver's convergence
+  // step (`promoteModeAtConvergence`) — the brain promotes mode once the tree
+  // is clean and exceptions are within threshold, so a consumer never hand-types
+  // it. The command stays registered + hidden as a debug/escape-hatch path (a
+  // demoted command is hidden, not removed — CLAUDE.md prime directive).
   program
-    .command("enforce")
+    .command("enforce", { hidden: true })
     .description("flip hooks WARN → BLOCK (gated on exception-count threshold)")
     .option("--yes", "skip confirmation prompt")
     .action(async (opts: { yes?: boolean }) => {
