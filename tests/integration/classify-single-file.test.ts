@@ -67,4 +67,21 @@ describe("classify --src <file> (single-file, #470)", () => {
     expect(r.code).not.toBe(0);
     expect(r.stderr).toMatch(/not found/i);
   });
+
+  it("skips a pattern/unknown-tier file in place (does not move it)", async () => {
+    // The single-file path documents that patterns/unknowns are skipped, not
+    // moved. The retired `migrate` errored on these (pointing at classify);
+    // classify itself reports the skip and leaves the file put (exit 0).
+    await writeFile(
+      join(dir, "src/components/slot.tsx"),
+      "export const Slot = ({ children }: { children: React.ReactNode }) => <div>{children}</div>;",
+    );
+    const r = await runCli(["classify", "--src", "src/components/slot.tsx", "--yes"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/skipped/i);
+    // File stays in place; nothing lands in a tier dir.
+    await expect(access(join(dir, "src/components/slot.tsx"))).resolves.toBeUndefined();
+    await expect(access(join(dir, "design-system/atoms/slot.tsx"))).rejects.toThrow();
+    await expect(access(join(dir, "design-system/composites/slot.tsx"))).rejects.toThrow();
+  });
 });
