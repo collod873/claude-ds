@@ -29,7 +29,10 @@ const LOOP_MEMBERS = ["sync", "upgrade", "classify"];
 const RESERVED_SLOTS = ["migrate-layout", "reconcile", "reconform"];
 
 describe("command surface (ADR-0025)", () => {
-  it("bills only drivers + entries + inspection in --help", () => {
+  it("bills drivers + entries + inspection (plus legacy migrate/enforce, pending #470) in --help", () => {
+    // `migrate` and `enforce` are neither driver/entry/inspection — they are
+    // the legacy commands ADR-0025 scopes out, billed until #470 retires/folds
+    // them. They stay in this snapshot deliberately, not by oversight.
     expect(visibleCommands().sort()).toMatchInlineSnapshot(`
       [
         "adopt",
