@@ -3,24 +3,24 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change } from "../operation.js";
 import type { ProjectContext } from "../project.js";
-import type { IntegrityFinding, IntegrityFixResult } from "./rule.js";
 import { evaluateIntegrity } from "./index.js";
+import type { IntegrityFinding, IntegrityFixResult } from "./rule.js";
 
 function getHeadContent(cwd: string, filePath: string): string | null {
-  try {
-    return execFileSync("git", ["show", `HEAD:${filePath}`], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-  } catch {
-    return null;
-  }
+	try {
+		return execFileSync("git", ["show", `HEAD:${filePath}`], {
+			cwd,
+			encoding: "utf8",
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+	} catch {
+		return null;
+	}
 }
 
 function headPassesIntegrity(filePath: string, headContent: string): boolean {
-  const findings = evaluateIntegrity(filePath, headContent);
-  return findings.length === 0;
+	const findings = evaluateIntegrity(filePath, headContent);
+	return findings.length === 0;
 }
 
 /**
@@ -36,55 +36,55 @@ function headPassesIntegrity(filePath: string, headContent: string): boolean {
  * ones the synchronous overload runs.
  */
 export async function restoreFromHead(
-  finding: IntegrityFinding,
-  ctx: ProjectContext,
+	finding: IntegrityFinding,
+	ctx: ProjectContext,
 ): Promise<IntegrityFixResult> {
-  const cwd = ctx.cwd;
-  const headContent = getHeadContent(cwd, finding.file);
+	const cwd = ctx.cwd;
+	const headContent = getHeadContent(cwd, finding.file);
 
-  if (headContent === null) {
-    return {
-      finding,
-      fixed: false,
-      message: `${finding.file} is not tracked in git — manually fix the file`,
-      changes: [],
-    };
-  }
+	if (headContent === null) {
+		return {
+			finding,
+			fixed: false,
+			message: `${finding.file} is not tracked in git — manually fix the file`,
+			changes: [],
+		};
+	}
 
-  if (!headPassesIntegrity(finding.file, headContent)) {
-    return {
-      finding,
-      fixed: false,
-      message: `HEAD version of ${finding.file} also fails integrity — cannot restore automatically`,
-      changes: [],
-    };
-  }
+	if (!headPassesIntegrity(finding.file, headContent)) {
+		return {
+			finding,
+			fixed: false,
+			message: `HEAD version of ${finding.file} also fails integrity — cannot restore automatically`,
+			changes: [],
+		};
+	}
 
-  let currentContent: string;
-  try {
-    currentContent = await readFile(join(cwd, finding.file), "utf8");
-  } catch {
-    return {
-      finding,
-      fixed: false,
-      message: `Could not read ${finding.file}`,
-      changes: [],
-    };
-  }
+	let currentContent: string;
+	try {
+		currentContent = await readFile(join(cwd, finding.file), "utf8");
+	} catch {
+		return {
+			finding,
+			fixed: false,
+			message: `Could not read ${finding.file}`,
+			changes: [],
+		};
+	}
 
-  const changes: Change[] = [
-    {
-      kind: "write",
-      path: finding.file,
-      before: Buffer.from(currentContent),
-      after: Buffer.from(headContent),
-    },
-  ];
+	const changes: Change[] = [
+		{
+			kind: "write",
+			path: finding.file,
+			before: Buffer.from(currentContent),
+			after: Buffer.from(headContent),
+		},
+	];
 
-  return {
-    finding,
-    fixed: true,
-    message: `Restored ${finding.file} from git HEAD`,
-    changes,
-  };
+	return {
+		finding,
+		fixed: true,
+		message: `Restored ${finding.file} from git HEAD`,
+		changes,
+	};
 }

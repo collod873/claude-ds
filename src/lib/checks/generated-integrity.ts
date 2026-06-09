@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change, Operation, PlanResult } from "../operation.js";
 import type { ProjectContext } from "../project.js";
@@ -9,314 +9,370 @@ const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
 
 export interface GenViolation {
-  ruleId: "GEN-001" | "GEN-002";
-  file: string;
-  message: string;
+	ruleId: "GEN-001" | "GEN-002";
+	file: string;
+	message: string;
 }
 
 // ── In-memory regenerators (mirror packs/next-react/scripts/generate-showcase-companion.ts) ──
 
 function toPascalCase(name: string): string {
-  return name.split(/[-_\s]+/).filter(Boolean)
-    .map(s => s.charAt(0).toUpperCase() + s.slice(1)).join("");
+	return name
+		.split(/[-_\s]+/)
+		.filter(Boolean)
+		.map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+		.join("");
 }
 
 const DS_UNDEFINED_SENTINEL = "__DS_UNDEFINED__";
 
 function parseExamples(source: string): Array<{ name: string; props: Record<string, unknown> }> {
-  const m = source.match(/examples\s*:\s*(\[[\s\S]*?\])\s*(?:,|\})/);
-  if (!m) return [];
-  try {
-    const sanitized = m[1]
-      .replace(/\/\/[^\n]*/g, "")
-      .replace(/,\s*([\]}])/g, "$1")
-      .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')
-      .replace(/:\s*undefined\b/g, `:"${DS_UNDEFINED_SENTINEL}"`)
-      .replace(/:\s*'([^']*)'/g, ':"$1"');
-    const parsed = JSON.parse(sanitized);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((e: unknown) => {
-      const obj = e as Record<string, unknown>;
-      const rawProps = typeof obj.props === "object" && obj.props !== null
-        ? (obj.props as Record<string, unknown>) : {};
-      // Drop sentinel keys: props set to `undefined` in source should be omitted
-      // from generated JSX, not emitted as null (which breaks non-nullable prop types).
-      const props: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(rawProps)) {
-        if (v !== DS_UNDEFINED_SENTINEL) props[k] = v;
-      }
-      return {
-        name: typeof obj.name === "string" ? obj.name : "unnamed",
-        props,
-      };
-    });
-  } catch { return []; }
+	const m = source.match(/examples\s*:\s*(\[[\s\S]*?\])\s*(?:,|\})/);
+	if (!m) return [];
+	try {
+		const sanitized = m[1]
+			.replace(/\/\/[^\n]*/g, "")
+			.replace(/,\s*([\]}])/g, "$1")
+			.replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')
+			.replace(/:\s*undefined\b/g, `:"${DS_UNDEFINED_SENTINEL}"`)
+			.replace(/:\s*'([^']*)'/g, ':"$1"');
+		const parsed = JSON.parse(sanitized);
+		if (!Array.isArray(parsed)) return [];
+		return parsed.map((e: unknown) => {
+			const obj = e as Record<string, unknown>;
+			const rawProps =
+				typeof obj.props === "object" && obj.props !== null
+					? (obj.props as Record<string, unknown>)
+					: {};
+			// Drop sentinel keys: props set to `undefined` in source should be omitted
+			// from generated JSX, not emitted as null (which breaks non-nullable prop types).
+			const props: Record<string, unknown> = {};
+			for (const [k, v] of Object.entries(rawProps)) {
+				if (v !== DS_UNDEFINED_SENTINEL) props[k] = v;
+			}
+			return {
+				name: typeof obj.name === "string" ? obj.name : "unnamed",
+				props,
+			};
+		});
+	} catch {
+		return [];
+	}
 }
 
 function parseSkip(source: string): string[] {
-  const m = source.match(/skip\s*:\s*(\[[\s\S]*?\])\s*(?:,|\})/);
-  if (!m) return [];
-  try {
-    const raw = m[1].replace(/\/\/[^\n]*/g, "").replace(/,\s*\]/g, "]").replace(/'/g, '"');
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter(s => typeof s === "string") : [];
-  } catch { return []; }
+	const m = source.match(/skip\s*:\s*(\[[\s\S]*?\])\s*(?:,|\})/);
+	if (!m) return [];
+	try {
+		const raw = m[1]
+			.replace(/\/\/[^\n]*/g, "")
+			.replace(/,\s*\]/g, "]")
+			.replace(/'/g, '"');
+		const parsed = JSON.parse(raw);
+		return Array.isArray(parsed) ? parsed.filter((s) => typeof s === "string") : [];
+	} catch {
+		return [];
+	}
 }
 
 function stripStringLiterals(text: string): string {
-  let result = text.replace(/"(?:[^"\\]|\\.)*"/g, '""');
-  result = result.replace(/'(?:[^'\\]|\\.)*'/g, "''");
-  result = result.replace(/`(?:[^`\\]|\\.)*`/g, "``");
-  return result;
+	let result = text.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+	result = result.replace(/'(?:[^'\\]|\\.)*'/g, "''");
+	result = result.replace(/`(?:[^`\\]|\\.)*`/g, "``");
+	return result;
 }
 
 function hasDefaultExport(source: string): boolean {
-  let stripped = source.replace(/\/\*[\s\S]*?\*\//g, "");
-  stripped = stripped.replace(/\/\/[^\n]*/g, "");
-  stripped = stripStringLiterals(stripped);
-  return /^\s*export\s+default\s+/m.test(stripped);
+	let stripped = source.replace(/\/\*[\s\S]*?\*\//g, "");
+	stripped = stripped.replace(/\/\/[^\n]*/g, "");
+	stripped = stripStringLiterals(stripped);
+	return /^\s*export\s+default\s+/m.test(stripped);
 }
 
 function extractVariantKeys(block: string): Record<string, string[]> {
-  const result: Record<string, string[]> = {};
-  const stripped = stripStringLiterals(block);
-  const variantRe = /(\w+)\s*:\s*\{([^}]*)\}/g;
-  let m: RegExpExecArray | null;
-  while ((m = variantRe.exec(stripped)) !== null) {
-    const variantName = m[1];
-    const strippedValuesBlock = m[2];
-    const origVariantRe = new RegExp(`(?:^|[{,\\s])${variantName}\\s*:\\s*\\{([^}]*)\\}`);
-    const origMatch = block.match(origVariantRe);
-    const origValuesBlock = origMatch ? origMatch[1] : strippedValuesBlock;
-    const keys: string[] = [];
-    const keyRe = /(\w+)\s*:/g;
-    let km: RegExpExecArray | null;
-    while ((km = keyRe.exec(strippedValuesBlock)) !== null) keys.push(km[1]);
-    const quotedKeyRe = /["']([^"']+)["']\s*:/g;
-    let qm: RegExpExecArray | null;
-    while ((qm = quotedKeyRe.exec(origValuesBlock)) !== null) {
-      if (!keys.includes(qm[1])) keys.push(qm[1]);
-    }
-    if (keys.length > 0) result[variantName] = keys;
-  }
-  return result;
+	const result: Record<string, string[]> = {};
+	const stripped = stripStringLiterals(block);
+	const variantRe = /(\w+)\s*:\s*\{([^}]*)\}/g;
+	let m: RegExpExecArray | null;
+	while ((m = variantRe.exec(stripped)) !== null) {
+		const variantName = m[1];
+		const strippedValuesBlock = m[2];
+		const origVariantRe = new RegExp(`(?:^|[{,\\s])${variantName}\\s*:\\s*\\{([^}]*)\\}`);
+		const origMatch = block.match(origVariantRe);
+		const origValuesBlock = origMatch ? origMatch[1] : strippedValuesBlock;
+		const keys: string[] = [];
+		const keyRe = /(\w+)\s*:/g;
+		let km: RegExpExecArray | null;
+		while ((km = keyRe.exec(strippedValuesBlock)) !== null) keys.push(km[1]);
+		const quotedKeyRe = /["']([^"']+)["']\s*:/g;
+		let qm: RegExpExecArray | null;
+		while ((qm = quotedKeyRe.exec(origValuesBlock)) !== null) {
+			if (!keys.includes(qm[1])) keys.push(qm[1]);
+		}
+		if (keys.length > 0) result[variantName] = keys;
+	}
+	return result;
 }
 
 function extractDefaultVariants(source: string): Record<string, string> {
-  const m = source.match(/defaultVariants\s*:\s*\{([^}]*)\}/);
-  if (!m) return {};
-  const result: Record<string, string> = {};
-  const kvRe = /(\w+)\s*:\s*["']?(\w+)["']?/g;
-  let km: RegExpExecArray | null;
-  while ((km = kvRe.exec(m[1])) !== null) result[km[1]] = km[2];
-  return result;
+	const m = source.match(/defaultVariants\s*:\s*\{([^}]*)\}/);
+	if (!m) return {};
+	const result: Record<string, string> = {};
+	const kvRe = /(\w+)\s*:\s*["']?(\w+)["']?/g;
+	let km: RegExpExecArray | null;
+	while ((km = kvRe.exec(m[1])) !== null) result[km[1]] = km[2];
+	return result;
 }
 
-function parseCva(source: string): { variants: Record<string, string[]>; defaultVariants: Record<string, string> } | null {
-  if (!source.includes("cva(")) return null;
-  const broadMatch = source.match(/variants\s*:\s*\{([\s\S]*?)\}\s*(?:,\s*(?:defaultVariants|compoundVariants)|\s*\}\s*\))/);
-  if (!broadMatch) return null;
-  const variants = extractVariantKeys(`{${broadMatch[1]}}`);
-  if (Object.keys(variants).length === 0) return null;
-  return { variants, defaultVariants: extractDefaultVariants(source) };
+function parseCva(
+	source: string,
+): { variants: Record<string, string[]>; defaultVariants: Record<string, string> } | null {
+	if (!source.includes("cva(")) return null;
+	const broadMatch = source.match(
+		/variants\s*:\s*\{([\s\S]*?)\}\s*(?:,\s*(?:defaultVariants|compoundVariants)|\s*\}\s*\))/,
+	);
+	if (!broadMatch) return null;
+	const variants = extractVariantKeys(`{${broadMatch[1]}}`);
+	if (Object.keys(variants).length === 0) return null;
+	return { variants, defaultVariants: extractDefaultVariants(source) };
 }
 
-function cvaCartesian(config: { variants: Record<string, string[]> }, skip: string[]): Array<{ name: string; props: Record<string, string> }> {
-  const keys = Object.keys(config.variants);
-  if (keys.length === 0) return [];
-  const values = keys.map(k => config.variants[k]);
-  function product(arrays: string[][]): string[][] {
-    return arrays.reduce<string[][]>((acc, cur) => acc.flatMap(a => cur.map(b => [...a, b])), [[]]);
-  }
-  return product(values)
-    .map(combo => {
-      const props: Record<string, string> = {};
-      const nameParts: string[] = [];
-      keys.forEach((k, i) => { props[k] = combo[i]; nameParts.push(`${k}=${combo[i]}`); });
-      return { name: nameParts.join("_"), props };
-    })
-    .filter(c => !skip.includes(c.name));
+function cvaCartesian(
+	config: { variants: Record<string, string[]> },
+	skip: string[],
+): Array<{ name: string; props: Record<string, string> }> {
+	const keys = Object.keys(config.variants);
+	if (keys.length === 0) return [];
+	const values = keys.map((k) => config.variants[k]);
+	function product(arrays: string[][]): string[][] {
+		return arrays.reduce<string[][]>(
+			(acc, cur) => acc.flatMap((a) => cur.map((b) => [...a, b])),
+			[[]],
+		);
+	}
+	return product(values)
+		.map((combo) => {
+			const props: Record<string, string> = {};
+			const nameParts: string[] = [];
+			keys.forEach((k, i) => {
+				props[k] = combo[i];
+				nameParts.push(`${k}=${combo[i]}`);
+			});
+			return { name: nameParts.join("_"), props };
+		})
+		.filter((c) => !skip.includes(c.name));
 }
 
 function isIconSize(sizeValue: string): boolean {
-  return sizeValue.includes("icon");
+	return sizeValue.includes("icon");
 }
 
 function autoChildren(props: Record<string, string>, displayName: string): string {
-  const sizeVal = props["size"] ?? "";
-  if (isIconSize(sizeVal)) return "";
-  return displayName;
+	const sizeVal = props["size"] ?? "";
+	if (isIconSize(sizeVal)) return "";
+	return displayName;
 }
 
-function isStubMeta(examples: Array<{ name: string; props: Record<string, unknown> }>, cvaConfig: { variants: Record<string, string[]> } | null): boolean {
-  if (cvaConfig !== null) return false;
-  if (examples.length !== 1) return false;
-  const only = examples[0];
-  return only.name === "default" && Object.keys(only.props).length === 0;
+function isStubMeta(
+	examples: Array<{ name: string; props: Record<string, unknown> }>,
+	cvaConfig: { variants: Record<string, string[]> } | null,
+): boolean {
+	if (cvaConfig !== null) return false;
+	if (examples.length !== 1) return false;
+	const only = examples[0];
+	return only.name === "default" && Object.keys(only.props).length === 0;
 }
 
-function regenShowcaseTsx(componentName: string, source: string, sourceName: string): string | null {
-  const kindMatch = source.match(/export\s+const\s+meta[^=]*=\s*\{[^}]*kind\s*:\s*["']([^"']+)["']/);
-  if (!kindMatch) return null;
-  const kind = kindMatch[1];
-  const displayName = toPascalCase(componentName);
-  const header = `// @generated by claude-ds — do not edit. Source: ${sourceName} meta block.`;
+function regenShowcaseTsx(
+	componentName: string,
+	source: string,
+	sourceName: string,
+): string | null {
+	const kindMatch = source.match(
+		/export\s+const\s+meta[^=]*=\s*\{[^}]*kind\s*:\s*["']([^"']+)["']/,
+	);
+	if (!kindMatch) return null;
+	const kind = kindMatch[1];
+	const displayName = toPascalCase(componentName);
+	const header = `// @generated by claude-ds — do not edit. Source: ${sourceName} meta block.`;
 
-  if (kind === "reference") {
-    const titleMatch = source.match(/kind\s*:\s*["']reference["'][^}]*title\s*:\s*["']([^"']+)["']/s)
-      ?? source.match(/title\s*:\s*["']([^"']+)["'][^}]*kind\s*:\s*["']reference["']/s);
-    const title = titleMatch ? titleMatch[1] : "Reference";
-    return [
-      header,
-      `import React from "react";`,
-      `import { meta } from "./${componentName}";`,
-      ``,
-      `export default function ${displayName}Showcase() {`,
-      `  if (meta.kind !== "reference") return null;`,
-      `  const content = meta.render();`,
-      `  return (`,
-      `    <main className="p-8">`,
-      `      <h1 className="text-2xl font-bold mb-6">${title}</h1>`,
-      `      <div className="prose prose-neutral dark:prose-invert max-w-none">{content as React.ReactNode}</div>`,
-      `    </main>`,
-      `  );`,
-      `}`,
-      ``,
-    ].join("\n");
-  }
+	if (kind === "reference") {
+		const titleMatch =
+			source.match(/kind\s*:\s*["']reference["'][^}]*title\s*:\s*["']([^"']+)["']/s) ??
+			source.match(/title\s*:\s*["']([^"']+)["'][^}]*kind\s*:\s*["']reference["']/s);
+		const title = titleMatch ? titleMatch[1] : "Reference";
+		return [
+			header,
+			`import React from "react";`,
+			`import { meta } from "./${componentName}";`,
+			``,
+			`export default function ${displayName}Showcase() {`,
+			`  if (meta.kind !== "reference") return null;`,
+			`  const content = meta.render();`,
+			`  return (`,
+			`    <main className="p-8">`,
+			`      <h1 className="text-2xl font-bold mb-6">${title}</h1>`,
+			`      <div className="prose prose-neutral dark:prose-invert max-w-none">{content as React.ReactNode}</div>`,
+			`    </main>`,
+			`  );`,
+			`}`,
+			``,
+		].join("\n");
+	}
 
-  const examples = parseExamples(source);
-  const skip = parseSkip(source);
-  const cvaConfig = parseCva(source);
+	const examples = parseExamples(source);
+	const skip = parseSkip(source);
+	const cvaConfig = parseCva(source);
 
-  if (isStubMeta(examples, cvaConfig)) {
-    return [
-      header,
-      `import React from "react";`,
-      ``,
-      `export default function ${displayName}Showcase() {`,
-      `  return (`,
-      `    <main className="p-8">`,
-      `      <h1 className="text-2xl font-bold mb-6">${displayName}</h1>`,
-      `      <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 p-6 text-sm text-muted-foreground">`,
-      `        No examples defined. Backfill{" "}`,
-      `        <code className="rounded bg-muted px-1">meta.examples</code> in{" "}`,
-      `        <code className="rounded bg-muted px-1">design-system/&lt;tier&gt;/${componentName}.tsx</code>`,
-      `        {" "}to render this component.`,
-      `      </div>`,
-      `    </main>`,
-      `  );`,
-      `}`,
-      ``,
-    ].join("\n");
-  }
+	if (isStubMeta(examples, cvaConfig)) {
+		return [
+			header,
+			`import React from "react";`,
+			``,
+			`export default function ${displayName}Showcase() {`,
+			`  return (`,
+			`    <main className="p-8">`,
+			`      <h1 className="text-2xl font-bold mb-6">${displayName}</h1>`,
+			`      <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 p-6 text-sm text-muted-foreground">`,
+			`        No examples defined. Backfill{" "}`,
+			`        <code className="rounded bg-muted px-1">meta.examples</code> in{" "}`,
+			`        <code className="rounded bg-muted px-1">design-system/&lt;tier&gt;/${componentName}.tsx</code>`,
+			`        {" "}to render this component.`,
+			`      </div>`,
+			`    </main>`,
+			`  );`,
+			`}`,
+			``,
+		].join("\n");
+	}
 
-  const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = [...examples];
+	const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = [...examples];
 
-  let cvaExamples: Array<{ name: string; props: Record<string, string> }> = [];
-  if (cvaConfig) {
-    const expanded = cvaCartesian(cvaConfig, skip);
-    const existingNames = new Set(examples.map(e => e.name));
-    cvaExamples = expanded.filter(ce => !existingNames.has(ce.name));
-  }
+	let cvaExamples: Array<{ name: string; props: Record<string, string> }> = [];
+	if (cvaConfig) {
+		const expanded = cvaCartesian(cvaConfig, skip);
+		const existingNames = new Set(examples.map((e) => e.name));
+		cvaExamples = expanded.filter((ce) => !existingNames.has(ce.name));
+	}
 
-  let explicitSection = "";
-  if (explicitExamples.length > 0) {
-    const blocks = explicitExamples.map(ex => {
-      const propsStr = Object.entries(ex.props).map(([k, v]) => {
-        if (typeof v === "string") return `${k}="${v}"`;
-        if (typeof v === "boolean") return v ? k : `${k}={false}`;
-        return `${k}={${JSON.stringify(v)}}`;
-      }).join(" ");
-      return [
-        `        <div className="flex flex-col items-start gap-1">`,
-        `          <${displayName}${propsStr ? " " + propsStr : ""} />`,
-        `          <span className="text-xs text-muted-foreground">${ex.name}</span>`,
-        `        </div>`,
-      ].join("\n");
-    }).join("\n");
-    explicitSection = [
-      `      <section className="mb-10">`,
-      `        <h2 className="text-xl font-semibold mb-4">Examples</h2>`,
-      `        <div className="flex flex-wrap items-end gap-3">`,
-      blocks,
-      `        </div>`,
-      `      </section>`,
-    ].join("\n");
-  }
+	let explicitSection = "";
+	if (explicitExamples.length > 0) {
+		const blocks = explicitExamples
+			.map((ex) => {
+				const propsStr = Object.entries(ex.props)
+					.map(([k, v]) => {
+						if (typeof v === "string") return `${k}="${v}"`;
+						if (typeof v === "boolean") return v ? k : `${k}={false}`;
+						return `${k}={${JSON.stringify(v)}}`;
+					})
+					.join(" ");
+				return [
+					`        <div className="flex flex-col items-start gap-1">`,
+					`          <${displayName}${propsStr ? " " + propsStr : ""} />`,
+					`          <span className="text-xs text-muted-foreground">${ex.name}</span>`,
+					`        </div>`,
+				].join("\n");
+			})
+			.join("\n");
+		explicitSection = [
+			`      <section className="mb-10">`,
+			`        <h2 className="text-xl font-semibold mb-4">Examples</h2>`,
+			`        <div className="flex flex-wrap items-end gap-3">`,
+			blocks,
+			`        </div>`,
+			`      </section>`,
+		].join("\n");
+	}
 
-  let cvaSection = "";
-  if (cvaExamples.length > 0 && cvaConfig) {
-    const variantNames = Object.keys(cvaConfig.variants);
-    const primaryAxis = variantNames[0];
-    const primaryValues = cvaConfig.variants[primaryAxis];
+	let cvaSection = "";
+	if (cvaExamples.length > 0 && cvaConfig) {
+		const variantNames = Object.keys(cvaConfig.variants);
+		const primaryAxis = variantNames[0];
+		const primaryValues = cvaConfig.variants[primaryAxis];
 
-    const groupSections = primaryValues.map(primaryVal => {
-      const groupCombos = cvaExamples.filter(ce => ce.props[primaryAxis] === primaryVal);
-      if (groupCombos.length === 0) return null;
-      const groupLabel = primaryVal.charAt(0).toUpperCase() + primaryVal.slice(1);
-      const buttonBlocks = groupCombos.map(ce => {
-        const propsStr = Object.entries(ce.props).map(([k, v]) => `${k}="${v}"`).join(" ");
-        const children = autoChildren(ce.props, displayName);
-        const secondaryLabel = Object.entries(ce.props).filter(([k]) => k !== primaryAxis).map(([, v]) => v).join(", ");
-        return [
-          `          <div className="flex flex-col items-start gap-1">`,
-          `            <${displayName}${propsStr ? " " + propsStr : ""}${children ? `>${children}</${displayName}>` : " />"}`,
-          `            <span className="text-xs text-muted-foreground">${secondaryLabel || primaryVal}</span>`,
-          `          </div>`,
-        ].join("\n");
-      }).filter(Boolean).join("\n");
+		const groupSections = primaryValues
+			.map((primaryVal) => {
+				const groupCombos = cvaExamples.filter((ce) => ce.props[primaryAxis] === primaryVal);
+				if (groupCombos.length === 0) return null;
+				const groupLabel = primaryVal.charAt(0).toUpperCase() + primaryVal.slice(1);
+				const buttonBlocks = groupCombos
+					.map((ce) => {
+						const propsStr = Object.entries(ce.props)
+							.map(([k, v]) => `${k}="${v}"`)
+							.join(" ");
+						const children = autoChildren(ce.props, displayName);
+						const secondaryLabel = Object.entries(ce.props)
+							.filter(([k]) => k !== primaryAxis)
+							.map(([, v]) => v)
+							.join(", ");
+						return [
+							`          <div className="flex flex-col items-start gap-1">`,
+							`            <${displayName}${propsStr ? " " + propsStr : ""}${children ? `>${children}</${displayName}>` : " />"}`,
+							`            <span className="text-xs text-muted-foreground">${secondaryLabel || primaryVal}</span>`,
+							`          </div>`,
+						].join("\n");
+					})
+					.filter(Boolean)
+					.join("\n");
 
-      return [
-        `        <section className="mb-6">`,
-        `          <h2 className="text-lg font-semibold mb-3">${groupLabel}</h2>`,
-        `          <div className="flex flex-wrap items-end gap-3">`,
-        buttonBlocks,
-        `          </div>`,
-        `        </section>`,
-      ].join("\n");
-    }).filter(Boolean).join("\n");
+				return [
+					`        <section className="mb-6">`,
+					`          <h2 className="text-lg font-semibold mb-3">${groupLabel}</h2>`,
+					`          <div className="flex flex-wrap items-end gap-3">`,
+					buttonBlocks,
+					`          </div>`,
+					`        </section>`,
+				].join("\n");
+			})
+			.filter(Boolean)
+			.join("\n");
 
-    cvaSection = [
-      `      <section className="mb-10">`,
-      `        <h2 className="text-xl font-semibold mb-4">Variants</h2>`,
-      groupSections,
-      `      </section>`,
-    ].join("\n");
-  }
+		cvaSection = [
+			`      <section className="mb-10">`,
+			`        <h2 className="text-xl font-semibold mb-4">Variants</h2>`,
+			groupSections,
+			`      </section>`,
+		].join("\n");
+	}
 
-  const body = explicitSection || cvaSection
-    ? [explicitSection, cvaSection].filter(Boolean).join("\n")
-    : `      <p className="text-muted-foreground">No examples defined.</p>`;
+	const body =
+		explicitSection || cvaSection
+			? [explicitSection, cvaSection].filter(Boolean).join("\n")
+			: `      <p className="text-muted-foreground">No examples defined.</p>`;
 
-  const importLine = hasDefaultExport(source)
-    ? `import ${displayName} from "./${componentName}";`
-    : `import { ${displayName} } from "./${componentName}";`;
+	const importLine = hasDefaultExport(source)
+		? `import ${displayName} from "./${componentName}";`
+		: `import { ${displayName} } from "./${componentName}";`;
 
-  return [
-    header,
-    `import React from "react";`,
-    importLine,
-    ``,
-    `export default function ${displayName}Showcase() {`,
-    `  return (`,
-    `    <main className="p-8">`,
-    `      <h1 className="text-2xl font-bold mb-6">${displayName}</h1>`,
-    body,
-    `    </main>`,
-    `  );`,
-    `}`,
-    ``,
-  ].join("\n");
+	return [
+		header,
+		`import React from "react";`,
+		importLine,
+		``,
+		`export default function ${displayName}Showcase() {`,
+		`  return (`,
+		`    <main className="p-8">`,
+		`      <h1 className="text-2xl font-bold mb-6">${displayName}</h1>`,
+		body,
+		`    </main>`,
+		`  );`,
+		`}`,
+		``,
+	].join("\n");
 }
 
 async function existsAt(p: string): Promise<boolean> {
-  try { await stat(p); return true; } catch { return false; }
+	try {
+		await stat(p);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /** Outcome of the generated-integrity planner — reported on `RunReport.ops[i].outcome`. */
 export interface GenIntegrityOutcome {
-  violations: GenViolation[];
+	violations: GenViolation[];
 }
 
 /**
@@ -336,74 +392,86 @@ export interface GenIntegrityOutcome {
 export type GenIntegrityOperation = Operation<GenIntegrityOutcome>;
 
 export function planGeneratedIntegrityFixes(): GenIntegrityOperation {
-  return {
-    name: "generated-integrity",
-    async plan(ctx: ProjectContext): Promise<PlanResult<GenIntegrityOutcome>> {
-      const violations: GenViolation[] = [];
-      const changes: Change[] = [];
-      const cwd = ctx.cwd;
+	return {
+		name: "generated-integrity",
+		async plan(ctx: ProjectContext): Promise<PlanResult<GenIntegrityOutcome>> {
+			const violations: GenViolation[] = [];
+			const changes: Change[] = [];
+			const cwd = ctx.cwd;
 
-      for (const tier of GEN_TIERS) {
-        const tierDir = join(cwd, "design-system", tier);
-        let tierEntries: string[];
-        try { tierEntries = await readdir(tierDir); } catch { continue; }
+			for (const tier of GEN_TIERS) {
+				const tierDir = join(cwd, "design-system", tier);
+				let tierEntries: string[];
+				try {
+					tierEntries = await readdir(tierDir);
+				} catch {
+					continue;
+				}
 
-        for (const entry of tierEntries) {
-          if (entry === ".keep" || entry === ".gitkeep") continue;
-          if (!entry.endsWith(".tsx")) continue;
-          if (COMPANION_SUFFIXES.some(s => entry.endsWith(s))) continue;
-          if (SKIP_PATTERNS.some(re => re.test(entry))) continue;
+				for (const entry of tierEntries) {
+					if (entry === ".keep" || entry === ".gitkeep") continue;
+					if (!entry.endsWith(".tsx")) continue;
+					if (COMPANION_SUFFIXES.some((s) => entry.endsWith(s))) continue;
+					if (SKIP_PATTERNS.some((re) => re.test(entry))) continue;
 
-          const entryPath = join(tierDir, entry);
-          const entryStat = await stat(entryPath).catch(() => null);
-          if (!entryStat || !entryStat.isFile()) continue;
+					const entryPath = join(tierDir, entry);
+					const entryStat = await stat(entryPath).catch(() => null);
+					if (!entryStat || !entryStat.isFile()) continue;
 
-          const componentName = entry.slice(0, -4);
-          const sourceName = entry;
+					const componentName = entry.slice(0, -4);
+					const sourceName = entry;
 
-          let source: string;
-          try { source = await readFile(entryPath, "utf8"); } catch { continue; }
+					let source: string;
+					try {
+						source = await readFile(entryPath, "utf8");
+					} catch {
+						continue;
+					}
 
-          const showcasePath = join(tierDir, `${componentName}.showcase.tsx`);
-          const showcaseRel = `design-system/${tier}/${componentName}.showcase.tsx`;
+					const showcasePath = join(tierDir, `${componentName}.showcase.tsx`);
+					const showcaseRel = `design-system/${tier}/${componentName}.showcase.tsx`;
 
-          if (!(await existsAt(showcasePath))) continue;
+					if (!(await existsAt(showcasePath))) continue;
 
-          const expected = regenShowcaseTsx(componentName, source, sourceName);
-          if (expected === null) continue;
+					const expected = regenShowcaseTsx(componentName, source, sourceName);
+					if (expected === null) continue;
 
-          let content: string;
-          try { content = await readFile(showcasePath, "utf8"); } catch { content = ""; }
+					let content: string;
+					try {
+						content = await readFile(showcasePath, "utf8");
+					} catch {
+						content = "";
+					}
 
-          if (!content.startsWith(SHOWCASE_HEADER_PREFIX)) {
-            violations.push({
-              ruleId: "GEN-001",
-              file: showcaseRel,
-              message: `@generated header missing from ${showcaseRel}`,
-            });
-            changes.push({
-              kind: "write",
-              path: showcaseRel,
-              before: Buffer.from(content, "utf8"),
-              after: Buffer.from(expected, "utf8"),
-            });
-          } else if (expected !== content) {
-            violations.push({
-              ruleId: "GEN-002",
-              file: showcaseRel,
-              message: `${showcaseRel} differs from regeneration — hand-edit detected`,
-            });
-            changes.push({
-              kind: "write",
-              path: showcaseRel,
-              before: Buffer.from(content, "utf8"),
-              after: Buffer.from(expected, "utf8"),
-            });
-          }
-        }
-      }
+					if (!content.startsWith(SHOWCASE_HEADER_PREFIX)) {
+						violations.push({
+							ruleId: "GEN-001",
+							file: showcaseRel,
+							message: `@generated header missing from ${showcaseRel}`,
+						});
+						changes.push({
+							kind: "write",
+							path: showcaseRel,
+							before: Buffer.from(content, "utf8"),
+							after: Buffer.from(expected, "utf8"),
+						});
+					} else if (expected !== content) {
+						violations.push({
+							ruleId: "GEN-002",
+							file: showcaseRel,
+							message: `${showcaseRel} differs from regeneration — hand-edit detected`,
+						});
+						changes.push({
+							kind: "write",
+							path: showcaseRel,
+							before: Buffer.from(content, "utf8"),
+							after: Buffer.from(expected, "utf8"),
+						});
+					}
+				}
+			}
 
-      return { changes, outcome: { violations } };
-    },
-  };
+			return { changes, outcome: { violations } };
+		},
+	};
 }

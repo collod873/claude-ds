@@ -24,22 +24,22 @@ import { tokenParityRule } from "./rules/token-parity.js";
  * prevents a silently-unfixable rule from shipping.
  */
 export const DRIFT_RULES_BY_ID: Record<DriftRuleId, DriftRule> = {
-  "DRIFT-META-KIND-MISSING": metaKindMissingRule,
-  "DRIFT-SMART-PART-NO-ROLE": smartPartNoRoleRule,
-  "DRIFT-ROLE-NO-CONTRACT": roleNoContractRule,
-  "DRIFT-MISPLACED": misplacedRule,
-  "DRIFT-MISCLASSIFIED-ATOM": misclassifiedAtomRule,
-  "DRIFT-MISCLASSIFIED-COMPOSITE": misclassifiedCompositeRule,
-  "DRIFT-DS-IMPORTS-FEATURE": dsImportsFeatureRule,
-  "DRIFT-PATTERN-NO-SLOTS": patternNoSlotsRule,
-  "DRIFT-PATTERN-IMPORTS-PATTERN": patternImportsPatternRule,
-  "DRIFT-INLINE-STATIC-STYLE": inlineStaticStyleRule,
-  "DRIFT-RAW-PRIMITIVE": rawPrimitiveRule,
-  "DRIFT-CVA-VARIANT-UNRENDERED": cvaVariantUnrenderedRule,
-  "DRIFT-META-EXAMPLES-DUPLICATE": metaExamplesDuplicateRule,
-  "DRIFT-META-EXAMPLES-CORRUPT": metaExamplesCorruptRule,
-  "DRIFT-STALE-META-STATES": staleMetaStatesRule,
-  "DRIFT-TOKEN-PARITY": tokenParityRule,
+	"DRIFT-META-KIND-MISSING": metaKindMissingRule,
+	"DRIFT-SMART-PART-NO-ROLE": smartPartNoRoleRule,
+	"DRIFT-ROLE-NO-CONTRACT": roleNoContractRule,
+	"DRIFT-MISPLACED": misplacedRule,
+	"DRIFT-MISCLASSIFIED-ATOM": misclassifiedAtomRule,
+	"DRIFT-MISCLASSIFIED-COMPOSITE": misclassifiedCompositeRule,
+	"DRIFT-DS-IMPORTS-FEATURE": dsImportsFeatureRule,
+	"DRIFT-PATTERN-NO-SLOTS": patternNoSlotsRule,
+	"DRIFT-PATTERN-IMPORTS-PATTERN": patternImportsPatternRule,
+	"DRIFT-INLINE-STATIC-STYLE": inlineStaticStyleRule,
+	"DRIFT-RAW-PRIMITIVE": rawPrimitiveRule,
+	"DRIFT-CVA-VARIANT-UNRENDERED": cvaVariantUnrenderedRule,
+	"DRIFT-META-EXAMPLES-DUPLICATE": metaExamplesDuplicateRule,
+	"DRIFT-META-EXAMPLES-CORRUPT": metaExamplesCorruptRule,
+	"DRIFT-STALE-META-STATES": staleMetaStatesRule,
+	"DRIFT-TOKEN-PARITY": tokenParityRule,
 };
 
 /**

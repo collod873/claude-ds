@@ -6,57 +6,54 @@
  * — no pty harness needed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  loadColorAdapter,
-  printLines,
-} from "../../../src/lib/render/tty-layer.js";
 import { identityColor } from "../../../src/lib/render/index.js";
+import { loadColorAdapter, printLines } from "../../../src/lib/render/tty-layer.js";
 
 describe("printLines", () => {
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  let captured: string[] = [];
+	const originalWrite = process.stdout.write.bind(process.stdout);
+	let captured: string[] = [];
 
-  beforeEach(() => {
-    captured = [];
-    process.stdout.write = ((chunk: string | Uint8Array): boolean => {
-      captured.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-      return true;
-    }) as typeof process.stdout.write;
-  });
+	beforeEach(() => {
+		captured = [];
+		process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+			captured.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+			return true;
+		}) as typeof process.stdout.write;
+	});
 
-  afterEach(() => {
-    process.stdout.write = originalWrite;
-  });
+	afterEach(() => {
+		process.stdout.write = originalWrite;
+	});
 
-  it("writes one trailing-newline-terminated string per call", () => {
-    printLines(["a", "b", "c"]);
-    expect(captured.join("")).toBe("a\nb\nc\n");
-  });
+	it("writes one trailing-newline-terminated string per call", () => {
+		printLines(["a", "b", "c"]);
+		expect(captured.join("")).toBe("a\nb\nc\n");
+	});
 
-  it("is a no-op for an empty line array", () => {
-    printLines([]);
-    expect(captured).toEqual([]);
-  });
+	it("is a no-op for an empty line array", () => {
+		printLines([]);
+		expect(captured).toEqual([]);
+	});
 });
 
 describe("loadColorAdapter", () => {
-  const original = process.stdout.isTTY;
-  afterEach(() => {
-    process.stdout.isTTY = original;
-  });
+	const original = process.stdout.isTTY;
+	afterEach(() => {
+		process.stdout.isTTY = original;
+	});
 
-  it("returns identityColor on the non-TTY path", () => {
-    process.stdout.isTTY = false;
-    expect(loadColorAdapter()).toBe(identityColor);
-  });
+	it("returns identityColor on the non-TTY path", () => {
+		process.stdout.isTTY = false;
+		expect(loadColorAdapter()).toBe(identityColor);
+	});
 
-  it("returns a non-identity adapter on the TTY path", () => {
-    process.stdout.isTTY = true;
-    const adapter = loadColorAdapter();
-    expect(adapter).not.toBe(identityColor);
-    // `picocolors` may strip when NO_COLOR is set or it can't detect a real
-    // terminal; the only invariant the smoke test pins is the wiring — the
-    // adapter is the TTY one, not the identity one.
-    expect(typeof adapter.green).toBe("function");
-  });
+	it("returns a non-identity adapter on the TTY path", () => {
+		process.stdout.isTTY = true;
+		const adapter = loadColorAdapter();
+		expect(adapter).not.toBe(identityColor);
+		// `picocolors` may strip when NO_COLOR is set or it can't detect a real
+		// terminal; the only invariant the smoke test pins is the wiring — the
+		// adapter is the TTY one, not the identity one.
+		expect(typeof adapter.green).toBe("function");
+	});
 });

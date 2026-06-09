@@ -1,5 +1,5 @@
-import { DEFAULT_DOMAIN_ROOTS } from "../../src/lib/classifier.js";
 import type { ResolvedAuditConfig } from "../../src/lib/audit-config.js";
+import { DEFAULT_DOMAIN_ROOTS } from "../../src/lib/classifier.js";
 import type { ProjectContext } from "../../src/lib/project.js";
 
 /**
@@ -17,23 +17,23 @@ import type { ProjectContext } from "../../src/lib/project.js";
  * `src/lib/project.ts` — test helpers carve out their own exemption.
  */
 export function makeFakeCtx(
-  cwd: string,
-  extra: Omit<Partial<ProjectContext>, "auditConfig"> & {
-    auditConfig?: Partial<ResolvedAuditConfig>;
-  } = {},
+	cwd: string,
+	extra: Omit<Partial<ProjectContext>, "auditConfig"> & {
+		auditConfig?: Partial<ResolvedAuditConfig>;
+	} = {},
 ): ProjectContext {
-  const auditConfig: ResolvedAuditConfig = {
-    domainRoots: DEFAULT_DOMAIN_ROOTS,
-    metaKindStrict: false,
-    roleContractsStrict: false,
-    allowedImports: [],
-    dsAliases: [],
-    tsconfigPaths: {},
-    appDir: "app",
-    claudeMdTarget: "CLAUDE.md",
-    ...(extra.auditConfig ?? {}),
-  };
-  const { auditConfig: _drop, decisions: extraDecisions, ...rest } = extra;
-  const decisions: ProjectContext["decisions"] = extraDecisions ?? {};
-  return { cwd, ...rest, auditConfig, decisions } as unknown as ProjectContext;
+	const auditConfig: ResolvedAuditConfig = {
+		domainRoots: DEFAULT_DOMAIN_ROOTS,
+		metaKindStrict: false,
+		roleContractsStrict: false,
+		allowedImports: [],
+		dsAliases: [],
+		tsconfigPaths: {},
+		appDir: "app",
+		claudeMdTarget: "CLAUDE.md",
+		...(extra.auditConfig ?? {}),
+	};
+	const { auditConfig: _drop, decisions: extraDecisions, ...rest } = extra;
+	const decisions: ProjectContext["decisions"] = extraDecisions ?? {};
+	return { cwd, ...rest, auditConfig, decisions } as unknown as ProjectContext;
 }

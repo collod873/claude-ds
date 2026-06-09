@@ -33,7 +33,7 @@ export const LABEL_PACK = "pack";
  *  truth so every surface ("installed: …", upgrade target default, etc.) reads
  *  the same string. */
 export function cliVersion(): string {
-  return `v${pkg.version}`;
+	return `v${pkg.version}`;
 }
 
 /**
@@ -49,12 +49,8 @@ export function cliVersion(): string {
  *   - `chainLength > 0`: a real migration set will apply. Returned as
  *     `pack vX → vY`, matching today's non-empty behaviour.
  */
-export function upgradeHeadline(input: {
-  from: string;
-  to: string;
-  chainLength: number;
-}): string {
-  if (input.from === input.to) return "verify migration end-states";
-  if (input.chainLength === 0) return `pin bump only — pack stays ${input.from}`;
-  return `${LABEL_PACK} ${input.from} → ${input.to}`;
+export function upgradeHeadline(input: { from: string; to: string; chainLength: number }): string {
+	if (input.from === input.to) return "verify migration end-states";
+	if (input.chainLength === 0) return `pin bump only — pack stays ${input.from}`;
+	return `${LABEL_PACK} ${input.from} → ${input.to}`;
 }

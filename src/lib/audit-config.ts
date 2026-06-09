@@ -1,5 +1,5 @@
-import type { Config } from "./config.js";
 import { DEFAULT_DOMAIN_ROOTS } from "./classifier.js";
+import type { Config } from "./config.js";
 import { detectDsAliases, detectTsconfigPaths } from "./ds-aliases.js";
 import { detectAppDir } from "./paths.js";
 
@@ -16,17 +16,17 @@ import { detectAppDir } from "./paths.js";
  * observable behavior change.
  */
 export interface ResolvedAuditConfig {
-  domainRoots: string[];
-  metaKindStrict: boolean;
-  /** When true, `DRIFT-SMART-PART-NO-ROLE` fires on smart DS parts that declare no role.
-   *  Mirrors `metaKindStrict`: default false on fresh adoption, flipped by the v-next
-   *  migration after a `classify` pass assigns roles (ADR-0016 / PRD #301). */
-  roleContractsStrict: boolean;
-  allowedImports: string[];
-  dsAliases: string[];
-  tsconfigPaths: Record<string, string[]>;
-  appDir: string;
-  claudeMdTarget: string;
+	domainRoots: string[];
+	metaKindStrict: boolean;
+	/** When true, `DRIFT-SMART-PART-NO-ROLE` fires on smart DS parts that declare no role.
+	 *  Mirrors `metaKindStrict`: default false on fresh adoption, flipped by the v-next
+	 *  migration after a `classify` pass assigns roles (ADR-0016 / PRD #301). */
+	roleContractsStrict: boolean;
+	allowedImports: string[];
+	dsAliases: string[];
+	tsconfigPaths: Record<string, string[]>;
+	appDir: string;
+	claudeMdTarget: string;
 }
 
 /**
@@ -50,34 +50,32 @@ export interface ResolvedAuditConfig {
  *     audit.ts's pre-adopt fallback.
  */
 export async function resolveAuditConfig(
-  cwd: string,
-  cfg: Config | null,
+	cwd: string,
+	cfg: Config | null,
 ): Promise<ResolvedAuditConfig> {
-  const srcRoot = cfg?.srcRoot ?? "src";
+	const srcRoot = cfg?.srcRoot ?? "src";
 
-  const domainRoots = cfg?.domain_roots ?? DEFAULT_DOMAIN_ROOTS;
-  const metaKindStrict = cfg?.meta_kind_strict ?? false;
-  const roleContractsStrict = cfg?.role_contracts_strict ?? false;
-  const allowedImports = cfg?.allowed_imports ?? [];
+	const domainRoots = cfg?.domain_roots ?? DEFAULT_DOMAIN_ROOTS;
+	const metaKindStrict = cfg?.meta_kind_strict ?? false;
+	const roleContractsStrict = cfg?.role_contracts_strict ?? false;
+	const allowedImports = cfg?.allowed_imports ?? [];
 
-  const cfgDsAliases = cfg?.ds_aliases ?? [];
-  const dsAliases = cfgDsAliases.length > 0
-    ? cfgDsAliases
-    : await detectDsAliases(cwd, srcRoot);
+	const cfgDsAliases = cfg?.ds_aliases ?? [];
+	const dsAliases = cfgDsAliases.length > 0 ? cfgDsAliases : await detectDsAliases(cwd, srcRoot);
 
-  const tsconfigPaths = await detectTsconfigPaths(cwd, srcRoot);
+	const tsconfigPaths = await detectTsconfigPaths(cwd, srcRoot);
 
-  const appDir = cfg?.app_dir ?? await detectAppDir(cwd);
-  const claudeMdTarget = cfg?.claude_md_target ?? "CLAUDE.md";
+	const appDir = cfg?.app_dir ?? (await detectAppDir(cwd));
+	const claudeMdTarget = cfg?.claude_md_target ?? "CLAUDE.md";
 
-  return {
-    domainRoots,
-    metaKindStrict,
-    roleContractsStrict,
-    allowedImports,
-    dsAliases,
-    tsconfigPaths,
-    appDir,
-    claudeMdTarget,
-  };
+	return {
+		domainRoots,
+		metaKindStrict,
+		roleContractsStrict,
+		allowedImports,
+		dsAliases,
+		tsconfigPaths,
+		appDir,
+		claudeMdTarget,
+	};
 }

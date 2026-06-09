@@ -1,11 +1,11 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveAuditConfig, type ResolvedAuditConfig } from "./audit-config.js";
+import { type ResolvedAuditConfig, resolveAuditConfig } from "./audit-config.js";
 import type { Config } from "./config.js";
 import type { AnswerBag } from "./decision/types.js";
 import type { DecisionAnswer, DecisionKey, FindingKey } from "./drift/decisions.js";
-import { parseManifest, type Manifest } from "./manifest.js";
+import { type Manifest, parseManifest } from "./manifest.js";
 import { loadConfig } from "./paths.js";
 
 /**
@@ -30,37 +30,42 @@ import { loadConfig } from "./paths.js";
  * Frozen on return so Operations / commands cannot mutate the context after load.
  */
 export interface ProjectContext {
-  kind: "adopted" | "pre-adopt";
-  cwd: string;
-  cfg: Config;
-  packDir: string;
-  manifest: Manifest;
-  auditConfig: ResolvedAuditConfig;
-  exists(path: string): Promise<boolean>;
-  decisions: {
-    renames?: Record<string, string>;
-    claudeMdTarget?: string;
-    /**
-     * Per-finding answers to the questions a fixer would otherwise ask via
-     * `opts.prompt`. Keyed by `findingKey(finding)` → `decisionKey` →
-     * `DecisionAnswer` (`number` index or `"defer"`). Populated by a
-     * command-level pre-pass in audit-fix once Phase C step 2+ lands; today
-     * the slot exists but nothing reads it (PRD #266 Phase C step 1).
-     */
-    fixerChoices?: Record<FindingKey, Record<DecisionKey, DecisionAnswer>>;
-    /**
-     * The Decision spine's flat answer bag (PRD #325 / ADR-0023). Loaded from
-     * `--answers <file>` and consulted by `resolveDecisions` before any
-     * prompt fires. Keys are stable `Decision.id`s (e.g.
-     * `"DRIFT-RAW-PRIMITIVE:design-system/atoms/x.tsx::extract:Sidebar"`).
-     * Subsumes `fixerChoices` as more sites migrate to the spine.
-     */
-    answers?: AnswerBag;
-  };
+	kind: "adopted" | "pre-adopt";
+	cwd: string;
+	cfg: Config;
+	packDir: string;
+	manifest: Manifest;
+	auditConfig: ResolvedAuditConfig;
+	exists(path: string): Promise<boolean>;
+	decisions: {
+		renames?: Record<string, string>;
+		claudeMdTarget?: string;
+		/**
+		 * Per-finding answers to the questions a fixer would otherwise ask via
+		 * `opts.prompt`. Keyed by `findingKey(finding)` → `decisionKey` →
+		 * `DecisionAnswer` (`number` index or `"defer"`). Populated by a
+		 * command-level pre-pass in audit-fix once Phase C step 2+ lands; today
+		 * the slot exists but nothing reads it (PRD #266 Phase C step 1).
+		 */
+		fixerChoices?: Record<FindingKey, Record<DecisionKey, DecisionAnswer>>;
+		/**
+		 * The Decision spine's flat answer bag (PRD #325 / ADR-0023). Loaded from
+		 * `--answers <file>` and consulted by `resolveDecisions` before any
+		 * prompt fires. Keys are stable `Decision.id`s (e.g.
+		 * `"DRIFT-RAW-PRIMITIVE:design-system/atoms/x.tsx::extract:Sidebar"`).
+		 * Subsumes `fixerChoices` as more sites migrate to the spine.
+		 */
+		answers?: AnswerBag;
+	};
 }
 
 async function existsAt(p: string): Promise<boolean> {
-  try { await stat(p); return true; } catch { return false; }
+	try {
+		await stat(p);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -77,27 +82,27 @@ async function existsAt(p: string): Promise<boolean> {
  * command opts into via the Runner — no longer a hidden side effect of boot.
  */
 export async function loadProject(
-  cwd: string,
-  decisions: ProjectContext["decisions"] = {},
+	cwd: string,
+	decisions: ProjectContext["decisions"] = {},
 ): Promise<ProjectContext> {
-  const cfg = await loadConfig(cwd);
-  const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = resolve(here, "..", "..");
-  const packDir = join(repoRoot, "packs", cfg.pack);
-  const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
-  const auditConfig = await resolveAuditConfig(cwd, cfg);
+	const cfg = await loadConfig(cwd);
+	const here = dirname(fileURLToPath(import.meta.url));
+	const repoRoot = resolve(here, "..", "..");
+	const packDir = join(repoRoot, "packs", cfg.pack);
+	const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+	const auditConfig = await resolveAuditConfig(cwd, cfg);
 
-  const ctx: ProjectContext = {
-    kind: "adopted",
-    cwd,
-    cfg,
-    packDir,
-    manifest,
-    auditConfig,
-    exists: (p: string) => existsAt(isAbsolute(p) ? p : join(cwd, p)),
-    decisions,
-  };
-  return Object.freeze(ctx);
+	const ctx: ProjectContext = {
+		kind: "adopted",
+		cwd,
+		cfg,
+		packDir,
+		manifest,
+		auditConfig,
+		exists: (p: string) => existsAt(isAbsolute(p) ? p : join(cwd, p)),
+		decisions,
+	};
+	return Object.freeze(ctx);
 }
 
 /**
@@ -113,21 +118,21 @@ export async function loadProject(
  * single thing functions read from.
  */
 export async function loadPreAdoptProject(
-  cwd: string,
-  args: { pack: string; packDir: string; manifest: Manifest },
-  decisions: ProjectContext["decisions"] = {},
+	cwd: string,
+	args: { pack: string; packDir: string; manifest: Manifest },
+	decisions: ProjectContext["decisions"] = {},
 ): Promise<ProjectContext> {
-  const auditConfig = await resolveAuditConfig(cwd, null);
+	const auditConfig = await resolveAuditConfig(cwd, null);
 
-  const ctx: ProjectContext = {
-    kind: "pre-adopt",
-    cwd,
-    cfg: { pack: args.pack } as Config,
-    packDir: args.packDir,
-    manifest: args.manifest,
-    auditConfig,
-    exists: (p: string) => existsAt(isAbsolute(p) ? p : join(cwd, p)),
-    decisions,
-  };
-  return Object.freeze(ctx);
+	const ctx: ProjectContext = {
+		kind: "pre-adopt",
+		cwd,
+		cfg: { pack: args.pack } as Config,
+		packDir: args.packDir,
+		manifest: args.manifest,
+		auditConfig,
+		exists: (p: string) => existsAt(isAbsolute(p) ? p : join(cwd, p)),
+		decisions,
+	};
+	return Object.freeze(ctx);
 }

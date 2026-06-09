@@ -22,37 +22,35 @@ import { spawnSync } from "node:child_process";
  */
 
 export interface CleanTreeOptions {
-  /** Command name embedded in the message — so the operator knows which gate refused. */
-  command: string;
-  /** Bypass — when true the guard returns ok even on a dirty tree. */
-  allowDirty?: boolean;
-  cwd: string;
+	/** Command name embedded in the message — so the operator knows which gate refused. */
+	command: string;
+	/** Bypass — when true the guard returns ok even on a dirty tree. */
+	allowDirty?: boolean;
+	cwd: string;
 }
 
-export type CleanTreeResult =
-  | { ok: true }
-  | { ok: false; message: string };
+export type CleanTreeResult = { ok: true } | { ok: false; message: string };
 
 export function checkCleanTree(opts: CleanTreeOptions): CleanTreeResult {
-  if (opts.allowDirty) return { ok: true };
+	if (opts.allowDirty) return { ok: true };
 
-  const isRepo = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
-    cwd: opts.cwd,
-    stdio: "ignore",
-  });
-  if (isRepo.status !== 0) return { ok: true };
+	const isRepo = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
+		cwd: opts.cwd,
+		stdio: "ignore",
+	});
+	if (isRepo.status !== 0) return { ok: true };
 
-  const status = spawnSync("git", ["status", "--porcelain"], {
-    cwd: opts.cwd,
-    encoding: "utf8",
-  });
-  if (status.status !== 0) return { ok: true };
-  if ((status.stdout ?? "").trim() === "") return { ok: true };
+	const status = spawnSync("git", ["status", "--porcelain"], {
+		cwd: opts.cwd,
+		encoding: "utf8",
+	});
+	if (status.status !== 0) return { ok: true };
+	if ((status.stdout ?? "").trim() === "") return { ok: true };
 
-  return {
-    ok: false,
-    message:
-      `${opts.command}: working tree is dirty — commit or stash changes first ` +
-      `(or pass --allow-dirty to override).`,
-  };
+	return {
+		ok: false,
+		message:
+			`${opts.command}: working tree is dirty — commit or stash changes first ` +
+			`(or pass --allow-dirty to override).`,
+	};
 }

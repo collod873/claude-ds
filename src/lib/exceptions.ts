@@ -17,56 +17,60 @@ export type AuditRuleId = DriftRuleId | IntegrityRuleId | OwnedConcernId;
 export class ExceptionError extends Error {}
 
 export interface Exception {
-  rule: AuditRuleId;
-  path: string;
-  issue?: string;      // URL or "#N" — required by lint, optional at parse time
-  reason?: string;     // human-readable note
-  permanent?: boolean; // skip issue-link lint when true
+	rule: AuditRuleId;
+	path: string;
+	issue?: string; // URL or "#N" — required by lint, optional at parse time
+	reason?: string; // human-readable note
+	permanent?: boolean; // skip issue-link lint when true
 }
 
 export interface ExceptionLint {
-  rule: AuditRuleId;
-  path: string;
-  issue: string | undefined;
-  warning: string;
+	rule: AuditRuleId;
+	path: string;
+	issue: string | undefined;
+	warning: string;
 }
 
 /** Callback that resolves an issue reference to its open/closed state. */
 export type IssueChecker = (ref: string) => Promise<"open" | "closed" | "unknown">;
 
 export function parseExceptions(raw: string): Exception[] {
-  const parsed = JSON.parse(raw);
-  if (Array.isArray(parsed))
-    throw new ExceptionError('exceptions.json must use wrapped shape { "exceptions": [...] }');
-  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.exceptions))
-    throw new ExceptionError('exceptions.json must have an "exceptions" array');
+	const parsed = JSON.parse(raw);
+	if (Array.isArray(parsed))
+		throw new ExceptionError('exceptions.json must use wrapped shape { "exceptions": [...] }');
+	if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.exceptions))
+		throw new ExceptionError('exceptions.json must have an "exceptions" array');
 
-  const validIds = new Set<string>([...allRuleIds(), ...allIntegrityRuleIds(), ...allOwnedConcernIds()]);
-  const arr: unknown[] = parsed.exceptions;
-  const result: Exception[] = [];
+	const validIds = new Set<string>([
+		...allRuleIds(),
+		...allIntegrityRuleIds(),
+		...allOwnedConcernIds(),
+	]);
+	const arr: unknown[] = parsed.exceptions;
+	const result: Exception[] = [];
 
-  for (const e of arr) {
-    const entry = e as Record<string, unknown>;
+	for (const e of arr) {
+		const entry = e as Record<string, unknown>;
 
-    if (typeof entry.rule !== "string")
-      throw new ExceptionError(`malformed exception entry (missing rule): ${JSON.stringify(e)}`);
+		if (typeof entry.rule !== "string")
+			throw new ExceptionError(`malformed exception entry (missing rule): ${JSON.stringify(e)}`);
 
-    if (!validIds.has(entry.rule))
-      throw new ExceptionError(
-        `unknown rule ID "${entry.rule}" in exceptions.json — registered IDs: ${[...allRuleIds(), ...allIntegrityRuleIds(), ...allOwnedConcernIds()].join(", ")}`
-      );
+		if (!validIds.has(entry.rule))
+			throw new ExceptionError(
+				`unknown rule ID "${entry.rule}" in exceptions.json — registered IDs: ${[...allRuleIds(), ...allIntegrityRuleIds(), ...allOwnedConcernIds()].join(", ")}`,
+			);
 
-    if (typeof entry.path !== "string")
-      throw new ExceptionError(`malformed exception entry (missing path): ${JSON.stringify(e)}`);
+		if (typeof entry.path !== "string")
+			throw new ExceptionError(`malformed exception entry (missing path): ${JSON.stringify(e)}`);
 
-    const exception: Exception = { rule: entry.rule as AuditRuleId, path: entry.path };
-    if (typeof entry.issue === "string") exception.issue = entry.issue;
-    if (typeof entry.reason === "string") exception.reason = entry.reason;
-    if (entry.permanent === true) exception.permanent = true;
-    result.push(exception);
-  }
+		const exception: Exception = { rule: entry.rule as AuditRuleId, path: entry.path };
+		if (typeof entry.issue === "string") exception.issue = entry.issue;
+		if (typeof entry.reason === "string") exception.reason = entry.reason;
+		if (entry.permanent === true) exception.permanent = true;
+		result.push(exception);
+	}
 
-  return result;
+	return result;
 }
 
 /**
@@ -76,18 +80,18 @@ export function parseExceptions(raw: string): Exception[] {
  * `enforce_threshold`. Issue #362.
  */
 export function openCount(ex: Exception[]): number {
-  return ex.filter(e => !e.permanent).length;
+	return ex.filter((e) => !e.permanent).length;
 }
 
 /** Throw ExceptionError if the exception count exceeds threshold. */
 export function gate(ex: Exception[], threshold: number): void {
-  const n = openCount(ex);
-  if (n > threshold) throw new ExceptionError(`exceptions (${n}) exceed threshold (${threshold})`);
+	const n = openCount(ex);
+	if (n > threshold) throw new ExceptionError(`exceptions (${n}) exceed threshold (${threshold})`);
 }
 
 /** Serialize exceptions array to the canonical JSON format. */
 export function serializeExceptions(exceptions: Exception[]): string {
-  return JSON.stringify({ exceptions }, null, 2) + "\n";
+	return JSON.stringify({ exceptions }, null, 2) + "\n";
 }
 
 /**
@@ -96,36 +100,36 @@ export function serializeExceptions(exceptions: Exception[]): string {
  * referenced issue is closed (when a checkIssue callback is supplied).
  */
 export async function lintExceptions(
-  exceptions: Exception[],
-  checkIssue?: IssueChecker
+	exceptions: Exception[],
+	checkIssue?: IssueChecker,
 ): Promise<ExceptionLint[]> {
-  const warnings: ExceptionLint[] = [];
+	const warnings: ExceptionLint[] = [];
 
-  for (const e of exceptions) {
-    if (e.permanent) continue;
+	for (const e of exceptions) {
+		if (e.permanent) continue;
 
-    if (!e.issue || !e.issue.trim()) {
-      warnings.push({
-        rule: e.rule,
-        path: e.path,
-        issue: undefined,
-        warning: `exception for ${e.path} (${e.rule}) has no issue link — add a tracking issue URL or #N`,
-      });
-      continue;
-    }
+		if (!e.issue || !e.issue.trim()) {
+			warnings.push({
+				rule: e.rule,
+				path: e.path,
+				issue: undefined,
+				warning: `exception for ${e.path} (${e.rule}) has no issue link — add a tracking issue URL or #N`,
+			});
+			continue;
+		}
 
-    if (checkIssue) {
-      const status = await checkIssue(e.issue);
-      if (status === "closed") {
-        warnings.push({
-          rule: e.rule,
-          path: e.path,
-          issue: e.issue,
-          warning: `exception for ${e.path} (${e.rule}) references closed issue ${e.issue} — remove the exception or reopen the issue`,
-        });
-      }
-    }
-  }
+		if (checkIssue) {
+			const status = await checkIssue(e.issue);
+			if (status === "closed") {
+				warnings.push({
+					rule: e.rule,
+					path: e.path,
+					issue: e.issue,
+					warning: `exception for ${e.path} (${e.rule}) references closed issue ${e.issue} — remove the exception or reopen the issue`,
+				});
+			}
+		}
+	}
 
-  return warnings;
+	return warnings;
 }

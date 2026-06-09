@@ -31,22 +31,22 @@
 import { setJsonMode } from "./log.js";
 
 export const HEADLESS_EXIT = {
-  OK: 0,
-  FINDINGS: 1,
-  USER_INPUT: 2,
-  PENDING: 3,
+	OK: 0,
+	FINDINGS: 1,
+	USER_INPUT: 2,
+	PENDING: 3,
 } as const;
 
 export type HeadlessExitCode = (typeof HEADLESS_EXIT)[keyof typeof HEADLESS_EXIT];
 
 export type HeadlessCommand =
-  | "adopt"
-  | "audit"
-  | "heal"
-  | "sync"
-  | "classify"
-  | "upgrade"
-  | "doctor";
+	| "adopt"
+	| "audit"
+	| "heal"
+	| "sync"
+	| "classify"
+	| "upgrade"
+	| "doctor";
 
 /**
  * The shared JSON shape every loop-critical command emits under `--json`.
@@ -74,12 +74,12 @@ export type HeadlessCommand =
  * each command's `--json` branch.
  */
 export interface HeadlessResult {
-  command: HeadlessCommand;
-  ok: boolean;
-  verdict: string;
-  exitCode: number;
-  actions: Record<string, unknown>;
-  remaining: Record<string, unknown>;
+	command: HeadlessCommand;
+	ok: boolean;
+	verdict: string;
+	exitCode: number;
+	actions: Record<string, unknown>;
+	remaining: Record<string, unknown>;
 }
 
 /**
@@ -88,9 +88,9 @@ export interface HeadlessResult {
  * test (running the CLI in-process via `runCli`) sees a clean state.
  */
 export function emitHeadless(result: HeadlessResult): never {
-  process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-  setJsonMode(false);
-  process.exit(result.exitCode);
+	process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+	setJsonMode(false);
+	process.exit(result.exitCode);
 }
 
 /**
@@ -99,16 +99,16 @@ export function emitHeadless(result: HeadlessResult): never {
  * "dirty tree" branches emitting the same envelope.
  */
 export function errorResult(
-  command: HeadlessCommand,
-  message: string,
-  extra: Record<string, unknown> = {},
+	command: HeadlessCommand,
+	message: string,
+	extra: Record<string, unknown> = {},
 ): HeadlessResult {
-  return {
-    command,
-    ok: false,
-    verdict: "error",
-    exitCode: HEADLESS_EXIT.USER_INPUT,
-    actions: {},
-    remaining: { error: message, ...extra },
-  };
+	return {
+		command,
+		ok: false,
+		verdict: "error",
+		exitCode: HEADLESS_EXIT.USER_INPUT,
+		actions: {},
+		remaining: { error: message, ...extra },
+	};
 }

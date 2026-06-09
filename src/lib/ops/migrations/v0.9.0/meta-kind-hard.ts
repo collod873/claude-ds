@@ -14,31 +14,31 @@ import type { ProjectContext } from "../../../project.js";
  * Idempotent: if `meta_kind_strict` is already true the Op returns no changes.
  */
 export const metaKindHardMigration: Operation = {
-  name: "meta-kind-hard@v0.9.0",
-  async plan(ctx: ProjectContext): Promise<Change[]> {
-    const cfgRel = ".claude-ds.json";
-    const cfgAbs = join(ctx.cwd, cfgRel);
-    let raw: string;
-    try {
-      raw = await readFile(cfgAbs, "utf8");
-    } catch {
-      return [];
-    }
-    let obj: Record<string, unknown>;
-    try {
-      obj = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      return [];
-    }
-    if (obj.meta_kind_strict === true) return [];
-    const updated = { ...obj, meta_kind_strict: true };
-    return [
-      {
-        kind: "write",
-        path: cfgRel,
-        before: Buffer.from(raw, "utf8"),
-        after: Buffer.from(JSON.stringify(updated, null, 2) + "\n", "utf8"),
-      },
-    ];
-  },
+	name: "meta-kind-hard@v0.9.0",
+	async plan(ctx: ProjectContext): Promise<Change[]> {
+		const cfgRel = ".claude-ds.json";
+		const cfgAbs = join(ctx.cwd, cfgRel);
+		let raw: string;
+		try {
+			raw = await readFile(cfgAbs, "utf8");
+		} catch {
+			return [];
+		}
+		let obj: Record<string, unknown>;
+		try {
+			obj = JSON.parse(raw) as Record<string, unknown>;
+		} catch {
+			return [];
+		}
+		if (obj.meta_kind_strict === true) return [];
+		const updated = { ...obj, meta_kind_strict: true };
+		return [
+			{
+				kind: "write",
+				path: cfgRel,
+				before: Buffer.from(raw, "utf8"),
+				after: Buffer.from(JSON.stringify(updated, null, 2) + "\n", "utf8"),
+			},
+		];
+	},
 };

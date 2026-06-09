@@ -4,265 +4,337 @@
  * detection, parsing, and the scaffold-vs-consumer partition without
  * spawning any real `tsc`.
  */
-import { describe, expect, it } from "vitest";
-import { writeFile, mkdir } from "node:fs/promises";
+
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { freshTmpDir, cleanup } from "../helpers/tmpdir.js";
+import { describe, expect, it } from "vitest";
 import {
-  detectVerifyCommand,
-  parseVerifyErrors,
-  runConsumerVerify,
-  type ExecFn,
+	detectVerifyCommand,
+	type ExecFn,
+	parseVerifyErrors,
+	runConsumerVerify,
 } from "../../src/lib/run-consumer-verify.js";
+import { cleanup, freshTmpDir } from "../helpers/tmpdir.js";
 
 /** Build a deterministic exec stub that returns the supplied output. */
-function stubExec(returned: { exitCode: number; stdout?: string; stderr?: string; timedOut?: boolean }): ExecFn {
-  return async () => ({
-    exitCode: returned.exitCode,
-    stdout: returned.stdout ?? "",
-    stderr: returned.stderr ?? "",
-    timedOut: returned.timedOut ?? false,
-  });
+function stubExec(returned: {
+	exitCode: number;
+	stdout?: string;
+	stderr?: string;
+	timedOut?: boolean;
+}): ExecFn {
+	return async () => ({
+		exitCode: returned.exitCode,
+		stdout: returned.stdout ?? "",
+		stderr: returned.stderr ?? "",
+		timedOut: returned.timedOut ?? false,
+	});
 }
 
 describe("parseVerifyErrors", () => {
-  it("parses a tsc-style diagnostic line", () => {
-    const raw = `design-system/atoms/button.tsx(12,7): error TS2304: Cannot find name 'Foo'.`;
-    const out = parseVerifyErrors(raw);
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({
-      file: "design-system/atoms/button.tsx",
-      line: 12,
-      col: 7,
-      code: "TS2304",
-      message: "Cannot find name 'Foo'.",
-    });
-  });
+	it("parses a tsc-style diagnostic line", () => {
+		const raw = `design-system/atoms/button.tsx(12,7): error TS2304: Cannot find name 'Foo'.`;
+		const out = parseVerifyErrors(raw);
+		expect(out).toHaveLength(1);
+		expect(out[0]).toMatchObject({
+			file: "design-system/atoms/button.tsx",
+			line: 12,
+			col: 7,
+			code: "TS2304",
+			message: "Cannot find name 'Foo'.",
+		});
+	});
 
-  it("parses multiple diagnostics across newlines", () => {
-    const raw = [
-      `design-system/atoms/a.tsx(1,1): error TS2300: Duplicate identifier 'meta'.`,
-      `src/page.tsx(99,2): error TS2304: Cannot find name 'Bar'.`,
-    ].join("\n");
-    const out = parseVerifyErrors(raw);
-    expect(out.map(e => e.file)).toEqual([
-      "design-system/atoms/a.tsx",
-      "src/page.tsx",
-    ]);
-  });
+	it("parses multiple diagnostics across newlines", () => {
+		const raw = [
+			`design-system/atoms/a.tsx(1,1): error TS2300: Duplicate identifier 'meta'.`,
+			`src/page.tsx(99,2): error TS2304: Cannot find name 'Bar'.`,
+		].join("\n");
+		const out = parseVerifyErrors(raw);
+		expect(out.map((e) => e.file)).toEqual(["design-system/atoms/a.tsx", "src/page.tsx"]);
+	});
 
-  it("returns no errors for green output", () => {
-    expect(parseVerifyErrors("")).toEqual([]);
-    expect(parseVerifyErrors("Found 0 errors. Watching for file changes.\n")).toEqual([]);
-  });
+	it("returns no errors for green output", () => {
+		expect(parseVerifyErrors("")).toEqual([]);
+		expect(parseVerifyErrors("Found 0 errors. Watching for file changes.\n")).toEqual([]);
+	});
 });
 
 describe("detectVerifyCommand", () => {
-  it("prefers an explicit `verify` script", async () => {
-    const cwd = await freshTmpDir("rcv-detect-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({
-        scripts: { verify: "tsc --noEmit", typecheck: "tsc --noEmit", build: "next build" },
-        devDependencies: { typescript: "^5.0.0" },
-      }));
-      await writeFile(join(cwd, "tsconfig.json"), "{}");
-      const cmd = await detectVerifyCommand(cwd);
-      expect(cmd?.label).toBe("npm run verify");
-    } finally { await cleanup(cwd); }
-  });
+	it("prefers an explicit `verify` script", async () => {
+		const cwd = await freshTmpDir("rcv-detect-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({
+					scripts: { verify: "tsc --noEmit", typecheck: "tsc --noEmit", build: "next build" },
+					devDependencies: { typescript: "^5.0.0" },
+				}),
+			);
+			await writeFile(join(cwd, "tsconfig.json"), "{}");
+			const cmd = await detectVerifyCommand(cwd);
+			expect(cmd?.label).toBe("npm run verify");
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("falls back to `typecheck` when no `verify` script", async () => {
-    const cwd = await freshTmpDir("rcv-detect-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({
-        scripts: { typecheck: "tsc --noEmit", build: "next build" },
-        devDependencies: { typescript: "^5.0.0" },
-      }));
-      const cmd = await detectVerifyCommand(cwd);
-      expect(cmd?.label).toBe("npm run typecheck");
-    } finally { await cleanup(cwd); }
-  });
+	it("falls back to `typecheck` when no `verify` script", async () => {
+		const cwd = await freshTmpDir("rcv-detect-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({
+					scripts: { typecheck: "tsc --noEmit", build: "next build" },
+					devDependencies: { typescript: "^5.0.0" },
+				}),
+			);
+			const cmd = await detectVerifyCommand(cwd);
+			expect(cmd?.label).toBe("npm run typecheck");
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("falls back to `tsc --noEmit` when no verify/typecheck script but typescript is a dep", async () => {
-    const cwd = await freshTmpDir("rcv-detect-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({
-        scripts: { build: "next build" },
-        devDependencies: { typescript: "^5.0.0" },
-      }));
-      await writeFile(join(cwd, "tsconfig.json"), "{}");
-      const cmd = await detectVerifyCommand(cwd);
-      expect(cmd?.label).toBe("npx tsc --noEmit");
-    } finally { await cleanup(cwd); }
-  });
+	it("falls back to `tsc --noEmit` when no verify/typecheck script but typescript is a dep", async () => {
+		const cwd = await freshTmpDir("rcv-detect-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({
+					scripts: { build: "next build" },
+					devDependencies: { typescript: "^5.0.0" },
+				}),
+			);
+			await writeFile(join(cwd, "tsconfig.json"), "{}");
+			const cmd = await detectVerifyCommand(cwd);
+			expect(cmd?.label).toBe("npx tsc --noEmit");
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("falls back to `build` script when no typecheck/typescript path exists", async () => {
-    const cwd = await freshTmpDir("rcv-detect-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({
-        scripts: { build: "next build" },
-      }));
-      const cmd = await detectVerifyCommand(cwd);
-      expect(cmd?.label).toBe("npm run build");
-    } finally { await cleanup(cwd); }
-  });
+	it("falls back to `build` script when no typecheck/typescript path exists", async () => {
+		const cwd = await freshTmpDir("rcv-detect-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({
+					scripts: { build: "next build" },
+				}),
+			);
+			const cmd = await detectVerifyCommand(cwd);
+			expect(cmd?.label).toBe("npm run build");
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("returns null when no detectable verify command", async () => {
-    const cwd = await freshTmpDir("rcv-detect-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "x", scripts: {} }));
-      const cmd = await detectVerifyCommand(cwd);
-      expect(cmd).toBeNull();
-    } finally { await cleanup(cwd); }
-  });
+	it("returns null when no detectable verify command", async () => {
+		const cwd = await freshTmpDir("rcv-detect-");
+		try {
+			await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "x", scripts: {} }));
+			const cmd = await detectVerifyCommand(cwd);
+			expect(cmd).toBeNull();
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 });
 
 describe("runConsumerVerify", () => {
-  it("returns ok=true with no errors on a green run", async () => {
-    const cwd = await freshTmpDir("rcv-green-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { verify: "tsc --noEmit" } }));
-      const result = await runConsumerVerify(cwd, { exec: stubExec({ exitCode: 0, stdout: "" }) });
-      expect(result.ok).toBe(true);
-      expect(result.errors).toEqual([]);
-      expect(result.scaffoldErrors).toEqual([]);
-      expect(result.consumerErrors).toEqual([]);
-      expect(result.command).toBe("npm run verify");
-      expect(result.exitCode).toBe(0);
-    } finally { await cleanup(cwd); }
-  });
+	it("returns ok=true with no errors on a green run", async () => {
+		const cwd = await freshTmpDir("rcv-green-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const result = await runConsumerVerify(cwd, { exec: stubExec({ exitCode: 0, stdout: "" }) });
+			expect(result.ok).toBe(true);
+			expect(result.errors).toEqual([]);
+			expect(result.scaffoldErrors).toEqual([]);
+			expect(result.consumerErrors).toEqual([]);
+			expect(result.command).toBe("npm run verify");
+			expect(result.exitCode).toBe(0);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("flags errors in scaffold files (default `design-system/` root) as scaffold errors", async () => {
-    const cwd = await freshTmpDir("rcv-scaffold-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { verify: "tsc --noEmit" } }));
-      const stdout = `design-system/atoms/button.tsx(1,1): error TS2300: Duplicate identifier 'meta'.`;
-      const result = await runConsumerVerify(cwd, {
-        exec: stubExec({ exitCode: 1, stdout }),
-      });
-      expect(result.ok).toBe(false);
-      expect(result.scaffoldErrors).toHaveLength(1);
-      expect(result.scaffoldErrors[0].file).toBe("design-system/atoms/button.tsx");
-      expect(result.consumerErrors).toEqual([]);
-    } finally { await cleanup(cwd); }
-  });
+	it("flags errors in scaffold files (default `design-system/` root) as scaffold errors", async () => {
+		const cwd = await freshTmpDir("rcv-scaffold-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const stdout = `design-system/atoms/button.tsx(1,1): error TS2300: Duplicate identifier 'meta'.`;
+			const result = await runConsumerVerify(cwd, {
+				exec: stubExec({ exitCode: 1, stdout }),
+			});
+			expect(result.ok).toBe(false);
+			expect(result.scaffoldErrors).toHaveLength(1);
+			expect(result.scaffoldErrors[0].file).toBe("design-system/atoms/button.tsx");
+			expect(result.consumerErrors).toEqual([]);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("treats errors outside scaffold roots/touched files as consumer errors (ok stays true)", async () => {
-    const cwd = await freshTmpDir("rcv-consumer-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { verify: "tsc --noEmit" } }));
-      const stdout = `src/legacy/page.tsx(99,2): error TS2304: Cannot find name 'Bar'.`;
-      const result = await runConsumerVerify(cwd, {
-        exec: stubExec({ exitCode: 1, stdout }),
-      });
-      // Pre-existing consumer errors warn but do not block claude-ds's verdict.
-      expect(result.ok).toBe(true);
-      expect(result.scaffoldErrors).toEqual([]);
-      expect(result.consumerErrors).toHaveLength(1);
-      expect(result.consumerErrors[0].file).toBe("src/legacy/page.tsx");
-    } finally { await cleanup(cwd); }
-  });
+	it("treats errors outside scaffold roots/touched files as consumer errors (ok stays true)", async () => {
+		const cwd = await freshTmpDir("rcv-consumer-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const stdout = `src/legacy/page.tsx(99,2): error TS2304: Cannot find name 'Bar'.`;
+			const result = await runConsumerVerify(cwd, {
+				exec: stubExec({ exitCode: 1, stdout }),
+			});
+			// Pre-existing consumer errors warn but do not block claude-ds's verdict.
+			expect(result.ok).toBe(true);
+			expect(result.scaffoldErrors).toEqual([]);
+			expect(result.consumerErrors).toHaveLength(1);
+			expect(result.consumerErrors[0].file).toBe("src/legacy/page.tsx");
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("counts errors in claude-ds-touched files as scaffold errors even outside `design-system/`", async () => {
-    const cwd = await freshTmpDir("rcv-touched-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { verify: "tsc --noEmit" } }));
-      const stdout = `src/special.tsx(3,4): error TS2304: Cannot find name 'X'.`;
-      const result = await runConsumerVerify(cwd, {
-        touchedFiles: new Set(["src/special.tsx"]),
-        exec: stubExec({ exitCode: 1, stdout }),
-      });
-      expect(result.ok).toBe(false);
-      expect(result.scaffoldErrors).toHaveLength(1);
-      expect(result.consumerErrors).toEqual([]);
-    } finally { await cleanup(cwd); }
-  });
+	it("counts errors in claude-ds-touched files as scaffold errors even outside `design-system/`", async () => {
+		const cwd = await freshTmpDir("rcv-touched-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const stdout = `src/special.tsx(3,4): error TS2304: Cannot find name 'X'.`;
+			const result = await runConsumerVerify(cwd, {
+				touchedFiles: new Set(["src/special.tsx"]),
+				exec: stubExec({ exitCode: 1, stdout }),
+			});
+			expect(result.ok).toBe(false);
+			expect(result.scaffoldErrors).toHaveLength(1);
+			expect(result.consumerErrors).toEqual([]);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("counts errors in pack-managed files as scaffold errors", async () => {
-    const cwd = await freshTmpDir("rcv-managed-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { verify: "tsc --noEmit" } }));
-      const stdout = `.claude/hooks/atom-imports.sh(1,1): error TS9999: bogus`;
-      const result = await runConsumerVerify(cwd, {
-        managedFiles: new Set([".claude/hooks/atom-imports.sh"]),
-        exec: stubExec({ exitCode: 1, stdout }),
-      });
-      expect(result.ok).toBe(false);
-      expect(result.scaffoldErrors).toHaveLength(1);
-    } finally { await cleanup(cwd); }
-  });
+	it("counts errors in pack-managed files as scaffold errors", async () => {
+		const cwd = await freshTmpDir("rcv-managed-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const stdout = `.claude/hooks/atom-imports.sh(1,1): error TS9999: bogus`;
+			const result = await runConsumerVerify(cwd, {
+				managedFiles: new Set([".claude/hooks/atom-imports.sh"]),
+				exec: stubExec({ exitCode: 1, stdout }),
+			});
+			expect(result.ok).toBe(false);
+			expect(result.scaffoldErrors).toHaveLength(1);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("partitions a mixed scaffold + consumer error list correctly", async () => {
-    const cwd = await freshTmpDir("rcv-mixed-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { verify: "tsc --noEmit" } }));
-      const stdout = [
-        `design-system/atoms/a.tsx(1,1): error TS2300: Duplicate identifier 'meta'.`,
-        `src/legacy/page.tsx(99,2): error TS2304: Cannot find name 'Bar'.`,
-        `design-system/composites/b.tsx(5,6): error TS2552: Cannot find name 'Foo'.`,
-      ].join("\n");
-      const result = await runConsumerVerify(cwd, {
-        exec: stubExec({ exitCode: 1, stdout }),
-      });
-      expect(result.ok).toBe(false);
-      expect(result.scaffoldErrors).toHaveLength(2);
-      expect(result.consumerErrors).toHaveLength(1);
-      expect(result.consumerErrors[0].file).toBe("src/legacy/page.tsx");
-    } finally { await cleanup(cwd); }
-  });
+	it("partitions a mixed scaffold + consumer error list correctly", async () => {
+		const cwd = await freshTmpDir("rcv-mixed-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const stdout = [
+				`design-system/atoms/a.tsx(1,1): error TS2300: Duplicate identifier 'meta'.`,
+				`src/legacy/page.tsx(99,2): error TS2304: Cannot find name 'Bar'.`,
+				`design-system/composites/b.tsx(5,6): error TS2552: Cannot find name 'Foo'.`,
+			].join("\n");
+			const result = await runConsumerVerify(cwd, {
+				exec: stubExec({ exitCode: 1, stdout }),
+			});
+			expect(result.ok).toBe(false);
+			expect(result.scaffoldErrors).toHaveLength(2);
+			expect(result.consumerErrors).toHaveLength(1);
+			expect(result.consumerErrors[0].file).toBe("src/legacy/page.tsx");
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("treats a non-zero exit with no parseable errors as an env failure (ok=false)", async () => {
-    const cwd = await freshTmpDir("rcv-env-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { verify: "tsc --noEmit" } }));
-      const result = await runConsumerVerify(cwd, {
-        exec: stubExec({ exitCode: 2, stderr: "tsc: command not found" }),
-      });
-      expect(result.ok).toBe(false);
-      expect(result.errors).toEqual([]);
-      expect(result.reason).toMatch(/exited 2/);
-    } finally { await cleanup(cwd); }
-  });
+	it("treats a non-zero exit with no parseable errors as an env failure (ok=false)", async () => {
+		const cwd = await freshTmpDir("rcv-env-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const result = await runConsumerVerify(cwd, {
+				exec: stubExec({ exitCode: 2, stderr: "tsc: command not found" }),
+			});
+			expect(result.ok).toBe(false);
+			expect(result.errors).toEqual([]);
+			expect(result.reason).toMatch(/exited 2/);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("returns ok=true with a `no verify command` reason when nothing is detectable", async () => {
-    const cwd = await freshTmpDir("rcv-none-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: {} }));
-      const result = await runConsumerVerify(cwd);
-      expect(result.ok).toBe(true);
-      expect(result.command).toBe("(none)");
-      expect(result.reason).toMatch(/no verify command/);
-    } finally { await cleanup(cwd); }
-  });
+	it("returns ok=true with a `no verify command` reason when nothing is detectable", async () => {
+		const cwd = await freshTmpDir("rcv-none-");
+		try {
+			await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: {} }));
+			const result = await runConsumerVerify(cwd);
+			expect(result.ok).toBe(true);
+			expect(result.command).toBe("(none)");
+			expect(result.reason).toMatch(/no verify command/);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("honors a custom managedRoots prefix", async () => {
-    const cwd = await freshTmpDir("rcv-roots-");
-    try {
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { verify: "tsc --noEmit" } }));
-      const stdout = `app/ui/widget.tsx(1,1): error TS2300: dup`;
-      const result = await runConsumerVerify(cwd, {
-        managedRoots: ["app/ui/"],
-        exec: stubExec({ exitCode: 1, stdout }),
-      });
-      expect(result.ok).toBe(false);
-      expect(result.scaffoldErrors).toHaveLength(1);
-    } finally { await cleanup(cwd); }
-  });
+	it("honors a custom managedRoots prefix", async () => {
+		const cwd = await freshTmpDir("rcv-roots-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const stdout = `app/ui/widget.tsx(1,1): error TS2300: dup`;
+			const result = await runConsumerVerify(cwd, {
+				managedRoots: ["app/ui/"],
+				exec: stubExec({ exitCode: 1, stdout }),
+			});
+			expect(result.ok).toBe(false);
+			expect(result.scaffoldErrors).toHaveLength(1);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 
-  it("normalizes a leading `./` and backslashes when matching scaffold paths", async () => {
-    const cwd = await freshTmpDir("rcv-norm-");
-    try {
-      await mkdir(join(cwd, "design-system", "atoms"), { recursive: true });
-      await writeFile(join(cwd, "package.json"), JSON.stringify({ scripts: { verify: "tsc --noEmit" } }));
-      const stdout = [
-        `./design-system/atoms/a.tsx(1,1): error TS2300: dup`,
-        `design-system\\atoms\\b.tsx(1,1): error TS2300: dup`,
-      ].join("\n");
-      const result = await runConsumerVerify(cwd, {
-        exec: stubExec({ exitCode: 1, stdout }),
-      });
-      expect(result.scaffoldErrors).toHaveLength(2);
-      expect(result.consumerErrors).toHaveLength(0);
-    } finally { await cleanup(cwd); }
-  });
+	it("normalizes a leading `./` and backslashes when matching scaffold paths", async () => {
+		const cwd = await freshTmpDir("rcv-norm-");
+		try {
+			await mkdir(join(cwd, "design-system", "atoms"), { recursive: true });
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const stdout = [
+				`./design-system/atoms/a.tsx(1,1): error TS2300: dup`,
+				`design-system\\atoms\\b.tsx(1,1): error TS2300: dup`,
+			].join("\n");
+			const result = await runConsumerVerify(cwd, {
+				exec: stubExec({ exitCode: 1, stdout }),
+			});
+			expect(result.scaffoldErrors).toHaveLength(2);
+			expect(result.consumerErrors).toHaveLength(0);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
 });

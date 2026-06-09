@@ -1,107 +1,105 @@
-import { parseConfig } from "../lib/config.js";
-import { parseLsRemote } from "../lib/tags.js";
-import { semverLt } from "../lib/version-currency.js";
-import { colors, printNextStep } from "../lib/log.js";
-import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { parseConfig } from "../lib/config.js";
+import { colors, printNextStep } from "../lib/log.js";
+import { parseLsRemote } from "../lib/tags.js";
+import { semverLt } from "../lib/version-currency.js";
 import { cliVersion, LABEL_CLI, LABEL_PIN } from "../lib/version-vocab.js";
 
 const DEFAULT_REMOTE = "https://github.com/collod873/claude-ds";
 
 async function readIfExistsLocal(p: string): Promise<string | null> {
-  try {
-    return await readFile(p, "utf8");
-  } catch (e) {
-    if (e instanceof Error && (e as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw e;
-  }
+	try {
+		return await readFile(p, "utf8");
+	} catch (e) {
+		if (e instanceof Error && (e as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw e;
+	}
 }
 
-export type LatestTagResult =
-  | { ok: true; tag: string | null }
-  | { ok: false; reason: string };
+export type LatestTagResult = { ok: true; tag: string | null } | { ok: false; reason: string };
 
 export interface SpawnRunResult {
-  status: number | null;
-  stdout: string;
-  stderr: string;
-  error?: Error;
+	status: number | null;
+	stdout: string;
+	stderr: string;
+	error?: Error;
 }
 
 export type GitRunner = (cmd: string, args: string[]) => SpawnRunResult;
 
 const defaultRunner: GitRunner = (cmd, args) => {
-  const r = spawnSync(cmd, args, { encoding: "utf8" });
-  return { status: r.status, stdout: r.stdout, stderr: r.stderr, error: r.error };
+	const r = spawnSync(cmd, args, { encoding: "utf8" });
+	return { status: r.status, stdout: r.stdout, stderr: r.stderr, error: r.error };
 };
 
 /** Resolve the latest v-prefixed semver tag at a remote. Caller distinguishes
  *  network/CLI failure (ok:false) from "remote has no v-tags" (ok:true, tag:null). */
 export function fetchLatestTag(remote: string, runner: GitRunner = defaultRunner): LatestTagResult {
-  const r = runner("git", ["ls-remote", "--tags", remote]);
-  if (r.error) return { ok: false, reason: r.error.message };
-  if (r.status !== 0) {
-    const detail = r.stderr.trim() || `(no stderr)`;
-    return { ok: false, reason: `git ls-remote exited ${r.status ?? "null"}: ${detail}` };
-  }
-  const tags = parseLsRemote(r.stdout);
-  return { ok: true, tag: tags[tags.length - 1] ?? null };
+	const r = runner("git", ["ls-remote", "--tags", remote]);
+	if (r.error) return { ok: false, reason: r.error.message };
+	if (r.status !== 0) {
+		const detail = r.stderr.trim() || `(no stderr)`;
+		return { ok: false, reason: `git ls-remote exited ${r.status ?? "null"}: ${detail}` };
+	}
+	const tags = parseLsRemote(r.stdout);
+	return { ok: true, tag: tags[tags.length - 1] ?? null };
 }
 
 export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd?: string }) {
-  const cwd = opts.cwd ?? process.cwd();
-  const raw = await readIfExistsLocal(join(cwd, ".claude-ds.json"));
-  const pinned = raw ? parseConfig(raw).packVersion : null;
-  const installedVer = cliVersion();
+	const cwd = opts.cwd ?? process.cwd();
+	const raw = await readIfExistsLocal(join(cwd, ".claude-ds.json"));
+	const pinned = raw ? parseConfig(raw).packVersion : null;
+	const installedVer = cliVersion();
 
-  const c = colors();
-  if (opts.check) {
-    if (!pinned) {
-      console.log(c.red("no .claude-ds.json found — cannot check version"));
-      printNextStep("version", { versionState: "no-config" });
-      process.exit(1);
-    }
+	const c = colors();
+	if (opts.check) {
+		if (!pinned) {
+			console.log(c.red("no .claude-ds.json found — cannot check version"));
+			printNextStep("version", { versionState: "no-config" });
+			process.exit(1);
+		}
 
-    if (pinned === installedVer) {
-      console.log(c.green(`up to date (${installedVer})`));
-      printNextStep("version", { versionState: "up-to-date" });
-      process.exit(0);
-    }
+		if (pinned === installedVer) {
+			console.log(c.green(`up to date (${installedVer})`));
+			printNextStep("version", { versionState: "up-to-date" });
+			process.exit(0);
+		}
 
-    console.log(`${LABEL_PIN}: ${c.bold(pinned)}  ${LABEL_CLI}: ${c.bold(installedVer)}`);
-    console.log("");
+		console.log(`${LABEL_PIN}: ${c.bold(pinned)}  ${LABEL_CLI}: ${c.bold(installedVer)}`);
+		console.log("");
 
-    // #363: replace the free-form "Run `claude-ds upgrade`..." line with the
-    // canonical `→ Next:` breadcrumb. Route based on direction: pinned <
-    // installed → upgrade; pinned > installed → update the CLI binary.
-    const state: "behind" | "ahead" = semverLt(pinned, installedVer) ? "behind" : "ahead";
-    printNextStep("version", { versionState: state });
-    process.exit(1);
-  }
+		// #363: replace the free-form "Run `claude-ds upgrade`..." line with the
+		// canonical `→ Next:` breadcrumb. Route based on direction: pinned <
+		// installed → upgrade; pinned > installed → update the CLI binary.
+		const state: "behind" | "ahead" = semverLt(pinned, installedVer) ? "behind" : "ahead";
+		printNextStep("version", { versionState: state });
+		process.exit(1);
+	}
 
-  // Default mode. `installed` is the CLI binary version (consistent with
-  // --check — issue #367). `pinned` is .claude-ds.json#packVersion, or
-  // `(none)` when no config is present. `latest` is the highest tag at the
-  // remote; failures print a hint on stderr instead of silently rendering
-  // `latest: unknown` (issue #368).
-  console.log(`${LABEL_CLI}: ${c.bold(installedVer)}`);
-  console.log(`${LABEL_PIN}: ${c.bold(pinned ?? "(none)")}`);
+	// Default mode. `installed` is the CLI binary version (consistent with
+	// --check — issue #367). `pinned` is .claude-ds.json#packVersion, or
+	// `(none)` when no config is present. `latest` is the highest tag at the
+	// remote; failures print a hint on stderr instead of silently rendering
+	// `latest: unknown` (issue #368).
+	console.log(`${LABEL_CLI}: ${c.bold(installedVer)}`);
+	console.log(`${LABEL_PIN}: ${c.bold(pinned ?? "(none)")}`);
 
-  if (opts.offline) {
-    console.log(`latest: ${c.dim("unknown")}`);
-    printNextStep("version", { versionState: defaultVersionState(pinned, installedVer) });
-    return;
-  }
+	if (opts.offline) {
+		console.log(`latest: ${c.dim("unknown")}`);
+		printNextStep("version", { versionState: defaultVersionState(pinned, installedVer) });
+		return;
+	}
 
-  const result = fetchLatestTag(DEFAULT_REMOTE);
-  if (result.ok) {
-    console.log(`latest: ${c.bold(result.tag ?? "unknown")}`);
-  } else {
-    console.log(`latest: ${c.dim("unknown")}`);
-    console.error(c.red(`(latest tag check failed: ${result.reason}; pass --offline to skip)`));
-  }
-  printNextStep("version", { versionState: defaultVersionState(pinned, installedVer) });
+	const result = fetchLatestTag(DEFAULT_REMOTE);
+	if (result.ok) {
+		console.log(`latest: ${c.bold(result.tag ?? "unknown")}`);
+	} else {
+		console.log(`latest: ${c.dim("unknown")}`);
+		console.error(c.red(`(latest tag check failed: ${result.reason}; pass --offline to skip)`));
+	}
+	printNextStep("version", { versionState: defaultVersionState(pinned, installedVer) });
 }
 
 /**
@@ -111,10 +109,10 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
  * for the same project state.
  */
 function defaultVersionState(
-  pinned: string | null,
-  installedVer: string,
+	pinned: string | null,
+	installedVer: string,
 ): "no-config" | "up-to-date" | "behind" | "ahead" {
-  if (!pinned) return "no-config";
-  if (pinned === installedVer) return "up-to-date";
-  return semverLt(pinned, installedVer) ? "behind" : "ahead";
+	if (!pinned) return "no-config";
+	if (pinned === installedVer) return "up-to-date";
+	return semverLt(pinned, installedVer) ? "behind" : "ahead";
 }

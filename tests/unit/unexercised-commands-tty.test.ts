@@ -20,67 +20,62 @@
  * the `tsc --noEmit` call with a `progress.start(...)` for the verification
  * phase.
  */
-import { describe, expect, it } from "vitest";
+
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cmdDir = join(here, "..", "..", "src", "commands");
 
-const UNEXERCISED = [
-  "version.ts",
-  "migrate-layout.ts",
-  "reconform.ts",
-  "enforce.ts",
-];
+const UNEXERCISED = ["version.ts", "migrate-layout.ts", "reconform.ts", "enforce.ts"];
 
 describe("#370 — unexercised commands wire the TTY color adapter", () => {
-  it.each(UNEXERCISED)(
-    "%s imports `colors` from lib/log.js so phase/verdict lines colorize on TTY",
-    async (filename) => {
-      const src = await readFile(join(cmdDir, filename), "utf8");
-      // Import statement: `import { ..., colors, ... } from "../lib/log.js"`.
-      // The regex is tolerant of the other named imports beside `colors`.
-      const importRe = /import\s*\{[^}]*\bcolors\b[^}]*\}\s*from\s*["']\.\.\/lib\/log\.js["']/;
-      expect(src, `${filename} should import colors from lib/log.js`).toMatch(importRe);
-      // The adapter must actually be invoked — an unused import is the F1
-      // shape the issue is closing (wiring named but never reached).
-      expect(src, `${filename} should call colors() at least once`).toMatch(/\bcolors\(\)/);
-    },
-  );
+	it.each(
+		UNEXERCISED,
+	)("%s imports `colors` from lib/log.js so phase/verdict lines colorize on TTY", async (filename) => {
+		const src = await readFile(join(cmdDir, filename), "utf8");
+		// Import statement: `import { ..., colors, ... } from "../lib/log.js"`.
+		// The regex is tolerant of the other named imports beside `colors`.
+		const importRe = /import\s*\{[^}]*\bcolors\b[^}]*\}\s*from\s*["']\.\.\/lib\/log\.js["']/;
+		expect(src, `${filename} should import colors from lib/log.js`).toMatch(importRe);
+		// The adapter must actually be invoked — an unused import is the F1
+		// shape the issue is closing (wiring named but never reached).
+		expect(src, `${filename} should call colors() at least once`).toMatch(/\bcolors\(\)/);
+	});
 });
 
 describe("#370 — reconform surfaces a spinner around the multi-second waits", () => {
-  it("imports createProgress from the TTY layer", async () => {
-    const src = await readFile(join(cmdDir, "reconform.ts"), "utf8");
-    expect(src).toMatch(
-      /import\s*\{[^}]*\bcreateProgress\b[^}]*\}\s*from\s*["']\.\.\/lib\/render\/tty-layer\.js["']/,
-    );
-  });
+	it("imports createProgress from the TTY layer", async () => {
+		const src = await readFile(join(cmdDir, "reconform.ts"), "utf8");
+		expect(src).toMatch(
+			/import\s*\{[^}]*\bcreateProgress\b[^}]*\}\s*from\s*["']\.\.\/lib\/render\/tty-layer\.js["']/,
+		);
+	});
 
-  it("wraps `tsc --noEmit` with a dedicated progress.start phase", async () => {
-    const src = await readFile(join(cmdDir, "reconform.ts"), "utf8");
-    // The spinner phase header naming `tsc` must appear before the
-    // `tsc --noEmit` spawn so the operator sees "verifying moves" rather than
-    // a silent hang during the multi-second tsc run.
-    const tscSpawnIdx = src.indexOf('spawnSync("npx", ["tsc", "--noEmit"]');
-    expect(tscSpawnIdx).toBeGreaterThan(-1);
-    const prelude = src.slice(0, tscSpawnIdx);
-    expect(prelude).toMatch(/progress\.start\([^)]*tsc[^)]*\)/);
-  });
+	it("wraps `tsc --noEmit` with a dedicated progress.start phase", async () => {
+		const src = await readFile(join(cmdDir, "reconform.ts"), "utf8");
+		// The spinner phase header naming `tsc` must appear before the
+		// `tsc --noEmit` spawn so the operator sees "verifying moves" rather than
+		// a silent hang during the multi-second tsc run.
+		const tscSpawnIdx = src.indexOf('spawnSync("npx", ["tsc", "--noEmit"]');
+		expect(tscSpawnIdx).toBeGreaterThan(-1);
+		const prelude = src.slice(0, tscSpawnIdx);
+		expect(prelude).toMatch(/progress\.start\([^)]*tsc[^)]*\)/);
+	});
 
-  it("starts and stops the spinner in a try/finally so SIGINT cleanup runs", async () => {
-    const src = await readFile(join(cmdDir, "reconform.ts"), "utf8");
-    // The progress controller registers a SIGINT handler that gets removed in
-    // stop(); reconform must invoke stop() unconditionally or the agent-side
-    // process keeps a dangling listener after the command returns.
-    expect(src).toMatch(/progress\.stop\(\)/);
-    // `try {` must precede the first `progress.start` so the `finally { progress.stop() }`
-    // covers every phase.
-    const firstStartIdx = src.indexOf("progress.start(");
-    const tryIdx = src.lastIndexOf("try {", firstStartIdx);
-    expect(tryIdx).toBeGreaterThan(-1);
-    expect(tryIdx).toBeLessThan(firstStartIdx);
-  });
+	it("starts and stops the spinner in a try/finally so SIGINT cleanup runs", async () => {
+		const src = await readFile(join(cmdDir, "reconform.ts"), "utf8");
+		// The progress controller registers a SIGINT handler that gets removed in
+		// stop(); reconform must invoke stop() unconditionally or the agent-side
+		// process keeps a dangling listener after the command returns.
+		expect(src).toMatch(/progress\.stop\(\)/);
+		// `try {` must precede the first `progress.start` so the `finally { progress.stop() }`
+		// covers every phase.
+		const firstStartIdx = src.indexOf("progress.start(");
+		const tryIdx = src.lastIndexOf("try {", firstStartIdx);
+		expect(tryIdx).toBeGreaterThan(-1);
+		expect(tryIdx).toBeLessThan(firstStartIdx);
+	});
 });

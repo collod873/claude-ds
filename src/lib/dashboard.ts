@@ -17,51 +17,47 @@
  * orchestration code.
  */
 
-import type {
-  DashboardFinding,
-  DashboardState,
-} from "./render/dashboard.js";
+import type { DashboardFinding, DashboardState } from "./render/dashboard.js";
 
 export interface DashboardInput {
-  cwd: string;
-  /** `"pre-adopt"` when no `.claude-ds.json` exists; `"adopted"` otherwise. */
-  mode: "pre-adopt" | "adopted";
-  /** Pack name — used to format the pre-adopt `adopt --pack <name>` recommendation. */
-  pack: string;
-  /** From `scanScaffoldPresence` — present/total managed+seeded files. */
-  scaffold: { present: number; total: number };
-  /** Missing managed files in adopted mode (lookalikes are reported separately by doctor). */
-  missingManaged: number;
-  /** Root-level dupes of canonical design-system/ files (#23). */
-  rootDupes: number;
-  /** Drift + integrity findings from a read-only `scanDriftAndIntegrity` pass. */
-  findings: ReadonlyArray<{ ruleId: string; file: string; message: string }>;
-  /** Subset of `findings` that need extraction (classify, not audit --fix). */
-  extractionCount: number;
-  /** Subset of `findings` that audit cannot auto-repair (report-only relocates,
-   *  unresolvable imports, deferred extraction). */
-  unfixableCount: number;
-  /** Detected build command — what the clean-tree recommendation invokes. */
-  buildCmd: string;
-  /** Pinned `packVersion` is older than the installed CLI (#336). Pre-adopt
-   *  callers and up-to-date projects pass `false`; the brain only surfaces
-   *  the signal in adopted mode. Defaults to `false` so callers not yet
-   *  wired to version currency keep today's behavior. */
-  upgradeAvailable?: boolean;
+	cwd: string;
+	/** `"pre-adopt"` when no `.claude-ds.json` exists; `"adopted"` otherwise. */
+	mode: "pre-adopt" | "adopted";
+	/** Pack name — used to format the pre-adopt `adopt --pack <name>` recommendation. */
+	pack: string;
+	/** From `scanScaffoldPresence` — present/total managed+seeded files. */
+	scaffold: { present: number; total: number };
+	/** Missing managed files in adopted mode (lookalikes are reported separately by doctor). */
+	missingManaged: number;
+	/** Root-level dupes of canonical design-system/ files (#23). */
+	rootDupes: number;
+	/** Drift + integrity findings from a read-only `scanDriftAndIntegrity` pass. */
+	findings: ReadonlyArray<{ ruleId: string; file: string; message: string }>;
+	/** Subset of `findings` that need extraction (classify, not audit --fix). */
+	extractionCount: number;
+	/** Subset of `findings` that audit cannot auto-repair (report-only relocates,
+	 *  unresolvable imports, deferred extraction). */
+	unfixableCount: number;
+	/** Detected build command — what the clean-tree recommendation invokes. */
+	buildCmd: string;
+	/** Pinned `packVersion` is older than the installed CLI (#336). Pre-adopt
+	 *  callers and up-to-date projects pass `false`; the brain only surfaces
+	 *  the signal in adopted mode. Defaults to `false` so callers not yet
+	 *  wired to version currency keep today's behavior. */
+	upgradeAvailable?: boolean;
 }
 
 export function composeDashboardState(input: DashboardInput): DashboardState {
-  const findings: DashboardFinding[] = input.findings.map(f => ({
-    ruleId: f.ruleId,
-    file: f.file,
-    message: f.message,
-  }));
-  return {
-    cwd: input.cwd,
-    mode: input.mode,
-    scaffold: input.scaffold,
-    findings,
-    upgradeAvailable:
-      input.mode === "adopted" && input.upgradeAvailable === true,
-  };
+	const findings: DashboardFinding[] = input.findings.map((f) => ({
+		ruleId: f.ruleId,
+		file: f.file,
+		message: f.message,
+	}));
+	return {
+		cwd: input.cwd,
+		mode: input.mode,
+		scaffold: input.scaffold,
+		findings,
+		upgradeAvailable: input.mode === "adopted" && input.upgradeAvailable === true,
+	};
 }

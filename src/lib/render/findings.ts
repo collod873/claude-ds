@@ -10,64 +10,60 @@
  */
 
 export interface RenderableFinding {
-  ruleId: string;
-  file: string;
-  message: string;
-  /** Human-readable rule label — slice-2 tightening (PRD #325). */
-  label?: string;
-  /** Auto-fixable vs. needs-you badge discriminator (derives from `fixable`
-   *  on the rule registry; see PRD #325 / slice 2). */
-  fixable?: boolean;
+	ruleId: string;
+	file: string;
+	message: string;
+	/** Human-readable rule label — slice-2 tightening (PRD #325). */
+	label?: string;
+	/** Auto-fixable vs. needs-you badge discriminator (derives from `fixable`
+	 *  on the rule registry; see PRD #325 / slice 2). */
+	fixable?: boolean;
 }
 
 interface FindingGroup {
-  ruleId: string;
-  label?: string;
-  fixable?: boolean;
-  findings: RenderableFinding[];
+	ruleId: string;
+	label?: string;
+	fixable?: boolean;
+	findings: RenderableFinding[];
 }
 
 function groupByRule(findings: RenderableFinding[]): FindingGroup[] {
-  const byId = new Map<string, FindingGroup>();
-  for (const f of findings) {
-    const existing = byId.get(f.ruleId);
-    if (existing) {
-      existing.findings.push(f);
-    } else {
-      byId.set(f.ruleId, {
-        ruleId: f.ruleId,
-        label: f.label,
-        fixable: f.fixable,
-        findings: [f],
-      });
-    }
-  }
-  return [...byId.values()];
+	const byId = new Map<string, FindingGroup>();
+	for (const f of findings) {
+		const existing = byId.get(f.ruleId);
+		if (existing) {
+			existing.findings.push(f);
+		} else {
+			byId.set(f.ruleId, {
+				ruleId: f.ruleId,
+				label: f.label,
+				fixable: f.fixable,
+				findings: [f],
+			});
+		}
+	}
+	return [...byId.values()];
 }
 
 function headerFor(group: FindingGroup): string {
-  const noun = group.findings.length === 1 ? "finding" : "findings";
-  const count = `(${group.findings.length} ${noun})`;
-  const badge =
-    group.fixable === true
-      ? " [auto-fixable]"
-      : group.fixable === false
-        ? " [needs-you]"
-        : "";
-  return group.label
-    ? `[${group.ruleId}] ${group.label} ${count}${badge}`
-    : `[${group.ruleId}] ${count}`;
+	const noun = group.findings.length === 1 ? "finding" : "findings";
+	const count = `(${group.findings.length} ${noun})`;
+	const badge =
+		group.fixable === true ? " [auto-fixable]" : group.fixable === false ? " [needs-you]" : "";
+	return group.label
+		? `[${group.ruleId}] ${group.label} ${count}${badge}`
+		: `[${group.ruleId}] ${count}`;
 }
 
 export function renderFindings(findings: RenderableFinding[]): string[] {
-  if (findings.length === 0) return ["No findings."];
+	if (findings.length === 0) return ["No findings."];
 
-  const lines: string[] = [];
-  for (const group of groupByRule(findings)) {
-    lines.push(headerFor(group));
-    for (const f of group.findings) {
-      lines.push(`  ${f.file}: ${f.message}`);
-    }
-  }
-  return lines;
+	const lines: string[] = [];
+	for (const group of groupByRule(findings)) {
+		lines.push(headerFor(group));
+		for (const f of group.findings) {
+			lines.push(`  ${f.file}: ${f.message}`);
+		}
+	}
+	return lines;
 }

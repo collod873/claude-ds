@@ -1,15 +1,15 @@
-import { isSmartPartFromSource } from "./three-signal.js";
 import { DEFAULT_DOMAIN_ROOTS } from "./classifier.js";
+import { isSmartPartFromSource } from "./three-signal.js";
 
 const REGEX_META_RE = /[.*+?^${}()|[\]\\]/g;
 
 function importsFromDomainRoot(source: string, domainRoots: string[]): boolean {
-  for (const root of domainRoots) {
-    const escaped = root.replace(REGEX_META_RE, "\\$&");
-    const re = new RegExp(`from\\s+["'][^"']*\\/${escaped}\\/`);
-    if (re.test(source)) return true;
-  }
-  return false;
+	for (const root of domainRoots) {
+		const escaped = root.replace(REGEX_META_RE, "\\$&");
+		const re = new RegExp(`from\\s+["'][^"']*\\/${escaped}\\/`);
+		if (re.test(source)) return true;
+	}
+	return false;
 }
 
 /**
@@ -43,11 +43,11 @@ function importsFromDomainRoot(source: string, domainRoots: string[]): boolean {
  * multi-part model, exactly as ADR-0022 required. Read ADR-0024 before changing.
  */
 const ROLE_PATTERNS: { role: string; anchor: RegExp }[] = [
-  // `role="combobox"` is the WAI-APG anchor the shipped combobox contract
-  // selects on (`container.querySelector('[role="combobox"]')`). If a smart
-  // part renders that attribute, it is — by definition — claiming to be a
-  // combobox, so the proposal is unambiguous.
-  { role: "combobox", anchor: /\brole\s*=\s*['"]combobox['"]/ },
+	// `role="combobox"` is the WAI-APG anchor the shipped combobox contract
+	// selects on (`container.querySelector('[role="combobox"]')`). If a smart
+	// part renders that attribute, it is — by definition — claiming to be a
+	// combobox, so the proposal is unambiguous.
+	{ role: "combobox", anchor: /\brole\s*=\s*['"]combobox['"]/ },
 ];
 
 /**
@@ -65,7 +65,7 @@ const ROLE_PATTERNS: { role: string; anchor: RegExp }[] = [
  * regardless: it soft-skips green until the consumer authors a composed mount.
  */
 const IMPORT_PATTERNS: { role: string; anchor: RegExp }[] = [
-  { role: "combobox", anchor: /\bfrom\s+['"]cmdk['"]/ },
+	{ role: "combobox", anchor: /\bfrom\s+['"]cmdk['"]/ },
 ];
 
 /**
@@ -85,9 +85,9 @@ const IMPORT_PATTERNS: { role: string; anchor: RegExp }[] = [
  *                           a tracked `exceptions.json` entry (per ADR-0003).
  */
 export type RoleProposal =
-  | { kind: "role"; role: string }
-  | { kind: "candidate-feature" }
-  | { kind: "tracked-exception" };
+	| { kind: "role"; role: string }
+	| { kind: "candidate-feature" }
+	| { kind: "tracked-exception" };
 
 /**
  * Propose a `meta.role` for a design-system source file.
@@ -121,18 +121,18 @@ export type RoleProposal =
  * presentational atom is the correct outcome (it never needed a role).
  */
 export function proposeRole(
-  source: string,
-  domainRoots: string[] = DEFAULT_DOMAIN_ROOTS,
+	source: string,
+	domainRoots: string[] = DEFAULT_DOMAIN_ROOTS,
 ): RoleProposal | null {
-  if (!isSmartPartFromSource(source)) return null;
-  for (const { role, anchor } of ROLE_PATTERNS) {
-    if (anchor.test(source)) return { kind: "role", role };
-  }
-  for (const { role, anchor } of IMPORT_PATTERNS) {
-    if (anchor.test(source)) return { kind: "role", role };
-  }
-  if (importsFromDomainRoot(source, domainRoots)) {
-    return { kind: "candidate-feature" };
-  }
-  return { kind: "tracked-exception" };
+	if (!isSmartPartFromSource(source)) return null;
+	for (const { role, anchor } of ROLE_PATTERNS) {
+		if (anchor.test(source)) return { kind: "role", role };
+	}
+	for (const { role, anchor } of IMPORT_PATTERNS) {
+		if (anchor.test(source)) return { kind: "role", role };
+	}
+	if (importsFromDomainRoot(source, domainRoots)) {
+		return { kind: "candidate-feature" };
+	}
+	return { kind: "tracked-exception" };
 }

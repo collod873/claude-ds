@@ -11,30 +11,25 @@
  * from one place.
  */
 
-export { isTTY } from "./tty.js";
+// Wired through this module so callers have one import surface.
+export { renderDecision } from "../decision/render.js";
 
 export type { ColorAdapter } from "./color.js";
 export { identityColor } from "./color.js";
-
-export type { DiffEntry } from "./diff.js";
-export { renderCommitmentGateDiff, colorizeDiffLines } from "./diff.js";
-
-export type { SummaryEntry } from "./summary.js";
-export {
-  renderChangeSummary,
-  renderChangeTierSummary,
-  renderChangesJson,
-} from "./summary.js";
-
 export type {
-  DashboardFinding,
-  DashboardMode,
-  DashboardState,
+	DashboardFinding,
+	DashboardMode,
+	DashboardState,
 } from "./dashboard.js";
 export { renderDashboard } from "./dashboard.js";
-
+export type { DiffEntry } from "./diff.js";
+export { colorizeDiffLines, renderCommitmentGateDiff } from "./diff.js";
 export type { RenderableFinding } from "./findings.js";
 export { renderFindings } from "./findings.js";
-
-// Wired through this module so callers have one import surface.
-export { renderDecision } from "../decision/render.js";
+export type { SummaryEntry } from "./summary.js";
+export {
+	renderChangeSummary,
+	renderChangesJson,
+	renderChangeTierSummary,
+} from "./summary.js";
+export { isTTY } from "./tty.js";

@@ -16,11 +16,11 @@ import { unresolvedSymbolRule } from "./rules/unresolved-symbol.js";
  * all route through this record.
  */
 export const INTEGRITY_RULES_BY_ID: Record<IntegrityRuleId, IntegrityRule> = {
-  "INTEGRITY-UNPARSEABLE": unparseableRule,
-  "INTEGRITY-ORPHANED-FROM": orphanedFromRule,
-  "INTEGRITY-UNRESOLVABLE-IMPORT": unresolvableImportRule,
-  "INTEGRITY-UNRESOLVED-SYMBOL": unresolvedSymbolRule,
-  "INTEGRITY-DUPLICATE-DECL": duplicateDeclRule,
+	"INTEGRITY-UNPARSEABLE": unparseableRule,
+	"INTEGRITY-ORPHANED-FROM": orphanedFromRule,
+	"INTEGRITY-UNRESOLVABLE-IMPORT": unresolvableImportRule,
+	"INTEGRITY-UNRESOLVED-SYMBOL": unresolvedSymbolRule,
+	"INTEGRITY-DUPLICATE-DECL": duplicateDeclRule,
 };
 
 /**

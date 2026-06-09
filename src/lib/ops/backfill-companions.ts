@@ -22,24 +22,24 @@ const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
 /** Convert kebab-case or snake_case to PascalCase for use as a JS identifier.
  *  e.g. "top-bar" → "TopBar", "tag_picker" → "TagPicker". */
 export function toPascalCase(name: string): string {
-  return name
-    .split(/[-_]/)
-    .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join("");
+	return name
+		.split(/[-_]/)
+		.map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+		.join("");
 }
 
 export function showcaseStub(displayName: string, fileBase: string): string {
-  return [
-    `// TODO(claude-ds): reconform stub — replace with real showcase`,
-    `import * as Mod from "./${fileBase}";`,
-    ``,
-    `void Mod;`,
-    ``,
-    `export default function ${displayName}Showcase() {`,
-    `  return null;`,
-    `}`,
-    ``,
-  ].join("\n");
+	return [
+		`// TODO(claude-ds): reconform stub — replace with real showcase`,
+		`import * as Mod from "./${fileBase}";`,
+		``,
+		`void Mod;`,
+		``,
+		`export default function ${displayName}Showcase() {`,
+		`  return null;`,
+		`}`,
+		``,
+	].join("\n");
 }
 
 /**
@@ -65,50 +65,53 @@ export function showcaseStub(displayName: string, fileBase: string): string {
  * lands, route the Op through it before falling back to the stub.
  */
 export const backfillCompanions: Operation = {
-  name: "backfill-companions",
-  async plan(ctx: ProjectContext): Promise<Change[]> {
-    const changes: Change[] = [];
+	name: "backfill-companions",
+	async plan(ctx: ProjectContext): Promise<Change[]> {
+		const changes: Change[] = [];
 
-    for (const tierRel of TIER_DIRS) {
-      const tierAbs = join(ctx.cwd, tierRel);
-      if (!(await ctx.exists(tierRel))) continue;
+		for (const tierRel of TIER_DIRS) {
+			const tierAbs = join(ctx.cwd, tierRel);
+			if (!(await ctx.exists(tierRel))) continue;
 
-      let entries: string[];
-      try {
-        entries = await readdir(tierAbs);
-      } catch {
-        continue;
-      }
+			let entries: string[];
+			try {
+				entries = await readdir(tierAbs);
+			} catch {
+				continue;
+			}
 
-      for (const entry of entries) {
-        if (entry === ".keep" || entry === ".gitkeep") continue;
-        if (!entry.endsWith(".tsx")) continue;
-        if (COMPANION_SUFFIXES.some(s => entry.endsWith(s))) continue;
-        if (SKIP_PATTERNS.some(re => re.test(entry))) continue;
+			for (const entry of entries) {
+				if (entry === ".keep" || entry === ".gitkeep") continue;
+				if (!entry.endsWith(".tsx")) continue;
+				if (COMPANION_SUFFIXES.some((s) => entry.endsWith(s))) continue;
+				if (SKIP_PATTERNS.some((re) => re.test(entry))) continue;
 
-        const entryAbs = join(tierAbs, entry);
-        const entryStat = await stat(entryAbs).catch(() => null);
-        if (!entryStat || !entryStat.isFile()) continue;
+				const entryAbs = join(tierAbs, entry);
+				const entryStat = await stat(entryAbs).catch(() => null);
+				if (!entryStat || !entryStat.isFile()) continue;
 
-        const componentName = entry.slice(0, -4); // kebab — file-path form
-        const displayName = toPascalCase(componentName); // PascalCase — identifier form
+				const componentName = entry.slice(0, -4); // kebab — file-path form
+				const displayName = toPascalCase(componentName); // PascalCase — identifier form
 
-        const companions: Array<{ relPath: string; bytes: string }> = [
-          { relPath: join(tierRel, `${componentName}.showcase.tsx`), bytes: showcaseStub(displayName, componentName) },
-        ];
+				const companions: Array<{ relPath: string; bytes: string }> = [
+					{
+						relPath: join(tierRel, `${componentName}.showcase.tsx`),
+						bytes: showcaseStub(displayName, componentName),
+					},
+				];
 
-        for (const c of companions) {
-          if (await ctx.exists(c.relPath)) continue;
-          changes.push({
-            kind: "write",
-            path: c.relPath,
-            before: null,
-            after: Buffer.from(c.bytes, "utf8"),
-          });
-        }
-      }
-    }
+				for (const c of companions) {
+					if (await ctx.exists(c.relPath)) continue;
+					changes.push({
+						kind: "write",
+						path: c.relPath,
+						before: null,
+						after: Buffer.from(c.bytes, "utf8"),
+					});
+				}
+			}
+		}
 
-    return changes;
-  },
+		return changes;
+	},
 };

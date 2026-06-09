@@ -22,22 +22,22 @@ export type DecisionKind = "commitment-gate" | "ambiguity" | "automatable";
 export type DecisionId = string;
 
 export interface DecisionOption {
-  label: string;
-  description: string;
+	label: string;
+	description: string;
 }
 
 export interface Decision {
-  id: DecisionId;
-  kind: DecisionKind;
-  question: string;
-  options: DecisionOption[];
-  /**
-   * For `automatable` and (non-TTY) `commitment-gate`, the option index used
-   * when no answer is supplied. Defaults to 0 if omitted. Forbidden in spirit
-   * for `ambiguity` — an Ambiguity with a safe default would not be one — but
-   * not statically rejected so the resolver can still consume mixed batches.
-   */
-  defaultIndex?: number;
+	id: DecisionId;
+	kind: DecisionKind;
+	question: string;
+	options: DecisionOption[];
+	/**
+	 * For `automatable` and (non-TTY) `commitment-gate`, the option index used
+	 * when no answer is supplied. Defaults to 0 if omitted. Forbidden in spirit
+	 * for `ambiguity` — an Ambiguity with a safe default would not be one — but
+	 * not statically rejected so the resolver can still consume mixed batches.
+	 */
+	defaultIndex?: number;
 }
 
 /**
@@ -57,9 +57,9 @@ export type AnswerBag = Record<DecisionId, DecisionAnswer>;
  * jargon, no internal pointers.
  */
 export interface PendingDecision {
-  id: DecisionId;
-  question: string;
-  options: DecisionOption[];
+	id: DecisionId;
+	question: string;
+	options: DecisionOption[];
 }
 
 /**
@@ -69,12 +69,12 @@ export interface PendingDecision {
  * exactly what the operator needs to feed `--answers` next.
  */
 export class UnresolvedAmbiguityError extends Error {
-  readonly decisionId: DecisionId;
-  readonly decisionQuestion: string;
-  constructor(id: DecisionId, question: string) {
-    super(`Unresolved Decision "${id}": ${question}`);
-    this.name = "UnresolvedAmbiguityError";
-    this.decisionId = id;
-    this.decisionQuestion = question;
-  }
+	readonly decisionId: DecisionId;
+	readonly decisionQuestion: string;
+	constructor(id: DecisionId, question: string) {
+		super(`Unresolved Decision "${id}": ${question}`);
+		this.name = "UnresolvedAmbiguityError";
+		this.decisionId = id;
+		this.decisionQuestion = question;
+	}
 }

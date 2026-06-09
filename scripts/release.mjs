@@ -10,12 +10,11 @@
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
-const run = (cmd, opts = {}) =>
-  execSync(cmd, { stdio: "pipe", encoding: "utf8", ...opts }).trim();
+const run = (cmd, opts = {}) => execSync(cmd, { stdio: "pipe", encoding: "utf8", ...opts }).trim();
 const sh = (cmd) => execSync(cmd, { stdio: "inherit" });
 const die = (msg) => {
-  console.error(`\n✗ ${msg}\n`);
-  process.exit(1);
+	console.error(`\n✗ ${msg}\n`);
+	process.exit(1);
 };
 
 const [, , bumpArg, summary] = process.argv;
@@ -36,13 +35,13 @@ const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
 const cur = pkg.version;
 let next;
 if (/^\d+\.\d+\.\d+$/.test(bumpArg)) {
-  next = bumpArg;
+	next = bumpArg;
 } else {
-  const [maj, min, pat] = cur.split(".").map(Number);
-  if (bumpArg === "major") next = `${maj + 1}.0.0`;
-  else if (bumpArg === "minor") next = `${maj}.${min + 1}.0`;
-  else if (bumpArg === "patch") next = `${maj}.${min}.${pat + 1}`;
-  else die(`unknown bump "${bumpArg}" — use patch|minor|major|X.Y.Z`);
+	const [maj, min, pat] = cur.split(".").map(Number);
+	if (bumpArg === "major") next = `${maj + 1}.0.0`;
+	else if (bumpArg === "minor") next = `${maj}.${min + 1}.0`;
+	else if (bumpArg === "patch") next = `${maj}.${min}.${pat + 1}`;
+	else die(`unknown bump "${bumpArg}" — use patch|minor|major|X.Y.Z`);
 }
 const tag = `v${next}`;
 if (run("git tag -l").split("\n").includes(tag)) die(`tag ${tag} already exists`);

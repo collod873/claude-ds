@@ -9,31 +9,31 @@ import type { DriftFinding, DriftRule, DriftRuleInput } from "../rule.js";
  * in one pass. Mirrors the prior-art shape from #198.
  */
 function detect(input: DriftRuleInput): DriftFinding | null {
-  const { file, metaKind, classifierVerdict } = input;
-  if (metaKind !== "atom") return null;
-  if (classifierVerdict.tier === "atom") return null;
-  if (classifierVerdict.tier === "pattern") return null;
-  // One classification boundary (PRD #241 / #244): an ambiguous composite
-  // verdict (1-2 DS imports) does not contradict meta.kind=atom — both
-  // possibilities are live. Only fire on a confidently-composite verdict,
-  // which is where classify also prompts.
-  if (classifierVerdict.ambiguous) return null;
-  return {
-    ruleId: "DRIFT-MISCLASSIFIED-ATOM",
-    file,
-    message:
-      `declares meta.kind=atom but classifier says ${classifierVerdict.tier}` +
-      ` (${classifierVerdict.signals.join("; ")})` +
-      ` — run \`claude-ds classify\` to relocate or update meta.kind`,
-  };
+	const { file, metaKind, classifierVerdict } = input;
+	if (metaKind !== "atom") return null;
+	if (classifierVerdict.tier === "atom") return null;
+	if (classifierVerdict.tier === "pattern") return null;
+	// One classification boundary (PRD #241 / #244): an ambiguous composite
+	// verdict (1-2 DS imports) does not contradict meta.kind=atom — both
+	// possibilities are live. Only fire on a confidently-composite verdict,
+	// which is where classify also prompts.
+	if (classifierVerdict.ambiguous) return null;
+	return {
+		ruleId: "DRIFT-MISCLASSIFIED-ATOM",
+		file,
+		message:
+			`declares meta.kind=atom but classifier says ${classifierVerdict.tier}` +
+			` (${classifierVerdict.signals.join("; ")})` +
+			` — run \`claude-ds classify\` to relocate or update meta.kind`,
+	};
 }
 
 export const misclassifiedAtomRule: DriftRule = {
-  id: "DRIFT-MISCLASSIFIED-ATOM",
-  severity: "error",
-  description: "File declares meta.kind=atom but classifier says otherwise",
-  detect,
-  fixable: false,
-  // classify owns the relocate-or-flip-meta.kind decision (ADR-0015).
-  classifyRelocatable: true,
+	id: "DRIFT-MISCLASSIFIED-ATOM",
+	severity: "error",
+	description: "File declares meta.kind=atom but classifier says otherwise",
+	detect,
+	fixable: false,
+	// classify owns the relocate-or-flip-meta.kind decision (ADR-0015).
+	classifyRelocatable: true,
 };

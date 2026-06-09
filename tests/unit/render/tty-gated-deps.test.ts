@@ -11,7 +11,7 @@
  * `await import(...)` from inside an `isTTY()`-gated function.
  */
 import { readdir, readFile } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -21,37 +21,37 @@ const TTY_LAYER_BASENAME = "tty-layer.ts";
 const STATIC_IMPORT_RE = /^\s*import\s+(?:[\s\S]*?\sfrom\s+)?["']([^"']+)["']/gm;
 
 async function walkTs(dir: string): Promise<string[]> {
-  const out: string[] = [];
-  const entries = await readdir(dir, { withFileTypes: true });
-  for (const e of entries) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) out.push(...(await walkTs(full)));
-    else if (e.isFile() && e.name.endsWith(".ts")) out.push(full);
-  }
-  return out;
+	const out: string[] = [];
+	const entries = await readdir(dir, { withFileTypes: true });
+	for (const e of entries) {
+		const full = join(dir, e.name);
+		if (e.isDirectory()) out.push(...(await walkTs(full)));
+		else if (e.isFile() && e.name.endsWith(".ts")) out.push(full);
+	}
+	return out;
 }
 
 describe("TTY-only runtime deps live behind the single isTTY() gate", () => {
-  it("no .ts file under src/lib/render/ except tty-layer.ts statically imports a TTY-only dep", async () => {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const renderDir = join(here, "..", "..", "..", "src", "lib", "render");
-    const files = await walkTs(renderDir);
-    expect(files.length).toBeGreaterThan(0);
+	it("no .ts file under src/lib/render/ except tty-layer.ts statically imports a TTY-only dep", async () => {
+		const here = dirname(fileURLToPath(import.meta.url));
+		const renderDir = join(here, "..", "..", "..", "src", "lib", "render");
+		const files = await walkTs(renderDir);
+		expect(files.length).toBeGreaterThan(0);
 
-    const offenders: { file: string; spec: string }[] = [];
-    for (const file of files) {
-      const basename = file.split("/").pop()!;
-      const allowed = basename === TTY_LAYER_BASENAME;
-      const src = await readFile(file, "utf8");
-      const matches = src.matchAll(STATIC_IMPORT_RE);
-      for (const m of matches) {
-        const spec = m[1];
-        if (TTY_ONLY_DEPS.some(d => spec === d || spec.startsWith(`${d}/`))) {
-          if (!allowed) offenders.push({ file, spec });
-        }
-      }
-    }
+		const offenders: { file: string; spec: string }[] = [];
+		for (const file of files) {
+			const basename = file.split("/").pop()!;
+			const allowed = basename === TTY_LAYER_BASENAME;
+			const src = await readFile(file, "utf8");
+			const matches = src.matchAll(STATIC_IMPORT_RE);
+			for (const m of matches) {
+				const spec = m[1];
+				if (TTY_ONLY_DEPS.some((d) => spec === d || spec.startsWith(`${d}/`))) {
+					if (!allowed) offenders.push({ file, spec });
+				}
+			}
+		}
 
-    expect(offenders).toEqual([]);
-  });
+		expect(offenders).toEqual([]);
+	});
 });

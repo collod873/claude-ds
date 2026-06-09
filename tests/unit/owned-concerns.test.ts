@@ -1,11 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  evaluateOwnedConcerns,
-  allOwnedConcernIds,
-  ownedConcernDescription,
-  ownedConcernSupersededBy,
-  formatOwnedConcernFinding,
-  type OwnedConcernId,
+	allOwnedConcernIds,
+	evaluateOwnedConcerns,
+	formatOwnedConcernFinding,
+	type OwnedConcernId,
+	ownedConcernDescription,
+	ownedConcernSupersededBy,
 } from "../../src/lib/owned-concerns/index.js";
 
 /**
@@ -91,160 +91,152 @@ main();
 `;
 
 describe("owned-concern registry", () => {
-  it("exposes OWNED-TOKEN-LINT as the one registered concern", () => {
-    const ids = allOwnedConcernIds();
-    expect(ids).toContain("OWNED-TOKEN-LINT");
-  });
+	it("exposes OWNED-TOKEN-LINT as the one registered concern", () => {
+		const ids = allOwnedConcernIds();
+		expect(ids).toContain("OWNED-TOKEN-LINT");
+	});
 
-  it("ships exactly one concern (grow-on-demand per ADR-0017)", () => {
-    // This guard is intentional: a second concern lands only on real
-    // shadow-infra evidence from a consumer, accompanied by an updated
-    // ADR-0017 amendment. If you are flipping this expectation, that
-    // amendment is the contract you are signing.
-    expect(allOwnedConcernIds()).toHaveLength(1);
-  });
+	it("ships exactly one concern (grow-on-demand per ADR-0017)", () => {
+		// This guard is intentional: a second concern lands only on real
+		// shadow-infra evidence from a consumer, accompanied by an updated
+		// ADR-0017 amendment. If you are flipping this expectation, that
+		// amendment is the contract you are signing.
+		expect(allOwnedConcernIds()).toHaveLength(1);
+	});
 
-  it("returns a description for every registered concern", () => {
-    for (const id of allOwnedConcernIds()) {
-      expect(ownedConcernDescription(id)).toBeTruthy();
-    }
-  });
+	it("returns a description for every registered concern", () => {
+		for (const id of allOwnedConcernIds()) {
+			expect(ownedConcernDescription(id)).toBeTruthy();
+		}
+	});
 
-  // ADR-0017 addendum / PRD #340 friction F10. The original supersession
-  // claim ("DRIFT-RAW-PRIMITIVE") was false: lint-tokens.ts performs a
-  // JSON↔CSS token-parity check, not raw-primitive detection. The supersession
-  // must name the rule that genuinely covers the same failure mode now that
-  // DRIFT-TOKEN-PARITY ships.
-  it("OWNED-TOKEN-LINT is superseded by DRIFT-TOKEN-PARITY", () => {
-    expect(ownedConcernSupersededBy("OWNED-TOKEN-LINT")).toBe(
-      "DRIFT-TOKEN-PARITY",
-    );
-  });
+	// ADR-0017 addendum / PRD #340 friction F10. The original supersession
+	// claim ("DRIFT-RAW-PRIMITIVE") was false: lint-tokens.ts performs a
+	// JSON↔CSS token-parity check, not raw-primitive detection. The supersession
+	// must name the rule that genuinely covers the same failure mode now that
+	// DRIFT-TOKEN-PARITY ships.
+	it("OWNED-TOKEN-LINT is superseded by DRIFT-TOKEN-PARITY", () => {
+		expect(ownedConcernSupersededBy("OWNED-TOKEN-LINT")).toBe("DRIFT-TOKEN-PARITY");
+	});
 });
 
 describe("OWNED-TOKEN-LINT detector", () => {
-  it("flags a lint-tokens.ts-shaped script anywhere in the tree", () => {
-    const findings = evaluateOwnedConcerns({
-      file: "scripts/lint-tokens.ts",
-      source: LINT_TOKENS_FIXTURE,
-    });
-    const hit = findings.find(f => f.concernId === "OWNED-TOKEN-LINT");
-    expect(hit).toBeDefined();
-    expect(hit!.file).toBe("scripts/lint-tokens.ts");
-    expect(hit!.supersededBy).toBe("DRIFT-TOKEN-PARITY");
-    // The detect message describes the detection; the supersession +
-    // remove-or-flag recommendation is constructed by formatOwnedConcernFinding
-    // (issue #348 gating). The corrected claim must not silently re-emerge as
-    // the original false claim anywhere in the rule.
-    expect(hit!.message).not.toMatch(/DRIFT-RAW-PRIMITIVE/);
-  });
+	it("flags a lint-tokens.ts-shaped script anywhere in the tree", () => {
+		const findings = evaluateOwnedConcerns({
+			file: "scripts/lint-tokens.ts",
+			source: LINT_TOKENS_FIXTURE,
+		});
+		const hit = findings.find((f) => f.concernId === "OWNED-TOKEN-LINT");
+		expect(hit).toBeDefined();
+		expect(hit!.file).toBe("scripts/lint-tokens.ts");
+		expect(hit!.supersededBy).toBe("DRIFT-TOKEN-PARITY");
+		// The detect message describes the detection; the supersession +
+		// remove-or-flag recommendation is constructed by formatOwnedConcernFinding
+		// (issue #348 gating). The corrected claim must not silently re-emerge as
+		// the original false claim anywhere in the rule.
+		expect(hit!.message).not.toMatch(/DRIFT-RAW-PRIMITIVE/);
+	});
 
-  it("keys on intent, not filename — flags even when renamed", () => {
-    const findings = evaluateOwnedConcerns({
-      file: "src/util/style-guard.ts",
-      source: LINT_TOKENS_FIXTURE,
-    });
-    expect(
-      findings.filter(f => f.concernId === "OWNED-TOKEN-LINT"),
-    ).toHaveLength(1);
-  });
+	it("keys on intent, not filename — flags even when renamed", () => {
+		const findings = evaluateOwnedConcerns({
+			file: "src/util/style-guard.ts",
+			source: LINT_TOKENS_FIXTURE,
+		});
+		expect(findings.filter((f) => f.concernId === "OWNED-TOKEN-LINT")).toHaveLength(1);
+	});
 
-  it("stays silent on a check-where-chain.sh-shaped script with zero DS signal", () => {
-    const findings = evaluateOwnedConcerns({
-      file: "scripts/check-where-chain.sh",
-      source: CHECK_WHERE_CHAIN_FIXTURE,
-    });
-    expect(
-      findings.filter(f => f.concernId === "OWNED-TOKEN-LINT"),
-    ).toHaveLength(0);
-  });
+	it("stays silent on a check-where-chain.sh-shaped script with zero DS signal", () => {
+		const findings = evaluateOwnedConcerns({
+			file: "scripts/check-where-chain.sh",
+			source: CHECK_WHERE_CHAIN_FIXTURE,
+		});
+		expect(findings.filter((f) => f.concernId === "OWNED-TOKEN-LINT")).toHaveLength(0);
+	});
 
-  it("stays silent on the pack's own scripts/update-tokens.ts", () => {
-    const findings = evaluateOwnedConcerns({
-      file: "scripts/update-tokens.ts",
-      source: UPDATE_TOKENS_FIXTURE,
-    });
-    expect(
-      findings.filter(f => f.concernId === "OWNED-TOKEN-LINT"),
-    ).toHaveLength(0);
-  });
+	it("stays silent on the pack's own scripts/update-tokens.ts", () => {
+		const findings = evaluateOwnedConcerns({
+			file: "scripts/update-tokens.ts",
+			source: UPDATE_TOKENS_FIXTURE,
+		});
+		expect(findings.filter((f) => f.concernId === "OWNED-TOKEN-LINT")).toHaveLength(0);
+	});
 
-  it("stays silent on an empty file", () => {
-    const findings = evaluateOwnedConcerns({
-      file: "scripts/empty.ts",
-      source: "",
-    });
-    expect(findings).toHaveLength(0);
-  });
+	it("stays silent on an empty file", () => {
+		const findings = evaluateOwnedConcerns({
+			file: "scripts/empty.ts",
+			source: "",
+		});
+		expect(findings).toHaveLength(0);
+	});
 
-  it("detect is a pure function of (content, path) — same input, same output", () => {
-    const input = {
-      file: "scripts/lint-tokens.ts",
-      source: LINT_TOKENS_FIXTURE,
-    };
-    const a = evaluateOwnedConcerns(input);
-    const b = evaluateOwnedConcerns(input);
-    expect(a).toEqual(b);
-  });
+	it("detect is a pure function of (content, path) — same input, same output", () => {
+		const input = {
+			file: "scripts/lint-tokens.ts",
+			source: LINT_TOKENS_FIXTURE,
+		};
+		const a = evaluateOwnedConcerns(input);
+		const b = evaluateOwnedConcerns(input);
+		expect(a).toEqual(b);
+	});
 });
 
 describe("formatOwnedConcernFinding — completeness gating", () => {
-  // ADR-0017 addendum / issue #348. The over-flag bias stands; what
-  // completeness *recommends* tightens. A finding may advise removal only
-  // when its concern names a shipped capability that genuinely covers the
-  // same failure mode. Otherwise it flags "possible shadow DS infra" and
-  // leaves the deletion call to the consumer.
+	// ADR-0017 addendum / issue #348. The over-flag bias stands; what
+	// completeness *recommends* tightens. A finding may advise removal only
+	// when its concern names a shipped capability that genuinely covers the
+	// same failure mode. Otherwise it flags "possible shadow DS infra" and
+	// leaves the deletion call to the consumer.
 
-  it("recommends removal when supersededBy names a shipped rule", () => {
-    const line = formatOwnedConcernFinding({
-      file: "scripts/lint-tokens.ts",
-      line: 1,
-      concernId: "OWNED-TOKEN-LINT",
-      supersededBy: "DRIFT-TOKEN-PARITY",
-      message: "hand-rolled design-token linter in scripts/lint-tokens.ts",
-    });
-    expect(line).toMatch(/scripts\/lint-tokens\.ts/);
-    expect(line).toMatch(/OWNED-TOKEN-LINT/);
-    expect(line).toMatch(/superseded by DRIFT-TOKEN-PARITY/);
-    expect(line).toMatch(/remove|delete/i);
-    expect(line).not.toMatch(/possible shadow DS infra/i);
-  });
+	it("recommends removal when supersededBy names a shipped rule", () => {
+		const line = formatOwnedConcernFinding({
+			file: "scripts/lint-tokens.ts",
+			line: 1,
+			concernId: "OWNED-TOKEN-LINT",
+			supersededBy: "DRIFT-TOKEN-PARITY",
+			message: "hand-rolled design-token linter in scripts/lint-tokens.ts",
+		});
+		expect(line).toMatch(/scripts\/lint-tokens\.ts/);
+		expect(line).toMatch(/OWNED-TOKEN-LINT/);
+		expect(line).toMatch(/superseded by DRIFT-TOKEN-PARITY/);
+		expect(line).toMatch(/remove|delete/i);
+		expect(line).not.toMatch(/possible shadow DS infra/i);
+	});
 
-  it("flags 'possible shadow DS infra' when no shipped capability covers the concern", () => {
-    const line = formatOwnedConcernFinding({
-      file: "scripts/some-future-shadow.ts",
-      line: 1,
-      concernId: "OWNED-TOKEN-LINT",
-      supersededBy: null,
-      message: "hand-rolled design-token linter in scripts/some-future-shadow.ts",
-    });
-    expect(line).toMatch(/scripts\/some-future-shadow\.ts/);
-    expect(line).toMatch(/possible shadow DS infra/i);
-    // Critical: the false-delete defect the gate exists to kill — when the
-    // pack ships no covering capability, completeness must NOT advise
-    // deletion (PRD #340 F10, issue #348).
-    expect(line).not.toMatch(/\b(?:delete|remove)\b/i);
-    expect(line).not.toMatch(/superseded by/i);
-  });
+	it("flags 'possible shadow DS infra' when no shipped capability covers the concern", () => {
+		const line = formatOwnedConcernFinding({
+			file: "scripts/some-future-shadow.ts",
+			line: 1,
+			concernId: "OWNED-TOKEN-LINT",
+			supersededBy: null,
+			message: "hand-rolled design-token linter in scripts/some-future-shadow.ts",
+		});
+		expect(line).toMatch(/scripts\/some-future-shadow\.ts/);
+		expect(line).toMatch(/possible shadow DS infra/i);
+		// Critical: the false-delete defect the gate exists to kill — when the
+		// pack ships no covering capability, completeness must NOT advise
+		// deletion (PRD #340 F10, issue #348).
+		expect(line).not.toMatch(/\b(?:delete|remove)\b/i);
+		expect(line).not.toMatch(/superseded by/i);
+	});
 });
 
 describe("owned-concern id totality", () => {
-  it("every id in the union has a registered concern", () => {
-    // Exhaustive switch over the OwnedConcernId union: TypeScript flags
-    // a missing case at compile time. The runtime assertion mirrors the
-    // drift/integrity totality tests — one row per id, no fallthrough.
-    const ids = allOwnedConcernIds();
-    for (const id of ids) {
-      const check: OwnedConcernId = id;
-      switch (check) {
-        case "OWNED-TOKEN-LINT":
-          expect(ownedConcernDescription(check)).toBeTruthy();
-          break;
-        default: {
-          const _exhaustive: never = check;
-          throw new Error(`unhandled OwnedConcernId: ${String(_exhaustive)}`);
-        }
-      }
-    }
-  });
+	it("every id in the union has a registered concern", () => {
+		// Exhaustive switch over the OwnedConcernId union: TypeScript flags
+		// a missing case at compile time. The runtime assertion mirrors the
+		// drift/integrity totality tests — one row per id, no fallthrough.
+		const ids = allOwnedConcernIds();
+		for (const id of ids) {
+			const check: OwnedConcernId = id;
+			switch (check) {
+				case "OWNED-TOKEN-LINT":
+					expect(ownedConcernDescription(check)).toBeTruthy();
+					break;
+				default: {
+					const _exhaustive: never = check;
+					throw new Error(`unhandled OwnedConcernId: ${String(_exhaustive)}`);
+				}
+			}
+		}
+	});
 });

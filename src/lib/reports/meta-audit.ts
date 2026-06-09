@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { info } from "../log.js";
 import type { ProjectContext } from "../project.js";
@@ -18,35 +18,35 @@ const META_RE = /export\s+const\s+meta\b/;
  * before deciding whether to run the Op.
  */
 export async function findMissingMeta(ctx: ProjectContext, dryRun: boolean): Promise<string[]> {
-  const { cwd } = ctx;
-  const missing: string[] = [];
-  for (const scanRel of SCAN_DIRS) {
-    const scanAbs = join(cwd, scanRel);
-    let entries: string[];
-    try {
-      entries = await readdir(scanAbs);
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (entry === ".keep" || entry === ".gitkeep") continue;
-      if (!entry.endsWith(".tsx")) continue;
-      if (COMPANION_SUFFIXES.some(s => entry.endsWith(s))) continue;
-      if (SKIP_PATTERNS.some(re => re.test(entry))) continue;
-      const entryPath = join(scanAbs, entry);
-      const entryStat = await stat(entryPath).catch(() => null);
-      if (!entryStat || !entryStat.isFile()) continue;
-      let source: string;
-      try {
-        source = await readFile(entryPath, "utf8");
-      } catch {
-        continue;
-      }
-      if (META_RE.test(source)) continue;
-      const relPath = join(scanRel, entry);
-      missing.push(relPath);
-      info(`${dryRun ? "[dry-run] " : ""}META-001: missing meta export: ${relPath}`);
-    }
-  }
-  return missing;
+	const { cwd } = ctx;
+	const missing: string[] = [];
+	for (const scanRel of SCAN_DIRS) {
+		const scanAbs = join(cwd, scanRel);
+		let entries: string[];
+		try {
+			entries = await readdir(scanAbs);
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			if (entry === ".keep" || entry === ".gitkeep") continue;
+			if (!entry.endsWith(".tsx")) continue;
+			if (COMPANION_SUFFIXES.some((s) => entry.endsWith(s))) continue;
+			if (SKIP_PATTERNS.some((re) => re.test(entry))) continue;
+			const entryPath = join(scanAbs, entry);
+			const entryStat = await stat(entryPath).catch(() => null);
+			if (!entryStat || !entryStat.isFile()) continue;
+			let source: string;
+			try {
+				source = await readFile(entryPath, "utf8");
+			} catch {
+				continue;
+			}
+			if (META_RE.test(source)) continue;
+			const relPath = join(scanRel, entry);
+			missing.push(relPath);
+			info(`${dryRun ? "[dry-run] " : ""}META-001: missing meta export: ${relPath}`);
+		}
+	}
+	return missing;
 }

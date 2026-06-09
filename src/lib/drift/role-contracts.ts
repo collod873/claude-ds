@@ -13,5 +13,5 @@
 export const SHIPPED_ROLES: readonly string[] = ["combobox"];
 
 export function hasShippedContract(role: string): boolean {
-  return SHIPPED_ROLES.includes(role);
+	return SHIPPED_ROLES.includes(role);
 }

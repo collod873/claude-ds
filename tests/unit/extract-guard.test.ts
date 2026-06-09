@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { __test } from "../../src/lib/ops/extract-inline-components";
 
 const { planFile } = __test;
@@ -50,25 +50,26 @@ import { cn } from "@/lib/utils";
 `;
 
 describe("extract guard — non-resolving parent (#259)", () => {
-  it("still extracts from a healthy parent (positive control)", () => {
-    const source = HEALTHY_IMPORTS + INLINE_BODY;
-    const plan = planFile(source, "design-system/atoms/row.tsx", "@/design-system", new Set());
-    expect(plan.extractions.map(e => e.componentName)).toEqual(["FileUploaderRow"]);
-    expect(plan.extractions[0].atomRel).toBe("design-system/atoms/file-uploader-row.tsx");
-  });
+	it("still extracts from a healthy parent (positive control)", () => {
+		const source = HEALTHY_IMPORTS + INLINE_BODY;
+		const plan = planFile(source, "design-system/atoms/row.tsx", "@/design-system", new Set());
+		expect(plan.extractions.map((e) => e.componentName)).toEqual(["FileUploaderRow"]);
+		expect(plan.extractions[0].atomRel).toBe("design-system/atoms/file-uploader-row.tsx");
+	});
 
-  it("refuses extraction when the same parent's imports are stripped (unbound symbols)", () => {
-    // Identical body, import block gone — references unbound Button/cn/Paperclip/X.
-    const source = INLINE_BODY;
-    const plan = planFile(source, "design-system/atoms/row.tsx", "@/design-system", new Set());
-    expect(plan.extractions).toEqual([]);
-    expect(plan.changes).toEqual([]);
-  });
+	it("refuses extraction when the same parent's imports are stripped (unbound symbols)", () => {
+		// Identical body, import block gone — references unbound Button/cn/Paperclip/X.
+		const source = INLINE_BODY;
+		const plan = planFile(source, "design-system/atoms/row.tsx", "@/design-system", new Set());
+		expect(plan.extractions).toEqual([]);
+		expect(plan.changes).toEqual([]);
+	});
 
-  it("refuses extraction when the parent duplicates a top-level function", () => {
-    const source = HEALTHY_IMPORTS + INLINE_BODY + "\n" + INLINE_BODY.split("\nexport function Row")[0];
-    const plan = planFile(source, "design-system/atoms/row.tsx", "@/design-system", new Set());
-    expect(plan.extractions).toEqual([]);
-    expect(plan.changes).toEqual([]);
-  });
+	it("refuses extraction when the parent duplicates a top-level function", () => {
+		const source =
+			HEALTHY_IMPORTS + INLINE_BODY + "\n" + INLINE_BODY.split("\nexport function Row")[0];
+		const plan = planFile(source, "design-system/atoms/row.tsx", "@/design-system", new Set());
+		expect(plan.extractions).toEqual([]);
+		expect(plan.changes).toEqual([]);
+	});
 });
