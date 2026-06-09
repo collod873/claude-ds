@@ -1,0 +1,75 @@
+name: Install Smoke
+
+# Exercise the literal consumer install path. Source-tree CI never runs the
+# command consumers actually run — `npx github:collod873/claude-ds#<ref>` —
+# which is the only path where the `prepare` lifecycle (build + guarded hook
+# installer) executes against a real git install. In particular the hook
+# installer's INIT_CWD guard, the branch that keeps a consumer repo's
+# `core.hookspath` untouched, has no coverage anywhere else. See #477.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: install-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install-smoke:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      # Checkout only to read the expected version off the ref under test.
+      - uses: actions/checkout@v5
+        with:
+          # On pull_request, default checkout is the synthetic merge commit but
+          # npx must fetch a ref that exists on the remote — use the head SHA
+          # for both so the version we read matches the package we install.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Install via npx from a scratch consumer repo
+        env:
+          TEST_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          EXPECTED="v$(node -p "require('./package.json').version")"
+
+          SCRATCH=$(mktemp -d)
+          # Fresh npm cache: the self-hosted runner's persistent cache must not
+          # be able to satisfy the install with a previously built clone.
+          export npm_config_cache=$(mktemp -d)
+          trap 'rm -rf "$SCRATCH" "$npm_config_cache"' EXIT
+
+          git -C "$SCRATCH" init -q
+          printf '{"name":"scratch-consumer","private":true}\n' > "$SCRATCH/package.json"
+          cd "$SCRATCH"
+
+          GOT=$(npx --yes "github:${REPO}#${TEST_SHA}" -V)
+          if [ "$GOT" != "$EXPECTED" ]; then
+            echo "FAIL: version mismatch — got '$GOT', expected '$EXPECTED'"
+            exit 1
+          fi
+          echo "OK: CLI ran from git install and printed $GOT"
+
+          # One representative real command: init reads the pack manifest and
+          # copies pack files out of the installed package, so a runtime file
+          # missing from the `files` allowlist fails here.
+          npx --yes "github:${REPO}#${TEST_SHA}" init --pack next-react --yes
+          if [ ! -f .claude-ds.json ]; then
+            echo "FAIL: init exited 0 but wrote no .claude-ds.json"
+            exit 1
+          fi
+          echo "OK: init scaffolded the scratch project"
+
+          # Never-break-a-consumer: prepare's hook installer must NOT have
+          # touched the consumer repo's git config on this install path.
+          if HOOKSPATH=$(git config core.hookspath); then
+            echo "FAIL: install set consumer core.hookspath to '$HOOKSPATH'"
+            exit 1
+          fi
+          echo "OK: consumer core.hookspath untouched"
