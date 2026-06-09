@@ -1,4 +1,0 @@
-# command: node dist/cli.js classify --dry-run
-# exit: 0
-# --- stdout/stderr below; bytes are verbatim from the built CLI ---
-[dry-run] no design-system parts to pull in

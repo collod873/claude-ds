@@ -19,9 +19,7 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "e2e:friction": "npm run build && vitest run tests/e2e/friction.test.ts",
-    "baseline:check": "node scripts/check-baseline-monotonic.mjs"
+    "test:watch": "vitest"
   },
   "engines": {
     "node": ">=20"

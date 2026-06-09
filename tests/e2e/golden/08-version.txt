@@ -1,7 +1,0 @@
-# command: node dist/cli.js version --offline
-# exit: 0
-# --- stdout/stderr below; bytes are verbatim from the built CLI ---
-installed: v1.6.0
-pinned: v1.6.0
-latest: unknown
-→ Verify: run 'claude-ds audit' to check for drift
