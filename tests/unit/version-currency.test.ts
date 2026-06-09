@@ -1,8 +1,8 @@
 /**
  * PRD #336 — pure version-currency helper. Compares a consumer's pinned
  * `packVersion` against the installed CLI version. Used by both `version
- * --check` (today's CHANGELOG-printing path) and the dashboard brain (new
- * `upgrade-available` signal), so the comparison lives in one place.
+ * --check` and the dashboard brain (`upgrade-available` signal), so the
+ * comparison lives in one place.
  *
  * Inputs are `vX.Y.Z` semver strings; the helper handles a leading `v` and
  * tolerates either side carrying or omitting it. Stale = pinned < installed.

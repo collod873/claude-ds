@@ -1,7 +1,6 @@
 /**
- * Pure version-currency comparison. Consumed by `version --check` (which
- * also prints CHANGELOG sections between the two) and by the dashboard
- * brain (which surfaces an `upgrade-available` signal and recommends
+ * Pure version-currency comparison. Consumed by `version --check` and by
+ * the dashboard brain (which surfaces an `upgrade-available` signal and recommends
  * `claude-ds upgrade` when the pinned `packVersion` lags the installed
  * CLI). Keeping the comparison in one place means the dashboard and
  * `version --check` can never disagree about whether a project is stale.

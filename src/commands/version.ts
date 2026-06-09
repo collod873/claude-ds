@@ -5,7 +5,6 @@ import { colors, printNextStep } from "../lib/log.js";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { cliVersion, LABEL_CLI, LABEL_PIN } from "../lib/version-vocab.js";
 
 const DEFAULT_REMOTE = "https://github.com/collod873/claude-ds";
@@ -17,42 +16,6 @@ async function readIfExistsLocal(p: string): Promise<string | null> {
     if (e instanceof Error && (e as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw e;
   }
-}
-
-/** Extract all version headings from CHANGELOG that fall between pinned (exclusive) and installed (inclusive). */
-export function extractChangelogSections(changelog: string, pinned: string, installed: string): string[] {
-  const lines = changelog.split("\n");
-  const sections: string[] = [];
-  let capturing = false;
-  let currentSection: string[] = [];
-
-  for (const line of lines) {
-    const headingMatch = line.match(/^## \[(\d+\.\d+\.\d+)\]/);
-    if (headingMatch) {
-      // Save previous section if we were capturing
-      if (capturing && currentSection.length > 0) {
-        sections.push(currentSection.join("\n").trim());
-        currentSection = [];
-      }
-      const ver = `v${headingMatch[1]}`;
-      // Include versions strictly after pinned and at most installed
-      // i.e. pinned < ver <= installed
-      const afterPinned = semverLt(pinned, ver);
-      const atMostInstalled = !semverLt(installed, ver);
-      if (afterPinned && atMostInstalled) {
-        capturing = true;
-        currentSection = [line];
-      } else {
-        capturing = false;
-      }
-    } else if (capturing) {
-      currentSection.push(line);
-    }
-  }
-  if (capturing && currentSection.length > 0) {
-    sections.push(currentSection.join("\n").trim());
-  }
-  return sections;
 }
 
 export type LatestTagResult =
@@ -108,26 +71,6 @@ export async function versionCmd(opts: { offline?: boolean; check?: boolean; cwd
 
     console.log(`${LABEL_PIN}: ${c.bold(pinned)}  ${LABEL_CLI}: ${c.bold(installedVer)}`);
     console.log("");
-
-    // Resolve CHANGELOG.md via the same relative URL pattern the package.json
-    // import already uses — `../../CHANGELOG.md` from src|dist/commands/version.{ts,js}
-    // lands at the package root in dev, dist, and installed layouts. The previous
-    // `dirname(dirname(...))` approach mis-landed at dist/ (issue #357).
-    const changelogPath = fileURLToPath(new URL("../../CHANGELOG.md", import.meta.url));
-    const changelog = await readIfExistsLocal(changelogPath);
-
-    if (changelog) {
-      const sections = extractChangelogSections(changelog, pinned, installedVer);
-      if (sections.length > 0) {
-        console.log(c.cyan("Changes between your pinned version and installed version:") + "\n");
-        for (const s of sections) {
-          // Print just the heading line for brevity
-          const heading = s.split("\n")[0];
-          console.log(`  ${heading}`);
-        }
-        console.log("");
-      }
-    }
 
     // #363: replace the free-form "Run `claude-ds upgrade`..." line with the
     // canonical `→ Next:` breadcrumb. Route based on direction: pinned <

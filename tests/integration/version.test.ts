@@ -52,18 +52,5 @@ describe("version", () => {
       expect(r.stdout).toMatch(/pinned: v0\.5\.0/);
       expect(r.stdout).toMatch(new RegExp(`installed: ${CLI_VERSION.replace(/\./g, "\\.")}`));
     });
-
-    it("renders CHANGELOG sections between pinned and installed", async () => {
-      // The repo's own CHANGELOG.md must be discoverable from the compiled
-      // command. Pinning to a much older version guarantees at least one
-      // intervening section (e.g. ## [1.0.0] or later) lands in the output.
-      await writeFile(join(dir, ".claude-ds.json"),
-        JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }));
-      const r = await runCli(["version", "--check"], { cwd: dir });
-      expect(r.stdout).toMatch(/Changes between your pinned version and installed version/);
-      // The CLI's own version heading must be in the listing.
-      const pat = `## \\[${pkg.version.replace(/\./g, "\\.")}\\]`;
-      expect(r.stdout).toMatch(new RegExp(pat));
-    });
   });
 });
