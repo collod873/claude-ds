@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Full is-it-safe-to-push gate: typecheck + lint + test + build.
+#
+# Escape hatches:
+#   - Skip once:  git push --no-verify
+#   - Disable:    git config --unset core.hookspath
+set -euo pipefail
+
+npm run verify
