@@ -36,22 +36,42 @@ npx github:collod873/claude-ds#semver:^1 adopt --pack next-react
 
 ## Commands
 
-| Command | Purpose |
-|---|---|
-| `init` | Greenfield bootstrap — full scaffold, hooks in BLOCK mode |
-| `adopt` | Brownfield install — scaffold + hooks in WARN mode |
-| `heal` | Self-converging brownfield loop — `sync → upgrade → classify → audit --fix` to a fixed point |
-| `audit` | Read-only conformance report. `--fix` auto-remediates deterministic issues |
-| `classify` | Categorize existing files into DS tiers |
-| `migrate <path>` | Move one component into the scaffold (registers an exception only when `--tier` forces a misplacement) |
-| `migrate-layout` | Rename lookalike files to canonical paths (`git mv`) |
-| `enforce` | Flip WARN → BLOCK (gated on exception count threshold) |
-| `sync` | Update managed files to the pinned release (diff + confirm) |
-| `upgrade` | Bump the pinned version in `.claude-ds.json` |
-| `reconform` | Fill missing companion files and run conformance checks |
-| `reconcile` | Prune orphaned/deprecated files |
-| `doctor` | Health check — lookalikes, drift, hook verification |
-| `version` | Print installed vs. latest version |
+You usually just run `claude-ds`. The surface is small on purpose (ADR-0025): a
+couple of **drivers**, the **entry** onramps, and **read-only inspection**.
+Everything else runs *under* the driver — see the appendix.
+
+| Command | Kind | Purpose |
+|---|---|---|
+| `claude-ds` | Driver | The front door — greets on first run, shows the dashboard once adopted |
+| `heal` | Driver | Self-converging brownfield loop — drives `sync → upgrade → classify → audit --fix` to a fixed point |
+| `init` | Entry | Greenfield bootstrap — full scaffold, hooks in BLOCK mode |
+| `adopt` | Entry | Brownfield install — scaffold + hooks in WARN mode |
+| `doctor` | Inspection | Health check — lookalikes, drift, hook verification |
+| `audit` | Inspection | Read-only conformance report (`--fix` auto-remediates deterministic issues) |
+| `version` | Inspection | Print installed vs. latest version |
+
+### Under the hood
+
+`heal` (and the bare front door) sequence these steps for you. They stay
+registered and runnable for maintainers, but they're demoted from the menu —
+you should never need to hand-type one. Re-adding one to the surface above is an
+ADR-0025 amendment, guarded by a snapshot test.
+
+| Step | Role | Purpose |
+|---|---|---|
+| `sync` | Loop member | Update managed files to the pinned release |
+| `upgrade` | Loop member | Bump the pinned version in `.claude-ds.json` |
+| `classify` | Loop member | Categorize existing files into DS tiers |
+| `audit --fix` | Loop member | Auto-remediate deterministic drift findings |
+| `migrate-layout` | Reserved slot | Rename lookalikes to canonical paths — has a `CANONICAL_ORDER` slot but its detection is **not yet wired**; runnable standalone only |
+| `reconcile` | Reserved slot | Prune orphaned/deprecated files — reserved, **detection unwired** |
+| `reconform` | Reserved slot | Fill missing companion files — reserved, **detection unwired** |
+
+The three reserved slots are tracked-but-unwired by design: the gap between the
+asserted [ADR-0018] taxonomy and wired detection is explicit, not silently dead.
+Wiring them is a separate PRD.
+
+[ADR-0018]: docs/adr/0018-single-remediation-planner.md
 
 ## How it works
 

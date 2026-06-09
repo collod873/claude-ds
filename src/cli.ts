@@ -52,9 +52,23 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .description(
       "Design-system governance CLI — installs and syncs the scaffold (the managed design-system files this tool owns).\n" +
         "Run `claude-ds` with no command to start: first run greets and routes you to init/adopt;\n" +
-        "an adopted project shows a health dashboard. The commands below are the explicit onramps.",
+        "an adopted project shows a health dashboard. The commands below are the entry onramps + read-only inspection;\n" +
+        "`heal` drives the rest under the hood (ADR-0025).",
     )
     .version(`v${pkg.version}`, "-V");
+
+  // ADR-0025: the help billing above lists only what a consumer chooses
+  // between — drivers (`claude-ds`, `heal`), entries (`init`/`adopt`), and
+  // read-only inspection (`doctor`/`audit`/`version`). The steps `heal`
+  // sequences under the hood (`sync`, `upgrade`, `classify`, `audit --fix`)
+  // and the reserved-but-unwired slots (`migrate-layout`, `reconcile`,
+  // `reconform`) stay registered but hidden. This footer names them so a
+  // maintainer reaching for one knows it exists without re-promoting it.
+  program.addHelpText(
+    "after",
+    "\nUnder the hood: `heal` sequences sync → upgrade → classify → audit --fix" +
+      " to a fixed point — you don't run these by hand (ADR-0025).",
+  );
 
   // Positional-options mode means an option declared on the parent (`--answers`
   // on the bare action below) only consumes its value when it appears BEFORE
@@ -172,8 +186,11 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
       await enforceCmd({ yes: opts.yes, cwd: defaults.cwd });
     });
 
+  // Loop member (ADR-0025): a step the driver sequences inside the heal loop,
+  // not a command a consumer hand-types. `hidden` demotes it from `--help`
+  // billing while keeping it registered and runnable for maintainers/tests.
   program
-    .command("sync")
+    .command("sync", { hidden: true })
     .description("update managed files to the pinned release (diff + confirm)")
     .option("--offline-fixture <path>", "use local pack directory instead of fetching upstream")
     .option("-y, --yes", "skip confirmation prompt (no-op, kept for back-compat)")
@@ -198,8 +215,12 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
       await doctorCmd({ pack: opts.pack, ignore: opts.ignore, verifyHooks: opts.verifyHooks, completeness: opts.completeness, json: opts.json, verbose: opts.verbose, cwd: defaults.cwd });
     });
 
+  // Reserved planner slot (ADR-0025 / ADR-0018): has a slot in
+  // `CANONICAL_ORDER` but its `deriveProjectState` detection is unwired, so the
+  // driver can't sequence it yet. Kept registered + runnable standalone but
+  // demoted from `--help` billing until a future PRD wires the detection.
   program
-    .command("migrate-layout")
+    .command("migrate-layout", { hidden: true })
     .description("rename lookalike files to canonical paths (git mv)")
     .option("--pack <name>", "pack to migrate layout for")
     .option("--yes", "skip confirmation prompt")
@@ -209,8 +230,10 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
       await migrateLayoutCmd({ pack: opts.pack, yes: opts.yes, ignore: opts.ignore, allowDirty: opts.allowDirty, cwd: defaults.cwd });
     });
 
+  // Reserved planner slot (ADR-0025 / ADR-0018) — unwired detection; demoted
+  // from `--help` billing. See `migrate-layout` above.
   program
-    .command("reconform")
+    .command("reconform", { hidden: true })
     .description("fill missing companion files and run conformance checks")
     .option("--dry-run", "report what would happen without mutating anything")
     .option("--backfill-meta", "audit and backfill missing meta exports + run classification audit")
@@ -222,8 +245,10 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
       await reconformCmd({ dryRun: opts.dryRun, backfillMeta: opts.backfillMeta, fix: opts.fix, demoteComposites: opts.demoteComposites, allowDirty: opts.allowDirty, verbose: opts.verbose, cwd: defaults.cwd });
     });
 
+  // Reserved planner slot (ADR-0025 / ADR-0018) — unwired detection; demoted
+  // from `--help` billing. See `migrate-layout` above.
   program
-    .command("reconcile")
+    .command("reconcile", { hidden: true })
     .description("prune orphaned/deprecated files")
     .option("--dry-run", "report orphans and collisions without deleting anything")
     .option("--force", "delete all findings without prompting")
@@ -231,8 +256,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
       await reconcileCmd({ dryRun: opts.dryRun, force: opts.force, cwd: defaults.cwd });
     });
 
+  // Loop member (ADR-0025) — demoted from `--help` billing. See `sync` above.
   program
-    .command("upgrade")
+    .command("upgrade", { hidden: true })
     .description("bump the pinned version in .claude-ds.json")
     .option("--to <version>", "target pack version (default: installed CLI version)")
     .option("--dry-run", "preview migration changes without applying them")
@@ -244,8 +270,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
       finishCommand(await upgradeCmd({ to: opts.to, dryRun: opts.dryRun, yes: opts.yes, allowDirty: opts.allowDirty, diff: opts.diff, json: opts.json, verify: true, cwd: defaults.cwd }));
     });
 
+  // Loop member (ADR-0025) — demoted from `--help` billing. See `sync` above.
   program
-    .command("classify")
+    .command("classify", { hidden: true })
     .description("categorize existing files into DS tiers")
     .option("--src <dir>", "opt-in: pull design-system parts from this source dir into design-system/ (omit to only reorganize within design-system/)")
     .option("--dry-run", "show classification plan without moving any files")
