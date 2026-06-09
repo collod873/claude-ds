@@ -1,6 +1,7 @@
 {
   "name": "claude-ds",
   "version": "1.6.1",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "claude-ds": "dist/cli.js"
@@ -9,7 +10,8 @@
     "dist/",
     "packs/next-react/files/",
     "packs/next-react/manifest.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p . && chmod +x dist/cli.js",
