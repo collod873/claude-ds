@@ -29,14 +29,10 @@ jobs:
     # newly bloats the gate past single-digit minutes, this fails loudly
     # rather than letting the gate quietly creep into 15+ minute territory.
     timeout-minutes: 8
-    # The self-correcting loop step (issue #416) creates issues, comments on
-    # the PR, and toggles `agent:blocked` on escalation. Without explicit
-    # write scopes here GITHUB_TOKEN falls back to read-only on PRs and the
-    # follow-up step would 403. Read-only by default for everything else.
+    # Read-only: this gate builds and runs the smoke + friction e2e files and
+    # uploads a report artifact. It writes nothing back to the repo or PR.
     permissions:
       contents: read
-      issues: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v5
         with:
@@ -91,33 +87,3 @@ jobs:
           name: e2e-report
           path: e2e-report.json
           if-no-files-found: warn
-
-      - name: Self-correcting loop — file follow-up from red gate (issue #416)
-        # When the smoke gate goes red on a PR, route the harness output
-        # through the self-correcting loop module so breakage strings new
-        # work into GitHub automatically instead of dead-ending. The module
-        # dedupes against the existing auto-filed queue, escalates clusters
-        # to a PRD, and stops + escalates to Collin after N=2 consecutive
-        # unproductive rounds (acceptance criteria, PRD #407).
-        #
-        # Gates on `failure()` so a green gate never spawns issue churn,
-        # and on `pull_request` so a red `push` to main (which has its own
-        # release-issue path in auto-tag.yml) doesn't double-file.
-        if: failure() && github.event_name == 'pull_request' && hashFiles('e2e-report.json') != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          HARNESS_REPORT: e2e-report.json
-          SOURCE_PR: ${{ github.event.pull_request.number }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          # Ensure the auto-filed label exists on first fire (mirrors the
-          # idempotent label-create pattern in architecture-review.yml).
-          # Without this, `gh issue create --label claude-ds:auto-filed`
-          # fails with "label does not exist" on the first run after this
-          # workflow lands.
-          gh label create "claude-ds:auto-filed" \
-            --color "D93F0B" \
-            --description "Auto-filed by the self-correcting loop (issue #416)" \
-            >/dev/null 2>&1 || true
-          npx tsx .sandcastle/self-correcting-loop/file-followup.ts

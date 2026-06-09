@@ -21,8 +21,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e:friction": "npm run build && vitest run tests/e2e/friction.test.ts",
-    "baseline:check": "node scripts/check-baseline-monotonic.mjs",
-    "sandcastle": "npx tsx .sandcastle/main.mts"
+    "baseline:check": "node scripts/check-baseline-monotonic.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -36,7 +35,6 @@
     "typescript": "^5.4.0"
   },
   "devDependencies": {
-    "@ai-hero/sandcastle": "^0.6.5",
     "@types/node": "^20.11.0",
     "@types/picomatch": "^4.0.3",
     "jsdom": "^24.1.3",
