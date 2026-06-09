@@ -7,13 +7,9 @@
 set -euo pipefail
 
 # Staged files Biome can handle (added/copied/modified — not deletions).
-staged=$(git diff --cached --name-only --diff-filter=ACM \
-	-- '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs' '*.json' || true)
-
-if [ -z "$staged" ]; then
-	exit 0
-fi
-
+# NUL-delimited so filenames with spaces survive the trip through xargs.
 # `biome check` respects biome.json includes/excludes, so files outside the
 # linted set (packs/next-react/files, .sandcastle) are skipped automatically.
-echo "$staged" | xargs npx biome check --no-errors-on-unmatched --files-ignore-unknown=true
+git diff --cached --name-only -z --diff-filter=ACM \
+	-- '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs' '*.json' |
+	xargs -0 -r npx --no-install biome check --no-errors-on-unmatched --files-ignore-unknown=true

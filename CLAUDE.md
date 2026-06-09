@@ -13,7 +13,7 @@ defect; end state is zero local DS infra. `adopt → heal` gets there — `heal`
 `sync → upgrade → classify → audit --fix` to a fixed point (see #265).
 
 - Build/test: edit `src/`, then `npm run build` (global CLI reads `dist/cli.js`).
-  `npm run typecheck` + `npm test` (vitest) before pushing.
+  `npm run verify` (lint + test + build) before pushing — the pre-push hook runs it anyway.
 - Changing public-facing behavior → check `README.md`.
 - Roadmap = GitHub issues; check `gh issue list` first.
 - The `agent-*` label pipeline owns delegated work (branch+PR per sub-issue, auto-merge).

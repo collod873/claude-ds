@@ -20,6 +20,16 @@ if (!existsSync(hooksDir)) {
 	process.exit(0);
 }
 
+// npm git installs run `prepare` inside npm's own temp clone, where the clone
+// IS the git toplevel — the toplevel check below can't tell it apart from a
+// real working tree. INIT_CWD (where the consumer ran `npm install`/`npx`)
+// can: if it points somewhere other than this package, we're being installed
+// as a dependency.
+const initCwd = process.env.INIT_CWD;
+if (initCwd && realpathSync(initCwd) !== realpathSync(packageDir)) {
+	process.exit(0);
+}
+
 let gitTop;
 try {
 	gitTop = execFileSync("git", ["rev-parse", "--show-toplevel"], {
@@ -39,5 +49,11 @@ if (realTop !== realPkg) {
 	process.exit(0);
 }
 
-execFileSync("git", ["config", "core.hookspath", ".githooks"], { cwd: packageDir });
-console.log("claude-ds: git hooks enabled (core.hookspath -> .githooks)");
+try {
+	execFileSync("git", ["config", "core.hookspath", ".githooks"], { cwd: packageDir });
+	console.log("claude-ds: git hooks enabled (core.hookspath -> .githooks)");
+} catch {
+	// Config not writable (read-only checkout, sandboxed cache). Hooks are a
+	// dev convenience — never fail the install over them.
+	console.warn("claude-ds: could not enable git hooks (git config write failed)");
+}

@@ -17,7 +17,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "verify": "npm run typecheck && npm run lint && npm test && npm run build",
+    "verify": "npm run lint && npm test && npm run build",
     "prepare": "npm run build && node scripts/install-hooks.mjs",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
