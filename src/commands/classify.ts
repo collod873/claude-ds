@@ -2,8 +2,9 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { basename, join } from "node:path";
 import picomatch from "picomatch";
-import { info, err, printNextStep, setJsonMode } from "../lib/log.js";
+import { info, err, setJsonMode } from "../lib/log.js";
 import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
+import { type CommandResult, success, commandError } from "../lib/command-result.js";
 import { loadProject, type ProjectContext } from "../lib/project.js";
 import { classifySource, type Tier } from "../lib/classifier.js";
 import { makeTtyPrompt, type FixerPrompt } from "../lib/drift/index.js";
@@ -182,14 +183,7 @@ export async function classifyCmd(opts: {
    * entirety of stdout.
    */
   json?: boolean;
-  /**
-   * Suppress the terminal `→ Next` breadcrumb. The remediation driver passes
-   * this when running classify as an inner loop step — heal/front-door owns
-   * the single authoritative verdict at convergence, so a per-step breadcrumb
-   * would contradict it (the C2/#414 defect this closes for classify).
-   */
-  skipNextStep?: boolean;
-}): Promise<void> {
+}): Promise<CommandResult> {
   const cwd = opts.cwd ?? process.cwd();
   if (opts.json) setJsonMode(true);
   const dryRun = opts.dryRun ?? false;
@@ -211,8 +205,7 @@ export async function classifyCmd(opts: {
       const m = e instanceof Error ? e.message : String(e);
       err(m);
       if (opts.json) emitHeadless(errorResult("classify", m));
-      process.exit(2);
-      return;
+      return commandError(2);
     }
   }
 
@@ -229,7 +222,7 @@ export async function classifyCmd(opts: {
     }
     err(m);
     if (opts.json) emitHeadless(errorResult("classify", m));
-    process.exit(2);
+    return commandError(2);
   }
 
   const { domainRoots, dsAliases, allowedImports, appDir } = ctx.auditConfig;
@@ -258,7 +251,7 @@ export async function classifyCmd(opts: {
         `Point --src at a specific design-system source dir (e.g. ${srcRoot}/components/ui), ` +
         `or run \`claude-ds classify\` with no --src to reorganize within design-system/.`,
       );
-      process.exit(2);
+      return commandError(2);
     }
 
     // Check source dir exists
@@ -267,11 +260,11 @@ export async function classifyCmd(opts: {
       const s = await stat(srcAbs);
       if (!s.isDirectory()) {
         err(`--src ${srcRel} is not a directory`);
-        process.exit(2);
+        return commandError(2);
       }
     } catch {
       err(`--src ${srcRel} not found`);
-      process.exit(2);
+      return commandError(2);
     }
 
     // Walk and classify each file
@@ -368,7 +361,7 @@ export async function classifyCmd(opts: {
           remaining: {},
         });
       }
-      return;
+      return success();
     }
 
     // Stage every planned move under a single commitment-gate Decision
@@ -420,14 +413,13 @@ export async function classifyCmd(opts: {
               decisionQuestion: e.decisionQuestion,
             }));
           }
-          process.exit(2);
-          return;
+          return commandError(2);
         }
         throw e;
       }
       if (gateAnswer !== 0) {
         info("classify: aborted — no files moved");
-        return;
+        return success();
       }
     }
 
@@ -484,7 +476,7 @@ export async function classifyCmd(opts: {
         remaining: {},
       });
     }
-    return;
+    return success();
   }
 
   // Extraction is structural and lives in classify (ADR-0015): lift any inline
@@ -530,7 +522,13 @@ export async function classifyCmd(opts: {
     }
   }
 
-  const { moved: ambiguityMoved, kept: ambiguityKept } = await applyAmbiguityPass();
+  const ambiguityResult = await applyAmbiguityPass();
+  // Issue #437: the ambiguity pass's non-TTY/unresolved path returns a
+  // `CommandResult` instead of `process.exit`-ing — the driver deleted the
+  // `runWithoutExit` trap, so a stray exit here would tear down the loop. The
+  // caller (CLI/driver) owns the exit.
+  if ("outcome" in ambiguityResult) return ambiguityResult;
+  const { moved: ambiguityMoved, kept: ambiguityKept } = ambiguityResult;
 
   // Role proposal pass (PRD #301 / #312, ADR-0016). After tier moves /
   // extraction / ambiguity have settled the files, walk atoms/composites and
@@ -586,7 +584,6 @@ export async function classifyCmd(opts: {
     roleProposals.length === 0
   ) {
     info("classify: no files moved");
-    if (!opts.skipNextStep) printNextStep("classify", {});
     if (opts.json) {
       emitHeadless({
         command: "classify",
@@ -597,11 +594,10 @@ export async function classifyCmd(opts: {
         remaining: { ambiguityKept, roleProposals: 0 },
       });
     }
-    return;
+    return success(opts.json ? undefined : { command: "classify", ctx: {} });
   }
 
   info("classify: complete");
-  if (!opts.skipNextStep) printNextStep("classify", {});
 
   if (opts.json) {
     emitHeadless({
@@ -618,6 +614,8 @@ export async function classifyCmd(opts: {
       remaining: { ambiguityKept },
     });
   }
+
+  return success(opts.json ? undefined : { command: "classify", ctx: {} });
 
   // Ambiguity pass (ADR-0015, issue #203, PRD #241 / #244, issue #251):
   // Walk design-system/atoms/ and re-classify each file using classifySource —
@@ -636,7 +634,7 @@ export async function classifyCmd(opts: {
   // Hoisted so it runs even when --src has no new files to classify (the common
   // re-run case: audit flagged a misplaced composite, user re-runs classify to
   // resolve it, but src is already migrated).
-  async function applyAmbiguityPass(): Promise<{ moved: number; kept: number }> {
+  async function applyAmbiguityPass(): Promise<{ moved: number; kept: number } | CommandResult> {
     // Ambiguous-band prompt source: a test-injected `opts.prompt` overrides
     // everything; otherwise the TTY prompt is used iff stdout is a TTY. Used
     // as the resolver's TTY callback below — the spine drives the question;
@@ -745,8 +743,7 @@ export async function classifyCmd(opts: {
         if (e instanceof UnresolvedAmbiguityError) {
           err(`classify needs you: decision "${e.decisionId}" — ${e.decisionQuestion}`);
           err(`Re-run with --answers <file> mapping "${e.decisionId}" to 0 (keep) or 1 (move).`);
-          process.exit(2);
-          return { moved: 0, kept: 0 };
+          return commandError(2);
         }
         throw e;
       }

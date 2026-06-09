@@ -129,10 +129,13 @@ describe("verify gate — audit --fix (PRD #407 / issue #410)", () => {
       timedOut: false,
     });
 
-    await auditCmd({ fix: true, cwd: dir });
+    // The CLI opts into the gate via `verify: true` (issue #437): ownership of
+    // the verify gate moved to the caller; the loop driver omits it.
+    const result = await auditCmd({ fix: true, verify: true, cwd: dir });
 
     expect(vi.mocked(runConsumerVerify)).toHaveBeenCalledOnce();
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(result.exitCode).toBe(1);
+    expect(result.outcome).toBe("findings-remain");
 
     const errMessages = vi.mocked(err).mock.calls.map(c => String(c[0]));
     const failureLine = errMessages.find(m => m.includes("verify gate failed"));
@@ -162,12 +165,12 @@ describe("verify gate — audit --fix (PRD #407 / issue #410)", () => {
       timedOut: false,
     });
 
-    await auditCmd({ fix: true, cwd: dir });
+    const result = await auditCmd({ fix: true, verify: true, cwd: dir });
 
     expect(vi.mocked(runConsumerVerify)).toHaveBeenCalledOnce();
-    // Either no exit, or exit(0) — never the non-zero exit reserved for a red gate.
-    const exitCalls = exitSpy.mock.calls.map(c => c[0]);
-    expect(exitCalls.find(c => c !== 0 && c !== undefined)).toBeUndefined();
+    // A green gate is exit 0 — never the non-zero code reserved for a red gate.
+    expect(result.exitCode).toBe(0);
+    expect(result.outcome).toBe("success");
 
     const infoMessages = vi.mocked(info).mock.calls.map(c => String(c[0]));
     expect(
@@ -211,29 +214,31 @@ describe("verify gate — audit --fix (PRD #407 / issue #410)", () => {
       timedOut: false,
     });
 
-    await auditCmd({ fix: true, cwd: dir });
+    const result = await auditCmd({ fix: true, verify: true, cwd: dir });
 
     const infoMessages = vi.mocked(info).mock.calls.map(c => String(c[0]));
     const noted = infoMessages.find(m => m.includes("pre-existing consumer error"));
     expect(noted, infoMessages.join("\n")).toBeDefined();
 
     // Non-zero exit is NOT reserved for consumer errors — they're warn-only.
-    const exitCalls = exitSpy.mock.calls.map(c => c[0]);
-    expect(exitCalls.find(c => c === 1)).toBeUndefined();
+    expect(result.exitCode).toBe(0);
   });
 
   it("does NOT call the verify gate on a read-only audit run (no --fix)", async () => {
     await scaffoldFixtureWithFixableDrift(dir);
 
-    await auditCmd({ fix: false, cwd: dir });
+    await auditCmd({ fix: false, verify: true, cwd: dir });
 
     expect(vi.mocked(runConsumerVerify)).not.toHaveBeenCalled();
   });
 
-  it("skips the verify gate when skipVerifyGate is set (heal/driveRemediation contract)", async () => {
+  it("does NOT run the verify gate when the caller omits `verify` (driver/loop-path contract)", async () => {
     await scaffoldFixtureWithFixableDrift(dir);
 
-    await auditCmd({ fix: true, cwd: dir, skipVerifyGate: true });
+    // Issue #437: the verify gate is caller-owned and opt-in. The remediation
+    // driver runs audit --fix as a plain function without `verify`, so the
+    // per-step gate never fires — heal owns the single gate at convergence.
+    await auditCmd({ fix: true, cwd: dir });
 
     expect(vi.mocked(runConsumerVerify)).not.toHaveBeenCalled();
   });

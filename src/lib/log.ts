@@ -47,9 +47,9 @@ export async function detectBuildCommand(cwd: string): Promise<string> {
   return "your build (e.g. npm run build)";
 }
 
-type NextStepCommand = "adopt" | "classify" | "audit" | "audit-fix" | "sync" | "reconcile" | "doctor" | "upgrade" | "migrate-layout" | "version" | "reconform" | "enforce";
+export type NextStepCommand = "adopt" | "classify" | "audit" | "audit-fix" | "sync" | "reconcile" | "doctor" | "upgrade" | "migrate-layout" | "version" | "reconform" | "enforce";
 
-interface NextStepContext {
+export interface NextStepContext {
   hasFindings?: boolean;
   buildCmd?: string;
   /**

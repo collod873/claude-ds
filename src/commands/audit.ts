@@ -3,8 +3,9 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseManifest } from "../lib/manifest.js";
 import { parseConfig, Config } from "../lib/config.js";
-import { info, err, printNextStep, detectBuildCommand, setJsonMode } from "../lib/log.js";
+import { info, err, detectBuildCommand, setJsonMode } from "../lib/log.js";
 import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
+import { type CommandResult, success, commandError, findingsRemain } from "../lib/command-result.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { parseExceptions, type Exception } from "../lib/exceptions.js";
 import { isExtractionNeededFinding, isFixable, type DriftRuleId } from "../lib/drift/index.js";
@@ -60,26 +61,20 @@ export interface AuditOpts {
    */
   pendingSink?: PendingDecision[];
   /**
-   * Issue #410: skip the post-fix verify gate (the consumer's `tsc`/verify
-   * is run before emitting a clean/fixed verdict). heal/driveRemediation
-   * passes this when running audit --fix as an inner step — heal owns the
-   * final gate at convergence and a per-step `tsc` invocation would mean N
-   * extra runs per heal iteration.
+   * Issue #410 / #437: run the post-fix verify gate (the consumer's
+   * `tsc`/verify before emitting a clean/fixed verdict). Caller-owned
+   * (ADR-0018) — the CLI entry opts in for a standalone `claude-ds audit --fix`;
+   * the remediation driver omits it because heal owns the final gate at
+   * convergence and a per-step `tsc` invocation would mean N extra runs per
+   * heal iteration.
    */
-  skipVerifyGate?: boolean;
-  /**
-   * Suppress the terminal `→ Next` breadcrumb. The remediation driver passes
-   * this when running `audit --fix` as an inner loop step — heal/front-door
-   * owns the single authoritative verdict at convergence, so a per-step
-   * breadcrumb would contradict it (the C2/#414 defect this closes for audit).
-   */
-  skipNextStep?: boolean;
+  verify?: boolean;
   cwd?: string;
 }
 
 const suppressedKey = (rule: string, path: string) => `${rule}:${path}`;
 
-export async function auditCmd(opts: AuditOpts) {
+export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
   const cwd = opts.cwd ?? process.cwd();
   if (opts.json) setJsonMode(true);
 
@@ -92,7 +87,7 @@ export async function auditCmd(opts: AuditOpts) {
     if (!guard.ok) {
       err(guard.message);
       if (opts.json) emitHeadless(errorResult("audit", guard.message));
-      process.exit(2);
+      return commandError(2);
     }
   }
 
@@ -108,7 +103,7 @@ export async function auditCmd(opts: AuditOpts) {
       const m = e instanceof Error ? e.message : String(e);
       err(m);
       if (opts.json) emitHeadless(errorResult("audit", m));
-      process.exit(2);
+      return commandError(2);
     }
   }
   if (!pack) {
@@ -116,7 +111,7 @@ export async function auditCmd(opts: AuditOpts) {
       const m = "--pack required (no .claude-ds.json found)";
       err(m);
       if (opts.json) emitHeadless(errorResult("audit", m));
-      process.exit(2);
+      return commandError(2);
     }
     ctx = await loadProject(cwd, decisions);
     cfg = ctx.cfg;
@@ -218,8 +213,7 @@ export async function auditCmd(opts: AuditOpts) {
           decisionQuestion: e.decisionQuestion,
         }));
       }
-      process.exit(2);
-      return;
+      return commandError(2);
     }
     throw e;
   }
@@ -257,7 +251,6 @@ export async function auditCmd(opts: AuditOpts) {
       }
       return !isFixable(f.ruleId as DriftRuleId);
     }).length;
-    if (!opts.skipNextStep) printNextStep("audit", { hasFindings: true, extractionCount, unfixableCount });
     if (opts.json) {
       emitHeadless({
         command: "audit",
@@ -275,7 +268,9 @@ export async function auditCmd(opts: AuditOpts) {
         },
       });
     }
-    process.exit(1);
+    return findingsRemain(
+      opts.json ? undefined : { command: "audit", ctx: { hasFindings: true, extractionCount, unfixableCount } },
+    );
   } else if (fixSummary.fixedCount > 0) {
     // Issue #410 / PRD #407 — the verify gate. The previous code printed
     // "No action required" then "→ Next: run <build>", asking the operator
@@ -283,9 +278,9 @@ export async function auditCmd(opts: AuditOpts) {
     // consumer's verify itself and gates the success verdict on a green
     // result. A red gate on a file claude-ds touched surfaces the errors
     // and exits non-zero — never prints "clean."
-    const verify = opts.skipVerifyGate
-      ? null
-      : await gateVerify(cwd, ctx.manifest.files.map(f => f.path), fixSummary.touchedFiles);
+    const verify = opts.verify
+      ? await gateVerify(cwd, ctx.manifest.files.map(f => f.path), fixSummary.touchedFiles)
+      : null;
     if (verify && !verify.ok) {
       reportRedGate(verify);
       if (opts.json) {
@@ -302,8 +297,7 @@ export async function auditCmd(opts: AuditOpts) {
           },
         });
       }
-      process.exit(1);
-      return;
+      return findingsRemain();
     }
     if (verify && verify.consumerErrors.length > 0) {
       info(`verify gate passed (${verify.command}) — ${verify.consumerErrors.length} pre-existing consumer error(s) noted but not caused by claude-ds`);
@@ -328,6 +322,7 @@ export async function auditCmd(opts: AuditOpts) {
         },
       });
     }
+    return success();
   } else if (warningCount > 0 && !opts.fix) {
     // #349 F9: warnings (orphans, deprecated-path matches, strict-root
     // unexpected files) are actionable even though they aren't errors. The
@@ -336,7 +331,6 @@ export async function auditCmd(opts: AuditOpts) {
     // defect. Acknowledge the warnings and route the breadcrumb at the
     // command that resolves them (`audit --fix` runs reconcile inline).
     info(`${warningCount} warning(s) — re-run with --fix to auto-resolve.`);
-    if (!opts.skipNextStep) printNextStep("audit", { hasActionableWarnings: true, buildCmd });
     if (opts.json) {
       emitHeadless({
         command: "audit",
@@ -347,12 +341,15 @@ export async function auditCmd(opts: AuditOpts) {
         remaining: { warnings: warningCount, findingsCount: 0 },
       });
     }
+    return success(
+      opts.json ? undefined : { command: "audit", ctx: { hasActionableWarnings: true, buildCmd } },
+    );
   } else {
     // Issue #410: if --fix mutated the tree (reconcile deleted orphans,
     // even with no drift findings to fix), gate the clean verdict on the
     // consumer's verify. A read-only `audit` (no --fix) skips the gate —
     // it never wrote bytes so there's nothing for verify to vouch for.
-    if (opts.fix && fixSummary.mutated && !opts.skipVerifyGate) {
+    if (opts.fix && fixSummary.mutated && opts.verify) {
       const verify = await gateVerify(cwd, ctx.manifest.files.map(f => f.path), fixSummary.touchedFiles);
       if (!verify.ok) {
         reportRedGate(verify);
@@ -370,8 +367,7 @@ export async function auditCmd(opts: AuditOpts) {
             },
           });
         }
-        process.exit(1);
-        return;
+        return findingsRemain();
       }
       if (verify.consumerErrors.length > 0) {
         info(`verify gate passed (${verify.command}) — ${verify.consumerErrors.length} pre-existing consumer error(s) noted but not caused by claude-ds`);
@@ -390,10 +386,9 @@ export async function auditCmd(opts: AuditOpts) {
           remaining: { findingsCount: 0, warnings: warningCount, verify: verifyJson(verify) },
         });
       }
-      return;
+      return success();
     }
     info("No action required.");
-    if (!opts.skipNextStep) printNextStep("audit", { hasFindings: false, buildCmd });
     if (opts.json) {
       emitHeadless({
         command: "audit",
@@ -404,6 +399,9 @@ export async function auditCmd(opts: AuditOpts) {
         remaining: { findingsCount: 0, warnings: warningCount },
       });
     }
+    return success(
+      opts.json ? undefined : { command: "audit", ctx: { hasFindings: false, buildCmd } },
+    );
   }
 }
 

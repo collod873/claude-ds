@@ -20,6 +20,8 @@ import { healCmd } from "./commands/heal.js";
 import { frontDoorCmd } from "./commands/front-door.js";
 import { greetCmd } from "./commands/greet.js";
 import { isTTY } from "./lib/render/index.js";
+import { printNextStep } from "./lib/log.js";
+import type { CommandResult } from "./lib/command-result.js";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -29,6 +31,18 @@ export interface ProgramDefaults {
 
 async function configExists(cwd: string): Promise<boolean> {
   try { await stat(join(cwd, ".claude-ds.json")); return true; } catch { return false; }
+}
+
+/**
+ * Map a loop member's `CommandResult` to the CLI surface (issue #437 / ADR-0018):
+ * render the caller-owned `→ Next` breadcrumb, then exit with the result's code.
+ * The driver consumes the same result but discards the breadcrumb, so no
+ * `→ Next` prints on the loop path. Exit 0 returns normally so commander can
+ * finish cleanly.
+ */
+function finishCommand(result: CommandResult): void {
+  if (result.nextStep) printNextStep(result.nextStep.command, result.nextStep.ctx);
+  if (result.exitCode !== 0) process.exit(result.exitCode);
 }
 
 export function buildProgram(defaults: ProgramDefaults = {}): Command {
@@ -113,7 +127,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--allow-dirty", "bypass the clean-tree guard (only meaningful with --fix)")
     .option("--json", "emit machine-readable headless contract (issue #408)")
     .action(async (opts: { pack?: string; suggestRemovals?: boolean; fix?: boolean; except?: boolean; reason?: string; issue?: string; permanent?: boolean; verbose?: boolean; answers?: string; allowDirty?: boolean; json?: boolean }) => {
-      await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals, fix: opts.fix, except: opts.except, reason: opts.reason, issue: opts.issue, permanent: opts.permanent, verbose: opts.verbose, answers: opts.answers, allowDirty: opts.allowDirty, json: opts.json, cwd: defaults.cwd });
+      finishCommand(await auditCmd({ pack: opts.pack, suggestRemovals: opts.suggestRemovals, fix: opts.fix, except: opts.except, reason: opts.reason, issue: opts.issue, permanent: opts.permanent, verbose: opts.verbose, answers: opts.answers, allowDirty: opts.allowDirty, json: opts.json, verify: true, cwd: defaults.cwd }));
     });
 
   program
@@ -168,7 +182,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--json", "emit machine-readable headless contract (issue #408)")
     .option("--verbose", "list every skipped file (default: collapse in-sync/seeded skips to a count)")
     .action(async (opts: { offlineFixture?: string; yes?: boolean; dryRun?: boolean; allowDirty?: boolean; json?: boolean; verbose?: boolean }) => {
-      await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd, yes: opts.yes, dryRun: opts.dryRun, allowDirty: opts.allowDirty, json: opts.json, verbose: opts.verbose });
+      finishCommand(await syncCmd({ offlineFixture: opts.offlineFixture, cwd: defaults.cwd, yes: opts.yes, dryRun: opts.dryRun, allowDirty: opts.allowDirty, json: opts.json, verbose: opts.verbose, verify: true }));
     });
 
   program
@@ -227,7 +241,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--diff", "render the full unified diff instead of the one-line-per-file summary")
     .option("--json", "emit machine output and suppress the human render")
     .action(async (opts: { to?: string; dryRun?: boolean; yes?: boolean; allowDirty?: boolean; diff?: boolean; json?: boolean }) => {
-      await upgradeCmd({ to: opts.to, dryRun: opts.dryRun, yes: opts.yes, allowDirty: opts.allowDirty, diff: opts.diff, json: opts.json, cwd: defaults.cwd });
+      finishCommand(await upgradeCmd({ to: opts.to, dryRun: opts.dryRun, yes: opts.yes, allowDirty: opts.allowDirty, diff: opts.diff, json: opts.json, verify: true, cwd: defaults.cwd }));
     });
 
   program
@@ -240,7 +254,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
     .option("--allow-dirty", "accepted for compatibility (no-op since PRD #340 F7 — classify's commitment-gate is the safety, git is the undo)")
     .option("--json", "emit machine-readable headless contract (issue #408)")
     .action(async (opts: { src?: string; dryRun?: boolean; yes?: boolean; answers?: string; allowDirty?: boolean; json?: boolean }) => {
-      await classifyCmd({ src: opts.src, dryRun: opts.dryRun, yes: opts.yes, answers: opts.answers, allowDirty: opts.allowDirty, json: opts.json, cwd: defaults.cwd });
+      finishCommand(await classifyCmd({ src: opts.src, dryRun: opts.dryRun, yes: opts.yes, answers: opts.answers, allowDirty: opts.allowDirty, json: opts.json, cwd: defaults.cwd }));
     });
 
   program

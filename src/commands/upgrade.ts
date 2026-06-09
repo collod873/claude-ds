@@ -3,8 +3,9 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
-import { info, err, confirm, printNextStep, setJsonMode } from "../lib/log.js";
+import { info, err, confirm, setJsonMode } from "../lib/log.js";
 import { HEADLESS_EXIT, errorResult, emitHeadless } from "../lib/headless.js";
+import { type CommandResult, type NextStepHint, success, commandError, findingsRemain } from "../lib/command-result.js";
 
 const execFile = promisify(execFileCb);
 import { loadProject } from "../lib/project.js";
@@ -78,8 +79,9 @@ function renderUpgradePreview(
  * Emit upgrade's headless contract — issue #408. Combines the existing
  * `{ changes: [...] }` shape (back-compat with PRD #340 sub-issue #344's
  * machine surface) with the headless envelope every loop-critical command
- * now ships under `--json`. The function is `never`-returning: it calls
- * `process.exit(exitCode)` so callers don't have to remember to.
+ * now ships under `--json`. Issue #437 turns this into a value-returning helper:
+ * it writes the JSON document and returns the matching `CommandResult` so the
+ * caller maps `exitCode` (no in-helper `process.exit`).
  */
 function emitUpgradeHeadless(
   exitCode: number,
@@ -87,7 +89,7 @@ function emitUpgradeHeadless(
   changesEntries: SummaryEntry[],
   actions: Record<string, unknown>,
   remaining: Record<string, unknown>,
-): never {
+): CommandResult {
   const payload = JSON.parse(renderChangesJson(changesEntries)) as { changes: unknown[] };
   const out = {
     command: "upgrade" as const,
@@ -100,7 +102,14 @@ function emitUpgradeHeadless(
   };
   process.stdout.write(JSON.stringify(out, null, 2) + "\n");
   setJsonMode(false);
-  process.exit(exitCode);
+  return resultForExit(exitCode);
+}
+
+/** Map an exit code to the matching `CommandResult` (no breadcrumb). */
+function resultForExit(exitCode: number): CommandResult {
+  if (exitCode === HEADLESS_EXIT.OK) return success();
+  if (exitCode === 1) return findingsRemain();
+  return commandError(exitCode);
 }
 
 /**
@@ -115,13 +124,15 @@ function emitUpgradeHeadless(
  * holds, and re-emits its Changes when the consumer has drifted away — so
  * re-running the chain through the Runner *is* the verification.
  *
- * Returns the number of drifted ops that were (or would be in dry-run) re-applied.
+ * Returns the number of drifted ops that were (or would be in dry-run)
+ * re-applied — or a `CommandResult` (issue #437) when an abort/restore-failure
+ * short-circuits, which the caller returns directly.
  */
 async function verifyEndStates(
   ctx: Awaited<ReturnType<typeof loadProject>>,
   packVersion: string,
   opts: { dryRun?: boolean; yes?: boolean; renderMode: UpgradeRenderMode; jsonAccumulator?: SummaryEntry[] },
-): Promise<number> {
+): Promise<number | CommandResult> {
   const verifyChain = computeVerificationChain(packVersion, MIGRATION_REGISTRY);
   if (verifyChain.length === 0) return 0;
 
@@ -138,13 +149,13 @@ async function verifyEndStates(
 
   if (!opts.yes && !(await confirm("Re-apply drifted migrations?"))) {
     err("aborted");
-    process.exit(130);
+    return commandError(130);
   }
 
   const applyReport = await runMigrations(ctx, verifyChain, "apply");
   if (applyReport.failed) {
     err(`end-state restore failed: ${applyReport.failed.error}`);
-    process.exit(2);
+    return commandError(2);
   }
   info(`restored ${driftedOps.length} drifted migration end-state(s)`);
   return driftedOps.length;
@@ -165,23 +176,14 @@ export async function upgradeCmd(opts: {
   diff?: boolean;
   json?: boolean;
   /**
-   * Issue #410: skip the post-apply consumer verify gate. heal's driver
-   * passes this when running upgrade as an inner step — heal owns the
-   * final gate at convergence and a per-step `tsc` invocation would mean N
-   * extra runs per heal iteration.
+   * Issue #410 / #437: run the post-apply consumer verify gate. Caller-owned
+   * (ADR-0018) — the CLI entry opts in for a standalone `claude-ds upgrade`; the
+   * remediation driver omits it because heal owns the final gate at convergence
+   * and a per-step `tsc` invocation would mean N extra runs per heal iteration.
    */
-  skipVerifyGate?: boolean;
-  /**
-   * Suppress the terminal `→ Next` breadcrumb. The remediation driver passes
-   * this when running upgrade as an inner loop step: heal/front-door owns the
-   * single authoritative verdict at convergence ("✓ Tree is clean"), so a
-   * per-step breadcrumb that names `audit` contradicts it and tells the
-   * operator to run a step the loop already auto-runs (the C2/#414 defect this
-   * closes for the upgrade path).
-   */
-  skipNextStep?: boolean;
+  verify?: boolean;
   cwd?: string;
-}) {
+}): Promise<CommandResult> {
   const cwd = opts.cwd ?? process.cwd();
   const renderMode: UpgradeRenderMode = opts.json ? "json" : opts.diff ? "diff" : "summary";
   if (opts.json) setJsonMode(true);
@@ -200,7 +202,7 @@ export async function upgradeCmd(opts: {
     if (!guard.ok) {
       err(guard.message);
       if (opts.json) emitHeadless(errorResult("upgrade", guard.message));
-      process.exit(2);
+      return commandError(2);
     }
   }
 
@@ -208,24 +210,26 @@ export async function upgradeCmd(opts: {
     const m = ".claude-ds.json absent — run adopt first";
     err(m);
     if (opts.json) emitHeadless(errorResult("upgrade", m));
-    process.exit(2);
+    return commandError(2);
   }
 
   const ctx = await loadProject(cwd);
   const from = ctx.cfg.packVersion;
   const to = opts.to ?? cliVersion();
 
+  // #349 F21: every command ends with a → Next breadcrumb. #344's render policy
+  // suppresses all human output under --json, so the hint is omitted there and
+  // returned otherwise for the CLI to render (the driver discards it — #437).
+  const upgradeHint = (outcome: "applied" | "no-op" | "repaired"): NextStepHint | undefined =>
+    renderMode === "json" ? undefined : { command: "upgrade", ctx: { upgradeOutcome: outcome } };
+
   if (from === to) {
     humanLog(`already at ${to}`);
-    const drifted = await verifyEndStates(ctx, from, { ...opts, renderMode, jsonAccumulator });
-    // #349 F21: every command ends with a → Next breadcrumb. #344's render
-    // policy suppresses all human output under --json, so gate the breadcrumb
-    // on the same renderMode rather than emitting it into the JSON surface.
-    if (renderMode !== "json" && !opts.skipNextStep) {
-      printNextStep("upgrade", { upgradeOutcome: drifted > 0 ? "repaired" : "no-op" });
-    }
+    const dr = await verifyEndStates(ctx, from, { ...opts, renderMode, jsonAccumulator });
+    if (typeof dr !== "number") return dr;
+    const drifted = dr;
     if (opts.json) {
-      emitUpgradeHeadless(
+      return emitUpgradeHeadless(
         HEADLESS_EXIT.OK,
         drifted > 0 ? "repaired" : "no-op",
         jsonAccumulator ?? [],
@@ -233,7 +237,7 @@ export async function upgradeCmd(opts: {
         { findingsCount: 0 },
       );
     }
-    return;
+    return success(upgradeHint(drifted > 0 ? "repaired" : "no-op"));
   }
 
   const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
@@ -241,12 +245,11 @@ export async function upgradeCmd(opts: {
   if (chain.length === 0) {
     humanLog(`no registered migrations between ${from} and ${to}`);
     humanLog(`pack is at ${from}`);
-    const drifted = await verifyEndStates(ctx, from, { ...opts, renderMode, jsonAccumulator });
-    if (renderMode !== "json" && !opts.skipNextStep) {
-      printNextStep("upgrade", { upgradeOutcome: drifted > 0 ? "repaired" : "no-op" });
-    }
+    const dr = await verifyEndStates(ctx, from, { ...opts, renderMode, jsonAccumulator });
+    if (typeof dr !== "number") return dr;
+    const drifted = dr;
     if (opts.json) {
-      emitUpgradeHeadless(
+      return emitUpgradeHeadless(
         HEADLESS_EXIT.OK,
         drifted > 0 ? "repaired" : "no-op",
         jsonAccumulator ?? [],
@@ -254,7 +257,7 @@ export async function upgradeCmd(opts: {
         { findingsCount: 0 },
       );
     }
-    return;
+    return success(upgradeHint(drifted > 0 ? "repaired" : "no-op"));
   }
 
   humanLog(`upgrading from ${from} → ${to}`);
@@ -270,7 +273,7 @@ export async function upgradeCmd(opts: {
   if (planErrors.length > 0) {
     for (const o of planErrors) err(`plan error in ${o.name}: ${o.error}`);
     if (opts.json) emitHeadless(errorResult("upgrade", "plan errors", { planErrors: planErrors.map(o => ({ name: o.name, error: o.error })) }));
-    process.exit(2);
+    return commandError(2);
   }
 
   renderUpgradePreview(dryReport, renderMode, jsonAccumulator);
@@ -283,7 +286,7 @@ export async function upgradeCmd(opts: {
   if (opts.dryRun) {
     humanLog("dry-run complete");
     if (opts.json) {
-      emitUpgradeHeadless(
+      return emitUpgradeHeadless(
         HEADLESS_EXIT.OK,
         "dry-run",
         jsonAccumulator ?? [],
@@ -291,13 +294,13 @@ export async function upgradeCmd(opts: {
         {},
       );
     }
-    return;
+    return success();
   }
 
   if (!opts.yes && !(await confirm("Apply migrations?"))) {
     err("aborted");
     if (opts.json) emitHeadless(errorResult("upgrade", "aborted"));
-    process.exit(130);
+    return commandError(130);
   }
 
   const report = await runMigrations(ctx, chain, "apply");
@@ -306,7 +309,7 @@ export async function upgradeCmd(opts: {
     const m = `apply failed: ${report.failed.error}`;
     err(m);
     if (opts.json) emitHeadless(errorResult("upgrade", m));
-    process.exit(2);
+    return commandError(2);
   }
 
   // Auto-detect shared utility imports used by many DS files
@@ -317,7 +320,7 @@ export async function upgradeCmd(opts: {
     const m = `finalize-upgrade failed: ${finalizeReport.failed.error}`;
     err(m);
     if (opts.json) emitHeadless(errorResult("upgrade", m));
-    process.exit(2);
+    return commandError(2);
   }
   if (detectedImports.length > 0) {
     humanLog(`auto-detected allowed_imports: ${detectedImports.join(", ")}`);
@@ -327,10 +330,16 @@ export async function upgradeCmd(opts: {
   humanLog("running sync to deliver pack files…");
   // Once upgrade applied bytes the tree is dirty — pass --allow-dirty through
   // to the embedded sync so it doesn't refuse on the very state upgrade just
-  // produced (PRD #325 / sub-issue #328). `skipVerifyGate: true` because the
-  // outer upgrade runs the verify gate below — one tsc invocation per
-  // command surface, not two (#410).
-  await syncCmd({ cwd, yes: opts.yes, allowDirty: true, skipVerifyGate: true, skipNextStep: true });
+  // produced (PRD #325 / sub-issue #328). sync runs as a plain function here:
+  // no `verify` (the outer upgrade owns the single verify gate below — one tsc
+  // invocation per command surface, not two, #410) and its returned breadcrumb
+  // hint is discarded (upgrade owns the verdict, #437).
+  // Propagate a failed embedded sync (apply/migrate-config error). Before #437
+  // sync `process.exit`-ed on failure, tearing down upgrade; now it returns, so
+  // a non-zero result must short-circuit here rather than be masked by a later
+  // "upgrade complete" success.
+  const syncResult = await syncCmd({ cwd, yes: opts.yes, allowDirty: true });
+  if (syncResult.exitCode !== 0) return syncResult;
 
   // Regenerate manifest.generated.ts — migrations may delete it (e.g.
   // manage-manifest@v0.9.0) and the PostToolUse hook won't fire until the
@@ -355,7 +364,7 @@ export async function upgradeCmd(opts: {
   // partition treats errors in scaffold/manifest files as scaffold errors
   // (block); pre-existing consumer errors are warn-only.
   let verify: VerifyResult | undefined;
-  if (!opts.skipVerifyGate) {
+  if (opts.verify) {
     const postUpgradeCtx = await loadProject(cwd);
     verify = await runConsumerVerify(cwd, {
       managedFiles: new Set(postUpgradeCtx.manifest.files.map(f => f.path)),
@@ -364,7 +373,7 @@ export async function upgradeCmd(opts: {
     if (!verify.ok) {
       reportRedGate(verify);
       if (opts.json) {
-        emitUpgradeHeadless(
+        return emitUpgradeHeadless(
           HEADLESS_EXIT.FINDINGS,
           "verify-failed",
           jsonAccumulator ?? [],
@@ -372,8 +381,7 @@ export async function upgradeCmd(opts: {
           { findingsCount: 0, verify: verifyJson(verify) },
         );
       }
-      process.exit(1);
-      return;
+      return findingsRemain();
     }
     if (verify.consumerErrors.length > 0) {
       humanLog(`verify gate passed (${verify.command}) — ${verify.consumerErrors.length} pre-existing consumer error(s) noted but not caused by claude-ds`);
@@ -382,18 +390,8 @@ export async function upgradeCmd(opts: {
     }
   }
 
-  // #349 F21: the applied-migration path must also close with a steering line
-  // — the already-current and no-chain branches above already do, but this
-  // tail printed none, leaving the most common upgrade with no verdict. The
-  // post-upgrade check is read-only `audit`, so #454 routes it as a `→ Verify:`
-  // tip. Gated like the sibling branches: not under --json, and suppressed when
-  // heal/front-door drives upgrade as an inner step and owns the verdict.
-  if (renderMode !== "json" && !opts.skipNextStep) {
-    printNextStep("upgrade", { upgradeOutcome: "applied" });
-  }
-
   if (opts.json) {
-    emitUpgradeHeadless(
+    return emitUpgradeHeadless(
       HEADLESS_EXIT.OK,
       "applied",
       jsonAccumulator ?? [],
@@ -401,6 +399,14 @@ export async function upgradeCmd(opts: {
       { findingsCount: 0, ...(verify ? { verify: verifyJson(verify) } : {}) },
     );
   }
+
+  // #349 F21: the applied-migration path must also close with a steering line
+  // — the already-current and no-chain branches above already do, but this
+  // tail printed none, leaving the most common upgrade with no verdict. The
+  // post-upgrade check is read-only `audit`, so #454 routes it as a `→ Verify:`
+  // tip. Returned as a hint (issue #437): the CLI renders it, the driver
+  // discards it so no breadcrumb prints on the loop path.
+  return success(upgradeHint("applied"));
 }
 
 function reportRedGate(verify: VerifyResult): void {
