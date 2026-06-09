@@ -16,12 +16,17 @@ jobs:
   ci:
     runs-on: self-hosted
     strategy:
-      # Test every Node major inside the engines range (>=20): the floor, the
-      # maintenance LTS, and the current LTS (.nvmrc pins 24 for dev/release).
-      # fail-fast off so one version's failure doesn't hide the others' results.
+      # Test every Node major inside the engines range (>=22.6 — the pack's
+      # hooks/scripts hard-require `node --experimental-strip-types`, which
+      # Node 20 doesn't have): the floor major and the current LTS (.nvmrc
+      # pins 24 for dev/release).
+      # fail-fast off so one version's failure doesn't hide the other's result.
+      # max-parallel 1: the self-hosted box runs jobs concurrently and the
+      # extra load flakes timing-sensitive tests (5s vitest timeouts).
       fail-fast: false
+      max-parallel: 1
       matrix:
-        node-version: [20, 22, 24]
+        node-version: [22, 24]
     name: ci (node ${{ matrix.node-version }})
     steps:
       - uses: actions/checkout@v5
