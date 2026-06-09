@@ -112,7 +112,7 @@ function main() {
         `\`_removal_triggers\` entry (day-one red on newly-measured surface — ADR-0003).\n` +
         `An added key with no trigger silences a real regression instead of fixing it. Offending keys:\n` +
         untracked.map((k) => `  + ${k}`).join("\n") +
-        `\n\nEither fix the underlying friction (see docs/agents/friction-loop.md) or, if this is\n` +
+        `\n\nEither fix the underlying friction or, if this is\n` +
         `genuinely new measured surface, add a \`_removal_triggers\` entry stating what burns it down.`,
     );
     exit(1);

@@ -2,8 +2,8 @@
  * PRD #439 — friction detector unit tests.
  *
  * The friction detector is the primary unit-test target. It is a pure scan
- * over captured rendered terminal output (mirroring `crewops-tripwire.ts`:
- * pure module, crafted payloads). Every rule gets a POSITIVE case (friction
+ * over captured rendered terminal output (pure module, crafted payloads).
+ * Every rule gets a POSITIVE case (friction
  * present ⇒ a finding) and a NEGATIVE case (clean output ⇒ no finding), plus a
  * regression block built from VERBATIM real-Crewops-style output that
  * motivated the rules.

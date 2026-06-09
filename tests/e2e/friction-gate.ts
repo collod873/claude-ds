@@ -16,7 +16,7 @@
  *     fails the gate. New friction ⇒ fail.
  *   - Baseline keys may only be REMOVED across commits, never added. The gate
  *     never auto-writes the baseline; closing a friction issue means hand-
- *     deleting its key (see docs/agents/friction-loop.md) and the gate refusing
+ *     deleting its key and the gate refusing
  *     to stay green if that key's finding still reproduces.
  *   - A baseline key that NO LONGER reproduces is reported (`stale`) so a fix
  *     can burn its entry down, but it does not fail the gate — the operator

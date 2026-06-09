@@ -27,8 +27,8 @@
  * `(input) -> FrictionFinding[]` functions. Drop one in or pull one out
  * without touching the others.
  *
- * Mirrors `crewops-tripwire.ts`: pure comparison/scan module, crafted-payload
- * unit tests, no fs/network in the core.
+ * Pure comparison/scan module: crafted-payload unit tests, no fs/network in
+ * the core.
  */
 
 /** The six friction kinds this module detects. Stable machine keys. */

@@ -51,7 +51,7 @@ const DEFAULT_MAX_ITERATIONS = 3;
  *   2 — user input or environment error (no config, dirty tree, bad flag)
  *   3 — partial fixed point: Automatable work settled, Pending decisions
  *       remain; the `--answers` scaffold names each and a re-run with the
- *       filled scaffold resolves them. Sandcastle automation routes on this
+ *       filled scaffold resolves them. External automation routes on this
  *       specifically: it is "needs Collin," not a hard failure.
  */
 export const HEAL_EXIT_PENDING = 3;
@@ -276,14 +276,14 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 
     // Partial fixed point: bytes stable but Ambiguities were collected as
     // Pending. Surface the named PENDING exit with a scaffold rather than
-    // letting sandcastle automation conflate it with "did not converge."
+    // letting external automation conflate it with "did not converge."
     if (outcome.kind === "pending") {
       await reportPendingAndExit(cwd, pendingSink, progress, opts.json);
       return;
     }
 
     // Ceiling hit. If Pending accumulated, that still needs the operator — the
-    // named PENDING exit, not a hard failure. Sandcastle routes on it either way.
+    // named PENDING exit, not a hard failure. External automation routes on it either way.
     if (pendingSink.length > 0) {
       await reportPendingAndExit(cwd, pendingSink, progress, opts.json);
       return;

@@ -68,9 +68,8 @@ surface we gate on.
 ## Consequences
 
 - The friction layer becomes testable. A friction point is "done" only when its
-  finding disappears from the baseline measured against the harvested snapshot —
-  see [friction-loop.md](../agents/friction-loop.md). This is the closing edge the
-  old loop lacked.
+  finding disappears from the baseline measured against the harvested snapshot.
+  This is the closing edge the old loop lacked.
 - User-facing output gains golden-file protection: unintended wording changes
   surface as a reviewable diff in the same PR that introduces them.
 - The harness keeps its headless guarantee. Anything that reintroduces a

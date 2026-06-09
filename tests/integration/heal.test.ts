@@ -348,7 +348,7 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
   // silently guessing. The loop converges everything Automatable to a partial
   // fixed point ("converged-modulo-Pending"), gathers unresolved Ambiguities,
   // and exits with a stable named non-zero code distinct from convergence-
-  // failure so sandcastle automation can route on it specifically.
+  // failure so external automation can route on it specifically.
   describe("headless Pending-decision collection (sub-issue #333)", () => {
     const PENDING_EXIT = 3;
     const SCAFFOLD_FILE = ".claude-ds-pending-answers.json";
@@ -377,7 +377,7 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
 
     it("exits with a named non-zero distinct from convergence-failure", async () => {
       // Convergence-failure exit is 1; user-error is 2; the Pending-decision
-      // exit must be a third stable code (3) so sandcastle automation can
+      // exit must be a third stable code (3) so external automation can
       // route on it specifically rather than conflating "needs Collin" with
       // "did not converge."
       await scaffoldEquidistantTokenFixture();

@@ -20,16 +20,6 @@ Edits to `src/` require `npm run build` before the global CLI picks them up.
 The `npx github:collod873/claude-ds#vX.Y.Z` install path now works via a `prepare` script in
 `package.json`. Local `npm link` workflow continues to work for development.
 
-## Agent skills
+## Domain docs
 
-### Triage labels
-
-Canonical triage labels, plus `agent:*` state labels for the AFK-agent workflow. See `docs/agents/triage-labels.md`.
-
-### Issue tracker
-
-Issues and PRDs live as GitHub issues. See `docs/agents/issue-tracker.md`.
-
-### Domain docs
-
-Single-context layout: `CONTEXT.md` at the repo root (if present), ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+Single-context layout: `CONTEXT.md` at the repo root (if present), ADRs under `docs/adr/`.
