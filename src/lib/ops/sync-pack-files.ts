@@ -164,8 +164,13 @@ export function makeSyncPackFiles(opts: SyncPackFilesOpts = {}): SyncPackFilesOp
 				// #15: hook and script files must land as 0o755. The Runner honours the `mode`
 				// hint via `chmod` after the atomic temp-file rename, replacing the post-write
 				// loop sync used to do at the command boundary.
+				// #507: only scripts under these dirs land executable. Data files that live
+				// alongside them (verify-fixture.json, README.md) must stay 644 — they were
+				// inheriting the 0o755 hook-script mode.
+				const isDataFile = writePath.endsWith(".json") || writePath.endsWith(".md");
 				const isExecutable =
-					writePath.startsWith(".claude/hooks/") || writePath.startsWith("scripts/");
+					!isDataFile &&
+					(writePath.startsWith(".claude/hooks/") || writePath.startsWith("scripts/"));
 				const change: Change = isExecutable
 					? { kind: "write", path: writePath, before, after, mode: "executable" }
 					: { kind: "write", path: writePath, before, after };
