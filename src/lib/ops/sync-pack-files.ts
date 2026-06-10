@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { formatContent, resolveConsumerFormatter } from "../formatter.js";
 import type { Manifest } from "../manifest.js";
 import type { Change, Operation, PlanResult } from "../operation.js";
 import { resolveManifestPath } from "../paths.js";
@@ -24,6 +25,13 @@ export interface PackFileDecision {
 /** Outcome reported on `RunReport.ops[i].outcome` — per-file sync verdicts. */
 export interface SyncPackFilesOutcome {
 	decisions: PackFileDecision[];
+	/**
+	 * Consumer-relative write paths whose bytes were run through the consumer's
+	 * formatter in-memory before being staged (issue #493). The sync command
+	 * excludes these from its post-apply formatter batch so they aren't formatted
+	 * twice; everything else it wrote still goes through the batch.
+	 */
+	formattedPaths: string[];
 }
 
 export type SyncPackFilesOp = Operation<SyncPackFilesOutcome>;
@@ -49,19 +57,35 @@ export interface SyncPackFilesOpts {
  * `RunReport.ops[i].outcome.decisions` — no mutable side-channel on the op handle.
  */
 export function makeSyncPackFiles(opts: SyncPackFilesOpts = {}): SyncPackFilesOp {
-	let cached: { changes: Change[]; decisions: PackFileDecision[] } | null = null;
+	let cached: {
+		changes: Change[];
+		decisions: PackFileDecision[];
+		formattedPaths: string[];
+	} | null = null;
 	return {
 		name: "sync-pack-files",
 		async plan(ctx: ProjectContext): Promise<PlanResult<SyncPackFilesOutcome>> {
 			if (cached) {
-				return { changes: cached.changes, outcome: { decisions: cached.decisions } };
+				return {
+					changes: cached.changes,
+					outcome: { decisions: cached.decisions, formattedPaths: cached.formattedPaths },
+				};
 			}
 			const manifest = opts.manifest ?? ctx.manifest;
 			const packDir = opts.packDir ?? ctx.packDir;
 			const cfg = ctx.cfg;
 
+			// #493: the showcase chrome under `app/` lands in the consumer's
+			// app_dir — linted territory. Format the canonical bytes through the
+			// consumer's formatter *before* diffing and writing, so (a) what we
+			// stage already passes their lint and (b) `diffFile` compares like
+			// against like — a previously-formatted file reads as "in sync" instead
+			// of ping-ponging "upstream changed" on every heal pass. Resolved once.
+			const formatter = await resolveConsumerFormatter(ctx.cwd);
+
 			const changes: Change[] = [];
 			const decisions: PackFileDecision[] = [];
+			const formattedPaths: string[] = [];
 
 			for (const f of manifest.files) {
 				if (f.category === "generated") continue;
@@ -96,6 +120,20 @@ export function makeSyncPackFiles(opts: SyncPackFilesOpts = {}): SyncPackFilesOp
 					srcName.endsWith(".fragment")
 				) {
 					upstream = `# >>> claude-ds managed >>>\n${upstream}\n# <<< claude-ds managed <<<`;
+				}
+
+				// #493: format the canonical bytes for showcase-chrome files that land
+				// in the consumer's app_dir, BEFORE diffing/writing. Scoped to `app/`
+				// pack files — the exact territory that broke Crewops' Biome lint.
+				// Only claim a path as "formatted" when the formatter actually changed
+				// the bytes, so a formatter that can't filter via stdin falls back to
+				// the command's post-apply batch unchanged (no behaviour change).
+				if (formatter && f.path.startsWith("app/")) {
+					const formatted = formatContent(formatter, upstream, writePath, ctx.cwd);
+					if (formatted !== upstream) {
+						upstream = formatted;
+						formattedPaths.push(writePath);
+					}
 				}
 
 				// v1 gap: no prior-snapshot cache — use prev=null so managed files without a known
@@ -134,8 +172,8 @@ export function makeSyncPackFiles(opts: SyncPackFilesOpts = {}): SyncPackFilesOp
 				changes.push(change);
 			}
 
-			cached = { changes, decisions };
-			return { changes, outcome: { decisions } };
+			cached = { changes, decisions, formattedPaths };
+			return { changes, outcome: { decisions, formattedPaths } };
 		},
 	};
 }

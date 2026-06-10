@@ -180,9 +180,14 @@ export async function syncCmd(opts: {
 
 	// #15: hook/script chmod is now a `Change.mode: "executable"` hint applied by the Runner
 	// (#221 / #230). Sync only collects rewritten paths here for the formatter pass.
+	// #493: paths the Op already formatted in-memory (the `app/` showcase chrome)
+	// are excluded — they're consumer-formatted before staging, so re-running the
+	// batch over them is wasted work (and would double-format under a stdin filter).
+	const alreadyFormatted = new Set(planResult.outcome.formattedPaths);
 	const rewrittenPaths: string[] = [];
 	for (const c of report.applied) {
 		if (c.kind !== "write") continue;
+		if (alreadyFormatted.has(c.path)) continue;
 		rewrittenPaths.push(c.path);
 	}
 
