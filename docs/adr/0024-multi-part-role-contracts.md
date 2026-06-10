@@ -1,11 +1,21 @@
 # 0024 — Multi-part role contracts: composed-widget mounts
 
 Date: 2026-06-08
-Status: Accepted
+Status: Superseded in part by [0026](0026-unify-composed-widget-rendering.md)
 
 Amends: 0016 (behavior as the fourth scaffold concern — role contracts)
 Resolves: the deferral in 0022 (multi-part roles and the single-component
 runner limit)
+
+> **Superseded in part (2026-06-09, ADR-0026).** §2 of this ADR introduced a
+> dedicated `meta.contractExamples` field, justified by the showcase / GEN-001
+> whole-array `JSON.parse` choking on a JSX thunk. ADR-0026 revisits that:
+> the parser limitation was the real defect, not a constraint. The integrity
+> parser is now per-entry (JSX-tolerant), the composed widget is authored **once**
+> in `meta.examples` (`props.children`), and `meta.contractExamples` is retired.
+> The multi-part *model* (§1, §3, §4 — composed mount, lock-step detection, the
+> green `pending` soft-skip) stands unchanged; only the field split in §2 is
+> reversed. Read ADR-0026 before reasoning about where composed mounts live.
 
 ## Context
 

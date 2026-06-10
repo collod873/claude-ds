@@ -30,12 +30,12 @@ const sources = import.meta.glob<Record<string, unknown>>(
 function toMetaModule(path: string, mod: Record<string, unknown>): MetaModule | null {
   const meta = mod.meta;
   if (!meta || typeof meta !== "object") return null;
-  // The contract path mounts the composed widget via `meta.contractExamples`
-  // thunks (ADR-0024), so the runner needs no resolved component. We therefore
-  // do NOT require a function-valued export here: a multi-part combobox root is
-  // often a context provider that isn't the file's first function export, and
-  // requiring one would silently drop it from discovery (no role seen → no
-  // soft-skip). `meta` alone is enough to discover and route the part.
+  // The contract path mounts the composed widget from a `meta.examples` entry's
+  // `props.children` (ADR-0024 / ADR-0026), so the runner needs no resolved
+  // component. We therefore do NOT require a function-valued export here: a
+  // multi-part combobox root is often a context provider that isn't the file's
+  // first function export, and requiring one would silently drop it from
+  // discovery (no role seen → no soft-skip). `meta` alone discovers + routes it.
   const file = path.split("/").pop() ?? path;
   const name = file.replace(/\.tsx$/, "");
   return {
@@ -61,19 +61,19 @@ describe("role contracts", () => {
   }
 
   // Pending parts: a role is stamped (e.g. detection caught a cmdk-based
-  // combobox) but no composed `meta.contractExamples` mount exists yet, so the
-  // runner can't drive the widget. This is a GREEN soft-skip — never a red
-  // failure dropped into a consumer (north star) — but unlike the old perpetual
-  // skip it is *resolvable*: the label names the exact part and the one action
-  // that activates it. See ADR-0024 (the multi-part model) / issue #461.
+  // combobox) but no composed `meta.examples` entry exists yet, so the runner
+  // can't drive the widget. This is a GREEN soft-skip — never a red failure
+  // dropped into a consumer (north star) — but unlike the old perpetual skip it
+  // is *resolvable*: the label names the exact part and the one action that
+  // activates it. See ADR-0024 / ADR-0026 (the unified render path) / issue #461.
   for (const comp of pending) {
     test.skip(
-      `${comp.name} (role: ${comp.role}) — add a meta.contractExamples mount of the composed widget to activate (ADR-0024)`,
+      `${comp.name} (role: ${comp.role}) — add a meta.examples entry whose props.children is the composed widget to activate (ADR-0026)`,
       () => {},
     );
   }
 
-  // Drivable parts: a role with a composed mount the contract can drive.
+  // Drivable parts: a role with a composed example the contract can drive.
   for (const comp of drivable) {
     test(`${comp.name} (role: ${comp.role})`, async () => {
       await runRoleContracts([comp], {

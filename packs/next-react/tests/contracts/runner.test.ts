@@ -13,26 +13,30 @@ import {
 import type { Meta } from "../../files/design-system/types/meta";
 
 /**
- * "renderComposed" stand-in for the pack test bench: a `contractExamples` mount
- * returns a fully-composed DOM node (the multi-part fixtures), and the bridge
- * just appends it. In a React consumer this slot is filled by Testing Library —
- * `render(element, { container })` — but the runner itself has no React
- * coupling, which is exactly what this stand-in proves (ADR-0024).
+ * "renderComposed" stand-in for the pack test bench: a composed example carries
+ * a fully-composed DOM node (the multi-part fixtures) in `props.children`, and
+ * the bridge just appends it. In a React consumer this slot is filled by Testing
+ * Library — `render(element, { container })` — but the runner itself has no
+ * React coupling, which is exactly what this stand-in proves (ADR-0024).
  */
 const mountComposed: RunnerOptions["renderComposed"] = (renderable, container) => {
   container.appendChild(renderable as Node);
 };
 
+/** A composed-widget example: the assembled widget authored in `props.children`. */
+function composedExample(name: string, node: unknown): { name: string; props: Record<string, unknown> } {
+  return { name, props: { children: node } };
+}
+
 describe("selectRoleBearingComponents", () => {
-  it("routes a role-bearing part WITH a contract mount to drivable", () => {
+  it("routes a role-bearing part WITH a composed example to drivable", () => {
     const tree: MetaModule[] = [
       {
         name: "Combobox",
         meta: {
           kind: "atom",
-          examples: [{ name: "default", props: {} }],
           role: "combobox",
-          contractExamples: [{ name: "default", render: () => composeGoodCombobox() }],
+          examples: [composedExample("default", composeGoodCombobox())],
         },
       },
       {
@@ -48,22 +52,41 @@ describe("selectRoleBearingComponents", () => {
     const { drivable, pending } = selectRoleBearingComponents(tree);
     expect(drivable.map((p) => p.name)).toEqual(["Combobox"]);
     expect(drivable[0].role).toBe("combobox");
-    expect(drivable[0].contractExamples).toHaveLength(1);
+    expect(drivable[0].mounts).toHaveLength(1);
     expect(pending).toEqual([]);
   });
 
-  it("routes a role-bearing part with NO contract mount to pending (green soft-skip, not red)", () => {
+  it("routes a role-bearing part with only flat examples to pending (green soft-skip, not red)", () => {
     // The detection-broadening safety valve (ADR-0024 §2): a stamped role with
-    // no composed mount must NOT be driven (would fail finding the anchor) and
+    // no composed example must NOT be driven (would fail finding the anchor) and
     // must NOT throw — it lands in `pending` for the test layer to soft-skip.
     const tree: MetaModule[] = [
       {
         name: "Combobox",
         meta: {
           kind: "atom",
-          // Flat showcase examples exist, but none is a composed contract mount.
+          // Flat showcase examples exist, but none carries a composed widget.
           examples: [{ name: "sm", props: { size: "sm" } }],
           role: "combobox",
+        },
+      },
+    ];
+    const { drivable, pending } = selectRoleBearingComponents(tree);
+    expect(drivable).toEqual([]);
+    expect(pending).toEqual([{ name: "Combobox", role: "combobox" }]);
+  });
+
+  it("a string-children example is flat, not a composed mount → pending", () => {
+    // A renderable mount is a node (DOM/React element). A plain string child is a
+    // flat visual example whose DOM never carries the role anchor — driving it
+    // would be a false failure, so it must route to pending, not drivable.
+    const tree: MetaModule[] = [
+      {
+        name: "Combobox",
+        meta: {
+          kind: "atom",
+          role: "combobox",
+          examples: [{ name: "default", props: { children: "Choose…" } }],
         },
       },
     ];
@@ -80,9 +103,8 @@ describe("selectRoleBearingComponents", () => {
         name: "DialogPattern",
         meta: {
           kind: "pattern",
-          examples: [],
+          examples: [composedExample("default", composeGoodCombobox())],
           role: "combobox",
-          contractExamples: [{ name: "default", render: () => composeGoodCombobox() }],
         } as unknown as MetaModule["meta"],
       },
     ];
@@ -97,9 +119,8 @@ describe("selectRoleBearingComponents", () => {
         name: "Tabs",
         meta: {
           kind: "composite",
-          examples: [{ name: "default", props: {} }],
           role: "tabs",
-          contractExamples: [{ name: "default", render: () => composeGoodCombobox() }],
+          examples: [composedExample("default", composeGoodCombobox())],
         } as unknown as MetaModule["meta"],
       },
     ];
@@ -118,9 +139,8 @@ describe("runRoleContracts (end-to-end, multi-part composed widget)", () => {
         name: "GoodCombobox",
         meta: {
           kind: "atom",
-          examples: [{ name: "default", props: {} }],
           role: "combobox",
-          contractExamples: [{ name: "default", render: () => composeGoodCombobox() }],
+          examples: [composedExample("default", composeGoodCombobox())],
         },
       },
     ]);
@@ -135,9 +155,8 @@ describe("runRoleContracts (end-to-end, multi-part composed widget)", () => {
         name: "BrokenCombobox",
         meta: {
           kind: "atom",
-          examples: [{ name: "default", props: {} }],
           role: "combobox",
-          contractExamples: [{ name: "default", render: () => composeBrokenCombobox() }],
+          examples: [composedExample("default", composeBrokenCombobox())],
         },
       },
     ]);
@@ -146,19 +165,19 @@ describe("runRoleContracts (end-to-end, multi-part composed widget)", () => {
     ).rejects.toThrow(/BrokenCombobox.*combobox.*split-context|commit/i);
   });
 
-  it("defensive: throws if a hand-built drivable list carries zero contract mounts", async () => {
+  it("defensive: throws if a hand-built drivable list carries zero mounts", async () => {
     // The selector routes zero-mount parts to `pending`, so this only happens
     // when a caller bypasses it. A role with zero mounts would let vitest see a
     // no-op test that "passes" without exercising the contract — the F3 trap.
     await expect(
       runRoleContracts(
-        [{ name: "EmptyCombobox", role: "combobox", contractExamples: [] }],
+        [{ name: "EmptyCombobox", role: "combobox", mounts: [] }],
         { renderComposed: mountComposed },
       ),
-    ).rejects.toThrow(/EmptyCombobox.*combobox.*contractExamples/i);
+    ).rejects.toThrow(/EmptyCombobox.*combobox.*composed example/i);
   });
 
-  it("runs every contract mount for a role-bearing component (multi-example coverage)", async () => {
+  it("runs every composed example for a role-bearing component (multi-example coverage)", async () => {
     let renderCount = 0;
     const trackingRender: RunnerOptions["renderComposed"] = (renderable, container) => {
       renderCount += 1;
@@ -169,11 +188,10 @@ describe("runRoleContracts (end-to-end, multi-part composed widget)", () => {
         name: "GoodCombobox",
         meta: {
           kind: "atom",
-          examples: [{ name: "default", props: {} }],
           role: "combobox",
-          contractExamples: [
-            { name: "default", render: () => composeGoodCombobox() },
-            { name: "second", render: () => composeGoodCombobox() },
+          examples: [
+            composedExample("default", composeGoodCombobox()),
+            composedExample("second", composeGoodCombobox()),
           ],
         },
       },
@@ -183,13 +201,12 @@ describe("runRoleContracts (end-to-end, multi-part composed widget)", () => {
   });
 });
 
-describe("Meta type accepts optional role + contractExamples on atom/composite arm", () => {
+describe("Meta type accepts optional role on atom/composite arm", () => {
   it("compiles role-bearing and roleless atom metas side by side", () => {
     const withRole: Meta = {
       kind: "atom",
-      examples: [{ name: "default", props: {} }],
       role: "combobox",
-      contractExamples: [{ name: "default", render: () => null }],
+      examples: [{ name: "default", props: { children: null } }],
     };
     const noRole: Meta = {
       kind: "atom",
