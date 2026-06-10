@@ -203,7 +203,16 @@ export async function runConsumerVerify(
 	}
 
 	const exec = opts.exec ?? defaultExec;
-	const timeoutMs = opts.timeoutMs ?? envTimeoutMs() ?? DEFAULT_TIMEOUT_MS;
+	// A non-finite / non-positive explicit timeout (e.g. `heal --verify-timeout abc`
+	// → NaN via parseInt, or `0`/`-5`) must not slip through: `NaN ?? x` keeps NaN,
+	// and `setTimeout(NaN)` fires immediately → instant SIGKILL of a green suite —
+	// the exact `verify-failed`-on-passing-tree regression this gate guards against.
+	// Fall back just like a bad env var does (issue #497).
+	const explicitTimeoutMs =
+		opts.timeoutMs !== undefined && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
+			? opts.timeoutMs
+			: undefined;
+	const timeoutMs = explicitTimeoutMs ?? envTimeoutMs() ?? DEFAULT_TIMEOUT_MS;
 	const result = await exec(command.cmd, command.args, { cwd, timeoutMs });
 
 	const errors = parseVerifyErrors(result.stdout + "\n" + result.stderr);

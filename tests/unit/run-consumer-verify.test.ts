@@ -464,6 +464,27 @@ describe("runConsumerVerify", () => {
 		}
 	});
 
+	it("falls back to env/default when opts.timeoutMs is NaN or non-positive (issue #497)", async () => {
+		// `heal --verify-timeout abc` → parseInt → NaN → `NaN * 1000` → NaN reaches
+		// here; `0`/`-5` reach here directly. A naive `?? default` keeps these and
+		// `setTimeout(NaN|0)` fires immediately, SIGKILLing a green suite. Each must
+		// fall back to the 300s default instead.
+		for (const bad of [Number.NaN, 0, -5]) {
+			const cwd = await freshTmpDir("rcv-timeout-bad-opt-");
+			try {
+				await writeFile(
+					join(cwd, "package.json"),
+					JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+				);
+				const seen = { timeoutMs: -1 };
+				await runConsumerVerify(cwd, { timeoutMs: bad, exec: capturingExec(seen) });
+				expect(seen.timeoutMs).toBe(300_000);
+			} finally {
+				await cleanup(cwd);
+			}
+		}
+	});
+
 	it("honors a custom managedRoots prefix", async () => {
 		const cwd = await freshTmpDir("rcv-roots-");
 		try {
