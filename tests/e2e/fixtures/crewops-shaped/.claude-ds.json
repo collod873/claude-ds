@@ -1,0 +1,10 @@
+{
+  "packVersion": "v1.7.0",
+  "pack": "next-react",
+  "mode": "warn",
+  "enforce_threshold": 10,
+  "removed": [],
+  "app_dir": "src/app",
+  "claude_md_target": ".claude/CLAUDE.md",
+  "meta_kind_strict": true
+}

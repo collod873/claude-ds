@@ -12,6 +12,7 @@
 			"scripts/**",
 			"*.config.ts",
 			"!packs/next-react/files",
+			"!tests/e2e/fixtures",
 			"!.sandcastle"
 		]
 	},
