@@ -200,7 +200,7 @@ describe("drift-fixers", () => {
 			shadow: { sm: "0 1px 2px 0 rgb(0 0 0 / 0.05)" },
 		};
 
-		async function setupTokens(tokens = TOKENS) {
+		async function setupTokens(tokens: Record<string, Record<string, string | number>> = TOKENS) {
 			await mkdir(join(dir, "design-system/atoms"), { recursive: true });
 			await writeFile(join(dir, "design-system/tokens.json"), JSON.stringify(tokens, null, 2));
 		}

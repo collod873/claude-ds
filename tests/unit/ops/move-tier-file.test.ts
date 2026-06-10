@@ -6,15 +6,11 @@ import type { Change } from "../../../src/lib/operation";
 import { moveTierFile } from "../../../src/lib/ops/move-tier-file";
 import type { ProjectContext } from "../../../src/lib/project";
 import { run } from "../../../src/lib/runner";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
+import { makeCfg, makeManifest } from "../../helpers/fixtures";
 import { cleanup, freshTmpDir } from "../../helpers/tmpdir";
 
-const emptyManifest: Manifest = {
-	files: [],
-	canonical_paths: [],
-	lookalike_ignore: [],
-	deprecated_paths: [],
-	managed_roots: [],
-};
+const emptyManifest: Manifest = makeManifest();
 
 let cwd: string;
 beforeEach(async () => {
@@ -25,18 +21,8 @@ afterEach(async () => {
 });
 
 function fakeCtx(): ProjectContext {
-	return {
-		cwd,
-		cfg: {
-			version: "v0.8.0",
-			pack: "next-react",
-			mode: "warn",
-			enforce_threshold: 10,
-			removed: [],
-			lookalike_ignore: [],
-			app_dir: "app",
-			claude_md_target: ".claude/CLAUDE.md",
-		},
+	return makeFakeCtx(cwd, {
+		cfg: makeCfg({ packVersion: "v0.8.0" }),
 		packDir: "/nonexistent",
 		manifest: emptyManifest,
 		exists: async (p) => {
@@ -48,7 +34,7 @@ function fakeCtx(): ProjectContext {
 			}
 		},
 		decisions: {},
-	};
+	});
 }
 
 function findWrite(

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Change } from "../../../../src/lib/operation";
 import { retireStates } from "../../../../src/lib/ops/migrations/v0.8.0/retire-states";
 import type { ProjectContext } from "../../../../src/lib/project";
+import { makeFakeCtx } from "../../../helpers/fake-ctx";
+import { makeCfg, makeManifest } from "../../../helpers/fixtures";
 import { cleanup, freshTmpDir } from "../../../helpers/tmpdir";
 
 let cwd: string;
@@ -16,11 +18,10 @@ afterEach(async () => {
 });
 
 function makeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
-	return {
-		cwd,
-		cfg: {} as ProjectContext["cfg"],
+	return makeFakeCtx(cwd, {
+		cfg: makeCfg(),
 		packDir: "/nonexistent",
-		manifest: {} as ProjectContext["manifest"],
+		manifest: makeManifest(),
 		exists: async (p: string) => {
 			try {
 				await stat(join(cwd, p));
@@ -29,9 +30,8 @@ function makeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
 				return false;
 			}
 		},
-		decisions: {},
 		...overrides,
-	};
+	});
 }
 
 async function scaffoldTiers(): Promise<void> {

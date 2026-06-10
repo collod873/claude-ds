@@ -6,18 +6,14 @@ import type { Change } from "../../../src/lib/operation";
 import { migrateClaudeMd } from "../../../src/lib/ops/migrate-claude-md";
 import type { ProjectContext } from "../../../src/lib/project";
 import { run } from "../../../src/lib/runner";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
+import { makeCfg, makeManifest } from "../../helpers/fixtures";
 import { cleanup, freshTmpDir } from "../../helpers/tmpdir";
 
 const OPEN = "<!-- >>> claude-ds managed >>> -->";
 const CLOSE = "<!-- <<< claude-ds managed <<< -->";
 
-const emptyManifest: Manifest = {
-	files: [],
-	canonical_paths: [],
-	lookalike_ignore: [],
-	deprecated_paths: [],
-	managed_roots: [],
-};
+const emptyManifest: Manifest = makeManifest();
 
 let cwd: string;
 let packDir: string;
@@ -31,19 +27,9 @@ afterEach(async () => {
 	await cleanup(packDir);
 });
 
-function fakeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
-	const base: ProjectContext = {
-		cwd,
-		cfg: {
-			version: "v0.6.0",
-			pack: "next-react",
-			mode: "warn",
-			enforce_threshold: 10,
-			removed: [],
-			lookalike_ignore: [],
-			app_dir: "app",
-			claude_md_target: ".claude/CLAUDE.md",
-		},
+function fakeCtx(overrides: Omit<Partial<ProjectContext>, "auditConfig"> = {}): ProjectContext {
+	return makeFakeCtx(cwd, {
+		cfg: makeCfg({ packVersion: "v0.6.0" }),
 		packDir,
 		manifest: emptyManifest,
 		exists: async (p) => {
@@ -56,8 +42,7 @@ function fakeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
 		},
 		decisions: {},
 		...overrides,
-	};
-	return base;
+	});
 }
 
 async function exists(p: string): Promise<boolean> {

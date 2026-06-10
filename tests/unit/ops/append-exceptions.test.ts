@@ -7,6 +7,8 @@ import type { Manifest } from "../../../src/lib/manifest";
 import type { Change } from "../../../src/lib/operation";
 import { appendExceptions } from "../../../src/lib/ops/append-exceptions";
 import type { ProjectContext } from "../../../src/lib/project";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
+import { makeCfg, makeManifest } from "../../helpers/fixtures";
 import { cleanup, freshTmpDir } from "../../helpers/tmpdir";
 
 let cwd: string;
@@ -20,35 +22,18 @@ afterEach(async () => {
 	await cleanup(packDir);
 });
 
-const baseCfg: Config = {
-	version: "v0.0.0",
-	pack: "next-react",
-	mode: "warn",
-	enforce_threshold: 10,
-	removed: [],
-	lookalike_ignore: [],
-	app_dir: "app",
-	claude_md_target: ".claude/CLAUDE.md",
-};
+const baseCfg: Config = makeCfg();
 
-const emptyManifest: Manifest = {
-	files: [],
-	canonical_paths: [],
-	lookalike_ignore: [],
-	deprecated_paths: [],
-	managed_roots: [],
-	generated_patterns: [],
-};
+const emptyManifest: Manifest = makeManifest();
 
 function makeCtx(): ProjectContext {
-	return {
-		cwd,
+	return makeFakeCtx(cwd, {
 		cfg: baseCfg,
 		packDir,
 		manifest: emptyManifest,
 		exists: async () => false,
 		decisions: {},
-	};
+	});
 }
 
 describe("appendExceptions op", () => {

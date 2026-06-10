@@ -27,6 +27,7 @@ describe("DRIFT-MISPLACED rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/button.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 		};
 		const findings = evaluateDrift(input);
@@ -40,6 +41,7 @@ describe("DRIFT-MISPLACED rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/search-bar.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
 		};
 		const findings = evaluateDrift(input);
@@ -53,6 +55,7 @@ describe("DRIFT-MISPLACED rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/button.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 		};
 		const findings = evaluateDrift(input);
@@ -63,6 +66,7 @@ describe("DRIFT-MISPLACED rule", () => {
 		const input: DriftRuleInput = {
 			file: "src/components/button.tsx",
 			locationTier: null,
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 		};
 		const findings = evaluateDrift(input);
@@ -73,6 +77,7 @@ describe("DRIFT-MISPLACED rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/card.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
 		};
 		const findings = evaluateDrift(input);
@@ -86,6 +91,7 @@ describe("DRIFT-MISPLACED rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/icon-button.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: {
 				tier: "composite",
 				signals: ["composes 1 design-system component"],
@@ -100,6 +106,7 @@ describe("DRIFT-MISPLACED rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/combobox.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: {
 				tier: "composite",
 				signals: ["composes 2 design-system components"],
@@ -121,6 +128,7 @@ describe("DRIFT-DS-IMPORTS-FEATURE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/invoice-amount.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: {
 				tier: "feature",
 				signals: ["imports from features/"],
@@ -137,6 +145,7 @@ describe("DRIFT-DS-IMPORTS-FEATURE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/task-list.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: {
 				tier: "feature",
 				signals: ["imports from lib/"],
@@ -152,6 +161,7 @@ describe("DRIFT-DS-IMPORTS-FEATURE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/search-bar.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: {
 				tier: "composite",
 				signals: ["composes 2 design-system components"],
@@ -165,6 +175,7 @@ describe("DRIFT-DS-IMPORTS-FEATURE rule", () => {
 		const input: DriftRuleInput = {
 			file: "features/invoicing/invoice-list.tsx",
 			locationTier: null,
+			metaKind: null,
 			classifierVerdict: {
 				tier: "feature",
 				signals: ["imports from features/"],
@@ -178,6 +189,7 @@ describe("DRIFT-DS-IMPORTS-FEATURE rule", () => {
 		const input: DriftRuleInput = {
 			file: "src/components/invoice-list.tsx",
 			locationTier: null,
+			metaKind: null,
 			classifierVerdict: {
 				tier: "feature",
 				signals: ["imports from lib/"],
@@ -192,6 +204,7 @@ describe("DRIFT-DS-IMPORTS-FEATURE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/invoice-amount.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: {
 				tier: "feature",
 				signals: ["imports from features/"],
@@ -212,6 +225,7 @@ describe("DRIFT-PATTERN-NO-SLOTS rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/patterns/app-layout.tsx",
 			locationTier: "pattern",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function AppLayout({ title }: { title: string }) {
   return <div><h1>{title}</h1></div>;
@@ -227,6 +241,7 @@ describe("DRIFT-PATTERN-NO-SLOTS rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/patterns/app-shell.tsx",
 			locationTier: "pattern",
+			metaKind: null,
 			classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
 			source: `export function AppShell({ children }: { children: React.ReactNode }) {
   return <div>{children}</div>;
@@ -240,6 +255,7 @@ describe("DRIFT-PATTERN-NO-SLOTS rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/patterns/layout.tsx",
 			locationTier: "pattern",
+			metaKind: null,
 			classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
 			source: `export function Layout({ sidebar, main }: { sidebar: React.ReactNode; main: React.ReactNode }) {
   return <div><aside>{sidebar}</aside><main>{main}</main></div>;
@@ -253,6 +269,7 @@ describe("DRIFT-PATTERN-NO-SLOTS rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/button.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Button({ label }: { label: string }) { return <button>{label}</button>; }`,
 		};
@@ -264,6 +281,7 @@ describe("DRIFT-PATTERN-NO-SLOTS rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/patterns/app-layout.tsx",
 			locationTier: "pattern",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: [] },
 		};
 		const findings = evaluateDrift(input);
@@ -280,6 +298,7 @@ describe("DRIFT-PATTERN-IMPORTS-PATTERN rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/patterns/app-wrapper.tsx",
 			locationTier: "pattern",
+			metaKind: null,
 			classifierVerdict: {
 				tier: "unknown",
 				signals: ["imports from design-system/patterns/"],
@@ -295,6 +314,7 @@ describe("DRIFT-PATTERN-IMPORTS-PATTERN rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/nav.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: {
 				tier: "unknown",
 				signals: ["imports from design-system/patterns/"],
@@ -308,6 +328,7 @@ describe("DRIFT-PATTERN-IMPORTS-PATTERN rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/patterns/app-shell.tsx",
 			locationTier: "pattern",
+			metaKind: null,
 			classifierVerdict: {
 				tier: "pattern",
 				signals: ["exports children or named slots"],
@@ -321,6 +342,7 @@ describe("DRIFT-PATTERN-IMPORTS-PATTERN rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/patterns/bad-wrapper.tsx",
 			locationTier: "pattern",
+			metaKind: null,
 			classifierVerdict: {
 				tier: "unknown",
 				signals: ["imports from design-system/patterns/"],
@@ -343,6 +365,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/badge.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Badge() {
   return <span style={{ color: 'red' }}>alert</span>;
@@ -359,6 +382,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/card.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Card() {
   return <div style={{ color: '#fff', padding: '8px' }}>content</div>;
@@ -372,6 +396,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/spacer.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Spacer() {
   return <div style={{ marginTop: 4, marginBottom: 4 }} />;
@@ -385,6 +410,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/skeleton.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Skeleton({ width: dynamicWidth }: { width: number }) {
   return <div style={{ width: dynamicWidth }} />;
@@ -398,6 +424,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/positioner.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source:
 				"export function Positioner({ y }: { y: number }) {\n  return <div style={{ transform: `translateY(${y}px)` }} />;\n}",
@@ -410,6 +437,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/indicator.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Indicator({ size }: { size: number }) {
   return <div style={{ color: 'red', width: size }} />;
@@ -423,6 +451,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/badge.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 		};
 		const findings = evaluateDrift(input);
@@ -433,6 +462,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "src/components/widget.tsx",
 			locationTier: null,
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Widget() {
   return <div style={{ color: 'red' }}>widget</div>;
@@ -446,6 +476,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/box.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Box({ extraStyle }: { extraStyle: React.CSSProperties }) {
   return <div style={{ ...extraStyle, color: 'red' }} />;
@@ -459,6 +490,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/label.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Label({ text }: { text: string }) {
   return <span className="label">{text}</span>;
@@ -472,6 +504,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/tag.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Tag() {
   return <span style={{ color: "blue" }}>tag</span>;
@@ -485,6 +518,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/dynamic.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Dynamic() {
   return <div style={{ color: getColor() }} />;
@@ -504,6 +538,7 @@ describe("DRIFT-RAW-PRIMITIVE rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/search-bar.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
 			source: `import { Input } from "../atoms/input";
 export function SearchBar() {
@@ -520,6 +555,7 @@ export function SearchBar() {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/form-field.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
 			source: `export function FormField() {
   return <div><label>Name</label><input type="text" /></div>;
@@ -535,6 +571,7 @@ export function SearchBar() {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/login-form.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
 			source: `export function LoginForm() {
   return <form>
@@ -555,6 +592,7 @@ export function SearchBar() {
 		const input: DriftRuleInput = {
 			file: "design-system/patterns/app-shell.tsx",
 			locationTier: "pattern",
+			metaKind: null,
 			classifierVerdict: { tier: "pattern", signals: ["exports children or named slots"] },
 			source: `export function AppShell({ children }: { children: React.ReactNode }) {
   return <div><button>Menu</button>{children}</div>;
@@ -572,6 +610,7 @@ export function SearchBar() {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/calendar-view.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
 			source: `function DayCell() {
 ${inlineBody}
@@ -593,6 +632,7 @@ export function CalendarView() {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/search-bar.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
 			source: `import { Input } from "../atoms/input";
 export function SearchBar() {
@@ -610,6 +650,7 @@ export function SearchBar() {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/button.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Button({ label }: { label: string }) {
   return <button>{label}</button>;
@@ -623,6 +664,7 @@ export function SearchBar() {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/toolbar.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
 			source: `import { Button } from "../atoms/button";
 export function Toolbar() {
@@ -637,6 +679,7 @@ export function Toolbar() {
 		const input: DriftRuleInput = {
 			file: "design-system/composites/widget.tsx",
 			locationTier: "composite",
+			metaKind: null,
 			classifierVerdict: { tier: "composite", signals: ["composes 2 design-system components"] },
 		};
 		const findings = evaluateDrift(input);
@@ -647,6 +690,7 @@ export function Toolbar() {
 		const input: DriftRuleInput = {
 			file: "src/components/form.tsx",
 			locationTier: null,
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Form() { return <button>Submit</button>; }`,
 		};
@@ -822,6 +866,7 @@ describe("DRIFT-CVA-VARIANT-UNRENDERED rule", () => {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/button.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `import { cva } from "class-variance-authority";
 const buttonVariants = cva("base", {
@@ -847,6 +892,7 @@ export const meta = {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/badge.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `import { cva } from "class-variance-authority";
 const badgeVariants = cva("base", {
@@ -871,6 +917,7 @@ export const meta = {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/label.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `export function Label({ text }: { text: string }) {
   return <span>{text}</span>;
@@ -888,6 +935,7 @@ export const meta = {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/button.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 		};
 		const findings = evaluateDrift(input);
@@ -898,6 +946,7 @@ export const meta = {
 		const input: DriftRuleInput = {
 			file: "src/components/button.tsx",
 			locationTier: null,
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `import { cva } from "class-variance-authority";
 const v = cva("base", { variants: { size: { sm: "s", lg: "l" } } });
@@ -911,6 +960,7 @@ export const meta = { kind: "atom" as const, examples: [] };`,
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/chip.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `import { cva } from "class-variance-authority";
 const chipVariants = cva("base", {
@@ -938,6 +988,7 @@ export const meta = {
 		const input: DriftRuleInput = {
 			file: "design-system/atoms/button.tsx",
 			locationTier: "atom",
+			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source: `import { cva } from "class-variance-authority";
 const v = cva("base", { variants: { size: { sm: "s", lg: "l" } } });

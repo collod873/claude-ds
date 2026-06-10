@@ -4,17 +4,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Manifest } from "../../../../../src/lib/manifest.js";
 import { managePortalScope } from "../../../../../src/lib/ops/migrations/v0.9.0/manage-portal-scope.js";
 import type { ProjectContext } from "../../../../../src/lib/project.js";
+import { makeFakeCtx } from "../../../../helpers/fake-ctx.js";
+import { makeCfg, makeManifest } from "../../../../helpers/fixtures.js";
 import { cleanup, freshTmpDir } from "../../../../helpers/tmpdir.js";
 
 const PORTAL_CSS_PATH = "design-system/utils/portal-scope.module.css";
 
-const emptyManifest: Manifest = {
-	files: [],
-	canonical_paths: [],
-	lookalike_ignore: [],
-	deprecated_paths: [],
-	managed_roots: [],
-};
+const emptyManifest: Manifest = makeManifest();
 
 let cwd: string;
 let packDir: string;
@@ -30,18 +26,8 @@ afterEach(async () => {
 });
 
 function makeCtx(): ProjectContext {
-	return {
-		cwd,
-		cfg: {
-			version: "v0.8.0",
-			pack: "next-react",
-			mode: "warn",
-			enforce_threshold: 10,
-			removed: [],
-			lookalike_ignore: [],
-			app_dir: "app",
-			claude_md_target: ".claude/CLAUDE.md",
-		},
+	return makeFakeCtx(cwd, {
+		cfg: makeCfg({ packVersion: "v0.8.0" }),
 		packDir,
 		manifest: emptyManifest,
 		exists: async (p: string) => {
@@ -52,8 +38,7 @@ function makeCtx(): ProjectContext {
 				return false;
 			}
 		},
-		decisions: {},
-	};
+	});
 }
 
 const PACK_CONTENT = ".portalScope {\n  display: contents;\n}\n";

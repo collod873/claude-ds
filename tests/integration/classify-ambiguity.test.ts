@@ -58,7 +58,7 @@ describe("classify ambiguity pass (issue #203)", () => {
 		await cleanup(dir);
 	});
 
-	const output = () => logSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+	const output = () => logSpy.mock.calls.map((c: unknown[]) => c.map(String).join(" ")).join("\n");
 
 	it("auto-move (confident composite): relocates to composites/ and flips meta.kind without a prompt", async () => {
 		// Confident composite (3 DS imports) — auto-moved unconditionally regardless of TTY.
@@ -241,8 +241,8 @@ describe("classify ambiguity spine integration (PRD #325 / ADR-0023)", () => {
 		const result = await classifyCmd({ src: "src/components", cwd: dir });
 		expect(result).toEqual({ outcome: "error", exitCode: 2 });
 		expect(exitSpy).not.toHaveBeenCalled();
-		const errCalls = errSpy.mock.calls.map((c) => c.map(String).join(" "));
-		const named = errCalls.find((c) => c.includes("classify needs you"));
+		const errCalls = errSpy.mock.calls.map((c: unknown[]) => c.map(String).join(" "));
+		const named = errCalls.find((c: string) => c.includes("classify needs you"));
 		expect(named).toBeDefined();
 		expect(named).toMatch(/classify-ambiguity:design-system\/atoms\/twocomp\.tsx/);
 		// The file MUST stay untouched — we never silently moved or kept it.
