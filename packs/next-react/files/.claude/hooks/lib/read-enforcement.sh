@@ -26,10 +26,19 @@ unset _enf_file _pat
 # enf_is_excluded <path> — true when the path matches an appWideExclude glob.
 # `**` is treated as `*` (bash `*` already spans `/`); each pattern is tried
 # both anchored and with a leading `*/` so `emails/**` matches a nested path.
+# A leading `**/` must also match ZERO directories (glob semantics), so the
+# remainder is tried anchored too — `**/*-pdf.tsx` matches a top-level
+# `invoice-pdf.tsx`, not just `src/invoice-pdf.tsx`.
 enf_is_excluded() {
   local f="$1" p g
   for p in ${ENF_EXCLUDE[@]+"${ENF_EXCLUDE[@]}"}; do
     [ -z "$p" ] && continue
+    # $g is an intentional glob on the right-hand side of ==.
+    if [[ "$p" == '**/'* ]]; then
+      g="${p#\*\*/}"; g="${g//\*\*/*}"
+      # shellcheck disable=SC2053
+      if [[ "$f" == $g ]]; then return 0; fi
+    fi
     g="${p//\*\*/*}"
     # shellcheck disable=SC2053
     if [[ "$f" == $g || "$f" == */$g ]]; then

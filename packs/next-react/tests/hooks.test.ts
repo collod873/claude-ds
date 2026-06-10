@@ -242,6 +242,14 @@ describe("pre-write-tokens-app-wide (opt-in app-wide TOK enforcement)", () => {
     expect(r.code).toBe(0);
   });
 
+  it("appWideExclude **/ matches zero leading dirs — a top-level *-pdf.tsx is excluded", () => {
+    const r = runHookInProject("pre-write-tokens-app-wide.sh", "report-pdf.tsx", {
+      content: rawHex,
+      enforcement: { tokenScope: "app-wide", appWideExclude: ["**/*-pdf.tsx"] },
+    });
+    expect(r.code).toBe(0);
+  });
+
   it("app-wide skips design-system/ files — the DS-scoped hook owns those", () => {
     const r = runHookInProject("pre-write-tokens-app-wide.sh", "design-system/atoms/Badge.tsx", {
       content: rawHex,
