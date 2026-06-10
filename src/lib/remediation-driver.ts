@@ -35,6 +35,10 @@ import { classifyCmd } from "../commands/classify.js";
 import { syncCmd } from "../commands/sync.js";
 import { upgradeCmd } from "../commands/upgrade.js";
 import { SCAN_SKIP_DIRS } from "./build-outputs.js";
+import {
+	type GenIntegrityOutcome,
+	planGeneratedIntegrityFixes,
+} from "./checks/generated-integrity.js";
 import type { PendingDecision } from "./decision/index.js";
 import { type Exception, openCount, parseExceptions } from "./exceptions.js";
 import { setConfigMode } from "./ops/set-config-mode.js";
@@ -98,6 +102,8 @@ interface DispatchOpts {
 	cwd: string;
 	answers: string | undefined;
 	pendingSink: PendingDecision[] | undefined;
+	/** Live progress UI — the reconform arm names ADR-0026-skipped companions on it (#509). */
+	progress: ProgressController;
 }
 
 /**
@@ -109,12 +115,21 @@ interface DispatchOpts {
  * the verification chain followed by a re-apply — is shared, and `upgradeCmd`
  * handles the `from === to` arm correctly.
  *
- * `migrate-layout`, `reconcile`, `reconform` have reserved slots in
- * `CANONICAL_ORDER` (ADR-0018) but their state derivation is not yet wired
- * (`deriveProjectState` returns `false` for them), so the planner cannot emit
- * them and the switch arms are unreachable today. Future PRD-#340 sub-issues
- * add detection + dispatch together — keeping the switch exhaustive now means a
- * forgotten case is a compile error then.
+ * `reconform` applies the generated-integrity regeneration (GEN-001/GEN-002):
+ * it runs the same `planGeneratedIntegrityFixes` op `deriveProjectState` folds
+ * for the `reconformNeeded` signal, so detection and dispatch fold the identical
+ * scan and cannot disagree (#509). It does NOT call `reconformCmd` — that runs
+ * eight phases and `process.exit`s, which would tear down the loop; the driver
+ * needs only the regen write. ADR-0026-skipped companions (JSX-bearing examples
+ * the regex regenerator can't reproduce) are named on `progress` so a skipped
+ * file can't hide a broken showcase behind a clean pass.
+ *
+ * `migrate-layout`, `reconcile` have reserved slots in `CANONICAL_ORDER`
+ * (ADR-0018) but their state derivation is not yet wired (`deriveProjectState`
+ * returns `false` for them), so the planner cannot emit them and the switch arms
+ * are unreachable today. Future PRD-#340 sub-issues add detection + dispatch
+ * together — keeping the switch exhaustive now means a forgotten case is a
+ * compile error then.
  *
  * Every sub-command runs with `allowDirty: true`: the driver itself dirties the
  * tree between iterations, and we don't want sync/upgrade/classify/audit to
@@ -122,7 +137,7 @@ interface DispatchOpts {
  * for the top-level clean-tree decision before the loop runs.
  */
 export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<number> {
-	const { cwd, answers, pendingSink } = opts;
+	const { cwd, answers, pendingSink, progress } = opts;
 	// Issue #437 (ADR-0018): each loop member runs as a plain function and returns
 	// a `CommandResult`. The driver reads only the exit code; it never renders the
 	// returned `nextStep` breadcrumb (heal/front-door own the single authoritative
@@ -140,9 +155,22 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
 				.exitCode;
 		case "audit --fix":
 			return (await auditCmd({ cwd, fix: true, allowDirty: true, answers, pendingSink })).exitCode;
+		case "reconform": {
+			// Apply the generated-integrity regeneration directly (#509) — the same
+			// op the deriver folds for `reconformNeeded`. `allowDirty` is implicit:
+			// `run()` is the bytes-on-disk chokepoint and never enforces clean-tree.
+			const ctx = await loadProject(cwd);
+			const report = await run(ctx, [planGeneratedIntegrityFixes()], "apply");
+			const outcome = report.ops[0]?.outcome as GenIntegrityOutcome | undefined;
+			for (const file of outcome?.skipped ?? []) {
+				progress.info(
+					`reconform: ${file} skipped — JSX-bearing example can't be regenerated (ADR-0026); verify by hand`,
+				);
+			}
+			return report.failed ? 1 : 0;
+		}
 		case "migrate-layout":
 		case "reconcile":
-		case "reconform":
 			// Reserved-but-unwired (see function comment).
 			return 0;
 	}
@@ -271,7 +299,7 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 		for (const step of plan) {
 			lastStep = step;
 			progress.start(step);
-			await dispatchStep(step, { cwd, answers, pendingSink });
+			await dispatchStep(step, { cwd, answers, pendingSink, progress });
 			progress.succeed(step);
 		}
 
