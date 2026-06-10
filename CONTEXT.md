@@ -256,6 +256,31 @@ and overwrite?"* (the safety north star). Owned concern answers *"what counts as
 DS infrastructure?"* (completeness). Conflating the two is the original ADR-0003
 enforcement gap.
 
+### Structural bypass
+Consumer component code that hand-assembles the equivalent of an existing DS
+**atom** instead of importing it — a `rounded-lg border bg-card` div (Card), a
+`rounded-full px-… text-xs` chip (Badge/Tag), a direct `import { toast } from
+'sonner'` (the toast wrapper). Detected by a **sibling advisory layer** to the
+Owned-concern registry (ADR-0026), not an Owned concern: the registry idiom is
+identical (discriminated `StructuralBypassId` union, totality-checked record,
+one **co-located per-atom signature** file per atom under
+`src/lib/structural-bypass/rules/`, pure `detect(content, path)`, repo-wide
+scanner) but the semantics differ. A structural bypass names the **atom** it
+bypasses (not a superseding rule), has no "delete this file" remedy (the remedy
+is "import the atom"), and is **advisory only** — `audit` surfaces it as a
+non-blocking triage candidate that never enters `activeFindings`, the
+scorecard, or the exit code. `rounded-full` legitimately appears on non-badge
+pills, so a hard gate would get disabled; the over-flag bias is paid back by
+one-line dismissal through `exceptions.json` (`BYPASS-` ids join the
+`AuditRuleId` union). One implementation, two entry points: standalone `audit`
+(new bypasses) and the `heal` loop (pre-existing ones, via `audit --fix`). The
+DS scaffold (`design-system/`) is excluded from the scan so the real atoms
+never self-flag. `BYPASS-` joins `DRIFT-` / `INTEGRITY-` / `OWNED-` as a stable
+public rule-id prefix. Ships with three evidence-backed signatures (the #457
+Crewops hand-rolls); grows on demand per ADR-0017.
+_Contrast_: Owned concern (hand-rolled DS *infrastructure*, blocking, recommends
+deletion); raw primitive (a `DRIFT-` hook on raw HTML elements).
+
 ### Migration Op
 A versioned `Op` shipped in `pack/versions/<version>/migrations/` that
 transforms a consumer from one pack version to the next. Migrations emit

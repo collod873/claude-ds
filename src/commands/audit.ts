@@ -27,6 +27,11 @@ import { formatFindings, formatScorecard } from "../lib/reports/findings-format.
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import { formatStrictWarnings, scanUnexpectedFiles } from "../lib/reports/unexpected-files.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
+import {
+	formatStructuralBypassFinding,
+	type StructuralBypassFinding,
+	scanStructuralBypass,
+} from "../lib/structural-bypass/index.js";
 
 async function exists(p: string): Promise<boolean> {
 	try {
@@ -241,8 +246,47 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 	warningCount += fixSummary.warningCount;
 	const activeFindings = fixSummary.remainingFindings;
 
+	// Structural-bypass advisory scan (ADR-0026, issue #457). Repo-wide,
+	// signature-as-identity: flags consumer code that hand-assembles an
+	// existing DS atom (a `bg-card` div, a `rounded-full` chip, a direct
+	// `sonner` import). One implementation, two entry points — `heal` runs it
+	// transitively through `audit --fix`. Advisory ONLY: these never enter
+	// `activeFindings` and never touch the exit code or scorecard
+	// (`rounded-full` legitimately appears on non-badge pills; a hard gate
+	// would get disabled). Dismissed through the same `exceptions.json`
+	// (rule, path) shape as drift/integrity/owned-concern findings.
+	const rawBypassFindings: StructuralBypassFinding[] = await scanStructuralBypass({
+		cwd,
+		manifestPaths: manifestFilePaths,
+		generatedPatterns: manifest.generated_patterns,
+	});
+	const bypassFindings = rawBypassFindings.filter(
+		(f) => !suppressedSet.has(suppressedKey(f.bypassId, f.file)),
+	);
+	// Advisory candidates ride the headless contract under `remaining.advisory`
+	// (info() is suppressed in --json mode, so CI sees them here). Omitted when
+	// empty so the clean envelope stays unchanged.
+	const advisoryEnvelope =
+		bypassFindings.length > 0
+			? {
+					advisory: bypassFindings.map((f) => ({
+						bypassId: f.bypassId,
+						file: f.file,
+						line: f.line,
+						atom: f.atom,
+					})),
+				}
+			: {};
+
 	// Grouped findings output + scorecard.
 	for (const line of formatFindings(activeFindings)) info(line);
+
+	if (bypassFindings.length > 0) {
+		info(
+			`\nAdvisory — possible DS-atom bypass (${bypassFindings.length}, non-blocking triage candidate${bypassFindings.length === 1 ? "" : "s"}):`,
+		);
+		for (const f of bypassFindings) info(formatStructuralBypassFinding(f));
+	}
 	info(
 		formatScorecard({
 			scaffoldPresent: scaffold.present,
@@ -287,6 +331,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 					warnings: warningCount,
 					findings: activeFindings.map((f) => ({ ruleId: f.ruleId, file: f.file })),
 					missingScaffold: scaffold.total - scaffold.present,
+					...advisoryEnvelope,
 				},
 			});
 		}
@@ -325,6 +370,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 						findingsCount: 0,
 						warnings: warningCount,
 						verify: verifyJson(verify),
+						...advisoryEnvelope,
 					},
 				});
 			}
@@ -352,6 +398,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 					warnings: warningCount,
 					findingsCount: 0,
 					...(verify ? { verify: verifyJson(verify) } : {}),
+					...advisoryEnvelope,
 				},
 			});
 		}
@@ -371,7 +418,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 				verdict: "warnings",
 				exitCode: HEADLESS_EXIT.OK,
 				actions: {},
-				remaining: { warnings: warningCount, findingsCount: 0 },
+				remaining: { warnings: warningCount, findingsCount: 0, ...advisoryEnvelope },
 			});
 		}
 		return success(
@@ -404,6 +451,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 							findingsCount: 0,
 							warnings: warningCount,
 							verify: verifyJson(verify),
+							...advisoryEnvelope,
 						},
 					});
 				}
@@ -430,7 +478,12 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 						fixedCount: fixSummary.fixedCount,
 						reconciledCount: fixSummary.reconciledCount,
 					},
-					remaining: { findingsCount: 0, warnings: warningCount, verify: verifyJson(verify) },
+					remaining: {
+						findingsCount: 0,
+						warnings: warningCount,
+						verify: verifyJson(verify),
+						...advisoryEnvelope,
+					},
 				});
 			}
 			return success();
@@ -443,7 +496,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 				verdict: "clean",
 				exitCode: HEADLESS_EXIT.OK,
 				actions: { fixedCount: fixSummary.fixedCount },
-				remaining: { findingsCount: 0, warnings: warningCount },
+				remaining: { findingsCount: 0, warnings: warningCount, ...advisoryEnvelope },
 			});
 		}
 		return success(
