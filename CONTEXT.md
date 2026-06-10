@@ -108,17 +108,18 @@ ship only when a real consumer component demands them (ADR-0016's
 anti-speculative-infra constraint).
 _Avoid_: pattern contract, behavioral spec, a11y test, snapshot.
 
-### Contract example
-A composed-widget mount the role contract drives — a `meta.contractExamples`
-entry whose `render()` thunk returns the **fully assembled** widget (for a
-multi-part combobox: the root composed with its trigger/input/content/item
+### Composed example
+A `meta.examples` entry whose `props.children` is the **fully assembled** widget
+(for a multi-part combobox: the root composed with its trigger/input/content/item
 children, since the `role="combobox"` anchor only exists once they are mounted
-together). Distinct from a showcase *example* (`meta.examples`, flat props,
-visual): a contract example is behavioral and is kept in its own field so a JSX
-thunk never reaches the showcase/GEN-001 whole-array `JSON.parse` (ADR-0024). A
-role stamped with zero contract examples is a green, resolvable soft-skip (the
-runner names the part and the one action that activates it), never a red failure.
-_Avoid_: calling it a showcase example, a fixture, or a story.
+together). One authored example serves **both** surfaces (ADR-0026): the showcase
+generator renders `<Component children={…} />` and the role-contract runner drives
+that same rendered DOM. The integrity parser walks `meta.examples` **per entry**
+so a JSX-bearing example no longer throws the whole-array `JSON.parse` (the
+defect ADR-0024 worked around with a separate `meta.contractExamples` field, now
+retired). A role stamped with zero composed examples is a green, resolvable
+soft-skip (the runner names the part and the one action that activates it), never
+a red failure. _Avoid_: calling it `contractExamples` (gone), a fixture, or a story.
 
 ### Smart part
 A DS atom or composite whose body uses React state, effect, or context —

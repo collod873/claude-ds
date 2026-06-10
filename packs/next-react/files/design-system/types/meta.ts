@@ -10,34 +10,25 @@
 
 import type { Role } from "../contracts/roles/index";
 
-/** Named example for atoms and composites. */
+/**
+ * Named example for atoms and composites.
+ *
+ * For a **composed-widget role** (ADR-0026) the assembled widget is authored
+ * here, in a single example: put the real JSX composition in `props.children`.
+ * One authored example then serves both surfaces — the showcase generator
+ * renders `<Component children={…} />` and the role-contract runner drives that
+ * same rendered DOM. For a multi-part headless-lib combobox (cmdk / base-ui /
+ * radix) that JSX is the root provider with its Trigger / Input / Content / Item
+ * children, because the ARIA `role="combobox"` anchor only exists once those
+ * parts are mounted together. The JSX *is* the part graph; no separate field is
+ * needed. (`props` is `Record<string, unknown>` so `children` may carry JSX; the
+ * showcase generator's AST path serialises it and the integrity parser tolerates
+ * it per-entry — ADR-0026.)
+ */
 export interface Example {
   name: string;
   props: Record<string, unknown>;
   skip?: boolean;
-}
-
-/**
- * A composed-widget mount for the role contract (ADR-0024, issue #461).
- *
- * `render` returns the **fully assembled** widget. For a multi-part headless-lib
- * combobox (cmdk / base-ui / radix) that means the root provider with its
- * Trigger / Input / Content / Item children composed exactly as a consumer uses
- * them — because the ARIA `role="combobox"` anchor only exists once those parts
- * are mounted together, never in any single DS file. The JSX *is* the part
- * graph; no separate graph declaration is needed. Typed `() => unknown` to keep
- * the pack framework-free; in a React consumer it returns a ReactNode (JSX).
- *
- * Why a dedicated field instead of overloading `examples`: `examples` is parsed
- * by the showcase generator and the GEN-001 integrity check via a whole-array
- * `JSON.parse`. A JSX thunk inside `examples` makes that parse throw, dropping
- * *every* example and producing false GEN drift on every consumer. So composed
- * mounts live here, read only by the role-contract runner — the showcase /
- * integrity machinery never touches them. See ADR-0024.
- */
-export interface ContractExample {
-  name: string;
-  render: () => unknown; // () => React.ReactNode — typed unknown to avoid a React dep in the pack
 }
 
 /**
@@ -85,26 +76,18 @@ export type Meta =
        * Standard interaction-pattern role this part conforms to (ADR-0016).
        * Drawn from the closed WAI-ARIA APG vocabulary in `contracts/roles/`.
        * Declaring a role binds the component to that role's shipped contract,
-       * which the runner exercises against every entry in `examples` through
-       * the rendered DOM. Omit for presentational parts and for smart parts
-       * still mid-classification (the audit rule
+       * which the runner drives against the composed widget authored in
+       * `examples` (the example whose `props.children` carries the assembled
+       * JSX) through the rendered DOM — the same render path the showcase uses
+       * (ADR-0026). A role declared with no such composed example is a tracked,
+       * green soft-skip (the runner names the part and asks for one), never a
+       * red failure — see ADR-0024 / ADR-0026. Omit for presentational parts and
+       * for smart parts still mid-classification (the audit rule
        * `DRIFT-SMART-PART-NO-ROLE` is gated by `role_contracts_strict`).
        * Reserved for `atom` / `composite` — the `pattern` and `reference`
        * arms intentionally do not carry roles.
        */
       role?: Role;
-      /**
-       * Composed-widget mounts the role contract drives (ADR-0024, issue #461).
-       * Each entry's `render()` returns the fully assembled widget — for a
-       * multi-part headless-lib combobox, the root composed with its Trigger /
-       * Input / Content / Item children, since the `role="combobox"` anchor only
-       * exists once the parts are mounted together. A role declared with zero
-       * `contractExamples` is a tracked, green soft-skip (the runner names the
-       * part and asks for a mount), never a red failure — see ADR-0024. Kept
-       * separate from `examples` so the showcase / GEN-001 parsers never see a
-       * JSX thunk (which would break their whole-array `JSON.parse`).
-       */
-      contractExamples?: ContractExample[];
     }
   | {
       kind: "pattern";

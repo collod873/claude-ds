@@ -1,33 +1,37 @@
 /**
  * Role contract runner — the bridge between a consumer's components and the
- * pack-shipped role contracts (ADR-0016, multi-part model in ADR-0024).
+ * pack-shipped role contracts (ADR-0016, multi-part model in ADR-0024, unified
+ * with the showcase render path in ADR-0026).
  *
  * The runner has two jobs and one explicit non-job:
  *
  *   1. **Select** — given every atom/composite the consumer ships, split the
  *      role-bearing ones into `drivable` (a `meta.role` with a shipped contract
- *      AND at least one `meta.contractExamples` mount) and `pending` (a role
- *      stamped, but no composed mount authored yet). Components without a role
- *      are skipped entirely. A role whose contract isn't registered is also
- *      skipped here — that surface belongs to `DRIFT-ROLE-NO-CONTRACT`
- *      (sub-issue #311), not the runner.
- *   2. **Drive** — render each `meta.contractExamples[i]` mount into a fresh DOM
- *      container and run the matching role contract against it. A thrown error
- *      from the contract is wrapped with `{component} / {role} / example "{name}"`
- *      so failures point straight at the offending file + example.
+ *      AND at least one composed-widget example) and `pending` (a role stamped,
+ *      but no composed example authored yet). A composed-widget example is a
+ *      `meta.examples` entry whose `props.children` is a renderable node — the
+ *      fully assembled widget. Components without a role are skipped entirely. A
+ *      role whose contract isn't registered is also skipped here — that surface
+ *      belongs to `DRIFT-ROLE-NO-CONTRACT` (sub-issue #311), not the runner.
+ *   2. **Drive** — render each composed example's `props.children` into a fresh
+ *      DOM container and run the matching role contract against it. A thrown
+ *      error from the contract is wrapped with `{component} / {role} / example
+ *      "{name}"` so failures point straight at the offending file + example.
  *
- * Why composed mounts (ADR-0024): a realistic headless-lib combobox (cmdk /
- * base-ui / radix) is **multi-part** — a root provider plus Trigger / Input /
- * Content / Item, composed in consumer *usage*. No single DS file's
- * `render(<C {...props}/>)` produces the assembled widget that carries the
- * `role="combobox"` anchor. So the contract drives a `contractExamples` mount —
- * a thunk that returns the fully composed widget — not a single component with
- * flat props. A single-component role (degenerate composition) is just a mount
- * whose thunk returns one element; it is still fully governed.
+ * Why a composed example (ADR-0024 / ADR-0026): a realistic headless-lib
+ * combobox (cmdk / base-ui / radix) is **multi-part** — a root provider plus
+ * Trigger / Input / Content / Item, composed in consumer *usage*. No single DS
+ * file's `render(<C {...props}/>)` produces the assembled widget that carries
+ * the `role="combobox"` anchor. ADR-0024 first drove this from a dedicated
+ * mount field; ADR-0026 retires that field and authors the composition **once**
+ * in `meta.examples` — the consumer puts the real JSX in an example's
+ * `props.children`, the showcase renders it, and the contract drives that same
+ * rendered DOM. A single-component role (degenerate composition) is
+ * just an example whose `children` is one element; it is still fully governed.
  *
  * The `pending` arm is what keeps detection broadening safe (ADR-0024 §2): when
  * detection stamps `role: "combobox"` on a cmdk-based part that has no composed
- * mount yet, the part lands in `pending` and the test soft-skips **green** with
+ * example yet, the part lands in `pending` and the test soft-skips **green** with
  * an actionable breadcrumb — never the red failure that stamping-without-a-runner
  * would have caused (the strictly-worse outcome ADR-0022 named).
  *
@@ -57,8 +61,8 @@ export interface MetaModule {
   name: string;
   /**
    * The component the file exports. Carried for discovery symmetry but **not**
-   * read by the contract path: a multi-part widget is mounted by its
-   * `contractExamples` thunks, which reference the composed parts directly.
+   * read by the contract path: a multi-part widget is mounted from a composed
+   * example's `props.children`, which references the assembled parts directly.
    * Optional so a consumer's discovery layer needn't resolve it for the runner.
    */
   Component?: unknown;
@@ -67,15 +71,18 @@ export interface MetaModule {
     kind: "atom" | "composite" | "pattern" | "reference";
     role?: string;
     examples?: { name: string; props: Record<string, unknown> }[];
-    contractExamples?: { name: string; render: () => unknown }[];
     [key: string]: unknown;
   };
 }
 
-/** A composed-widget mount the runner drives — `render()` returns the assembled widget. */
-export interface ContractExample {
+/**
+ * A composed-widget mount the runner drives. `renderable` is the assembled
+ * widget — a composed example's `props.children` (a ReactNode in a consumer; a
+ * vanilla DOM node in the pack's own tests).
+ */
+export interface ContractMount {
   name: string;
-  render: () => unknown;
+  renderable: unknown;
 }
 
 /**
@@ -85,7 +92,7 @@ export interface ContractExample {
 export interface RoleBearingComponent {
   name: string;
   role: Role;
-  contractExamples: ContractExample[];
+  mounts: ContractMount[];
 }
 
 /** A role-bearing part with a registered contract but no composed mount yet. */
@@ -118,9 +125,14 @@ export interface RoleSelection {
  *     declared a role mid-rollout would have a red test before the contract
  *     even shipped.
  *
- * Of the survivors: a part with ≥1 `contractExamples` mount is `drivable`; a
- * part with a stamped role but no mount yet is `pending` (the runner names it
- * and asks for a composed mount — green, not red). See ADR-0024.
+ * Of the survivors: a part with ≥1 composed-widget example is `drivable`; a part
+ * with a stamped role but no composed example yet is `pending` (the runner names
+ * it and asks for one — green, not red). See ADR-0024 / ADR-0026.
+ *
+ * A composed-widget example is a `meta.examples` entry whose `props.children` is
+ * a renderable node — a React element (`$$typeof`) or a DOM node (`nodeType`).
+ * Flat visual examples (`{ size: "sm" }`, string children) are not mounts: their
+ * DOM never carries the role anchor, so driving them would be a false failure.
  */
 export function selectRoleBearingComponents(modules: MetaModule[]): RoleSelection {
   const drivable: RoleBearingComponent[] = [];
@@ -131,25 +143,38 @@ export function selectRoleBearingComponents(modules: MetaModule[]): RoleSelectio
     if (!role) continue;
     const contract = contractFor(role);
     if (!contract) continue;
-    const contractExamples = m.meta.contractExamples ?? [];
-    if (contractExamples.length === 0) {
+    const mounts: ContractMount[] = (m.meta.examples ?? [])
+      .filter((ex) => isRenderable(ex.props?.children))
+      .map((ex) => ({ name: ex.name, renderable: ex.props.children }));
+    if (mounts.length === 0) {
       pending.push({ name: m.name, role: contract.role });
       continue;
     }
     drivable.push({
       name: m.name,
       role: contract.role,
-      contractExamples,
+      mounts,
     });
   }
   return { drivable, pending };
 }
 
+/**
+ * A composed example carries the assembled widget in `props.children`. We accept
+ * a React element (`$$typeof`) or a vanilla DOM node (`nodeType`) — the two
+ * renderable shapes the runner ever mounts — and an array of either. A string or
+ * a plain object is a flat visual child, never a composed-widget mount.
+ */
+function isRenderable(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(isRenderable);
+  if (value === null || typeof value !== "object") return false;
+  return "$$typeof" in value || "nodeType" in value;
+}
+
 export interface RunnerOptions {
   /**
-   * Mount a composed renderable (the value a `contractExamples` mount's
-   * `render()` returns) into `container`. In a React consumer this is a
-   * one-liner around Testing Library:
+   * Mount a composed renderable (a composed example's `props.children`) into
+   * `container`. In a React consumer this is a one-liner around Testing Library:
    *
    *   renderComposed: (el, container) => render(el as ReactElement, { container })
    *
@@ -194,25 +219,25 @@ export async function runRoleContracts(
         `runRoleContracts: ${comp.name} declares role "${comp.role}" but no contract is registered`,
       );
     }
-    if (comp.contractExamples.length === 0) {
+    if (comp.mounts.length === 0) {
       // Defensive: the selector routes zero-mount parts to `pending` (a green
       // soft-skip), so reaching here means a hand-built list bypassed it. A
       // role with zero mounts would let vitest see a no-op test that "passes"
       // without exercising the contract — the F3 trap by another name. Surface it.
       throw new Error(
-        `runRoleContracts: ${comp.name} declares role "${comp.role}" but ships no meta.contractExamples — add a composed mount to exercise the contract`,
+        `runRoleContracts: ${comp.name} declares role "${comp.role}" but ships no composed example — add a meta.examples entry whose props.children is the assembled widget to exercise the contract`,
       );
     }
-    for (const example of comp.contractExamples) {
+    for (const mount of comp.mounts) {
       const container = document.createElement("div");
       document.body.appendChild(container);
       try {
-        opts.renderComposed(example.render(), container);
+        opts.renderComposed(mount.renderable, container);
         await contract.run({ container });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         throw new Error(
-          `${comp.name} (role: ${comp.role}) example "${example.name}" — ${message}`,
+          `${comp.name} (role: ${comp.role}) example "${mount.name}" — ${message}`,
         );
       } finally {
         cleanup(container);

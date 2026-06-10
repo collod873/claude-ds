@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { extractBraceEntries, extractExamplesContent } from "../drift/examples.js";
 import type { Change, Operation, PlanResult } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 
@@ -26,38 +27,66 @@ function toPascalCase(name: string): string {
 
 const DS_UNDEFINED_SENTINEL = "__DS_UNDEFINED__";
 
-function parseExamples(source: string): Array<{ name: string; props: Record<string, unknown> }> {
-	const m = source.match(/examples\s*:\s*(\[[\s\S]*?\])\s*(?:,|\})/);
-	if (!m) return [];
+interface ParsedExamples {
+	examples: Array<{ name: string; props: Record<string, unknown> }>;
+	/**
+	 * True when at least one example entry could not be JSON-parsed — the
+	 * signature of a JSX-bearing example (`props: { children: <X/> }`). The
+	 * regex regenerator cannot reproduce the AST generator's JSX output, so a
+	 * file with such an example is skipped from integrity comparison entirely
+	 * (ADR-0026) rather than regenerated into a stub that clobbers the real,
+	 * AST-generated showcase — a "never break a consumer" violation.
+	 */
+	hadUnparseable: boolean;
+}
+
+/** Parse a single `{ name, props }` example entry; null if it can't be JSON-decoded (e.g. JSX). */
+function parseExampleEntry(entry: string): { name: string; props: Record<string, unknown> } | null {
 	try {
-		const sanitized = m[1]
+		const sanitized = entry
 			.replace(/\/\/[^\n]*/g, "")
 			.replace(/,\s*([\]}])/g, "$1")
 			.replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')
 			.replace(/:\s*undefined\b/g, `:"${DS_UNDEFINED_SENTINEL}"`)
 			.replace(/:\s*'([^']*)'/g, ':"$1"');
-		const parsed = JSON.parse(sanitized);
-		if (!Array.isArray(parsed)) return [];
-		return parsed.map((e: unknown) => {
-			const obj = e as Record<string, unknown>;
-			const rawProps =
-				typeof obj.props === "object" && obj.props !== null
-					? (obj.props as Record<string, unknown>)
-					: {};
-			// Drop sentinel keys: props set to `undefined` in source should be omitted
-			// from generated JSX, not emitted as null (which breaks non-nullable prop types).
-			const props: Record<string, unknown> = {};
-			for (const [k, v] of Object.entries(rawProps)) {
-				if (v !== DS_UNDEFINED_SENTINEL) props[k] = v;
-			}
-			return {
-				name: typeof obj.name === "string" ? obj.name : "unnamed",
-				props,
-			};
-		});
+		const obj = JSON.parse(sanitized) as Record<string, unknown>;
+		if (typeof obj !== "object" || obj === null) return null;
+		const rawProps =
+			typeof obj.props === "object" && obj.props !== null
+				? (obj.props as Record<string, unknown>)
+				: {};
+		// Drop sentinel keys: props set to `undefined` in source should be omitted
+		// from generated JSX, not emitted as null (which breaks non-nullable prop types).
+		const props: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(rawProps)) {
+			if (v !== DS_UNDEFINED_SENTINEL) props[k] = v;
+		}
+		return { name: typeof obj.name === "string" ? obj.name : "unnamed", props };
 	} catch {
-		return [];
+		return null;
 	}
+}
+
+/**
+ * Parse `meta.examples` **per entry** (ADR-0026). A whole-array `JSON.parse`
+ * throws on one JSX-bearing example and silently drops *every* example —
+ * producing false GEN drift. Walking entry-by-entry keeps every JSON-decodable
+ * example and flags the rest via `hadUnparseable`.
+ */
+function parseExamples(source: string): ParsedExamples {
+	const content = extractExamplesContent(source);
+	if (content === null) return { examples: [], hadUnparseable: false };
+	const examples: Array<{ name: string; props: Record<string, unknown> }> = [];
+	let hadUnparseable = false;
+	for (const entry of extractBraceEntries(content)) {
+		const parsed = parseExampleEntry(entry);
+		if (parsed === null) {
+			hadUnparseable = true;
+			continue;
+		}
+		examples.push(parsed);
+	}
+	return { examples, hadUnparseable };
 }
 
 function parseSkip(source: string): string[] {
@@ -220,7 +249,12 @@ function regenShowcaseTsx(
 		].join("\n");
 	}
 
-	const examples = parseExamples(source);
+	const { examples, hadUnparseable } = parseExamples(source);
+	// A JSX-bearing example (ADR-0026) is rendered by the AST generator but cannot
+	// be reproduced by this regex regenerator. Skip the file from integrity
+	// comparison rather than regenerate a stub that would clobber the real
+	// showcase — "never break a consumer" outranks drift coverage here.
+	if (hadUnparseable) return null;
 	const skip = parseSkip(source);
 	const cvaConfig = parseCva(source);
 

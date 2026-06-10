@@ -1199,46 +1199,95 @@ function parseMeta(source: string): ParsedMeta | null {
 
 const REGEX_UNDEFINED_SENTINEL = "__DS_UNDEFINED__";
 
-function parseExamples(source: string): Example[] {
-  // Find examples array in meta
-  const examplesMatch = source.match(/examples\s*:\s*(\[[\s\S]*?\])\s*(?:,|\})/);
-  if (!examplesMatch) return [];
+/**
+ * Find the content between `examples: [` and its matching `]`, counting nested
+ * brackets so an inner array (or JSX `[…]`) doesn't terminate early. Returns null
+ * if no examples array is found. (Mirrors src/lib/drift/examples.ts — the pack
+ * script can't import from the CLI's src tree.)
+ */
+function extractExamplesContent(source: string): string | null {
+  const opener = /examples\s*:\s*\[/.exec(source);
+  if (!opener) return null;
+  let depth = 1;
+  const start = opener.index + opener[0].length;
+  for (let i = start; i < source.length; i++) {
+    if (source[i] === "[") depth++;
+    else if (source[i] === "]") {
+      depth--;
+      if (depth === 0) return source.slice(start, i);
+    }
+  }
+  return null;
+}
 
+/** Extract top-level `{…}` entries from the examples-array body by brace depth. */
+function extractBraceEntries(text: string): string[] {
+  const entries: string[] = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (text[i] === "}") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        entries.push(text.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return entries;
+}
+
+/** Parse a single `{ name, props }` example entry; null if not JSON-decodable (e.g. JSX). */
+function parseExampleEntry(entry: string): Example | null {
   try {
-    // Replace JS-style property shorthand, functions, etc. with JSON-safe equivalents.
-    // We support: name: "string", props: { key: "val", key2: 123, key3: true/false/null }
-    const raw = examplesMatch[1];
-    // Attempt JSON.parse after light sanitization.
     // `undefined` is replaced with a sentinel string rather than `null` so we can
     // distinguish "prop explicitly cleared to undefined" (→ omit from JSX) from
     // "prop intentionally set to null" (→ emit `={null}`).
-    const sanitized = raw
+    const sanitized = entry
       .replace(/\/\/[^\n]*/g, "") // remove line comments
       .replace(/,\s*([\]}])/g, "$1") // trailing commas
       .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":') // unquoted keys
       .replace(/:\s*undefined\b/g, `:"${REGEX_UNDEFINED_SENTINEL}"`) // undefined → sentinel
       .replace(/:\s*'([^']*)'/g, ':"$1"'); // single-quoted strings → double-quoted
-    const parsed = JSON.parse(sanitized);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((e: unknown) => {
-      const obj = e as Record<string, unknown>;
-      const rawProps = typeof obj.props === "object" && obj.props !== null
-        ? (obj.props as Record<string, unknown>)
-        : {};
-      // Drop sentinel props — they were `undefined` in source and must be omitted
-      // from generated JSX rather than emitted as null.
-      const props: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(rawProps)) {
-        if (v !== REGEX_UNDEFINED_SENTINEL) props[k] = v;
-      }
-      return {
-        name: typeof obj.name === "string" ? obj.name : "unnamed",
-        props,
-      };
-    });
+    const obj = JSON.parse(sanitized) as Record<string, unknown>;
+    if (typeof obj !== "object" || obj === null) return null;
+    const rawProps = typeof obj.props === "object" && obj.props !== null
+      ? (obj.props as Record<string, unknown>)
+      : {};
+    // Drop sentinel props — they were `undefined` in source and must be omitted
+    // from generated JSX rather than emitted as null.
+    const props: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(rawProps)) {
+      if (v !== REGEX_UNDEFINED_SENTINEL) props[k] = v;
+    }
+    return {
+      name: typeof obj.name === "string" ? obj.name : "unnamed",
+      props,
+    };
   } catch {
-    return [];
+    return null;
   }
+}
+
+/**
+ * Regex-fallback examples parse — per entry (ADR-0026). A whole-array JSON.parse
+ * throws on one JSX-bearing example and drops *every* example; walking
+ * entry-by-entry keeps the JSON-decodable examples and silently skips the JSX
+ * ones (which only the AST path can serialise anyway). This path runs only when
+ * `typescript` is unavailable; otherwise extractMetaFromAST handles JSX directly.
+ */
+function parseExamples(source: string): Example[] {
+  const content = extractExamplesContent(source);
+  if (content === null) return [];
+  const examples: Example[] = [];
+  for (const entry of extractBraceEntries(content)) {
+    const parsed = parseExampleEntry(entry);
+    if (parsed !== null) examples.push(parsed);
+  }
+  return examples;
 }
 
 function parseSkip(source: string): string[] {
