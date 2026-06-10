@@ -45,6 +45,11 @@ export interface DashboardInput {
 	 *  the signal in adopted mode. Defaults to `false` so callers not yet
 	 *  wired to version currency keep today's behavior. */
 	upgradeAvailable?: boolean;
+	/** Count of hand-rolled DS infra findings from the read-only owned-concern
+	 *  scan (ADR-0003 / #504). Surfaced as a "what's wrong" signal. */
+	handRolledInfra?: number;
+	/** Labels of the read-only completeness scans that ran clean (#504). */
+	alsoChecked?: string[];
 }
 
 export function composeDashboardState(input: DashboardInput): DashboardState {
@@ -59,5 +64,7 @@ export function composeDashboardState(input: DashboardInput): DashboardState {
 		scaffold: input.scaffold,
 		findings,
 		upgradeAvailable: input.mode === "adopted" && input.upgradeAvailable === true,
+		handRolledInfra: input.mode === "adopted" ? (input.handRolledInfra ?? 0) : 0,
+		alsoChecked: input.mode === "adopted" ? input.alsoChecked : undefined,
 	};
 }

@@ -39,6 +39,7 @@ import { detectBuildCommand } from "../lib/log.js";
 import { parseManifest } from "../lib/manifest.js";
 import { computeMigrationChain } from "../lib/migration-framework.js";
 import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
+import { type OwnedConcernScannerFinding, scanOwnedConcerns } from "../lib/owned-concerns/index.js";
 import { resolveManifestPath } from "../lib/paths.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { deriveProjectState } from "../lib/project-state.js";
@@ -169,6 +170,14 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 	let findings: Array<{ ruleId: string; file: string; message: string }> = [];
 	let extractionCount = 0;
 	let unfixableCount = 0;
+	// Read-only completeness scans (ADR-0003 / #504). A check that passes
+	// silently reads as a check that never ran, so the front door runs the
+	// owned-concern (hand-rolled DS infra) and deprecated-dupe scans and names
+	// the clean ones in the dashboard. `handRolledInfra` is a "what's wrong"
+	// signal when non-zero; the labels below are only claimed when the scan
+	// genuinely returned zero — never asserting a false negative.
+	let handRolledInfra = 0;
+	const alsoChecked: string[] = [];
 	if (ctx.kind === "adopted") {
 		const exceptionsPath = join(cwd, "design-system/exceptions.json");
 		let exceptions: Exception[] = [];
@@ -192,6 +201,24 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			}
 			return !isFixable(f.ruleId as DriftRuleId);
 		}).length;
+
+		// Owned-concern scan (ADR-0017 / #514): repo-wide, signature-as-identity.
+		// Catches hand-rolled DS infrastructure (the Crewops `ui-token-validator.sh`
+		// / `base-ui-aschild-validator.sh` class) the drift scan above is blind to.
+		// This is the scan #504's blocker required to land before any "clean ✓"
+		// claim ships — without it, "no hand-rolled DS infra" would be a lie.
+		const rawOwned: OwnedConcernScannerFinding[] = await scanOwnedConcerns({
+			cwd,
+			manifestPaths: new Set(manifest.files.map((f) => f.path)),
+			generatedPatterns: manifest.generated_patterns,
+		});
+		handRolledInfra = rawOwned.filter((f) => !suppressed.has(`${f.concernId}:${f.file}`)).length;
+		if (handRolledInfra === 0) alsoChecked.push("no hand-rolled DS infra");
+
+		// Deprecated/stale root-level dupes (#23): a canonical design-system/ file
+		// left shadowed by a pre-adopt root copy. `rootDupes` was already scanned
+		// above; name it clean here so the deprecated-file check is visible too.
+		if (rootDupes.length === 0) alsoChecked.push("nothing stale or deprecated");
 	}
 
 	const buildCmd = await detectBuildCommand(cwd);
@@ -222,6 +249,8 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		unfixableCount,
 		buildCmd,
 		upgradeAvailable,
+		handRolledInfra,
+		alsoChecked,
 	});
 
 	printLines(renderDashboard(state));
@@ -241,6 +270,19 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 	const plan = planRemediation(projectState);
 
 	if (plan.length === 0) {
+		// Completeness (ADR-0003) is not a remediation-loop member, so an empty
+		// plan does NOT imply the owned-concern scan was clean. If it flagged
+		// hand-rolled DS infra, route to the command that resolves it rather than
+		// asserting clean — the dashboard already named it under "What's wrong".
+		if (handRolledInfra > 0) {
+			const noun = handRolledInfra === 1 ? "finding" : "findings";
+			printLines([
+				"",
+				`Loop is clean, but ${handRolledInfra} hand-rolled DS infra ${noun} need attention.`,
+				"→ Run `claude-ds doctor --completeness` to see what to remove.",
+			]);
+			return;
+		}
 		printLines([
 			"",
 			"Nothing to remediate — the tree is clean.",
@@ -316,8 +358,18 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 				process.exit(1);
 				return;
 			}
+			// Two independent closing signals reconciled here (#504 + #510):
+			// `consumerErrorCount` notes pre-existing consumer errors the verify
+			// gate let pass (warn-only); `handRolledInfra` — the completeness scan
+			// run before the loop (ADR-0003, not a loop member) — downgrades the
+			// "start working" go-ahead to `doctor --completeness` when infra remains.
 			printLines(
-				renderClosingSummary(cliVersion(), parsedCfg?.packVersion, verify.consumerErrors.length),
+				renderClosingSummary(
+					cliVersion(),
+					parsedCfg?.packVersion,
+					verify.consumerErrors.length,
+					handRolledInfra,
+				),
 			);
 		} else if (outcome.kind === "exhausted") {
 			printLines([
@@ -349,6 +401,7 @@ function renderClosingSummary(
 	version: string,
 	pinnedBefore: string | undefined,
 	consumerErrorCount = 0,
+	handRolledInfra = 0,
 ): string[] {
 	const lines = ["", `✓ Tree is clean — ${version}.`];
 	if (pinnedBefore && pinnedBefore !== version) {
@@ -367,7 +420,19 @@ function renderClosingSummary(
 			`  ${consumerErrorCount} pre-existing consumer error(s) noted (not caused by claude-ds).`,
 		);
 	}
-	lines.push("  Nothing needs your attention — start working.");
+	// The remediation loop converged, but completeness (ADR-0003) is not a loop
+	// member — hand-rolled DS infra found before the run still stands. The
+	// "start working" go-ahead is only honest when nothing is left, so a gap
+	// downgrades it to the one command that resolves it (#504). A noted consumer
+	// error above is warn-only and does not block the go-ahead.
+	if (handRolledInfra > 0) {
+		const noun = handRolledInfra === 1 ? "finding" : "findings";
+		lines.push(
+			`  ${handRolledInfra} hand-rolled DS infra ${noun} remain — run \`claude-ds doctor --completeness\`.`,
+		);
+	} else {
+		lines.push("  Nothing needs your attention — start working.");
+	}
 	return lines;
 }
 

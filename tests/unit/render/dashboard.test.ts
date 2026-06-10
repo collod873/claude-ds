@@ -76,6 +76,32 @@ const PRE_ADOPT: DashboardState = {
 	findings: [],
 };
 
+const CLEAN_WITH_ALSO_CHECKED: DashboardState = {
+	cwd: "/repo/example-app",
+	mode: "adopted",
+	scaffold: { present: 12, total: 12 },
+	findings: [],
+	alsoChecked: ["no hand-rolled DS infra", "nothing stale or deprecated"],
+};
+
+const INCOMPLETE_WITH_ALSO_CHECKED: DashboardState = {
+	cwd: "/repo/example-app",
+	mode: "adopted",
+	scaffold: { present: 9, total: 12 },
+	findings: [],
+	upgradeAvailable: true,
+	alsoChecked: ["no hand-rolled DS infra", "nothing stale or deprecated"],
+};
+
+const HAND_ROLLED_INFRA: DashboardState = {
+	cwd: "/repo/example-app",
+	mode: "adopted",
+	scaffold: { present: 12, total: 12 },
+	findings: [],
+	handRolledInfra: 2,
+	alsoChecked: ["nothing stale or deprecated"],
+};
+
 describe("renderDashboard (pure)", () => {
 	it("renders the clean adopted state", () => {
 		expect(renderDashboard(CLEAN)).toMatchInlineSnapshot(`
@@ -134,6 +160,44 @@ describe("renderDashboard (pure)", () => {
       [
         "Where you are: pre-adopt (/repo/fresh-app)",
         "What's wrong: no scaffold installed yet",
+      ]
+    `);
+	});
+
+	it("names the clean read-only scans on an otherwise clean tree (#504)", () => {
+		// A check that passes silently reads as a check that never ran. The
+		// completeness promise (ADR-0003) is only credible if the tool shows it
+		// verified — so a clean owned-concern / deprecated scan is named, not omitted.
+		expect(renderDashboard(CLEAN_WITH_ALSO_CHECKED)).toMatchInlineSnapshot(`
+      [
+        "Where you are: adopted (/repo/example-app)",
+        "Managed files: 12/12 ✓",
+        "What's wrong: nothing — tree is clean",
+        "Also checked: no hand-rolled DS infra, nothing stale or deprecated ✓",
+      ]
+    `);
+	});
+
+	it("names clean scans even when other things are wrong (#504)", () => {
+		expect(renderDashboard(INCOMPLETE_WITH_ALSO_CHECKED)).toMatchInlineSnapshot(`
+      [
+        "Where you are: adopted (/repo/example-app)",
+        "Managed files: 9/12",
+        "What's wrong: scaffold incomplete + upgrade available",
+        "Also checked: no hand-rolled DS infra, nothing stale or deprecated ✓",
+      ]
+    `);
+	});
+
+	it("hand-rolled DS infra is a what's-wrong signal, never an 'also checked' one (#504)", () => {
+		// The scan that found something is NOT named as clean — it surfaces in
+		// "What's wrong" so the tree is never falsely reported clean.
+		expect(renderDashboard(HAND_ROLLED_INFRA)).toMatchInlineSnapshot(`
+      [
+        "Where you are: adopted (/repo/example-app)",
+        "Managed files: 12/12 ✓",
+        "What's wrong: 2 hand-rolled DS infra findings",
+        "Also checked: nothing stale or deprecated ✓",
       ]
     `);
 	});
