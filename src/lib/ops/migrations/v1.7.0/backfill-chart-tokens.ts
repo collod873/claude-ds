@@ -35,7 +35,14 @@ const CHART_DEFAULTS = {
  * adopted before this release has the new managed ramp but no `color.chart`, so
  * `tokens.color.chart` fails to typecheck — the same break `widen-tokens@v0.9.0`
  * absorbed for `motion`/`mask`/`shadow`/`z`. This Op closes that gap: additive merge,
- * `color.chart` left untouched if already present.
+ * keys the consumer already has left untouched.
+ *
+ * The merge is *key-level*, not group-level (#491): a consumer that hand-rolled a
+ * differently-shaped `color.chart` (e.g. Crewops' mode-split `chart.{light,dark}`)
+ * still needs the `categorical`/`status` keys the managed ramp reads. A group-level
+ * presence check would no-op on any pre-existing `chart`, leaving the ramp reading
+ * keys that aren't there — unrecoverable through `heal`. So we backfill each missing
+ * managed key individually and never touch the consumer's existing keys.
  */
 export const backfillChartTokens: Operation = {
 	name: "backfill-chart-tokens@v1.7.0",
@@ -54,9 +61,30 @@ export const backfillChartTokens: Operation = {
 			tokens.color !== null && typeof tokens.color === "object"
 				? (tokens.color as Record<string, unknown>)
 				: undefined;
-		if (color && "chart" in color) return [];
 
-		tokens.color = { ...(color ?? {}), chart: CHART_DEFAULTS };
+		const existingChart =
+			color &&
+			color.chart !== null &&
+			typeof color.chart === "object" &&
+			!Array.isArray(color.chart)
+				? (color.chart as Record<string, unknown>)
+				: undefined;
+
+		// `chart` present but not a mergeable object (scalar/array): we can't key-merge
+		// without clobbering the consumer's value, so leave it untouched (ADR-0003).
+		if (color && "chart" in color && !existingChart) return [];
+
+		const chart: Record<string, unknown> = { ...(existingChart ?? {}) };
+		let changed = false;
+		for (const key of Object.keys(CHART_DEFAULTS) as (keyof typeof CHART_DEFAULTS)[]) {
+			if (!(key in chart)) {
+				chart[key] = CHART_DEFAULTS[key];
+				changed = true;
+			}
+		}
+		if (!changed) return [];
+
+		tokens.color = { ...(color ?? {}), chart };
 
 		const after = Buffer.from(JSON.stringify(tokens, null, 2) + "\n", "utf8");
 		const before = Buffer.from(raw, "utf8");

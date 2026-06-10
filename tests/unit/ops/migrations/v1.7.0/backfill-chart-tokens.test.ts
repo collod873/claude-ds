@@ -74,17 +74,78 @@ describe("backfill-chart-tokens migration Op", () => {
 		expect(color.background).toBe("#ffffff");
 	});
 
-	it("is idempotent — returns no changes when color.chart already present", async () => {
-		await writeTokens({ color: { ...BASE_TOKENS.color, chart: { categorical: { "1": "#000" } } } });
+	it("is idempotent — returns no changes when both categorical and status present", async () => {
+		await writeTokens({
+			color: {
+				...BASE_TOKENS.color,
+				chart: { categorical: { "1": "#000" }, status: { positive: "#0f0" } },
+			},
+		});
 		const changes = await backfillChartTokens.plan(makeCtx());
 		expect(changes).toHaveLength(0);
 	});
 
-	it("does not overwrite an existing color.chart", async () => {
+	it("does not overwrite existing categorical/status keys", async () => {
 		const custom = { categorical: { "1": "#abcdef" }, status: { positive: "#123456" } };
 		await writeTokens({ color: { ...BASE_TOKENS.color, chart: custom } });
 		const changes = await backfillChartTokens.plan(makeCtx());
 		expect(changes).toHaveLength(0);
+	});
+
+	it("backfills categorical/status into a differently-shaped color.chart, leaving consumer keys untouched", async () => {
+		// Crewops-shaped pre-existing chart: mode-split series via $alias/$type leaves.
+		const crewopsChart = {
+			light: {
+				"1": { $type: "color", $value: "{color.primary}" },
+				"2": { $type: "color", $value: "#7c3aed" },
+			},
+			dark: {
+				"1": { $type: "color", $value: "{color.primary}" },
+				"2": { $type: "color", $value: "#a78bfa" },
+			},
+		};
+		await writeTokens({ color: { ...BASE_TOKENS.color, chart: crewopsChart } });
+
+		const changes = await backfillChartTokens.plan(makeCtx());
+		expect(changes).toHaveLength(1);
+		expect(changes[0].kind).toBe("write");
+
+		const color = afterOf(changes).color as Record<string, unknown>;
+		const chart = color.chart as Record<string, unknown>;
+		// Managed ramp keys backfilled.
+		expect(Object.keys(chart.categorical as object).length).toBeGreaterThanOrEqual(4);
+		expect(Object.keys(chart.status as object)).toEqual(
+			expect.arrayContaining(["positive", "negative", "warning", "neutral"]),
+		);
+		// Consumer's existing chart keys untouched.
+		expect(chart.light).toEqual(crewopsChart.light);
+		expect(chart.dark).toEqual(crewopsChart.dark);
+	});
+
+	it("backfills only the missing key when one of categorical/status is present", async () => {
+		await writeTokens({
+			color: { ...BASE_TOKENS.color, chart: { categorical: { "1": "#abcdef" } } },
+		});
+		const changes = await backfillChartTokens.plan(makeCtx());
+		expect(changes).toHaveLength(1);
+		const chart = (afterOf(changes).color as Record<string, unknown>).chart as Record<
+			string,
+			unknown
+		>;
+		// Existing categorical preserved, status added.
+		expect(chart.categorical).toEqual({ "1": "#abcdef" });
+		expect(Object.keys(chart.status as object)).toEqual(
+			expect.arrayContaining(["positive", "negative", "warning", "neutral"]),
+		);
+	});
+
+	it("leaves a present-but-non-object color.chart untouched (no clobber)", async () => {
+		// A scalar/array chart is malformed, but ADR-0003 forbids deleting consumer bytes.
+		for (const chart of ["legacy-string", ["#000", "#fff"]] as const) {
+			await writeTokens({ color: { ...BASE_TOKENS.color, chart } });
+			const changes = await backfillChartTokens.plan(makeCtx());
+			expect(changes).toHaveLength(0);
+		}
 	});
 
 	it("creates color when tokens.json has no color group at all", async () => {
