@@ -36,5 +36,13 @@ export const MIGRATION_REGISTRY: MigrationVersion[] = [
 		],
 	},
 	{ version: "v1.0.0", ops: [migrateExceptions, liftTrackingManifest] },
-	{ version: "v1.7.0", ops: [backfillChartTokens] },
+	{
+		version: "v1.7.0",
+		ops: [backfillChartTokens],
+		highlights: [
+			"token-bound chart palette",
+			"structural-bypass detection",
+			"content-drift scaffoldGap",
+		],
+	},
 ];

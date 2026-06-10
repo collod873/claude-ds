@@ -399,6 +399,32 @@ export function SoloLabel() { return <span />; }
 		expect(out).not.toMatch(/→ Next/);
 		expect(out).not.toContain("run 'claude-ds audit'");
 	}, 60000);
+
+	it("closing summary: footer names the version, what's new, and 'start working' (#503)", async () => {
+		// The bare "✓ Tree is clean" gave the operator nothing about what the run
+		// delivered. After convergence the footer states the version reached, what
+		// landed since the pinned version (sourced from the migration chain), and a
+		// "nothing needs your attention" go-ahead. Pin v1.0.0 so the chain to the
+		// current CLI carries the v1.7.0 highlights.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		const cfgPath = join(dir, ".claude-ds.json");
+		const cfg = JSON.parse(await readFile(cfgPath, "utf8"));
+		cfg.packVersion = "v1.0.0";
+		await writeFile(cfgPath, JSON.stringify(cfg));
+
+		const out = await captureFrontDoor({
+			cwd: dir,
+			interactive: false,
+			yes: true,
+			maxIterations: 5,
+		});
+
+		expect(out).toMatch(new RegExp(`Tree is clean — ${CURRENT}`));
+		expect(out).toMatch(/New since v1\.0\.0:/);
+		expect(out).toMatch(/chart palette/);
+		expect(out).toMatch(/Nothing needs your attention — start working/);
+	}, 60000);
 });
 
 /**
