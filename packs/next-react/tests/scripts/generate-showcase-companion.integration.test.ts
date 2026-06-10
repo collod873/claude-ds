@@ -2,10 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from
 import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { copyFileSync, mkdirSync } from "node:fs";
+import { runCli } from "../../../../tests/helpers/runcli";
 
 const SCRIPT = resolve("packs/next-react/files/scripts/generate-showcase-companion.ts");
 
@@ -26,59 +27,43 @@ function copyFixture(fixtureSrc: string, dest: string, relPath: string): void {
   copyFileSync(join(fixtureSrc, relPath), destPath);
 }
 
-describe("generate-showcase-companion.ts [integration]", () => {
-  let dir: string;
+// ── File-wide shared-spawn clusters ──────────────────────────────────────────
+// Node boot + typescript module load dominate each generator spawn (~400ms),
+// and the generator processes every component under design-system/ in one
+// run with fully independent per-component outputs. So every test that just
+// seeds component source(s) and asserts on the generated showcase shares ONE
+// spawn: all sources are seeded below under distinct file paths, and each
+// test reads only its own output. Same idea as the per-describe "shared
+// spawn" clusters further down — lifted to file scope.
+//
+// Tests that need a different project shape keep their own runs: empty dir,
+// analyzer script present (changes output for every component), tsconfig @/
+// aliases (second cluster below), and reconform interplay.
 
-  beforeEach(async () => {
-    dir = await fresh();
-  });
+interface SharedRun {
+  dir: string;
+  r: SpawnSyncReturns<string>;
+}
 
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
+let sharedGenRun: Promise<SharedRun> | null = null;
+/** Plain consumer: no package.json, no tsconfig, no analyzer. */
+function sharedGen(): Promise<SharedRun> {
+  sharedGenRun ??= (async () => {
+    const dir = await fresh();
+    const atomsDir = join(dir, "design-system", "atoms");
+    const compositesDir = join(dir, "design-system", "composites");
+    await mkdir(atomsDir, { recursive: true });
+    await mkdir(compositesDir, { recursive: true });
 
-  // ── atom with explicit examples ────────────────────────────────────────────
-
-  // ── no-meta graceful skip ──────────────────────────────────────────────────
-
-  it("skips components with no meta export and exits 0", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    // Component without a meta export
+    // no-meta graceful skip — component without a meta export (GEN-000)
     await writeFile(
-      join(dsDir, "plain.tsx"),
+      join(atomsDir, "plain.tsx"),
       `import React from "react";\nexport function Plain() { return <div />; }\n`
     );
 
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
-    expect(r.status).toBe(0);
-    // No showcase generated for it
-    expect(existsSync(join(dsDir, "plain.showcase.tsx"))).toBe(false);
-    // But GEN-000 warning emitted to stderr
-    expect(r.stderr).toMatch(/GEN-000/);
-  });
-
-  // ── empty dir graceful ─────────────────────────────────────────────────────
-
-  it("exits 0 when design-system dirs are absent", async () => {
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
-    expect(r.status).toBe(0);
-  });
-
-  // ── string-literal stripping (Bug 1) ──────────────────────────────────────
-
-  it("CVA parser does not emit bogus Tailwind-modifier variant values (hover, active, etc.)", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    // Component with Tailwind modifier strings inside CVA variant values
+    // string-literal stripping (Bug 1) — Tailwind modifier strings inside CVA variant values
     await writeFile(
-      join(dsDir, "button.tsx"),
+      join(atomsDir, "button.tsx"),
       [
         `import React from "react";`,
         `import { cva } from "class-variance-authority";`,
@@ -100,30 +85,9 @@ describe("generate-showcase-companion.ts [integration]", () => {
       ].join("\n")
     );
 
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
-    expect(r.status).toBe(0);
-
-    const content = await readFile(join(dsDir, "button.showcase.tsx"), "utf8");
-    // Must NOT contain bogus modifier-derived variant values
-    expect(content).not.toContain('intent="hover"');
-    expect(content).not.toContain('intent="active"');
-    expect(content).not.toContain('intent="focus"');
-    expect(content).not.toContain('intent="aria"');
-    // Must contain exactly the 2 real intent groups and 2 real sizes
-    expect(content).toContain(">Primary<");
-    expect(content).toContain(">Secondary<");
-  });
-
-  // ── children fallback (Bug 2) ─────────────────────────────────────────────
-
-  it("auto-generated non-icon combos get displayName as children", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
+    // children fallback (Bug 2)
     await writeFile(
-      join(dsDir, "btn.tsx"),
+      join(atomsDir, "btn.tsx"),
       [
         `import React from "react";`,
         `import { cva } from "class-variance-authority";`,
@@ -139,26 +103,10 @@ describe("generate-showcase-companion.ts [integration]", () => {
       ].join("\n")
     );
 
-    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
-
-    const content = await readFile(join(dsDir, "btn.showcase.tsx"), "utf8");
-    // Non-icon size (sm) combos should have text children "Btn"
-    expect(content).toContain(">Btn<");
-    // Icon size combos should be self-closing (no children)
-    expect(content).toContain('size="icon"');
-    // Icon buttons should NOT have text children injected
-    const iconComboIdx = content.indexOf('size="icon"');
-    const afterIcon = content.slice(iconComboIdx, iconComboIdx + 80);
-    expect(afterIcon).not.toContain(">Btn<");
-  });
-
-  // ── pretty label (Bug 3) ──────────────────────────────────────────────────
-
-  it("grouped section headings use title-case, not underscore-joined debug keys", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
+    // pretty label (Bug 3) — `pill.tsx`: was `badge.tsx` pre-cluster, renamed so the
+    // multi-CVA-stubbed fixture below keeps the `badge.tsx` path
     await writeFile(
-      join(dsDir, "badge.tsx"),
+      join(atomsDir, "pill.tsx"),
       [
         `import React from "react";`,
         `import { cva } from "class-variance-authority";`,
@@ -169,29 +117,14 @@ describe("generate-showcase-companion.ts [integration]", () => {
         `  },`,
         `  defaultVariants: { tone: "primary", size: "sm" },`,
         `});`,
-        `export function Badge(props: any) { return <span {...props} />; }`,
+        `export function Pill(props: any) { return <span {...props} />; }`,
         `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
       ].join("\n")
     );
 
-    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
-
-    const content = await readFile(join(dsDir, "badge.showcase.tsx"), "utf8");
-    // Group headings must be title-cased primary values
-    expect(content).toContain(">Primary<");
-    expect(content).toContain(">Danger<");
-    // Must NOT contain raw underscore combo keys as headings
-    expect(content).not.toContain(">tone=primary_size=sm<");
-    expect(content).not.toContain(">tone=danger_size=lg<");
-  });
-
-  // ── grouped CVA structure (Bug 4) ─────────────────────────────────────────
-
-  it("CVA combos are grouped by first axis with secondary axis as row", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
+    // grouped CVA structure (Bug 4)
     await writeFile(
-      join(dsDir, "chip.tsx"),
+      join(atomsDir, "chip.tsx"),
       [
         `import React from "react";`,
         `import { cva } from "class-variance-authority";`,
@@ -207,9 +140,388 @@ describe("generate-showcase-companion.ts [integration]", () => {
       ].join("\n")
     );
 
-    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    // import style — named-export-only atom (non-stub example so the import is emitted)
+    await writeFile(
+      join(atomsDir, "app-shell.tsx"),
+      [
+        `import React from "react";`,
+        `export function AppShell({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export const meta = { kind: "atom", examples: [{ name: "with-child", props: { children: "hello" } }], skip: [] };`,
+      ].join("\n")
+    );
 
-    const content = await readFile(join(dsDir, "chip.showcase.tsx"), "utf8");
+    // import style — default-export atom
+    copyFixture(FIXTURE_DEFAULT_EXPORT, dir, "design-system/atoms/card.tsx");
+
+    // stub meta (name=default, empty props, no CVA) → placeholder
+    await writeFile(
+      join(atomsDir, "stub-atom.tsx"),
+      [
+        `import React from "react";`,
+        `export function StubAtom({ items }: { items: string[] }) { return <ul>{items.map(i => <li key={i}>{i}</li>)}</ul>; }`,
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+
+    // non-stub meta (non-empty props) → renders normally
+    await writeFile(
+      join(atomsDir, "real-atom.tsx"),
+      [
+        `import React from "react";`,
+        `export function RealAtom({ label }: { label: string }) { return <span>{label}</span>; }`,
+        `export const meta = { kind: "atom", examples: [{ name: "filled", props: { label: "hello" } }], skip: [] };`,
+      ].join("\n")
+    );
+
+    // stub meta with CVA variants → renders normally (not placeholder)
+    await writeFile(
+      join(atomsDir, "cva-atom.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const v = cva("b", {`,
+        `  variants: { intent: { primary: "p", secondary: "s" } },`,
+        `  defaultVariants: { intent: "primary" },`,
+        `});`,
+        `export function CvaAtom(props: any) { return <div {...props} />; }`,
+        // stub meta but CVA exists — should render normally
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+
+    // multi-CVA file with examples:[] → placeholder (regression for #62)
+    copyFixture(FIXTURE_MULTI_CVA_STUBBED, dir, "design-system/atoms/badge.tsx");
+
+    // #69 — namespace-only export (object literal, not callable)
+    await writeFile(
+      join(atomsDir, "skeleton.tsx"),
+      [
+        `import React from "react";`,
+        `function Line(props: any) { return <span {...props} />; }`,
+        `function Block(props: any) { return <div {...props} />; }`,
+        `function Circle(props: any) { return <span {...props} />; }`,
+        `export const Skeleton = { Line, Block, Circle };`,
+        `export const meta = { kind: "atom", examples: [{ name: "line", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+
+    // #295 — pre-existing namespace-only component (simulating combobox-item in Crewops)…
+    await writeFile(
+      join(atomsDir, "combobox-item.tsx"),
+      [
+        `import React from "react";`,
+        `function Trigger(props: any) { return <button {...props} />; }`,
+        `function Content(props: any) { return <div {...props} />; }`,
+        `export const ComboboxItem = { Trigger, Content };`,
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+    // …must not block a normal callable component from getting a companion.
+    // `edit-target.tsx`: was `button.tsx` pre-cluster, renamed to dodge the Bug 1 source above.
+    await writeFile(
+      join(atomsDir, "edit-target.tsx"),
+      [
+        `import React from "react";`,
+        `export function EditTarget(props: any) { return <button {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
+      ].join("\n")
+    );
+
+    // Bug B — carried locals topo-sorted: `c` references `b` which references `a`
+    await writeFile(
+      join(atomsDir, "chain.tsx"),
+      [
+        `import React from "react";`,
+        `export function Foo() { return <div />; }`,
+        `const a = <Foo />;`,
+        `const b = <>{a}<Foo /></>;`,
+        `const c = <>{b}<Foo /></>;`,
+        `export function Chain({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export const meta = {`,
+        `  kind: "atom",`,
+        `  examples: [{ name: "chain", props: { children: c } }],`,
+        `};`,
+      ].join("\n")
+    );
+
+    // A3 — type-only import referenced in example callbacks
+    copyFixture(FIXTURE_TYPE_IMPORT_CARRY, dir, "design-system/atoms/filter-button.tsx");
+    copyFixture(FIXTURE_TYPE_IMPORT_CARRY, dir, "design-system/_fixtures/handler-types.ts");
+
+    // A3 — typed local const inline + transitive type-import carry
+    copyFixture(FIXTURE_TYPED_LOCAL_INLINE, dir, "design-system/composites/item-list.tsx");
+    copyFixture(FIXTURE_TYPED_LOCAL_INLINE, dir, "design-system/_fixtures/item-types.ts");
+
+    // #70 — sibling function declarations referenced in meta JSX
+    await writeFile(
+      join(compositesDir, "card.tsx"),
+      [
+        `import React from "react";`,
+        `export function Card({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export function CardHeader({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export function CardBody({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export const meta = {`,
+        `  kind: "composite",`,
+        `  examples: [{`,
+        `    name: "with-header",`,
+        `    props: { children: <><CardHeader>Title</CardHeader><CardBody>Body</CardBody></> }`,
+        `  }],`,
+        `  skip: [],`,
+        `};`,
+      ].join("\n")
+    );
+
+    // ADR-0026 — composed-widget example + flat example sharing the array
+    await writeFile(
+      join(compositesDir, "combobox.tsx"),
+      [
+        `import React from "react";`,
+        `export function Combobox({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export function ComboboxTrigger() { return <button role="combobox" />; }`,
+        `export function ComboboxList() { return <ul role="listbox" />; }`,
+        `export const meta = {`,
+        `  kind: "composite",`,
+        `  role: "combobox",`,
+        `  examples: [`,
+        `    { name: "sm", props: { size: "sm" } },`,
+        `    { name: "composed", props: { children: <><ComboboxTrigger /><ComboboxList /></> } },`,
+        `  ],`,
+        `};`,
+      ].join("\n")
+    );
+
+    // Bug A — prop explicitly set to undefined must be omitted from JSX
+    await writeFile(
+      join(compositesDir, "summary.tsx"),
+      [
+        `import React from "react";`,
+        `export function Summary({ status, reference }: { status: string; reference?: string }) {`,
+        `  return <div>{status}{reference}</div>;`,
+        `}`,
+        `export const meta = {`,
+        `  kind: "composite",`,
+        `  examples: [`,
+        `    {`,
+        `      name: "no-reference",`,
+        `      props: { status: "draft", reference: undefined },`,
+        `    },`,
+        `  ],`,
+        `};`,
+      ].join("\n")
+    );
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    return { dir, r };
+  })();
+  return sharedGenRun;
+}
+
+let sharedAliasRun: Promise<SharedRun> | null = null;
+/** Aliased consumer: package.json + tsconfig with `@/*` paths, _fixtures imports. */
+function sharedAliasGen(): Promise<SharedRun> {
+  sharedAliasRun ??= (async () => {
+    const dir = await fresh();
+    const compositesDir = join(dir, "design-system", "composites");
+    const fixturesDir = join(dir, "design-system", "_fixtures");
+    await mkdir(compositesDir, { recursive: true });
+    await mkdir(fixturesDir, { recursive: true });
+    // package.json needed so findConsumerRoot() can locate the project root and
+    // resolveAtPrefix() can read tsconfig paths for @/ alias resolution.
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "test-consumer" }, null, 2));
+    await writeFile(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }, null, 2)
+    );
+
+    // Over-eager identifier collection regression: meta uses `hendersonContact.fullName`
+    // (string property access). contact-fixtures.ts defines an internal helper function
+    // `buildContact()` and imports `hendersonAddress` from address-fixtures.ts to build
+    // the fixture objects. The showcase must only import the directly referenced
+    // identifiers — not the internal helper or transitive imports.
+    await writeFile(
+      join(fixturesDir, "address-fixtures.ts"),
+      [
+        `export const hendersonAddress = { street: "1 Henderson Ave" };`,
+        `export const longAddress = { street: "A Very Long Street Name Indeed" };`,
+      ].join("\n")
+    );
+    await writeFile(
+      join(fixturesDir, "contact-fixtures.ts"),
+      [
+        `import { hendersonAddress, longAddress } from "./address-fixtures";`,
+        `function buildContact(name: string, phone: string, addr: { street: string }) {`,
+        `  return { fullName: name, phoneE164: phone, addressStreet: addr.street };`,
+        `}`,
+        `export const hendersonContact = buildContact("Jane Henderson", "+15551234567", hendersonAddress);`,
+        `export const okaforLead = buildContact("Chidi Okafor", "+15559876543", longAddress);`,
+        `export const longNameContact = buildContact("Maximilian Bartholomew", "+15550001234", hendersonAddress);`,
+      ].join("\n")
+    );
+    await writeFile(
+      join(compositesDir, "contact-card.tsx"),
+      [
+        `import {`,
+        `  hendersonContact,`,
+        `  okaforLead,`,
+        `  longNameContact,`,
+        `} from "@/design-system/_fixtures/contact-fixtures";`,
+        ``,
+        `export const meta = {`,
+        `  kind: "composite" as const,`,
+        `  examples: [`,
+        `    { name: "Henderson", props: { name: hendersonContact.fullName, phone: hendersonContact.phoneE164 } },`,
+        `    { name: "Okafor", props: { name: okaforLead.fullName } },`,
+        `  ],`,
+        `  states: {`,
+        `    longText: { props: { name: longNameContact.fullName } },`,
+        `  },`,
+        `};`,
+        ``,
+        `export default function ContactCard({ name, phone }: { name: string; phone?: string }) {`,
+        `  return <div>{name}{phone && <span>{phone}</span>}</div>;`,
+        `}`,
+      ].join("\n")
+    );
+
+    // Bug B — nested object properties inside imported fixtures (depth limit regression)
+    await writeFile(
+      join(fixturesDir, "task-fixtures.ts"),
+      [
+        `export interface Assignee { name: string; avatarUrl?: string }`,
+        `export interface TaskFixture { title: string; assignee: Assignee }`,
+        `export const acmeTasks: TaskFixture[] = [`,
+        `  { title: "Task one", assignee: { name: "Marcus Webb" } },`,
+        `  { title: "Task two", assignee: { name: "Sara Kim" } },`,
+        `];`,
+      ].join("\n")
+    );
+    await writeFile(
+      join(compositesDir, "task-row.tsx"),
+      [
+        `import React from "react";`,
+        `import { acmeTasks } from "@/design-system/_fixtures/task-fixtures";`,
+        `export function TaskRow({ title, assignee }: { title: string; assignee: { name: string } }) {`,
+        `  return <div>{title} — {assignee.name}</div>;`,
+        `}`,
+        `export const meta = {`,
+        `  kind: "composite",`,
+        `  examples: [`,
+        `    {`,
+        `      name: "in-progress",`,
+        `      props: {`,
+        `        title: acmeTasks[0].title,`,
+        `        assignee: acmeTasks[0].assignee,`,
+        `      },`,
+        `    },`,
+        `  ],`,
+        `};`,
+      ].join("\n")
+    );
+
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    return { dir, r };
+  })();
+  return sharedAliasRun;
+}
+
+afterAll(async () => {
+  for (const run of [sharedGenRun, sharedAliasRun]) {
+    if (run) await rm((await run).dir, { recursive: true, force: true });
+  }
+});
+
+describe("generate-showcase-companion.ts [integration]", () => {
+  // ── no-meta graceful skip ──────────────────────────────────────────────────
+
+  it("skips components with no meta export and exits 0", async () => {
+    const { dir, r } = await sharedGen();
+    expect(r.status).toBe(0);
+    // No showcase generated for it
+    expect(existsSync(join(dir, "design-system", "atoms", "plain.showcase.tsx"))).toBe(false);
+    // But GEN-000 warning emitted to stderr
+    expect(r.stderr).toMatch(/GEN-000/);
+  });
+
+  // ── empty dir graceful ─────────────────────────────────────────────────────
+
+  it("exits 0 when design-system dirs are absent", async () => {
+    const dir = await fresh();
+    try {
+      const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+        cwd: dir,
+        encoding: "utf8",
+      });
+      expect(r.status).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── string-literal stripping (Bug 1) ──────────────────────────────────────
+
+  it("CVA parser does not emit bogus Tailwind-modifier variant values (hover, active, etc.)", async () => {
+    const { dir, r } = await sharedGen();
+    expect(r.status).toBe(0);
+
+    const content = await readFile(join(dir, "design-system", "atoms", "button.showcase.tsx"), "utf8");
+    // Must NOT contain bogus modifier-derived variant values
+    expect(content).not.toContain('intent="hover"');
+    expect(content).not.toContain('intent="active"');
+    expect(content).not.toContain('intent="focus"');
+    expect(content).not.toContain('intent="aria"');
+    // Must contain exactly the 2 real intent groups and 2 real sizes
+    expect(content).toContain(">Primary<");
+    expect(content).toContain(">Secondary<");
+  });
+
+  // ── children fallback (Bug 2) ─────────────────────────────────────────────
+
+  it("auto-generated non-icon combos get displayName as children", async () => {
+    const { dir } = await sharedGen();
+
+    const content = await readFile(join(dir, "design-system", "atoms", "btn.showcase.tsx"), "utf8");
+    // Non-icon size (sm) combos should have text children "Btn"
+    expect(content).toContain(">Btn<");
+    // Icon size combos should be self-closing (no children)
+    expect(content).toContain('size="icon"');
+    // Icon buttons should NOT have text children injected
+    const iconComboIdx = content.indexOf('size="icon"');
+    const afterIcon = content.slice(iconComboIdx, iconComboIdx + 80);
+    expect(afterIcon).not.toContain(">Btn<");
+  });
+
+  // ── pretty label (Bug 3) ──────────────────────────────────────────────────
+
+  it("grouped section headings use title-case, not underscore-joined debug keys", async () => {
+    const { dir } = await sharedGen();
+
+    const content = await readFile(join(dir, "design-system", "atoms", "pill.showcase.tsx"), "utf8");
+    // Group headings must be title-cased primary values
+    expect(content).toContain(">Primary<");
+    expect(content).toContain(">Danger<");
+    // Must NOT contain raw underscore combo keys as headings
+    expect(content).not.toContain(">tone=primary_size=sm<");
+    expect(content).not.toContain(">tone=danger_size=lg<");
+  });
+
+  // ── grouped CVA structure (Bug 4) ─────────────────────────────────────────
+
+  it("CVA combos are grouped by first axis with secondary axis as row", async () => {
+    const { dir } = await sharedGen();
+
+    const content = await readFile(join(dir, "design-system", "atoms", "chip.showcase.tsx"), "utf8");
     // Should render a Variants section
     expect(content).toContain("Variants");
     // Each primary value gets its own section heading
@@ -222,28 +534,10 @@ describe("generate-showcase-companion.ts [integration]", () => {
   // ── import style: named vs default export ────────────────────────────────
 
   it("named-export-only atom emits import { Name } from named import", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    // Component with only a named export (no export default).
-    // Uses a non-stub example (has a non-empty prop) so the import is emitted.
-    await writeFile(
-      join(dsDir, "app-shell.tsx"),
-      [
-        `import React from "react";`,
-        `export function AppShell({ children }: { children?: React.ReactNode }) {`,
-        `  return <div>{children}</div>;`,
-        `}`,
-        `export const meta = { kind: "atom", examples: [{ name: "with-child", props: { children: "hello" } }], skip: [] };`,
-      ].join("\n")
-    );
-
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
 
-    const content = await readFile(join(dsDir, "app-shell.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "atoms", "app-shell.showcase.tsx"), "utf8");
     // Must use named import because there is no default export
     expect(content).toContain('import { AppShell } from "./app-shell"');
     // Must NOT use default import
@@ -251,17 +545,10 @@ describe("generate-showcase-companion.ts [integration]", () => {
   });
 
   it("default-export atom emits default import", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    copyFixture(FIXTURE_DEFAULT_EXPORT, dir, "design-system/atoms/card.tsx");
-
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
 
-    const content = await readFile(join(dsDir, "card.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "atoms", "card.showcase.tsx"), "utf8");
     // Must use default import because fixture has export default function Card
     expect(content).toContain('import Card from "./card"');
     // Must NOT use named import
@@ -383,9 +670,6 @@ describe("generate-showcase-companion.ts [integration] — REF fixture cluster",
 // We construct minimal consumer projects with .claude-ds.json, pack manifest,
 // and pre-seeded generated files.
 
-import { fileURLToPath } from "node:url";
-const RECONFORM_SCRIPT = resolve("dist/cli.js");
-const PACK_DIR = resolve("packs/next-react");
 
 async function seedIntegrityFixture(dir: string, showcaseContent: string): Promise<void> {
   // .claude-ds.json
@@ -421,11 +705,7 @@ describe("reconform integrity check (GEN-001 / GEN-002)", () => {
       `import React from "react";\nexport default function BtnShowcase() { return null; }\n`
     );
 
-    const r = spawnSync("node", [RECONFORM_SCRIPT, "reconform"], {
-      cwd: dir,
-      encoding: "utf8",
-      input: "\n", // auto-skip any prompts
-    });
+    const r = await runCli(["reconform"], { cwd: dir, stdin: "\n" });
 
     // Must mention GEN-001
     const combined = r.stdout + r.stderr;
@@ -437,11 +717,7 @@ describe("reconform integrity check (GEN-001 / GEN-002)", () => {
     const showcaseDrifted = `// @generated by claude-ds — do not edit. Source: btn.tsx meta block.\nimport React from "react";\nimport Btn from "./btn";\n\nexport default function BtnShowcase() {\n  // HAND EDIT: this line was added\n  return <div>CUSTOM</div>;\n}\n`;
     await seedIntegrityFixture(dir, showcaseDrifted);
 
-    const r = spawnSync("node", [RECONFORM_SCRIPT, "reconform"], {
-      cwd: dir,
-      encoding: "utf8",
-      input: "\n",
-    });
+    const r = await runCli(["reconform"], { cwd: dir, stdin: "\n" });
 
     const combined = r.stdout + r.stderr;
     expect(combined).toMatch(/GEN-002/);
@@ -451,11 +727,7 @@ describe("reconform integrity check (GEN-001 / GEN-002)", () => {
     const showcaseDrifted = `// @generated by claude-ds — do not edit. Source: btn.tsx meta block.\nimport React from "react";\nexport default function BtnShowcase() { return <div>DRIFTED</div>; }\n`;
     await seedIntegrityFixture(dir, showcaseDrifted);
 
-    spawnSync("node", [RECONFORM_SCRIPT, "reconform", "--fix"], {
-      cwd: dir,
-      encoding: "utf8",
-      input: "\n",
-    });
+    await runCli(["reconform", "--fix"], { cwd: dir, stdin: "\n" });
 
     // After --fix, the showcase must be regenerated (no longer contain DRIFTED)
     const repaired = await readFile(join(dir, "design-system", "atoms", "btn.showcase.tsx"), "utf8");
@@ -479,11 +751,7 @@ describe("reconform integrity check (GEN-001 / GEN-002)", () => {
     spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
 
     // Now run reconform — should report no GEN violations
-    const r = spawnSync("node", [RECONFORM_SCRIPT, "reconform"], {
-      cwd: dir,
-      encoding: "utf8",
-      input: "\n",
-    });
+    const r = await runCli(["reconform"], { cwd: dir, stdin: "\n" });
 
     const combined = r.stdout + r.stderr;
     expect(combined).toContain("integrity check: all generated files are clean");
@@ -495,16 +763,6 @@ describe("reconform integrity check (GEN-001 / GEN-002)", () => {
 // ── Error boundary + stub-meta tests ────────────────────────────────────────
 
 describe("error boundary and stub-meta placeholder", () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await fresh();
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
   // ── Task 1: error boundary import is emitted in page.tsx ──────────────────
 
   it("page.tsx imports ShowcaseBoundary from _showcase-boundary", async () => {
@@ -526,24 +784,10 @@ describe("error boundary and stub-meta placeholder", () => {
   // ── Task 2: stub-meta produces placeholder card ───────────────────────────
 
   it("stub meta (name=default, empty props, no CVA) emits placeholder — no component import", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    await writeFile(
-      join(dsDir, "stub-atom.tsx"),
-      [
-        `import React from "react";`,
-        `export function StubAtom({ items }: { items: string[] }) { return <ul>{items.map(i => <li key={i}>{i}</li>)}</ul>; }`,
-        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
-      ].join("\n")
-    );
-
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
 
-    const content = await readFile(join(dsDir, "stub-atom.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "atoms", "stub-atom.showcase.tsx"), "utf8");
     // Must have @generated header
     expect(content).toMatch(/^\/\/ @generated by claude-ds/);
     // Must contain placeholder text
@@ -558,24 +802,10 @@ describe("error boundary and stub-meta placeholder", () => {
   // ── Task 2: non-stub meta still renders component ─────────────────────────
 
   it("non-stub meta (non-empty props) renders component normally", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    await writeFile(
-      join(dsDir, "real-atom.tsx"),
-      [
-        `import React from "react";`,
-        `export function RealAtom({ label }: { label: string }) { return <span>{label}</span>; }`,
-        `export const meta = { kind: "atom", examples: [{ name: "filled", props: { label: "hello" } }], skip: [] };`,
-      ].join("\n")
-    );
-
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
 
-    const content = await readFile(join(dsDir, "real-atom.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "atoms", "real-atom.showcase.tsx"), "utf8");
     // Must render the component
     expect(content).toContain('import { RealAtom }');
     expect(content).toContain('<RealAtom');
@@ -584,30 +814,10 @@ describe("error boundary and stub-meta placeholder", () => {
   });
 
   it("stub meta with CVA variants renders normally (not placeholder)", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    await writeFile(
-      join(dsDir, "cva-atom.tsx"),
-      [
-        `import React from "react";`,
-        `import { cva } from "class-variance-authority";`,
-        `const v = cva("b", {`,
-        `  variants: { intent: { primary: "p", secondary: "s" } },`,
-        `  defaultVariants: { intent: "primary" },`,
-        `});`,
-        `export function CvaAtom(props: any) { return <div {...props} />; }`,
-        // stub meta but CVA exists — should render normally
-        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
-      ].join("\n")
-    );
-
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
 
-    const content = await readFile(join(dsDir, "cva-atom.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "atoms", "cva-atom.showcase.tsx"), "utf8");
     // Should render component (CVA expanded combos)
     expect(content).toContain('import { CvaAtom }');
     expect(content).toContain('<CvaAtom');
@@ -618,17 +828,10 @@ describe("error boundary and stub-meta placeholder", () => {
   // ── multi-CVA file with examples:[] emits placeholder (regression for #62) ──
 
   it("multi-CVA file with examples:[] emits placeholder card, not malformed JSX", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    copyFixture(FIXTURE_MULTI_CVA_STUBBED, dir, "design-system/atoms/badge.tsx");
-
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
 
-    const content = await readFile(join(dsDir, "badge.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "atoms", "badge.showcase.tsx"), "utf8");
     // Must have @generated header
     expect(content).toMatch(/^\/\/ @generated by claude-ds/);
     // Must contain placeholder card marker
@@ -1010,21 +1213,8 @@ describe("AST-based meta extractor (A3) — alias fixtures (#93) cluster", () =>
 });
 
 describe("AST-based meta extractor (A3) — bespoke", () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await fresh();
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
   it("re-emits `import type` for type-only imports referenced in example callbacks", async () => {
-    copyFixture(FIXTURE_TYPE_IMPORT_CARRY, dir, "design-system/atoms/filter-button.tsx");
-    copyFixture(FIXTURE_TYPE_IMPORT_CARRY, dir, "design-system/_fixtures/handler-types.ts");
-
-    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const { dir } = await sharedGen();
 
     const content = await readFile(
       join(dir, "design-system/atoms/filter-button.showcase.tsx"),
@@ -1035,10 +1225,7 @@ describe("AST-based meta extractor (A3) — bespoke", () => {
   });
 
   it("inlines typed local const with annotation preserved and carries transitive type-import", async () => {
-    copyFixture(FIXTURE_TYPED_LOCAL_INLINE, dir, "design-system/composites/item-list.tsx");
-    copyFixture(FIXTURE_TYPED_LOCAL_INLINE, dir, "design-system/_fixtures/item-types.ts");
-
-    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const { dir } = await sharedGen();
 
     const content = await readFile(
       join(dir, "design-system/composites/item-list.showcase.tsx"),
@@ -1051,72 +1238,13 @@ describe("AST-based meta extractor (A3) — bespoke", () => {
 
   it("over-eager identifier collection: property-access on fixture export with internal helper does not pull in helper or transitive imports", async () => {
     // Regression for: meta uses `hendersonContact.fullName` (string property access).
-    // contact-fixtures.ts defines an internal helper function `buildContact()` and imports
-    // `hendersonAddress` from address-fixtures.ts to build the fixture objects.
     // The showcase must only import the directly referenced identifiers (hendersonContact,
     // okaforLead, longNameContact) and NOT the internal helper or transitive imports.
-    const dsDir = join(dir, "design-system", "composites");
-    const fixturesDir = join(dir, "design-system", "_fixtures");
-    await mkdir(dsDir, { recursive: true });
-    await mkdir(fixturesDir, { recursive: true });
-    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "test-consumer" }));
-    await writeFile(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }));
-
-    // Internal address fixture (transitively imported by contact-fixtures)
-    await writeFile(
-      join(fixturesDir, "address-fixtures.ts"),
-      [
-        `export const hendersonAddress = { street: "1 Henderson Ave" };`,
-        `export const longAddress = { street: "A Very Long Street Name Indeed" };`,
-      ].join("\n")
-    );
-
-    // Contact fixtures — internal helper `buildContact` is NOT exported.
-    // hendersonContact et al. are built via the helper call (CallExpression).
-    await writeFile(
-      join(fixturesDir, "contact-fixtures.ts"),
-      [
-        `import { hendersonAddress, longAddress } from "./address-fixtures";`,
-        `function buildContact(name: string, phone: string, addr: { street: string }) {`,
-        `  return { fullName: name, phoneE164: phone, addressStreet: addr.street };`,
-        `}`,
-        `export const hendersonContact = buildContact("Jane Henderson", "+15551234567", hendersonAddress);`,
-        `export const okaforLead = buildContact("Chidi Okafor", "+15559876543", longAddress);`,
-        `export const longNameContact = buildContact("Maximilian Bartholomew", "+15550001234", hendersonAddress);`,
-      ].join("\n")
-    );
-
-    // Component meta — only uses .fullName and .phoneE164 (string properties)
-    await writeFile(
-      join(dsDir, "contact-card.tsx"),
-      [
-        `import {`,
-        `  hendersonContact,`,
-        `  okaforLead,`,
-        `  longNameContact,`,
-        `} from "@/design-system/_fixtures/contact-fixtures";`,
-        ``,
-        `export const meta = {`,
-        `  kind: "composite" as const,`,
-        `  examples: [`,
-        `    { name: "Henderson", props: { name: hendersonContact.fullName, phone: hendersonContact.phoneE164 } },`,
-        `    { name: "Okafor", props: { name: okaforLead.fullName } },`,
-        `  ],`,
-        `  states: {`,
-        `    longText: { props: { name: longNameContact.fullName } },`,
-        `  },`,
-        `};`,
-        ``,
-        `export default function ContactCard({ name, phone }: { name: string; phone?: string }) {`,
-        `  return <div>{name}{phone && <span>{phone}</span>}</div>;`,
-        `}`,
-      ].join("\n")
-    );
-
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    // Sources are seeded in sharedAliasGen() above.
+    const { dir, r } = await sharedAliasGen();
     expect(r.status).toBe(0);
 
-    const content = await readFile(join(dsDir, "contact-card.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "composites", "contact-card.showcase.tsx"), "utf8");
 
     // The meta props fully resolve to string values, so the showcase must not
     // import the fixture helpers at all — just emit the plain strings inline.
@@ -1324,38 +1452,12 @@ describe("JSX attribute / children emission regressions", () => {
 // ── #69 namespace export + #70 sibling function declarations ────────────────
 
 describe("namespace export + sibling function declarations (#69, #70)", () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await fresh();
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
   // ── #69 — namespace-only export emits actionable warning but does NOT fail the run.
   // Per #295: a per-component structural limitation is not a fatal run error. Per-edit
   // hooks invoke the generator on every Write/Edit; treating GEN-069 as fatal blocks
   // every DS edit because of one pre-existing namespace-only component.
   it("#69 namespace-only export (object literal) emits actionable warning but exits 0", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    await writeFile(
-      join(dsDir, "skeleton.tsx"),
-      [
-        `import React from "react";`,
-        `function Line(props: any) { return <span {...props} />; }`,
-        `function Block(props: any) { return <div {...props} />; }`,
-        `function Circle(props: any) { return <span {...props} />; }`,
-        `export const Skeleton = { Line, Block, Circle };`,
-        `export const meta = { kind: "atom", examples: [{ name: "line", props: {} }], skip: [] };`,
-      ].join("\n")
-    );
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { r } = await sharedGen();
     // Run must succeed — namespace-only is a per-component limitation, not a fatal run error.
     expect(r.status).toBe(0);
     // Warning must still be emitted to stderr so authors see it (and so audit can flag it).
@@ -1365,72 +1467,21 @@ describe("namespace export + sibling function declarations (#69, #70)", () => {
     expect(combined).toMatch(/namespace|not callable|object literal/i);
   });
 
-  // ── #295 — one pre-existing namespace-only component must not block edits to other DS files.
+  // ── #295 — one pre-existing namespace-only component (combobox-item.tsx in the shared
+  // seed) must not block edits to other DS files: the callable sibling (edit-target.tsx)
+  // must still get a companion from the same run.
   it("#295 namespace-only sibling does not fail run for unrelated callable components", async () => {
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    // Pre-existing namespace-only component (simulating combobox-item in Crewops).
-    await writeFile(
-      join(dsDir, "combobox-item.tsx"),
-      [
-        `import React from "react";`,
-        `function Trigger(props: any) { return <button {...props} />; }`,
-        `function Content(props: any) { return <div {...props} />; }`,
-        `export const ComboboxItem = { Trigger, Content };`,
-        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
-      ].join("\n")
-    );
-    // The file being edited — a normal callable component that must still get a companion.
-    await writeFile(
-      join(dsDir, "button.tsx"),
-      [
-        `import React from "react";`,
-        `export function Button(props: any) { return <button {...props} />; }`,
-        `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
-      ].join("\n")
-    );
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
     // The callable component's companion must still be generated.
-    expect(existsSync(join(dsDir, "button.showcase.tsx"))).toBe(true);
+    expect(existsSync(join(dir, "design-system", "atoms", "edit-target.showcase.tsx"))).toBe(true);
   });
 
   // ── #70 — sibling function declarations get imports emitted when referenced in meta JSX ─
   it("#70 sibling function declaration referenced in meta JSX gets imported", async () => {
-    const dsDir = join(dir, "design-system", "composites");
-    await mkdir(dsDir, { recursive: true });
-    await writeFile(
-      join(dsDir, "card.tsx"),
-      [
-        `import React from "react";`,
-        `export function Card({ children }: { children?: React.ReactNode }) {`,
-        `  return <div>{children}</div>;`,
-        `}`,
-        `export function CardHeader({ children }: { children?: React.ReactNode }) {`,
-        `  return <div>{children}</div>;`,
-        `}`,
-        `export function CardBody({ children }: { children?: React.ReactNode }) {`,
-        `  return <div>{children}</div>;`,
-        `}`,
-        `export const meta = {`,
-        `  kind: "composite",`,
-        `  examples: [{`,
-        `    name: "with-header",`,
-        `    props: { children: <><CardHeader>Title</CardHeader><CardBody>Body</CardBody></> }`,
-        `  }],`,
-        `  skip: [],`,
-        `};`,
-      ].join("\n")
-    );
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
-    const content = await readFile(join(dsDir, "card.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "composites", "card.showcase.tsx"), "utf8");
     // The generated showcase must import CardHeader and CardBody from "./card"
     expect(content).toMatch(/import\s*\{[^}]*CardHeader[^}]*\}\s*from\s*"\.\/card"/);
     expect(content).toMatch(/import\s*\{[^}]*CardBody[^}]*\}\s*from\s*"\.\/card"/);
@@ -1450,44 +1501,10 @@ describe("namespace export + sibling function declarations (#69, #70)", () => {
 // A flat example sharing the array must still render — proving per-entry tolerance.
 
 describe("ADR-0026 — composed-widget example renders via the showcase path", () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await fresh();
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
   it("renders the composed JSX widget AND a flat example sharing the array", async () => {
-    const dsDir = join(dir, "design-system", "composites");
-    await mkdir(dsDir, { recursive: true });
-    await writeFile(
-      join(dsDir, "combobox.tsx"),
-      [
-        `import React from "react";`,
-        `export function Combobox({ children }: { children?: React.ReactNode }) {`,
-        `  return <div>{children}</div>;`,
-        `}`,
-        `export function ComboboxTrigger() { return <button role="combobox" />; }`,
-        `export function ComboboxList() { return <ul role="listbox" />; }`,
-        `export const meta = {`,
-        `  kind: "composite",`,
-        `  role: "combobox",`,
-        `  examples: [`,
-        `    { name: "sm", props: { size: "sm" } },`,
-        `    { name: "composed", props: { children: <><ComboboxTrigger /><ComboboxList /></> } },`,
-        `  ],`,
-        `};`,
-      ].join("\n")
-    );
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
-    const content = await readFile(join(dsDir, "combobox.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "composites", "combobox.showcase.tsx"), "utf8");
     // The composed example renders the assembled widget (not a placeholder string),
     // and the JSX sub-parts are imported so the showcase compiles.
     expect(content).toMatch(/<Combobox\s+children=\{<><ComboboxTrigger\s*\/><ComboboxList\s*\/><\/>\}/);
@@ -1505,47 +1522,15 @@ describe("ADR-0026 — composed-widget example renders via the showcase path", (
 // sorts carried locals so dependencies always precede dependents.
 
 describe("Bug B — carried locals are emitted in dependency order (no TS2448)", () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await fresh();
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
   it("dependency local (a) is emitted before dependent local (b) that references it", async () => {
-    // Reproduce the scenario: `c` references `b` which references `a`.
+    // The chain.tsx seed reproduces the scenario: `c` references `b` which references `a`.
     // meta.examples uses `c` directly. Discovery order adds `b` to carried first
     // (because it's in `c`'s source), then `a` (because it's in `b`'s source).
     // Without topological sort the output would be `const b = …; const a = …;`
     // causing TS2448 since `b` references `a` before `a` is declared.
-    const dsDir = join(dir, "design-system", "atoms");
-    await mkdir(dsDir, { recursive: true });
-    await writeFile(
-      join(dsDir, "chain.tsx"),
-      [
-        `import React from "react";`,
-        `export function Foo() { return <div />; }`,
-        `const a = <Foo />;`,
-        `const b = <>{a}<Foo /></>;`,
-        `const c = <>{b}<Foo /></>;`,
-        `export function Chain({ children }: { children?: React.ReactNode }) {`,
-        `  return <div>{children}</div>;`,
-        `}`,
-        `export const meta = {`,
-        `  kind: "atom",`,
-        `  examples: [{ name: "chain", props: { children: c } }],`,
-        `};`,
-      ].join("\n")
-    );
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
-    const content = await readFile(join(dsDir, "chain.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "atoms", "chain.showcase.tsx"), "utf8");
     // Both locals must be present (a is a dependency of b, which is in c's source)
     expect(content).toContain("const a =");
     expect(content).toContain("const b =");
@@ -1562,43 +1547,10 @@ describe("Bug B — carried locals are emitted in dependency order (no TS2448)",
 // for non-nullable prop types.
 
 describe("Bug A — undefined props are omitted from generated JSX", () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await fresh();
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
   it("prop explicitly set to undefined in examples[] is omitted from JSX attributes", async () => {
-    const dsDir = join(dir, "design-system", "composites");
-    await mkdir(dsDir, { recursive: true });
-    await writeFile(
-      join(dsDir, "summary.tsx"),
-      [
-        `import React from "react";`,
-        `export function Summary({ status, reference }: { status: string; reference?: string }) {`,
-        `  return <div>{status}{reference}</div>;`,
-        `}`,
-        `export const meta = {`,
-        `  kind: "composite",`,
-        `  examples: [`,
-        `    {`,
-        `      name: "no-reference",`,
-        `      props: { status: "draft", reference: undefined },`,
-        `    },`,
-        `  ],`,
-        `};`,
-      ].join("\n")
-    );
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const { dir, r } = await sharedGen();
     expect(r.status).toBe(0);
-    const content = await readFile(join(dsDir, "summary.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "composites", "summary.showcase.tsx"), "utf8");
     // Must render the component
     expect(content).toContain("<Summary");
     // `reference` was undefined — must NOT appear as an attribute at all
@@ -1619,69 +1571,11 @@ describe("Bug A — undefined props are omitted from generated JSX", () => {
 // Increasing the limit to 20 allows full resolution.
 
 describe("Bug B — nested object properties in imported fixtures resolve correctly", () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await fresh();
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
   it("array[i].nestedObj.prop resolves to the string value, not null", async () => {
-    const dsDir = join(dir, "design-system", "composites");
-    const fixturesDir = join(dir, "design-system", "_fixtures");
-    await mkdir(dsDir, { recursive: true });
-    await mkdir(fixturesDir, { recursive: true });
-    // package.json needed so findConsumerRoot() can locate the project root and
-    // resolveAtPrefix() can read tsconfig paths for @/ alias resolution.
-    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "test-consumer" }, null, 2));
-    // Fixture file with a nested object property
-    await writeFile(
-      join(fixturesDir, "task-fixtures.ts"),
-      [
-        `export interface Assignee { name: string; avatarUrl?: string }`,
-        `export interface TaskFixture { title: string; assignee: Assignee }`,
-        `export const acmeTasks: TaskFixture[] = [`,
-        `  { title: "Task one", assignee: { name: "Marcus Webb" } },`,
-        `  { title: "Task two", assignee: { name: "Sara Kim" } },`,
-        `];`,
-      ].join("\n")
-    );
-    // tsconfig so @/ alias resolution works
-    await writeFile(
-      join(dir, "tsconfig.json"),
-      JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }, null, 2)
-    );
-    await writeFile(
-      join(dsDir, "task-row.tsx"),
-      [
-        `import React from "react";`,
-        `import { acmeTasks } from "@/design-system/_fixtures/task-fixtures";`,
-        `export function TaskRow({ title, assignee }: { title: string; assignee: { name: string } }) {`,
-        `  return <div>{title} — {assignee.name}</div>;`,
-        `}`,
-        `export const meta = {`,
-        `  kind: "composite",`,
-        `  examples: [`,
-        `    {`,
-        `      name: "in-progress",`,
-        `      props: {`,
-        `        title: acmeTasks[0].title,`,
-        `        assignee: acmeTasks[0].assignee,`,
-        `      },`,
-        `    },`,
-        `  ],`,
-        `};`,
-      ].join("\n")
-    );
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    // task-fixtures.ts / task-row.tsx are seeded in sharedAliasGen() above.
+    const { dir, r } = await sharedAliasGen();
     expect(r.status).toBe(0);
-    const content = await readFile(join(dsDir, "task-row.showcase.tsx"), "utf8");
+    const content = await readFile(join(dir, "design-system", "composites", "task-row.showcase.tsx"), "utf8");
     expect(content).toContain("<TaskRow");
     // assignee must be resolved as a complete object — name must NOT be null
     expect(content).not.toContain('{ name: null }');
