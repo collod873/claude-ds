@@ -2,6 +2,8 @@
 
 Shared design-system governance and scaffold CLI. Installs a consistent `design-system/` layout, Claude Code hooks, and contracts into any consumer project — then keeps them in sync across releases.
 
+> **License:** source-available under [PolyForm Noncommercial 1.0.0](LICENSE) (ADR-0028). Free for personal and noncommercial use; commercial use requires a license from the author.
+
 ## Just run `claude-ds`
 
 The bare command with no subcommand is the front door. `cd` into any project and run:
