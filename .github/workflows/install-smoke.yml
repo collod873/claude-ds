@@ -46,10 +46,19 @@ jobs:
           export npm_config_cache=$(mktemp -d)
           trap 'rm -rf "$SCRATCH" "$npm_config_cache" "$TARBALL"' EXIT
 
+          # Next-shaped scratch consumer (#525): src/app router tree + tsconfig
+          # path alias, enough for framework-facing behavior (app-dir detection)
+          # to trigger on the real install path. Deep framework behavior stays
+          # owned by tests/integration/next-fixture.test.ts — keep this shallow.
           git -C "$SCRATCH" init -q
           printf '{"name":"scratch-consumer","private":true}\n' > "$SCRATCH/package.json"
+          mkdir -p "$SCRATCH/src/app"
+          printf 'export default function RootLayout({ children }) { return children; }\n' > "$SCRATCH/src/app/layout.tsx"
+          printf 'export default function Home() { return null; }\n' > "$SCRATCH/src/app/page.tsx"
+          printf '{"compilerOptions":{"paths":{"@/*":["./src/*"]}}}\n' > "$SCRATCH/tsconfig.json"
+          printf 'node_modules/\n' > "$SCRATCH/.gitignore"
           cd "$SCRATCH"
-          echo "checkpoint: scratch consumer repo ready"
+          echo "checkpoint: Next-shaped scratch consumer repo ready"
 
           npm install --no-save "$TARBALL"
           GOT=$(npx --no-install claude-ds -V)
@@ -59,15 +68,37 @@ jobs:
           fi
           echo "OK: CLI ran from tarball install and printed $GOT"
 
-          # One representative real command: init reads the pack manifest and
+          # Declare next/react AFTER the tarball install: detection reads
+          # package.json, not node_modules, and declaring them earlier would
+          # make `npm install` pull all of Next through the cold cache on
+          # every run — this is a smoke, keep it cheap.
+          node -e "const f='package.json',p=require('./'+f);p.dependencies={next:'^15.0.0',react:'^19.0.0','react-dom':'^19.0.0'};require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+
+          # Commit the consumer state so adopt's clean-tree guard sees what a
+          # real consumer has: project files + install committed, no
+          # --allow-dirty escape hatch.
+          git add -A
+          git -c user.name=smoke -c user.email=smoke@invalid commit -qm "next-shaped scratch consumer"
+
+          # The real consumer entry path: adopt reads the pack manifest and
           # copies pack files out of the installed package, so a runtime file
-          # missing from the `files` allowlist fails here.
-          npx --no-install claude-ds init --pack next-react --yes
+          # missing from the `files` allowlist fails here (#477) — and the
+          # Next shape makes framework detection run from the tarball (#525).
+          npx --no-install claude-ds adopt --pack next-react
           if [ ! -f .claude-ds.json ]; then
-            echo "FAIL: init exited 0 but wrote no .claude-ds.json"
+            echo "FAIL: adopt exited 0 but wrote no .claude-ds.json"
             exit 1
           fi
-          echo "OK: init scaffolded the scratch project"
+          if [ ! -f .claude/hooks/atom-imports.sh ]; then
+            echo "FAIL: adopt exited 0 but laid down no pack hook files"
+            exit 1
+          fi
+          APP_DIR=$(node -p "JSON.parse(require('fs').readFileSync('.claude-ds.json','utf8')).app_dir")
+          if [ "$APP_DIR" != "src/app" ]; then
+            echo "FAIL: expected app_dir 'src/app' (Next shape not detected), got '$APP_DIR'"
+            exit 1
+          fi
+          echo "OK: adopt scaffolded the Next-shaped consumer (app_dir=$APP_DIR)"
 
           # Never-break-a-consumer: installing the package must NOT touch the
           # consumer repo's git config (tarball installs don't run `prepare`,
