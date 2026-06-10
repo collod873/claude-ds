@@ -4,17 +4,35 @@
       {
         "matcher": "Edit|Write",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/pre-write-ds-manifest.sh" },
-          { "type": "command", "command": ".claude/hooks/pre-write-ds-similarity.sh" },
-          { "type": "command", "command": ".claude/hooks/pre-write-tsx.sh" },
-          { "type": "command", "command": ".claude/hooks/pre-write-ds-exceptions.sh" },
-          { "type": "command", "command": ".claude/hooks/pre-write-ds-tier-imports.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-write-ds-manifest.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-write-ds-similarity.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-write-tsx.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-write-ds-exceptions.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-write-ds-tier-imports.sh"
+          }
         ]
       },
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/pre-commit-global.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-commit-global.sh"
+          }
         ]
       }
     ],
@@ -22,8 +40,14 @@
       {
         "matcher": "Edit|Write",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/atom-imports.sh" },
-          { "type": "command", "command": ".claude/hooks/regenerate-companions.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/atom-imports.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/regenerate-companions.sh"
+          }
         ]
       }
     ]
