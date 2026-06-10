@@ -72,6 +72,26 @@
       "category": "managed"
     },
     {
+      "path": ".claude/hooks/lib/read-enforcement.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/pre-write-tokens-app-wide.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/pre-write-base-ui.sh",
+      "category": "managed"
+    },
+    {
+      "path": ".claude/hooks/pre-write-tokens-app-wide.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
+      "path": ".claude/hooks/pre-write-base-ui.sh.verify-fixture.json",
+      "category": "seeded"
+    },
+    {
       "path": ".claude/hooks/README.md",
       "category": "seeded"
     },
@@ -232,6 +252,10 @@
     },
     {
       "path": "design-system/exceptions.json",
+      "category": "seeded"
+    },
+    {
+      "path": "design-system/enforcement.json",
       "category": "seeded"
     },
     {

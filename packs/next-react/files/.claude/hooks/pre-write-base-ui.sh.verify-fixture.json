@@ -1,0 +1,11 @@
+{
+  "pass": {
+    "arg": "src/components/Trigger.tsx",
+    "setup": [
+      {
+        "path": "src/components/Trigger.tsx",
+        "content": "export const Trigger = () => <Slot asChild><button>x</button></Slot>;\n"
+      }
+    ]
+  }
+}

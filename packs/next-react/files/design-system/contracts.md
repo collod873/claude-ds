@@ -9,6 +9,41 @@
   component API stays fully exposed.
 - Failures are logged to `failure-log.md` via `.claude/hooks/lib/log-failure.sh`.
 
+## Semantic-name surface
+
+Every token reference names a *role*, not a raw value. The allowed surface is:
+
+- **Color roles** — `primary`, `secondary`, `accent`, `muted`, `card`,
+  `popover`, `background`, `foreground`, `border`, `input`, `ring`,
+  `destructive` (and their `-foreground` pairs where defined in `tokens.json`).
+- **`status-*` namespace** — semantic status colors live under one namespace:
+  `status-success`, `status-warning`, `status-error`, `status-info` (each with
+  a `-foreground` pair). Status meaning is carried by the role name, never by a
+  raw hue (`text-status-error`, not `text-red-600` or `#e53e3e`). New status
+  meanings extend the namespace in `tokens.json`; they are not invented inline.
+- **Default-palette names are not the surface.** Tailwind's stock scale
+  (`red-500`, `slate-200`, `zinc-…`, etc.) is a raw value wearing a name — it
+  bypasses the role layer and is treated like a raw literal.
+
+## Dimensional scope
+
+Token enforcement is organized by **dimension** — color, spacing, typography
+(and chart color, per `@ds/charts`). A raw literal is judged against the
+dimension it lives in: a hex/`rgb()`/`hsl()` is a *color* violation (TOK-001),
+a `px`/`rem` magic number is a *spacing* violation (TOK-002), a raw
+`font-size`/`font-weight` is a *typography* violation (TOK-003). Each dimension
+resolves only to its own token namespace; cross-dimension substitution (a
+spacing token used for a font size) is still drift.
+
+**Enforcement scope is consumer-set, not hardcoded.** The DS-scoped token hook
+(`pre-write-ds-tokens.sh`) always governs `design-system/**`. A consumer that
+wants the same dimensional rules across *all* component files opts in via
+`design-system/enforcement.json` (`tokenScope: "app-wide"`); the same file
+carries the `appWideExclude` list (e.g. shadcn `ui/`, `*-pdf.tsx`, `emails/`,
+`globals.css`) and the `componentLib` flag (`radix` | `base-ui`) that gates
+`asChild`→`render` enforcement. Defaults keep app-wide enforcement off, so the
+surface above is advisory outside `design-system/` until a consumer turns it on.
+
 ## Per-component bundle
 
 Every component — atom or composite — ships as:

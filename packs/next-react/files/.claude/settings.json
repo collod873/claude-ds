@@ -23,6 +23,14 @@
           {
             "type": "command",
             "command": ".claude/hooks/pre-write-ds-tier-imports.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-write-tokens-app-wide.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-write-base-ui.sh"
           }
         ]
       },

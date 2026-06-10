@@ -1,7 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
 import { resolve, join } from "node:path";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, symlinkSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  copyFileSync,
+  symlinkSync,
+  readdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 
 function runHook(script: string, file: string) {
@@ -9,6 +17,47 @@ function runHook(script: string, file: string) {
   const input = JSON.stringify({ tool_name: "Write", tool_input: { file_path: absFile } });
   const r = spawnSync("bash", [resolve("packs/next-react/files/.claude/hooks", script)], { encoding: "utf8", input });
   return { code: r.status ?? 1, stderr: r.stderr };
+}
+
+const HOOKS_SRC = resolve("packs/next-react/files/.claude/hooks");
+
+/**
+ * Run a hook inside a throwaway project dir so it can read cwd-relative
+ * config (design-system/enforcement.json). Copies the hook + lib/, optionally
+ * seeds enforcement.json, writes the target file, and runs with cwd=tmp.
+ */
+function runHookInProject(
+  script: string,
+  targetRel: string,
+  opts: { content: string; enforcement?: unknown },
+) {
+  const tmp = mkdtempSync(join(tmpdir(), "hook-enf-"));
+  try {
+    const hooksDir = join(tmp, ".claude/hooks");
+    const libDir = join(hooksDir, "lib");
+    mkdirSync(libDir, { recursive: true });
+    for (const f of readdirSync(HOOKS_SRC)) {
+      if (f.endsWith(".sh")) copyFileSync(join(HOOKS_SRC, f), join(hooksDir, f));
+    }
+    for (const f of readdirSync(join(HOOKS_SRC, "lib"))) {
+      copyFileSync(join(HOOKS_SRC, "lib", f), join(libDir, f));
+    }
+    if (opts.enforcement !== undefined) {
+      mkdirSync(join(tmp, "design-system"), { recursive: true });
+      writeFileSync(
+        join(tmp, "design-system/enforcement.json"),
+        JSON.stringify(opts.enforcement, null, 2),
+      );
+    }
+    const target = join(tmp, targetRel);
+    mkdirSync(join(target, ".."), { recursive: true });
+    writeFileSync(target, opts.content);
+    const input = JSON.stringify({ tool_name: "Write", tool_input: { file_path: target } });
+    const r = spawnSync("bash", [join(hooksDir, script)], { encoding: "utf8", input, cwd: tmp });
+    return { code: r.status ?? 1, stderr: r.stderr };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 describe("next-react hooks (fixture)", () => {
@@ -155,6 +204,100 @@ describe("next-react hooks (fixture)", () => {
   });
 });
 
+// #465: opt-in app-wide token enforcement + base-ui asChild gate, both driven by
+// the consumer-editable design-system/enforcement.json. Defaults keep both inert
+// so an existing consumer is never newly blocked ("never break a consumer").
+describe("pre-write-tokens-app-wide (opt-in app-wide TOK enforcement)", () => {
+  const rawHex = "export const X = () => <span style={{ color: '#e53e3e' }}>x</span>;\n";
+
+  it("no-op by default: no enforcement.json present → exits 0 even on raw hex app file", () => {
+    const r = runHookInProject("pre-write-tokens-app-wide.sh", "src/components/Card.tsx", {
+      content: rawHex,
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it("no-op when tokenScope is design-system (the default scope)", () => {
+    const r = runHookInProject("pre-write-tokens-app-wide.sh", "src/components/Card.tsx", {
+      content: rawHex,
+      enforcement: { tokenScope: "design-system" },
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it("tokenScope=app-wide → blocks raw hex in a non-DS component file (TOK-001)", () => {
+    const r = runHookInProject("pre-write-tokens-app-wide.sh", "src/components/Card.tsx", {
+      content: rawHex,
+      enforcement: { tokenScope: "app-wide" },
+    });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/^[^:]+:\d+: TOK-001: /m);
+  });
+
+  it("app-wide but file matches appWideExclude (*-pdf.tsx) → exits 0", () => {
+    const r = runHookInProject("pre-write-tokens-app-wide.sh", "src/invoice-pdf.tsx", {
+      content: rawHex,
+      enforcement: { tokenScope: "app-wide", appWideExclude: ["**/*-pdf.tsx"] },
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it("appWideExclude **/ matches zero leading dirs — a top-level *-pdf.tsx is excluded", () => {
+    const r = runHookInProject("pre-write-tokens-app-wide.sh", "report-pdf.tsx", {
+      content: rawHex,
+      enforcement: { tokenScope: "app-wide", appWideExclude: ["**/*-pdf.tsx"] },
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it("app-wide skips design-system/ files — the DS-scoped hook owns those", () => {
+    const r = runHookInProject("pre-write-tokens-app-wide.sh", "design-system/atoms/Badge.tsx", {
+      content: rawHex,
+      enforcement: { tokenScope: "app-wide" },
+    });
+    expect(r.code).toBe(0);
+  });
+});
+
+describe("pre-write-base-ui (opt-in asChild→render gate)", () => {
+  const asChild = "export const X = () => <Slot asChild><button>x</button></Slot>;\n";
+
+  it("no-op by default: componentLib radix (default) allows asChild → exits 0", () => {
+    const r = runHookInProject("pre-write-base-ui.sh", "src/components/Trigger.tsx", {
+      content: asChild,
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it("componentLib=base-ui → blocks asChild (BASEUI-001)", () => {
+    const r = runHookInProject("pre-write-base-ui.sh", "src/components/Trigger.tsx", {
+      content: asChild,
+      enforcement: { componentLib: "base-ui" },
+    });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/^[^:]+:\d+: BASEUI-001: /m);
+  });
+});
+
+describe("pre-write-tsx honors appWideExclude (#465)", () => {
+  it("skips an excluded *-pdf.tsx even though it carries an inline style violation", () => {
+    const r = runHookInProject("pre-write-tsx.sh", "src/invoice-pdf.tsx", {
+      content: "export const X = () => <div style={{ color: 'red' }} />;\n",
+      enforcement: { appWideExclude: ["**/*-pdf.tsx"] },
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it("still blocks a non-excluded app .tsx with an inline style violation", () => {
+    const r = runHookInProject("pre-write-tsx.sh", "src/components/Widget.tsx", {
+      content: "export const X = () => <div style={{ color: 'red' }} />;\n",
+      enforcement: { appWideExclude: ["**/*-pdf.tsx"] },
+    });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/^[^:]+:\d+: AESTH-001: /m);
+  });
+});
+
 describe("hook stdin contract", () => {
   it("hooks exit 0 gracefully when invoked with no stdin and no args", () => {
     const hooks = [
@@ -164,6 +307,8 @@ describe("hook stdin contract", () => {
       "pre-write-ds-tokens.sh",
       "pre-write-ds-tier-imports.sh",
       "pre-write-ds-similarity.sh",
+      "pre-write-tokens-app-wide.sh",
+      "pre-write-base-ui.sh",
       "regenerate-companions.sh",
       "atom-imports.sh",
     ];

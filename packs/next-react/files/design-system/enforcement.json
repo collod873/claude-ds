@@ -1,0 +1,11 @@
+{
+  "$schema-note": "Consumer-editable DS-enforcement config (claude-ds #465). Read by .claude/hooks. Seeded once on adopt; never overwritten.",
+  "tokenScope": "design-system",
+  "componentLib": "radix",
+  "appWideExclude": [
+    "**/ui/**",
+    "**/*-pdf.tsx",
+    "emails/**",
+    "**/globals.css"
+  ]
+}
