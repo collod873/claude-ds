@@ -93,6 +93,26 @@ describe("Issue #54 — formatter detection & invocation", () => {
 		expect(called.trim().length).toBeGreaterThan(0);
 	}, 60_000);
 
+	it("biome invocation passes --no-errors-on-unmatched (#501)", async () => {
+		// When every synced path sits outside the consumer's biome `includes`,
+		// biome errors with a ~20-line "no files processed" dump on each sync.
+		// --no-errors-on-unmatched silences that so the warn doesn't recur.
+		await seedConsumerProject(dir);
+		await installFakeFormatter(dir, "biome");
+		await writeFile(join(dir, "biome.json"), JSON.stringify({}), "utf8");
+
+		const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], {
+			cwd: dir,
+			stdin: "y\n",
+		});
+
+		expect(r.code).toBe(0);
+		const called = await readFile(join(dir, "node_modules", ".bin", "biome.called"), "utf8").catch(
+			() => "",
+		);
+		expect(called).toMatch(/--no-errors-on-unmatched/);
+	}, 60_000);
+
 	it("biome detection: biome.jsonc present → invokes biome formatter", async () => {
 		await seedConsumerProject(dir);
 		await installFakeFormatter(dir, "biome");
