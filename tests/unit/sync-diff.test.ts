@@ -21,6 +21,20 @@ describe("sync-diff (managed)", () => {
 	});
 });
 
+describe("sync-diff (missing on disk)", () => {
+	it("reports 'new in this version' when the file was never tracked (prev=null)", () => {
+		const v = diffFile({ category: "managed" }, { prev: null, upstream: "B", current: null });
+		expect(v.action).toBe("rewrite");
+		expect(v.reason).toContain("new in this version");
+		expect(v.reason).not.toContain("missing on disk");
+	});
+	it("reports 'missing on disk — recreating' only when a tracked file was deleted (prev set)", () => {
+		const v = diffFile({ category: "managed" }, { prev: "A", upstream: "B", current: null });
+		expect(v.action).toBe("rewrite");
+		expect(v.reason).toBe("missing on disk — recreating");
+	});
+});
+
 describe("sync-diff (hybrid markdown)", () => {
 	it("rewrites only the marker region", () => {
 		const v = diffFile(

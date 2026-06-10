@@ -21,7 +21,13 @@ export interface EntryInfo {
 
 export function diffFile(info: EntryInfo, d: DiffInput): FileVerdict {
 	if (info.category === "generated") return { action: "skip", reason: "generated" };
-	if (d.current === null) return { action: "rewrite", reason: "missing on disk — recreating" };
+	if (d.current === null)
+		return {
+			action: "rewrite",
+			// prev=null → the file was never tracked, so it's new in this version, not deleted.
+			// prev set → a previously-synced managed file is gone from disk; genuine restore.
+			reason: d.prev === null ? "new in this version — creating" : "missing on disk — recreating",
+		};
 	if (info.category === "seeded") return { action: "skip", reason: "seeded; never re-touched" };
 
 	if (info.category === "managed") {

@@ -276,7 +276,7 @@ export async function adoptCmd(opts: {
 
 		// ---- Boot ProjectContext and route file writes through the Runner ----
 		// First install becomes the special case where diffFile sees `current = null`:
-		//   - managed/hybrid/seeded files with no on-disk counterpart → verdict "rewrite, missing on disk — recreating"
+		//   - managed/hybrid/seeded files with no on-disk counterpart → verdict "rewrite, new in this version — creating"
 		//   - pre-existing managed files → verdict "rewrite, upstream changed" (or "skip, in sync" if byte-identical)
 		//   - pre-existing hybrid files → marker/JSON-key merge via diffFile, same as sync
 		// This is why we no longer need adopt-specific write logic — diffFile + Runner cover it.
