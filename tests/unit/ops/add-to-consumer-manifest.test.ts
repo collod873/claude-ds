@@ -9,6 +9,8 @@ import {
 	CONSUMER_MANIFEST_PATH,
 } from "../../../src/lib/ops/add-to-consumer-manifest";
 import type { ProjectContext } from "../../../src/lib/project";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
+import { makeCfg, makeManifest } from "../../helpers/fixtures";
 import { cleanup, freshTmpDir } from "../../helpers/tmpdir";
 
 const TRACKING_PATH = ".claude-ds/tracking-manifest.json";
@@ -24,36 +26,19 @@ afterEach(async () => {
 	await cleanup(packDir);
 });
 
-const baseCfg: Config = {
-	version: "v0.0.0",
-	pack: "next-react",
-	mode: "warn",
-	enforce_threshold: 10,
-	removed: [],
-	lookalike_ignore: [],
-	app_dir: "app",
-	claude_md_target: ".claude/CLAUDE.md",
-};
+const baseCfg: Config = makeCfg();
 
-const emptyManifest: Manifest = {
-	files: [],
-	canonical_paths: [],
-	lookalike_ignore: [],
-	deprecated_paths: [],
-	managed_roots: [],
-	generated_patterns: [],
-};
+const emptyManifest: Manifest = makeManifest();
 
-function makeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
-	return {
-		cwd,
+function makeCtx(overrides: Omit<Partial<ProjectContext>, "auditConfig"> = {}): ProjectContext {
+	return makeFakeCtx(cwd, {
 		cfg: baseCfg,
 		packDir,
 		manifest: emptyManifest,
 		exists: async () => false,
 		decisions: {},
 		...overrides,
-	};
+	});
 }
 
 describe("addToConsumerManifest op", () => {

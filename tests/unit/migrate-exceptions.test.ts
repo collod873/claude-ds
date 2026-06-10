@@ -3,36 +3,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrateExceptions } from "../../src/lib/ops/migrations/v1.0.0/migrate-exceptions.js";
 import type { ProjectContext } from "../../src/lib/project.js";
+import { makeFakeCtx } from "../helpers/fake-ctx";
+import { makeCfg, makeManifest } from "../helpers/fixtures";
 import { cleanup, freshTmpDir } from "../helpers/tmpdir";
 
 function mockCtx(cwd: string): ProjectContext {
-	return {
-		cwd,
-		cfg: {
-			packVersion: "v0.9.0",
-			pack: "next-react",
-			mode: "warn",
-			enforce_threshold: 10,
-			removed: [],
-			lookalike_ignore: [],
-			app_dir: "app",
-			claude_md_target: "CLAUDE.md",
-			domain_roots: ["features", "lib"],
-			meta_kind_strict: false,
-			role_contracts_strict: false,
-			srcRoot: "src",
-			allowed_imports: [],
-			ds_aliases: [],
-		},
+	return makeFakeCtx(cwd, {
+		cfg: makeCfg({ packVersion: "v0.9.0", claude_md_target: "CLAUDE.md" }),
 		packDir: "",
-		manifest: {
-			files: [],
-			canonical_paths: [],
-			lookalike_ignore: [],
-			deprecated_paths: [],
-			managed_roots: [],
-			generated_patterns: [],
-		},
+		manifest: makeManifest(),
 		exists: async (p: string) => {
 			try {
 				await stat(join(cwd, p));
@@ -41,8 +20,7 @@ function mockCtx(cwd: string): ProjectContext {
 				return false;
 			}
 		},
-		decisions: {},
-	} as ProjectContext;
+	});
 }
 
 describe("migrate-exceptions v1.0.0", () => {

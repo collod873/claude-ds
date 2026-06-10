@@ -7,18 +7,14 @@ import { migrateConfig } from "../../../src/lib/ops/migrate-config";
 import type { ProjectContext } from "../../../src/lib/project";
 import { loadProject } from "../../../src/lib/project";
 import { run } from "../../../src/lib/runner";
+import { makeFakeCtx } from "../../helpers/fake-ctx";
+import { makeCfg, makeManifest } from "../../helpers/fixtures";
 import { cleanup, freshTmpDir } from "../../helpers/tmpdir";
 
 let cwd: string;
 let packDir: string;
 
-const emptyManifest: Manifest = {
-	files: [],
-	canonical_paths: [],
-	lookalike_ignore: [],
-	deprecated_paths: [],
-	managed_roots: [],
-};
+const emptyManifest: Manifest = makeManifest();
 
 beforeEach(async () => {
 	cwd = await freshTmpDir("migrate-cfg-cwd-");
@@ -32,23 +28,13 @@ afterEach(async () => {
 });
 
 function fakeCtx(): ProjectContext {
-	return {
-		cwd,
-		cfg: {
-			version: "v0.0.0",
-			pack: "next-react",
-			mode: "warn",
-			enforce_threshold: 10,
-			removed: [],
-			lookalike_ignore: [],
-			app_dir: "app",
-			claude_md_target: "CLAUDE.md",
-		},
+	return makeFakeCtx(cwd, {
+		cfg: makeCfg({ claude_md_target: "CLAUDE.md" }),
 		packDir,
 		manifest: emptyManifest,
 		exists: async () => false,
 		decisions: {},
-	};
+	});
 }
 
 describe("migrateConfig op — plan()", () => {

@@ -96,12 +96,13 @@ export async function runCli(args: string[], opts: RunOpts): Promise<RunResult> 
 	} catch (e) {
 		if (e instanceof ExitError) {
 			code = e.code;
-		} else if (e && typeof e === "object" && "code" in e && "exitCode" in e) {
+		} else if (e instanceof Error && "code" in e && "exitCode" in e) {
 			// commander CommanderError (raised via exitOverride): includes --help (0)
-			// and validation failures (non-zero).
-			const ce = e as { exitCode: number; message: string };
-			code = ce.exitCode;
-			if (ce.message && code !== 0) stderr += `error: ${ce.message}\n`;
+			// and validation failures (non-zero). It always extends Error, so the
+			// instanceof guard gives us `message` without a cast; `exitCode` narrows
+			// to unknown via `in`, so verify it's a number at runtime.
+			code = typeof e.exitCode === "number" ? e.exitCode : 1;
+			if (e.message && code !== 0) stderr += `error: ${e.message}\n`;
 		} else {
 			const msg = e instanceof Error ? e.message : String(e);
 			stderr += `error: ${msg}\n`;

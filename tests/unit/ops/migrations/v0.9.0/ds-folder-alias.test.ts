@@ -6,15 +6,11 @@ import type { Manifest } from "../../../../../src/lib/manifest";
 import { dsFolderAlias } from "../../../../../src/lib/ops/migrations/v0.9.0/ds-folder-alias";
 import type { ProjectContext } from "../../../../../src/lib/project";
 import { run } from "../../../../../src/lib/runner";
+import { makeFakeCtx } from "../../../../helpers/fake-ctx";
+import { makeCfg, makeManifest } from "../../../../helpers/fixtures";
 import { cleanup, freshTmpDir } from "../../../../helpers/tmpdir";
 
-const emptyManifest: Manifest = {
-	files: [],
-	canonical_paths: [],
-	lookalike_ignore: [],
-	deprecated_paths: [],
-	managed_roots: [],
-};
+const emptyManifest: Manifest = makeManifest();
 
 let cwd: string;
 beforeEach(async () => {
@@ -25,20 +21,8 @@ afterEach(async () => {
 });
 
 function fakeCtx(srcRoot = "src"): ProjectContext {
-	const cfg: Config = {
-		packVersion: "v0.8.0",
-		pack: "next-react",
-		mode: "warn",
-		enforce_threshold: 10,
-		removed: [],
-		lookalike_ignore: [],
-		app_dir: "app",
-		claude_md_target: ".claude/CLAUDE.md",
-		domain_roots: ["features", "lib"],
-		srcRoot,
-	};
-	return {
-		cwd,
+	const cfg: Config = makeCfg({ packVersion: "v0.8.0", srcRoot });
+	return makeFakeCtx(cwd, {
 		cfg,
 		packDir: "/nonexistent",
 		manifest: emptyManifest,
@@ -50,8 +34,7 @@ function fakeCtx(srcRoot = "src"): ProjectContext {
 				return false;
 			}
 		},
-		decisions: {},
-	};
+	});
 }
 
 describe("dsFolderAlias op", () => {

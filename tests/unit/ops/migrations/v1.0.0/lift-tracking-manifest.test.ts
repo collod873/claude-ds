@@ -5,6 +5,8 @@ import type { Config } from "../../../../../src/lib/config.js";
 import type { Manifest } from "../../../../../src/lib/manifest.js";
 import { liftTrackingManifest } from "../../../../../src/lib/ops/migrations/v1.0.0/lift-tracking-manifest.js";
 import type { ProjectContext } from "../../../../../src/lib/project.js";
+import { makeFakeCtx } from "../../../../helpers/fake-ctx.js";
+import { makeCfg } from "../../../../helpers/fixtures.js";
 import { cleanup, freshTmpDir } from "../../../../helpers/tmpdir.js";
 
 const SHOWCASE_PATH = "design-system/manifest.json";
@@ -23,16 +25,7 @@ afterEach(async () => {
 	await cleanup(packDir);
 });
 
-const baseCfg: Config = {
-	packVersion: "v1.0.0",
-	pack: "next-react",
-	mode: "warn",
-	enforce_threshold: 10,
-	removed: [],
-	lookalike_ignore: [],
-	app_dir: "app",
-	claude_md_target: ".claude/CLAUDE.md",
-};
+const baseCfg: Config = makeCfg({ packVersion: "v1.0.0" });
 
 const emptyManifest: Manifest = {
 	files: [],
@@ -53,15 +46,13 @@ async function existsAt(p: string): Promise<boolean> {
 }
 
 function makeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
-	return {
-		cwd,
+	return makeFakeCtx(cwd, {
 		cfg: baseCfg,
 		packDir,
 		manifest: emptyManifest,
 		exists: (p: string) => existsAt(join(cwd, p)),
-		decisions: {},
 		...overrides,
-	};
+	});
 }
 
 describe("liftTrackingManifest.plan()", () => {
