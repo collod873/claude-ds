@@ -3,6 +3,7 @@ import { extname, join } from "node:path";
 import { SCAN_SKIP_DIRS } from "./build-outputs.js";
 import type { EnforcementConfig } from "./enforcement.js";
 import { ENFORCEMENT_DEFAULTS } from "./enforcement.js";
+import { isManifestOrKeepfile } from "./manifest.js";
 import { evaluateOwnedConcerns } from "./owned-concerns/index.js";
 
 /**
@@ -28,6 +29,13 @@ import { evaluateOwnedConcerns } from "./owned-concerns/index.js";
  * "what a hand-rolled X looks like" has one definition (the same files
  * `doctor --completeness` flags for retirement). Deterministic over the tree:
  * same tree → same result, so callers in `plan()` stay pure.
+ *
+ * Pack-managed paths are excluded before detection (`manifestPaths`), exactly
+ * as the Owned-concern scanner does — the pack's own `pre-write-base-ui.sh`
+ * and `pre-write-tokens-app-wide.sh` match the validator detectors by content,
+ * so failing to exclude them would let the pack's own hooks flip a Radix /
+ * DS-scoped consumer to base-ui / app-wide, activating the opt-in gates and
+ * blocking legitimate code ("never break a consumer").
  */
 
 const SCANNABLE_EXTS: ReadonlySet<string> = new Set([
@@ -69,12 +77,19 @@ async function walkRepo(cwd: string): Promise<string[]> {
 	return results;
 }
 
-export async function detectEnforcement(cwd: string): Promise<EnforcementConfig> {
+export async function detectEnforcement(
+	cwd: string,
+	manifestPaths: Set<string> = new Set(),
+): Promise<EnforcementConfig> {
 	let componentLib: EnforcementConfig["componentLib"] = ENFORCEMENT_DEFAULTS.componentLib;
 	let tokenScope: EnforcementConfig["tokenScope"] = ENFORCEMENT_DEFAULTS.tokenScope;
 
 	const files = await walkRepo(cwd);
 	for (const file of files) {
+		// Pack-managed files match the validator detectors by content (the pack's
+		// own hooks absorb those validators) — exclude them so the pack never
+		// detects its own infra as the consumer's (#505).
+		if (isManifestOrKeepfile(file, manifestPaths)) continue;
 		if (!SCANNABLE_EXTS.has(extname(file))) continue;
 		let source: string;
 		try {

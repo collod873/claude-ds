@@ -151,7 +151,8 @@ export function makeSyncPackFiles(opts: SyncPackFilesOpts = {}): SyncPackFilesOp
 				// duplicates (not dead-weight survivors). Only on first create — never
 				// re-touch an existing consumer-owned file.
 				if (f.path === ENFORCEMENT_PATH && current === null) {
-					const detected = await detectEnforcement(ctx.cwd);
+					const manifestPaths = new Set(manifest.files.map((mf) => mf.path));
+					const detected = await detectEnforcement(ctx.cwd, manifestPaths);
 					upstream = applyDetectedEnforcement(upstream, detected);
 				}
 

@@ -106,6 +106,30 @@ describe("detectEnforcement (#505)", () => {
 		const detected = await detectEnforcement(dir);
 		expect(detected.componentLib).toBe("radix");
 	});
+
+	// The pack's own hooks match the validator detectors by content (they
+	// absorb those validators). They are manifest-managed, so excluding them
+	// must keep a plain radix consumer radix — else the pack's own hook would
+	// flip the seed to base-ui / app-wide and activate the opt-in gates,
+	// blocking legitimate code ("never break a consumer").
+	it("excludes manifest-managed pack hooks from detection", async () => {
+		await mkdir(join(dir, ".claude", "hooks"), { recursive: true });
+		await writeFile(
+			join(dir, ".claude", "hooks", "pre-write-base-ui.sh"),
+			BASE_UI_ASCHILD_VALIDATOR,
+		);
+		await writeFile(
+			join(dir, ".claude", "hooks", "pre-write-tokens-app-wide.sh"),
+			UI_TOKEN_VALIDATOR,
+		);
+		await writeFile(join(dir, "src", "Picker.tsx"), RADIX_COMPONENT);
+		const manifestPaths = new Set([
+			".claude/hooks/pre-write-base-ui.sh",
+			".claude/hooks/pre-write-tokens-app-wide.sh",
+		]);
+		const detected = await detectEnforcement(dir, manifestPaths);
+		expect(detected).toEqual({ componentLib: "radix", tokenScope: "design-system" });
+	});
 });
 
 describe("applyDetectedEnforcement (#505)", () => {
