@@ -104,6 +104,41 @@ describe("frontDoorCmd (TTY dashboard + commitment gate)", () => {
 		expect(out).toMatch(/Where you are: adopted/);
 		expect(out).toMatch(/Nothing to remediate — the tree is clean/);
 		expect(out).toMatch(/Run `npm run build`/);
+		// #504: the read-only completeness scans that ran clean are named, so a
+		// passing check is distinguishable from one that never ran.
+		expect(out).toMatch(/Also checked: no hand-rolled DS infra, nothing stale or deprecated ✓/);
+	});
+
+	it("adopted + hand-rolled validator: surfaces it, never claims clean (#504)", async () => {
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		// The Crewops miss (#505): a hand-rolled base-ui asChild validator the
+		// drift scan is blind to. #504's blocker required the owned-concern scan
+		// to catch this class before any "clean ✓" line ships — so the front door
+		// runs it, names the defect under "What's wrong", and keeps it OUT of
+		// "Also checked".
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await writeFile(
+			join(dir, "scripts/base-ui-aschild-validator.sh"),
+			`#!/bin/bash
+# base-ui-aschild-validator.sh — asChild is Radix-only; base-ui uses the render prop
+if grep -q "asChild" "$1"; then
+  echo "asChild not allowed on a base-ui scaffold"
+  exit 1
+fi
+`,
+		);
+
+		const out = await captureFrontDoor({ cwd: dir });
+
+		expect(out).toMatch(/Where you are: adopted/);
+		expect(out).toMatch(/What's wrong:.*hand-rolled DS infra/);
+		// The found scan is not named clean; the deprecated scan still is.
+		expect(out).not.toMatch(/Also checked:.*no hand-rolled DS infra/);
+		expect(out).toMatch(/Also checked: nothing stale or deprecated ✓/);
+		// Never reported clean — routed to the command that resolves it.
+		expect(out).not.toMatch(/Nothing to remediate — the tree is clean/);
+		expect(out).toMatch(/claude-ds doctor --completeness/);
 	});
 
 	it("adopted + auto-fixable drift: the gate plans audit --fix", async () => {
