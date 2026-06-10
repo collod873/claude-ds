@@ -37,6 +37,32 @@ function makeCtx(): ProjectContext {
 
 const BASE_TOKENS = { color: { primary: "#0070f3", background: "#ffffff", foreground: "#111111" } };
 
+const HEX = /^#[0-9a-fA-F]{3,8}$/;
+
+/**
+ * Mirrors the managed consumer `design-system/charts/ramp.ts` (categoricalRamp /
+ * seriesColor / statusColor) verbatim — keep in sync. The managed ramp reads
+ * `color.chart.*` as bare strings, so feeding the migration's output through this
+ * fails the moment we seed something it can't read as a color (e.g. a DTCG/alias
+ * object → `[object Object]`).
+ */
+function consumeViaRamp(chart: {
+	categorical: Record<string, unknown>;
+	status: Record<string, unknown>;
+}): {
+	seriesColor: (index: number) => unknown;
+	statusColor: (status: string) => unknown;
+} {
+	const categoricalRamp = Object.keys(chart.categorical)
+		.sort((a, b) => Number(a) - Number(b))
+		.map((k) => chart.categorical[k]);
+	const n = categoricalRamp.length;
+	return {
+		seriesColor: (index: number) => categoricalRamp[((index % n) + n) % n],
+		statusColor: (status: string) => chart.status[status],
+	};
+}
+
 async function writeTokens(tokens: object): Promise<void> {
 	await mkdir(join(cwd, "design-system"), { recursive: true });
 	await writeFile(join(cwd, "design-system/tokens.json"), JSON.stringify(tokens, null, 2) + "\n");
@@ -164,8 +190,10 @@ describe("backfill-chart-tokens migration Op", () => {
 		expect((change as { path: string }).path).toBe("design-system/tokens.json");
 	});
 
-	it("seeds chart tokens in the consumer's DTCG ($value/$type) format, not bare strings", async () => {
-		// A consumer whose tokens.json uses DTCG leaves everywhere.
+	it("seeds chart tokens as bare hex even in a DTCG file — the managed ramp reads bare strings", async () => {
+		// A consumer whose tokens.json uses DTCG leaves everywhere. The chart ramp
+		// (design-system/charts/ramp.ts, category: managed) still reads color.chart
+		// as bare strings, so seeding DTCG objects there would render [object Object].
 		await writeTokens({
 			color: {
 				primary: { $type: "color", $value: "#0070f3" },
@@ -178,14 +206,16 @@ describe("backfill-chart-tokens migration Op", () => {
 			string,
 			Record<string, unknown>
 		>;
-		// Seeded leaves match the file's DTCG shape — not bare hex strings.
-		expect(chart.status.positive).toEqual({ $value: expect.any(String), $type: "color" });
-		expect(chart.categorical["1"]).toEqual({ $value: expect.any(String), $type: "color" });
+		// Seeded as bare hex strings — NOT { $value, $type } objects ramp.ts can't read.
+		expect(chart.status.positive).toMatch(HEX);
+		expect(chart.categorical["1"]).toMatch(HEX);
 	});
 
-	it("aliases categorical to the consumer's existing brand ramp instead of seeding raw default hex", async () => {
-		// Crewops: mode-split brand ramp already present; managed ramp reads
-		// `categorical`/`status`, which don't exist yet.
+	it("resolves the consumer's brand ramp to bare hex so categorical is on-brand AND ramp-readable", async () => {
+		// Crewops: mode-split brand ramp present, mixing a DTCG alias leaf
+		// (light.1 → {color.primary}) and a literal (light.2). primary is a
+		// distinctive hex so a resolved brand color is distinguishable from the
+		// Vercel default palette.
 		const crewopsChart = {
 			light: {
 				"1": { $type: "color", $value: "{color.primary}" },
@@ -196,7 +226,9 @@ describe("backfill-chart-tokens migration Op", () => {
 				"2": { $type: "color", $value: "#a78bfa" },
 			},
 		};
-		await writeTokens({ color: { ...BASE_TOKENS.color, chart: crewopsChart } });
+		await writeTokens({
+			color: { primary: "#abc123", background: "#ffffff", chart: crewopsChart },
+		});
 
 		const changes = await backfillChartTokens.plan(makeCtx());
 		const chart = (afterOf(changes).color as Record<string, unknown>).chart as Record<
@@ -204,18 +236,47 @@ describe("backfill-chart-tokens migration Op", () => {
 			Record<string, unknown>
 		>;
 
-		// categorical aliases the consumer's `light` brand ramp — no Vercel-blue default leaks in.
-		expect(chart.categorical["1"]).toEqual({ $value: "{color.chart.light.1}", $type: "color" });
-		expect(chart.categorical["2"]).toEqual({ $value: "{color.chart.light.2}", $type: "color" });
+		// categorical is bare hex resolved from `light`: slot 1 follows the
+		// {color.primary} alias to #abc123, slot 2 takes the literal #7c3aed —
+		// no Vercel-blue default leaks in.
+		expect(chart.categorical["1"]).toBe("#abc123");
+		expect(chart.categorical["2"]).toBe("#7c3aed");
 		// The 2-entry brand ramp wraps to fill all six categorical slots.
-		expect(chart.categorical["3"]).toEqual({ $value: "{color.chart.light.1}", $type: "color" });
+		expect(chart.categorical["3"]).toBe("#abc123");
 		expect(Object.keys(chart.categorical)).toHaveLength(6);
-		expect(JSON.stringify(chart.categorical)).not.toContain("#0070f3");
+		// Every seeded value is a bare hex string the managed ramp can consume.
+		for (const v of Object.values(chart.categorical)) expect(v).toMatch(HEX);
 		// Brand ramps untouched.
 		expect(chart.light).toEqual(crewopsChart.light);
 		expect(chart.dark).toEqual(crewopsChart.dark);
-		// status has no brand source → defaults, but in the file's DTCG leaf form.
-		expect(chart.status.positive).toEqual({ $value: expect.any(String), $type: "color" });
+		// status has no brand source → default palette, also bare hex.
+		expect(chart.status.positive).toMatch(HEX);
+	});
+
+	it("migration output is consumable by the managed chart ramp (no [object Object])", async () => {
+		// End-to-end guard for the regression that motivated this PR's rewrite:
+		// feed the seeded color.chart through the managed ramp's verbatim logic and
+		// assert every series/status color is a usable hex string, never an object.
+		const crewopsChart = {
+			light: {
+				"1": { $type: "color", $value: "{color.primary}" },
+				"2": { $type: "color", $value: "#7c3aed" },
+			},
+		};
+		await writeTokens({
+			color: { primary: "#abc123", background: "#ffffff", chart: crewopsChart },
+		});
+		const changes = await backfillChartTokens.plan(makeCtx());
+		const chart = (afterOf(changes).color as Record<string, unknown>).chart as {
+			categorical: Record<string, unknown>;
+			status: Record<string, unknown>;
+		};
+
+		const ramp = consumeViaRamp(chart);
+		// seriesColor wraps past the ramp end, so probe more indices than slots.
+		for (let i = 0; i < 8; i++) expect(ramp.seriesColor(i)).toMatch(HEX);
+		for (const s of ["positive", "negative", "warning", "neutral"])
+			expect(ramp.statusColor(s)).toMatch(HEX);
 	});
 
 	it("backfilled chart palette matches the pack's shipped tokens.json (no drift)", async () => {

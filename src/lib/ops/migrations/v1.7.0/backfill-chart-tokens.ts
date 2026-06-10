@@ -30,37 +30,49 @@ const CHART_DEFAULTS = {
 /** Managed keys the ramp reads — everything else under `color.chart` is a consumer ramp. */
 const MANAGED_KEYS = new Set(["categorical", "status"]);
 
-/** A DTCG token leaf: `{ $value, $type }`. Bare-string tokens are the alternative. */
-type Leaf = string | { $value: string; $type: "color" };
+const HEX = /^#[0-9a-fA-F]{3,8}$/;
 
 function isObject(v: unknown): v is Record<string, unknown> {
 	return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
-/** A DTCG leaf is an object carrying a `$value`. */
-function isDtcgLeaf(v: unknown): boolean {
+/** A DTCG leaf is an object carrying a `$value` — `{ $value, $type }`. */
+function isDtcgLeaf(v: unknown): v is { $value: unknown } {
 	return isObject(v) && "$value" in v;
 }
 
+/** Navigate a dotted token path (`color.primary`) to its leaf, or `undefined`. */
+function getByPath(root: Record<string, unknown>, path: string): unknown {
+	let node: unknown = root;
+	for (const key of path.split(".")) {
+		if (!isObject(node)) return undefined;
+		node = node[key];
+	}
+	return node;
+}
+
 /**
- * Does this token tree use DTCG (`$value`/`$type`) leaves? Walks the consumer's
- * own tokens so the values we seed match the format the file already uses (#506
- * part 2) — bare strings into a bare-string file, DTCG leaves into a DTCG file.
+ * Resolve a token value down to a literal hex string. Unwraps a DTCG leaf to its
+ * `$value`, follows `{dotted.path}` aliases through the tree (with a cycle guard),
+ * and returns the hex once reached — or `undefined` if it bottoms out on a non-hex
+ * or dangling reference. We bake a consumer's brand ramp down to bare hex this way
+ * because the managed chart ramp reads chart tokens as bare strings (below).
  */
-function usesDtcg(node: unknown): boolean {
-	if (isDtcgLeaf(node)) return true;
-	if (isObject(node)) return Object.values(node).some(usesDtcg);
-	return false;
-}
-
-/** A seeded color leaf in the file's format. */
-function colorLeaf(hex: string, dtcg: boolean): Leaf {
-	return dtcg ? { $value: hex, $type: "color" } : hex;
-}
-
-/** A DTCG alias leaf referencing another token by path (`{color.chart.light.1}`). */
-function aliasLeaf(ref: string): Leaf {
-	return { $value: `{${ref}}`, $type: "color" };
+function resolveHex(
+	value: unknown,
+	root: Record<string, unknown>,
+	seen: Set<string> = new Set(),
+): string | undefined {
+	const raw = isDtcgLeaf(value) ? value.$value : value;
+	if (typeof raw !== "string") return undefined;
+	const alias = raw.match(/^\{([^}]+)\}$/);
+	if (alias) {
+		const path = alias[1];
+		if (seen.has(path)) return undefined;
+		seen.add(path);
+		return resolveHex(getByPath(root, path), root, seen);
+	}
+	return HEX.test(raw) ? raw : undefined;
 }
 
 /** Ascending numeric keys of a ramp group (`{ "1": …, "2": … }` → `["1", "2"]`). */
@@ -71,55 +83,58 @@ function numericKeys(group: Record<string, unknown>): string[] {
 }
 
 /**
- * The consumer's pre-existing brand ramp under `color.chart`, if any — the
- * source `categorical` should alias rather than bypass (#506 part 1). A "ramp"
- * is any non-managed sub-group with numeric leaf keys (Crewops' mode-split
- * `light`/`dark`). Prefer a conventional base-mode name; the managed ramp is a
- * single flat series, so a mode-split source collapses to one mode.
+ * The consumer's pre-existing brand ramp under `color.chart`, resolved to a flat
+ * list of literal hex colors (#506 part 1). A "ramp" is any non-managed sub-group
+ * with numeric leaf keys (Crewops' mode-split `light`/`dark`); the managed ramp is
+ * a single flat series, so a mode-split source collapses to one mode. Prefer a
+ * conventional base-mode name. Each slot is resolved to bare hex — unwrapping DTCG
+ * leaves and dereferencing `{...}` aliases — because the managed ramp reads chart
+ * tokens as bare strings with no resolution of its own. Unresolvable slots are
+ * dropped; an empty result means "no usable brand ramp, seed defaults".
  */
-function findBrandRamp(
+function findBrandRampHexes(
 	chart: Record<string, unknown>,
-): { name: string; keys: string[] } | undefined {
+	root: Record<string, unknown>,
+): string[] {
 	const candidates = Object.entries(chart)
 		.filter(([k, v]) => !MANAGED_KEYS.has(k) && isObject(v))
 		.map(([name, v]) => ({ name, keys: numericKeys(v as Record<string, unknown>) }))
 		.filter((c) => c.keys.length > 0);
-	if (candidates.length === 0) return undefined;
+	if (candidates.length === 0) return [];
+	let pick: { name: string; keys: string[] } | undefined;
 	for (const preferred of ["light", "base", "default"]) {
-		const hit = candidates.find((c) => c.name === preferred);
-		if (hit) return hit;
+		pick = candidates.find((c) => c.name === preferred);
+		if (pick) break;
 	}
-	return [...candidates].sort((a, b) => a.name.localeCompare(b.name))[0];
+	if (!pick) pick = [...candidates].sort((a, b) => a.name.localeCompare(b.name))[0];
+	const group = chart[pick.name] as Record<string, unknown>;
+	return pick.keys
+		.map((k) => resolveHex(group[k], root))
+		.filter((h): h is string => h !== undefined);
 }
 
 /**
- * Build the `categorical` group. When the consumer already has a brand ramp,
- * alias each series to it (wrapping if the ramp is shorter than the six default
- * slots) so charts inherit brand color instead of the upstream Vercel palette.
- * Aliasing needs DTCG reference syntax; a bare-string file with no DTCG support
- * falls back to seeding defaults. With no brand ramp, seed defaults in-format.
+ * Build the `categorical` group as bare hex — the only format the managed ramp
+ * reads. With a consumer brand ramp, fill the six slots from its resolved hexes,
+ * wrapping when the ramp is shorter, so charts come out on-brand. Otherwise seed
+ * the default palette.
  */
-function buildCategorical(
-	dtcg: boolean,
-	ramp: { name: string; keys: string[] } | undefined,
-): Record<string, Leaf> {
-	const out: Record<string, Leaf> = {};
-	if (ramp && dtcg) {
+function buildCategorical(brandHexes: string[]): Record<string, string> {
+	const out: Record<string, string> = {};
+	if (brandHexes.length > 0) {
 		Object.keys(CHART_DEFAULTS.categorical).forEach((idx, i) => {
-			const rampKey = ramp.keys[i % ramp.keys.length];
-			out[idx] = aliasLeaf(`color.chart.${ramp.name}.${rampKey}`);
+			out[idx] = brandHexes[i % brandHexes.length];
 		});
 		return out;
 	}
-	for (const [idx, hex] of Object.entries(CHART_DEFAULTS.categorical))
-		out[idx] = colorLeaf(hex, dtcg);
+	for (const [idx, hex] of Object.entries(CHART_DEFAULTS.categorical)) out[idx] = hex;
 	return out;
 }
 
-/** Build the `status` group. No semantic brand source exists, so seed defaults in-format. */
-function buildStatus(dtcg: boolean): Record<string, Leaf> {
-	const out: Record<string, Leaf> = {};
-	for (const [k, hex] of Object.entries(CHART_DEFAULTS.status)) out[k] = colorLeaf(hex, dtcg);
+/** Build the `status` group as bare hex. No semantic brand source, so seed defaults. */
+function buildStatus(): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const [k, hex] of Object.entries(CHART_DEFAULTS.status)) out[k] = hex;
 	return out;
 }
 
@@ -140,17 +155,25 @@ function buildStatus(dtcg: boolean): Record<string, Leaf> {
  * keys that aren't there — unrecoverable through `heal`. So we backfill each missing
  * managed key individually and never touch the consumer's existing keys.
  *
- * Two #506 refinements over a raw default-hex backfill:
- *   - *Format*: seed values in the format the file already uses — DTCG
- *     (`$value`/`$type`) leaves into a DTCG file, bare strings into a bare-string
- *     file — instead of always emitting bare strings.
- *   - *Brand ramps*: when the consumer already has a brand ramp under
- *     `color.chart` (e.g. `light`/`dark`), alias `categorical` to it rather than
- *     seeding the upstream Vercel palette, so the first chart comes out on-brand.
- *     `status` has no semantic brand source, so it seeds defaults (in-format).
- *     Surfacing the "placeholder colors seeded — set your brand ramp" advisory
- *     for the no-ramp case is the closing summary's job (#503); naming the now-
- *     bypassable hand-rolled ramps as stale infra is audit's (#504).
+ * #506 refinement over a raw default-hex backfill — *brand ramps*: when the
+ * consumer already has a brand ramp under `color.chart` (e.g. `light`/`dark`),
+ * seed `categorical` from it rather than the upstream Vercel palette, so the
+ * first chart comes out on-brand. `status` has no semantic brand source, so it
+ * seeds defaults.
+ *
+ * Seeded values are *always bare hex*, never DTCG `{ $value, $type }` or `{...}`
+ * alias objects. The managed chart ramp (`design-system/charts/ramp.ts`,
+ * `category: managed`) reads `color.chart.categorical`/`status` as bare strings
+ * via a raw JSON import and has no DTCG/alias resolution — seeding objects there
+ * renders `[object Object]`, breaking charts. So a consumer brand ramp expressed
+ * in DTCG or aliases (Crewops' `{ $value: "{color.primary}" }`) is *resolved* to
+ * literal hex at migration time. This is why #506's "seed in the file's format"
+ * idea does not apply to chart tokens specifically: their only consumer speaks
+ * bare strings.
+ *
+ * Surfacing the "placeholder colors seeded — set your brand ramp" advisory for
+ * the no-ramp case is the closing summary's job (#503); naming the now-bypassable
+ * hand-rolled ramps as stale infra is audit's (#504).
  */
 export const backfillChartTokens: Operation = {
 	name: "backfill-chart-tokens@v1.7.0",
@@ -182,20 +205,19 @@ export const backfillChartTokens: Operation = {
 		// without clobbering the consumer's value, so leave it untouched (ADR-0003).
 		if (color && "chart" in color && !existingChart) return [];
 
-		// Match the file's existing token format (#506 part 2) and alias the new
-		// `categorical` series to any pre-existing brand ramp rather than bypass it
-		// with raw upstream defaults (#506 part 1).
-		const dtcg = usesDtcg(color ?? tokens);
-		const brandRamp = existingChart ? findBrandRamp(existingChart) : undefined;
+		// Seed `categorical` from any pre-existing brand ramp rather than bypassing
+		// it with raw upstream defaults (#506 part 1), resolved to bare hex because
+		// the managed ramp reads chart tokens as bare strings (see doc comment).
+		const brandHexes = existingChart ? findBrandRampHexes(existingChart, tokens) : [];
 
 		const chart: Record<string, unknown> = { ...(existingChart ?? {}) };
 		let changed = false;
 		if (!("categorical" in chart)) {
-			chart.categorical = buildCategorical(dtcg, brandRamp);
+			chart.categorical = buildCategorical(brandHexes);
 			changed = true;
 		}
 		if (!("status" in chart)) {
-			chart.status = buildStatus(dtcg);
+			chart.status = buildStatus();
 			changed = true;
 		}
 		if (!changed) return [];
