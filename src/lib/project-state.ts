@@ -15,6 +15,7 @@
  */
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { planGeneratedIntegrityFixes } from "./checks/generated-integrity.js";
 import {
 	type DriftRuleId,
 	isClassifyRelocatable,
@@ -52,12 +53,14 @@ async function exists(p: string): Promise<boolean> {
  * the cached one from before sync/upgrade/classify ran.
  *
  * Steps for which no driver wiring exists yet (`migrate-layout`,
- * `reconcile`, `reconform`) return `false` for now. Their slots in
- * `CANONICAL_ORDER` are reserved by ADR-0018; future sub-issues of PRD
- * #340 add the detection and dispatch together. Returning `false`
- * conservatively rather than `true` means the planner never emits a step
- * the driver can't execute — heal would otherwise spin against an
- * unhandled `LoopStep` and hit the iteration ceiling.
+ * `reconcile`) return `false` for now. Their slots in `CANONICAL_ORDER`
+ * are reserved by ADR-0018; future sub-issues of PRD #340 add the
+ * detection and dispatch together. Returning `false` conservatively rather
+ * than `true` means the planner never emits a step the driver can't
+ * execute — heal would otherwise spin against an unhandled `LoopStep` and
+ * hit the iteration ceiling. `reconform` is now wired (#509): its
+ * derivation folds the generated-integrity scan and its dispatcher applies
+ * the regeneration.
  */
 export async function deriveProjectState(cwd: string): Promise<ProjectState> {
 	const ctx = await loadProject(cwd);
@@ -131,6 +134,18 @@ async function deriveFromCtx(ctx: ProjectContext): Promise<ProjectState> {
 	}
 	const suppressed = new Set(exceptions.map((e) => `${e.rule}:${e.path}`));
 
+	// `reconformNeeded` folds the same generated-integrity scan reconform runs:
+	// regenerate each showcase companion in-memory and compare to disk (GEN-001/
+	// GEN-002). A non-empty changeset means a companion drifted — a hand-edit, or
+	// the staleness a generator upgrade leaves behind (content comparison catches
+	// generator-version drift for free; no provenance stamp needed). Wiring this
+	// completes the PRD #340 reconform slot so heal/front-door schedule reconform
+	// whenever a generated artifact drifts instead of leaving it under "tree is
+	// clean" (#509). The plan() call is a pure read — it describes the rewrite,
+	// the dispatcher applies it.
+	const genPlan = await planGeneratedIntegrityFixes().plan(ctx);
+	const reconformNeeded = genPlan.changes.length > 0;
+
 	const driftIntegrity = await scanDriftAndIntegrity(ctx);
 	const active = driftIntegrity.findings.filter((f) => !suppressed.has(`${f.ruleId}:${f.file}`));
 
@@ -186,7 +201,7 @@ async function deriveFromCtx(ctx: ProjectContext): Promise<ProjectState> {
 		// wire their derivation alongside their dispatchers.
 		layoutMigrationNeeded: false,
 		reconcileNeeded: false,
-		reconformNeeded: false,
+		reconformNeeded,
 		classifyNeeded,
 		autoFixNeeded,
 		unresolvableFindings,

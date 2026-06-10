@@ -275,6 +275,18 @@ export async function reconformCmd(opts: {
 		const genReport = await run(ctx, [genOp], mode);
 		const genOutcome = genReport.ops[0]?.outcome as GenIntegrityOutcome | undefined;
 		const genViolations = genOutcome?.violations ?? [];
+		const genSkipped = genOutcome?.skipped ?? [];
+		// #509: name the ADR-0026-skipped companions. They're excluded from
+		// comparison (a JSX-bearing example the regex regenerator can't reproduce),
+		// so the integrity check can't confirm they're current — without this line a
+		// subset of broken showcases could hide behind "all generated files clean."
+		for (const s of genSkipped) {
+			info(
+				c.cyan(
+					`integrity check: ${s} skipped (JSX-bearing example, ADR-0026) — not compared; verify by hand`,
+				),
+			);
+		}
 		for (const v of genViolations) info(`${c.red(v.ruleId)}: ${v.message}`);
 		if (genViolations.length > 0) {
 			if (dryRun) {
