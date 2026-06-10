@@ -21,10 +21,10 @@ jobs:
       # Node 20 doesn't have): the floor major and the current LTS (.nvmrc
       # pins 24 for dev/release).
       # fail-fast off so one version's failure doesn't hide the other's result.
-      # max-parallel 1: the self-hosted box runs jobs concurrently and the
-      # extra load flakes timing-sensitive tests (5s vitest timeouts).
+      # No max-parallel cap: the old flake it guarded against (5s vitest
+      # timeouts under concurrent-job load) was addressed at the root —
+      # in-process CLI runner + 30s testTimeout (see vitest.config.ts, #487).
       fail-fast: false
-      max-parallel: 1
       matrix:
         node-version: [22, 24]
     name: ci (node ${{ matrix.node-version }})
