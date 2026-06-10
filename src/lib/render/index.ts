@@ -26,6 +26,8 @@ export type { DiffEntry } from "./diff.js";
 export { colorizeDiffLines, renderCommitmentGateDiff } from "./diff.js";
 export type { RenderableFinding } from "./findings.js";
 export { renderFindings } from "./findings.js";
+export type { NoticeRenderOptions, PerFileNotice } from "./notices.js";
+export { NOTICE_COLLAPSE_THRESHOLD, renderPerFileNotices } from "./notices.js";
 export type { SummaryEntry } from "./summary.js";
 export {
 	renderChangeSummary,
