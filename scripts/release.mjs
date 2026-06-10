@@ -7,6 +7,11 @@
 // `v*` tags, rebuilds, publishes to npm, and cuts a GitHub Release with
 // auto-generated notes. This script never touches the README: install
 // strings use the npm `@^1` range, so there are no per-release pins to sync.
+//
+// After a release lands on npm, refresh the time-travel fixture so its pin
+// advances one release behind the new latest (offline tests stay one version
+// back — PRD #529):
+//   node scripts/refresh-time-travel-fixture.mjs   # then commit the .claude-ds.json diff
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
