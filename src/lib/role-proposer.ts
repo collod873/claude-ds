@@ -37,10 +37,11 @@ function importsFromDomainRoot(source: string, domainRoots: string[]): boolean {
  * with only a single-component runner, stamping a role the runner couldn't
  * drive turned a green soft-skip into a RED failure on real consumers —
  * strictly worse. That coupling is now satisfied. Detection and the runner
- * moved together (ADR-0024): a stamped role with no composed `contractExamples`
- * mount lands in the runner's `pending` arm — a GREEN, resolvable soft-skip —
- * never a red failure. So the import heuristic ships here, lock-step with the
- * multi-part model, exactly as ADR-0022 required. Read ADR-0024 before changing.
+ * moved together (ADR-0024, unified in ADR-0026): a stamped role with no
+ * composed `meta.examples` entry lands in the runner's `pending` arm — a GREEN,
+ * resolvable soft-skip — never a red failure. So the import heuristic ships
+ * here, lock-step with the multi-part model, exactly as ADR-0022 required. Read
+ * ADR-0024 / ADR-0026 before changing.
  */
 const ROLE_PATTERNS: { role: string; anchor: RegExp }[] = [
 	// `role="combobox"` is the WAI-APG anchor the shipped combobox contract

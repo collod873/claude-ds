@@ -1444,6 +1444,59 @@ describe("namespace export + sibling function declarations (#69, #70)", () => {
   });
 });
 
+// ── ADR-0026: a composed-widget role example renders the assembled widget ────
+// One authored example (the composition in props.children) feeds BOTH the
+// showcase (here) and the role-contract runner (packs/.../contracts/runner.test.ts).
+// A flat example sharing the array must still render — proving per-entry tolerance.
+
+describe("ADR-0026 — composed-widget example renders via the showcase path", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fresh();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("renders the composed JSX widget AND a flat example sharing the array", async () => {
+    const dsDir = join(dir, "design-system", "composites");
+    await mkdir(dsDir, { recursive: true });
+    await writeFile(
+      join(dsDir, "combobox.tsx"),
+      [
+        `import React from "react";`,
+        `export function Combobox({ children }: { children?: React.ReactNode }) {`,
+        `  return <div>{children}</div>;`,
+        `}`,
+        `export function ComboboxTrigger() { return <button role="combobox" />; }`,
+        `export function ComboboxList() { return <ul role="listbox" />; }`,
+        `export const meta = {`,
+        `  kind: "composite",`,
+        `  role: "combobox",`,
+        `  examples: [`,
+        `    { name: "sm", props: { size: "sm" } },`,
+        `    { name: "composed", props: { children: <><ComboboxTrigger /><ComboboxList /></> } },`,
+        `  ],`,
+        `};`,
+      ].join("\n")
+    );
+    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    const content = await readFile(join(dsDir, "combobox.showcase.tsx"), "utf8");
+    // The composed example renders the assembled widget (not a placeholder string),
+    // and the JSX sub-parts are imported so the showcase compiles.
+    expect(content).toMatch(/<Combobox\s+children=\{<><ComboboxTrigger\s*\/><ComboboxList\s*\/><\/>\}/);
+    expect(content).toMatch(/import\s*\{[^}]*ComboboxTrigger[^}]*\}\s*from\s*"\.\/combobox"/);
+    // The flat example sharing the array still renders — JSX did not nuke it.
+    expect(content).toContain('<Combobox size="sm" />');
+  });
+});
+
 // ── Bug B: carried locals emitted in discovery order (dependent before dependency) ──
 // When a local const `b` references another local const `a`, and `b` is
 // discovered first (because meta.examples directly uses `b`), the generator
