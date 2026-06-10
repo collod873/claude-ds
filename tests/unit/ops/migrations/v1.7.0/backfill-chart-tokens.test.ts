@@ -139,6 +139,15 @@ describe("backfill-chart-tokens migration Op", () => {
 		);
 	});
 
+	it("leaves a present-but-non-object color.chart untouched (no clobber)", async () => {
+		// A scalar/array chart is malformed, but ADR-0003 forbids deleting consumer bytes.
+		for (const chart of ["legacy-string", ["#000", "#fff"]] as const) {
+			await writeTokens({ color: { ...BASE_TOKENS.color, chart } });
+			const changes = await backfillChartTokens.plan(makeCtx());
+			expect(changes).toHaveLength(0);
+		}
+	});
+
 	it("creates color when tokens.json has no color group at all", async () => {
 		await writeTokens({ spacing: { "1": "0.25rem" } });
 		const changes = await backfillChartTokens.plan(makeCtx());

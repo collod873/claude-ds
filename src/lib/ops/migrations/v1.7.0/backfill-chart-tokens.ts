@@ -63,9 +63,16 @@ export const backfillChartTokens: Operation = {
 				: undefined;
 
 		const existingChart =
-			color && color.chart !== null && typeof color.chart === "object"
+			color &&
+			color.chart !== null &&
+			typeof color.chart === "object" &&
+			!Array.isArray(color.chart)
 				? (color.chart as Record<string, unknown>)
 				: undefined;
+
+		// `chart` present but not a mergeable object (scalar/array): we can't key-merge
+		// without clobbering the consumer's value, so leave it untouched (ADR-0003).
+		if (color && "chart" in color && !existingChart) return [];
 
 		const chart: Record<string, unknown> = { ...(existingChart ?? {}) };
 		let changed = false;
