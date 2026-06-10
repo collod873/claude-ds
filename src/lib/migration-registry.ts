@@ -9,6 +9,7 @@ import { rewritePortalStyles } from "./ops/migrations/v0.9.0/rewrite-portal-styl
 import { widenTokensMigration } from "./ops/migrations/v0.9.0/widen-tokens.js";
 import { liftTrackingManifest } from "./ops/migrations/v1.0.0/lift-tracking-manifest.js";
 import { migrateExceptions } from "./ops/migrations/v1.0.0/migrate-exceptions.js";
+import { backfillChartTokens } from "./ops/migrations/v1.7.0/backfill-chart-tokens.js";
 
 /**
  * All known pack migration sets, keyed by release version.
@@ -35,4 +36,5 @@ export const MIGRATION_REGISTRY: MigrationVersion[] = [
 		],
 	},
 	{ version: "v1.0.0", ops: [migrateExceptions, liftTrackingManifest] },
+	{ version: "v1.7.0", ops: [backfillChartTokens] },
 ];
