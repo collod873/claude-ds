@@ -460,6 +460,46 @@ export function SoloLabel() { return <span />; }
 		expect(out).toMatch(/chart palette/);
 		expect(out).toMatch(/Nothing needs your attention — start working/);
 	}, 60000);
+
+	it("closing summary: converged loop still downgrades 'start working' if hand-rolled infra remains (#504)", async () => {
+		// The remediation loop fixes drift, but completeness (ADR-0003) is not a
+		// loop member — a hand-rolled validator survives a clean convergence. The
+		// footer must NOT issue the "start working" go-ahead while that infra
+		// stands; it downgrades to the one command that resolves it.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		// Auto-fixable drift so the plan is non-empty and the loop drives to clean.
+		await writeFile(
+			join(dir, "design-system/atoms/solo-label.tsx"),
+			`export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function SoloLabel() { return <span />; }
+`,
+		);
+		// A hand-rolled validator the drift scan is blind to — found by the
+		// owned-concern scan, untouched by the loop.
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await writeFile(
+			join(dir, "scripts/base-ui-aschild-validator.sh"),
+			`#!/bin/bash
+# base-ui-aschild-validator.sh — asChild is Radix-only; base-ui uses the render prop
+if grep -q "asChild" "$1"; then exit 1; fi
+`,
+		);
+
+		const out = await captureFrontDoor({
+			cwd: dir,
+			interactive: false,
+			yes: true,
+			maxIterations: 5,
+		});
+
+		// Loop converged...
+		expect(out).toMatch(new RegExp(`Tree is clean — ${CURRENT}`));
+		// ...but the go-ahead is withheld and routed to the resolving command.
+		expect(out).not.toMatch(/Nothing needs your attention — start working/);
+		expect(out).toMatch(/hand-rolled DS infra finding.*remain/);
+		expect(out).toMatch(/claude-ds doctor --completeness/);
+	}, 60000);
 });
 
 /**
