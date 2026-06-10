@@ -164,6 +164,60 @@ describe("backfill-chart-tokens migration Op", () => {
 		expect((change as { path: string }).path).toBe("design-system/tokens.json");
 	});
 
+	it("seeds chart tokens in the consumer's DTCG ($value/$type) format, not bare strings", async () => {
+		// A consumer whose tokens.json uses DTCG leaves everywhere.
+		await writeTokens({
+			color: {
+				primary: { $type: "color", $value: "#0070f3" },
+				background: { $type: "color", $value: "#ffffff" },
+			},
+		});
+		const changes = await backfillChartTokens.plan(makeCtx());
+		expect(changes).toHaveLength(1);
+		const chart = (afterOf(changes).color as Record<string, unknown>).chart as Record<
+			string,
+			Record<string, unknown>
+		>;
+		// Seeded leaves match the file's DTCG shape — not bare hex strings.
+		expect(chart.status.positive).toEqual({ $value: expect.any(String), $type: "color" });
+		expect(chart.categorical["1"]).toEqual({ $value: expect.any(String), $type: "color" });
+	});
+
+	it("aliases categorical to the consumer's existing brand ramp instead of seeding raw default hex", async () => {
+		// Crewops: mode-split brand ramp already present; managed ramp reads
+		// `categorical`/`status`, which don't exist yet.
+		const crewopsChart = {
+			light: {
+				"1": { $type: "color", $value: "{color.primary}" },
+				"2": { $type: "color", $value: "#7c3aed" },
+			},
+			dark: {
+				"1": { $type: "color", $value: "{color.primary}" },
+				"2": { $type: "color", $value: "#a78bfa" },
+			},
+		};
+		await writeTokens({ color: { ...BASE_TOKENS.color, chart: crewopsChart } });
+
+		const changes = await backfillChartTokens.plan(makeCtx());
+		const chart = (afterOf(changes).color as Record<string, unknown>).chart as Record<
+			string,
+			Record<string, unknown>
+		>;
+
+		// categorical aliases the consumer's `light` brand ramp — no Vercel-blue default leaks in.
+		expect(chart.categorical["1"]).toEqual({ $value: "{color.chart.light.1}", $type: "color" });
+		expect(chart.categorical["2"]).toEqual({ $value: "{color.chart.light.2}", $type: "color" });
+		// The 2-entry brand ramp wraps to fill all six categorical slots.
+		expect(chart.categorical["3"]).toEqual({ $value: "{color.chart.light.1}", $type: "color" });
+		expect(Object.keys(chart.categorical)).toHaveLength(6);
+		expect(JSON.stringify(chart.categorical)).not.toContain("#0070f3");
+		// Brand ramps untouched.
+		expect(chart.light).toEqual(crewopsChart.light);
+		expect(chart.dark).toEqual(crewopsChart.dark);
+		// status has no brand source → defaults, but in the file's DTCG leaf form.
+		expect(chart.status.positive).toEqual({ $value: expect.any(String), $type: "color" });
+	});
+
 	it("backfilled chart palette matches the pack's shipped tokens.json (no drift)", async () => {
 		const packTokens = JSON.parse(
 			await readFile(resolve("packs/next-react/files/design-system/tokens.json"), "utf8"),
