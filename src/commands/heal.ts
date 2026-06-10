@@ -105,6 +105,14 @@ export interface HealOpts {
 	 * is the tripwire's central divergence signal.
 	 */
 	dryRun?: boolean;
+	/**
+	 * Issue #497: override the consumer verify-gate timeout, in whole seconds.
+	 * The default (300s, see `run-consumer-verify.ts`) is suite-scaled, but a
+	 * heavy consumer can still exceed it on a cold run; this raises it per-run
+	 * without touching the env var. When unset, `runConsumerVerify` falls back
+	 * to `CLAUDE_DS_VERIFY_TIMEOUT` then the default.
+	 */
+	verifyTimeout?: number;
 }
 
 export async function healCmd(opts: HealOpts): Promise<void> {
@@ -239,6 +247,7 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 			const verify = await runConsumerVerify(cwd, {
 				managedFiles: new Set(ctx.manifest.files.map((f) => f.path)),
 				managedRoots: ["design-system/"],
+				...(opts.verifyTimeout !== undefined ? { timeoutMs: opts.verifyTimeout * 1000 } : {}),
 			});
 			progress.stop();
 			if (!verify.ok) {

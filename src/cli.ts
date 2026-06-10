@@ -473,6 +473,11 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 			"--dry-run",
 			"plan the remediation walk without running anything (issue #416 — pairs with --json for the Crewops tripwire)",
 		)
+		.option(
+			"--verify-timeout <s>",
+			"override the verify-gate timeout in seconds (default 300; or set CLAUDE_DS_VERIFY_TIMEOUT) — issue #497",
+			(v) => parseInt(v, 10),
+		)
 		.action(
 			async (opts: {
 				maxIterations?: number;
@@ -480,6 +485,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 				answers?: string;
 				json?: boolean;
 				dryRun?: boolean;
+				verifyTimeout?: number;
 			}) => {
 				await healCmd({
 					maxIterations: opts.maxIterations,
@@ -487,6 +493,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 					answers: opts.answers,
 					json: opts.json,
 					dryRun: opts.dryRun,
+					verifyTimeout: opts.verifyTimeout,
 					cwd: defaults.cwd,
 				});
 			},
