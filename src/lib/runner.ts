@@ -32,6 +32,20 @@ export interface RunOptions {
 export interface OpReport<TOutcome = unknown> {
 	name: string;
 	changes: Change[];
+	/**
+	 * The explicit progress/no-op signal (#532). `true` iff this Op's plan would
+	 * change bytes on disk — at least one Change that creates, modifies, deletes,
+	 * or renames a file. A plan of only no-op writes (`before` equals `after`),
+	 * `abort` verdicts, or an empty changeset is a *no-op* (`false`); so is a
+	 * plan-time throw — an Op that errored made no progress.
+	 *
+	 * heal reads this so a step scheduled to clear a complaint that produced no
+	 * progress is never marked ✔ and never repeated identically next pass
+	 * (defects 2, 6). The Runner stays the only writer; Ops stay pure planners —
+	 * the signal is derived from the Changes they already emit, not a new field
+	 * Ops set themselves.
+	 */
+	progress: boolean;
 	outcome?: TOutcome;
 	error?: string;
 }
@@ -44,6 +58,26 @@ export interface RunReport {
 
 function resolveIn(cwd: string, p: string): string {
 	return isAbsolute(p) ? p : join(cwd, p);
+}
+
+/**
+ * Does a single Change move bytes on disk? A `write` whose `after` matches its
+ * `before` byte-for-byte is a no-op (the consumer-formatter re-emit case, or a
+ * fixer that "fixed" nothing); a create, a real modify, a delete, and a rename
+ * all make progress. An `abort` is a planning verdict — the Op decided it can't
+ * touch the file — so it is no progress. Pure; the per-Op roll-up feeds
+ * `OpReport.progress` (#532).
+ */
+function changeIsProgress(c: Change): boolean {
+	switch (c.kind) {
+		case "write":
+			return c.before === null || !c.before.equals(c.after);
+		case "delete":
+		case "rename":
+			return true;
+		case "abort":
+			return false;
+	}
 }
 
 function isBinary(buf: Buffer): boolean {
@@ -228,12 +262,16 @@ export async function run(
 		try {
 			const result = await op.plan(ctx);
 			const changes = Array.isArray(result) ? result : result.changes;
-			const entry: OpReport = { name: op.name, changes };
+			const entry: OpReport = {
+				name: op.name,
+				changes,
+				progress: changes.some(changeIsProgress),
+			};
 			if (!Array.isArray(result)) entry.outcome = result.outcome;
 			report.ops.push(entry);
 			for (const change of changes) planned.push({ opName: op.name, change });
 		} catch (e) {
-			report.ops.push({ name: op.name, changes: [], error: (e as Error).message });
+			report.ops.push({ name: op.name, changes: [], progress: false, error: (e as Error).message });
 		}
 	}
 

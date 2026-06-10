@@ -137,7 +137,27 @@ interface DispatchOpts {
  * refuse on the very state the driver just produced. The caller is responsible
  * for the top-level clean-tree decision before the loop runs.
  */
-export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<number> {
+/**
+ * What a dispatched step did. `progress` is the explicit progress/no-op signal
+ * (#532): `true` when the step changed bytes, `false` when it visited its work
+ * and changed nothing (a skip-all reconform, a no-op pass). The loop renders ✔
+ * only on progress; a no-progress step reports "nothing to do" instead, so a
+ * checkmark always means the step cleared real work (defect 6).
+ *
+ * For the command-wrapped members (`sync`/`upgrade`/`classify`/`audit`) the
+ * driver can't introspect the RunReport buried inside the command, so it reports
+ * `progress: true` — those steps only land in the plan when their state signal
+ * fires, so a no-op is the exception, and the iteration-level fixed-point check
+ * (byte-stable + plan still non-empty → named blocker) catches a stuck command
+ * step regardless. `reconform` runs through `run()` here directly, so it reports
+ * its real per-Op progress.
+ */
+interface StepResult {
+	exitCode: number;
+	progress: boolean;
+}
+
+export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<StepResult> {
 	const { cwd, answers, pendingSink, progress } = opts;
 	// Issue #437 (ADR-0018): each loop member runs as a plain function and returns
 	// a `CommandResult`. The driver reads only the exit code; it never renders the
@@ -148,14 +168,27 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
 	switch (step) {
 		case "upgrade":
 		case "repair":
-			return (await upgradeCmd({ cwd, yes: true, allowDirty: true })).exitCode;
+			return {
+				exitCode: (await upgradeCmd({ cwd, yes: true, allowDirty: true })).exitCode,
+				progress: true,
+			};
 		case "sync":
-			return (await syncCmd({ cwd, yes: true, allowDirty: true })).exitCode;
+			return {
+				exitCode: (await syncCmd({ cwd, yes: true, allowDirty: true })).exitCode,
+				progress: true,
+			};
 		case "classify":
-			return (await classifyCmd({ cwd, yes: true, allowDirty: true, answers, pendingSink }))
-				.exitCode;
+			return {
+				exitCode: (await classifyCmd({ cwd, yes: true, allowDirty: true, answers, pendingSink }))
+					.exitCode,
+				progress: true,
+			};
 		case "audit --fix":
-			return (await auditCmd({ cwd, fix: true, allowDirty: true, answers, pendingSink })).exitCode;
+			return {
+				exitCode: (await auditCmd({ cwd, fix: true, allowDirty: true, answers, pendingSink }))
+					.exitCode,
+				progress: true,
+			};
 		case "reconform": {
 			// Apply the generated-integrity regeneration directly (#509) — the same
 			// op the deriver folds for `reconformNeeded`. `allowDirty` is implicit:
@@ -176,12 +209,17 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
 			})) {
 				progress.info(line);
 			}
-			return report.failed ? 1 : 0;
+			// #532: a reconform that regenerated nothing — every companion it
+			// visited was an ADR-0026 skip — made no progress. The loop must not
+			// stamp ✔ on it; reading the Runner's per-Op progress signal tells the
+			// loop to report "nothing to do" instead (defect 6).
+			const madeProgress = report.ops.some((o) => o.progress);
+			return { exitCode: report.failed ? 1 : 0, progress: madeProgress };
 		}
 		case "migrate-layout":
 		case "reconcile":
 			// Reserved-but-unwired (see function comment).
-			return 0;
+			return { exitCode: 0, progress: false };
 	}
 }
 
@@ -308,8 +346,16 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 		for (const step of plan) {
 			lastStep = step;
 			progress.start(step);
-			await dispatchStep(step, { cwd, answers, pendingSink, progress });
-			progress.succeed(step);
+			const result = await dispatchStep(step, { cwd, answers, pendingSink, progress });
+			// ✔-requires-progress (#532): a checkmark may only render for a step
+			// whose report shows progress. A step that visited its work and changed
+			// nothing (a skip-all reconform) reports "nothing to do" — never a ✔ that
+			// would falsely read as the complaint cleared (defect 6).
+			if (result.progress) {
+				progress.succeed(step);
+			} else {
+				progress.info(`${step}: nothing to do`);
+			}
 		}
 
 		const after = await snapshotTree(cwd);
@@ -324,22 +370,28 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 			return { kind: "pending" };
 		}
 
-		// Fixed point: this iteration ran the full plan and changed zero bytes.
-		// Gate convergence on the findings-side booleans so a lingering upgrade
-		// signal whose chain is empty (#300's shape) doesn't masquerade as
-		// unresolved findings — but real unfixable findings (classify/autoFix that
-		// the dispatchers could not clear) keep the loop going to the ceiling,
-		// which is honestly "did not converge" rather than silent success.
-		// `unresolvableFindings` is the post-#379 signal for unfixable findings no
-		// loop step can clear (PATTERN-IMPORTS-PATTERN, ROLE-NO-CONTRACT,
-		// INTEGRITY-UNRESOLVABLE-IMPORT): without it the deriver had to fold them
-		// into `classifyNeeded` to keep the convergence check honest, embedding
-		// the false assumption that classify owns every unfixable rule.
-		const findingsRemain =
-			state.classifyNeeded || state.autoFixNeeded || state.unresolvableFindings;
-		if (stable && pendingThisIter === 0 && !findingsRemain) {
-			await promoteModeAtConvergence(cwd, progress);
-			return { kind: "converged", iterations: iter };
+		// This pass ran the full plan and changed zero bytes. Re-derive state: the
+		// plan is a pure function of the tree, and the tree didn't move, so the
+		// NEXT pass's plan tells us what a stable pass means here.
+		//
+		// #532 (defect 2): if the re-derived plan is non-empty, the next pass would
+		// be byte-for-byte identical to the one we just ran — the originating
+		// complaint (an empty-migration-range "upgrade available", an unfixable
+		// finding) is still present and its no-op step would simply repeat. Rather
+		// than burn another identical pass, stop and name the blocker. An empty
+		// next plan with no unresolvable findings is genuine convergence — the
+		// previous `findingsRemain` boolean check (classify/autoFix/unresolvable)
+		// is subsumed: those signals drive the very plan we re-derive here, plus the
+		// upgrade/sync/reconform signals it missed (#300's empty-chain shape used to
+		// masquerade as convergence because it was not a "finding").
+		if (stable && pendingThisIter === 0) {
+			const nextState = await deriveProjectState(cwd);
+			const nextPlan = planRemediation(nextState);
+			if (nextPlan.length === 0 && !nextState.unresolvableFindings) {
+				await promoteModeAtConvergence(cwd, progress);
+				return { kind: "converged", iterations: iter };
+			}
+			return { kind: "exhausted", lastStep: nextPlan[0] ?? lastStep };
 		}
 	}
 

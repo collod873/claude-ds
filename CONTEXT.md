@@ -208,6 +208,23 @@ imports left behind, audit pointing at itself for findings it cannot fix
 — is the deepest possible violation of the north star. See ADR-0014,
 ADR-0015.
 
+**Progress signal (#532):** every `RunReport.ops[i]` carries an explicit
+`progress` boolean — `true` iff the Op's Changes move bytes (a create, real
+modify, delete, or rename), `false` for a no-op write (`before === after`),
+an `abort`, an empty plan, or a plan-time throw. Operations stay pure
+planners; the Runner derives the signal from the Changes they already emit.
+heal reads it for two guarantees. **✔-requires-progress:** a step is marked
+✔ only when its report shows progress — a step that visited every file and
+changed nothing (a skip-all reconform over ADR-0026 JSX companions) reports
+"nothing to do," never a checkmark that would falsely read as the complaint
+cleared (Crewops defect 6). **No identical no-op repeat:** a pass that
+changed zero bytes while its originating complaint persists is non-convergence
+— the plan is a pure function of the tree, so the next pass would be
+byte-for-byte identical; heal re-derives, and if the next plan is non-empty it
+exits at once naming the blocker instead of spinning the same no-op to the
+ceiling (the empty-migration-range "upgrade available" that used to masquerade
+as ✔ convergence — Crewops defect 2).
+
 ### Intervention
 A manual correction or rescue the consumer had to make to reach a clean
 tree during a verification run — editing the consumer repo by hand, undoing
