@@ -32,6 +32,27 @@ describe("renderPerFileNotices (pure)", () => {
 		expect(lines.some((l) => l.includes("--verbose"))).toBe(false);
 	});
 
+	it("collapses at exactly threshold + 1 — the off-by-one boundary", () => {
+		const files = Array.from({ length: NOTICE_COLLAPSE_THRESHOLD + 1 }, (_, i) => `b-${i}.tsx`);
+		const lines = renderPerFileNotices(notices("integrity check", files), {
+			summarize: (_k, n) => `${n} files skipped`,
+		});
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain(`${NOTICE_COLLAPSE_THRESHOLD + 1} files skipped`);
+		expect(lines[0]).toContain("--verbose");
+	});
+
+	it("honors a caller-supplied threshold override", () => {
+		const files = Array.from({ length: 3 }, (_, i) => `t-${i}.tsx`);
+		// threshold 1: two-plus notices collapse even though the default would inline three.
+		const lines = renderPerFileNotices(notices("integrity check", files), {
+			threshold: 1,
+			summarize: (_k, n) => `${n} files skipped`,
+		});
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("3 files skipped");
+	});
+
 	it("collapses to one summary line beyond the threshold, with a --verbose hint", () => {
 		const files = Array.from({ length: 62 }, (_, i) => `c-${i}.tsx`);
 		const lines = renderPerFileNotices(notices("integrity check", files), {
