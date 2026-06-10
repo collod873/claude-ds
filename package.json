@@ -23,6 +23,7 @@
     "prepare": "npm run build && node scripts/install-hooks.mjs",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
+    "test:fast": "vitest run tests/unit",
     "test:watch": "vitest",
     "release": "node scripts/release.mjs"
   },

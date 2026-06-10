@@ -1,21 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { spawn } from "node:child_process";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, rm, stat, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const CLI_PATH = fileURLToPath(new URL("../../../src/cli.ts", import.meta.url));
-
-async function runCli(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((res) => {
-    const child = spawn("npx", ["tsx", CLI_PATH, ...args], { cwd });
-    let stdout = "", stderr = "";
-    child.stdout.on("data", (d) => (stdout += d));
-    child.stderr.on("data", (d) => (stderr += d));
-    child.on("close", (code) => res({ code: code ?? 1, stdout, stderr }));
-  });
-}
+import { join } from "node:path";
+import { runCli } from "../../../tests/helpers/runcli";
 
 /**
  * Minimal frontmatter parser — extracts top-level scalars and sequences from
@@ -52,14 +39,18 @@ function parseFrontmatter(raw: string): Record<string, unknown> {
   return result;
 }
 
+// Every test inspects the same read-only scaffold, so init runs once for the
+// whole file (in-process via the shared runCli helper — no spawn).
 describe("next-react skills (fixture)", () => {
   let dir: string;
-  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "claude-ds-skills-")); });
-  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "claude-ds-skills-"));
+    const r = await runCli(["init", "--pack", "next-react", "--yes"], { cwd: dir });
+    if (r.code !== 0) throw new Error(`init failed (${r.code}): ${r.stderr}`);
+  });
+  afterAll(async () => { await rm(dir, { recursive: true, force: true }); });
 
   it("all skill dirs land after adopt (init)", async () => {
-    const r = await runCli(["init", "--pack", "next-react", "--yes"], dir);
-    expect(r.code).toBe(0);
     await stat(join(dir, ".claude/skills/aesthetic-principles/SKILL.md"));
     await stat(join(dir, ".claude/skills/design-system/SKILL.md"));
     await stat(join(dir, ".claude/skills/design-system/contracts.md"));
@@ -68,14 +59,10 @@ describe("next-react skills (fixture)", () => {
   });
 
   it("scaffold-component skill is not present after init", async () => {
-    const r = await runCli(["init", "--pack", "next-react", "--yes"], dir);
-    expect(r.code).toBe(0);
     await expect(stat(join(dir, ".claude/skills/scaffold-component/SKILL.md"))).rejects.toThrow();
   });
 
   it("aesthetic-principles SKILL.md frontmatter parses and triggers on **/*.tsx", async () => {
-    const r = await runCli(["init", "--pack", "next-react", "--yes"], dir);
-    expect(r.code).toBe(0);
     const raw = await readFile(join(dir, ".claude/skills/aesthetic-principles/SKILL.md"), "utf8");
     const fm = parseFrontmatter(raw);
     expect(fm).toHaveProperty("triggers");
@@ -85,8 +72,6 @@ describe("next-react skills (fixture)", () => {
   });
 
   it("design-system SKILL.md frontmatter parses and triggers on design-system/**", async () => {
-    const r = await runCli(["init", "--pack", "next-react", "--yes"], dir);
-    expect(r.code).toBe(0);
     const raw = await readFile(join(dir, ".claude/skills/design-system/SKILL.md"), "utf8");
     const fm = parseFrontmatter(raw);
     expect(fm).toHaveProperty("triggers");
@@ -96,24 +81,18 @@ describe("next-react skills (fixture)", () => {
   });
 
   it("aesthetic-principles tier is A (scaffold Tier A)", async () => {
-    const r = await runCli(["init", "--pack", "next-react", "--yes"], dir);
-    expect(r.code).toBe(0);
     const raw = await readFile(join(dir, ".claude/skills/aesthetic-principles/SKILL.md"), "utf8");
     const fm = parseFrontmatter(raw);
     expect(fm["tier"]).toBe("A");
   });
 
   it("design-system tier is B (scaffold Tier B)", async () => {
-    const r = await runCli(["init", "--pack", "next-react", "--yes"], dir);
-    expect(r.code).toBe(0);
     const raw = await readFile(join(dir, ".claude/skills/design-system/SKILL.md"), "utf8");
     const fm = parseFrontmatter(raw);
     expect(fm["tier"]).toBe("B");
   });
 
   it("component SKILL.md triggers include intent phrases and glob paths", async () => {
-    const r = await runCli(["init", "--pack", "next-react", "--yes"], dir);
-    expect(r.code).toBe(0);
     const raw = await readFile(join(dir, ".claude/skills/component/SKILL.md"), "utf8");
     const fm = parseFrontmatter(raw);
     expect(fm["tier"]).toBe("B");
@@ -126,8 +105,6 @@ describe("next-react skills (fixture)", () => {
   });
 
   it("pattern SKILL.md triggers include intent phrases and glob paths", async () => {
-    const r = await runCli(["init", "--pack", "next-react", "--yes"], dir);
-    expect(r.code).toBe(0);
     const raw = await readFile(join(dir, ".claude/skills/pattern/SKILL.md"), "utf8");
     const fm = parseFrontmatter(raw);
     expect(fm["tier"]).toBe("B");
@@ -138,8 +115,6 @@ describe("next-react skills (fixture)", () => {
   });
 
   it("neither new skill inlines the Meta type", async () => {
-    const r = await runCli(["init", "--pack", "next-react", "--yes"], dir);
-    expect(r.code).toBe(0);
     const component = await readFile(join(dir, ".claude/skills/component/SKILL.md"), "utf8");
     const pattern = await readFile(join(dir, ".claude/skills/pattern/SKILL.md"), "utf8");
     for (const raw of [component, pattern]) {
@@ -150,8 +125,6 @@ describe("next-react skills (fixture)", () => {
   });
 
   it("design-system SKILL.md mentions references tier", async () => {
-    const r = await runCli(["init", "--pack", "next-react", "--yes"], dir);
-    expect(r.code).toBe(0);
     const raw = await readFile(join(dir, ".claude/skills/design-system/SKILL.md"), "utf8");
     expect(raw).toContain("references/");
     expect(raw).toMatch(/kind:\s*"reference"/);
