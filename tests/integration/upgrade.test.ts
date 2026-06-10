@@ -78,6 +78,26 @@ describe("upgrade", () => {
 		expect(cfg.packVersion).toBe("v0.9.0");
 	});
 
+	it("#502: logs 'regenerated manifest' once per pass, not once per internal invocation", async () => {
+		await writeFile(
+			join(dir, ".claude-ds.json"),
+			JSON.stringify({ ...BASE_CFG, packVersion: "v0.8.0" }),
+		);
+		await mkdir(join(dir, "design-system"), { recursive: true });
+		await writeFile(join(dir, "design-system/manifest.generated.ts"), "// hand-built\n", "utf8");
+
+		const r = await runCli(["upgrade", "--to", "v0.9.0", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		// upgrade runs sync internally (which regenerates) and then regenerates again
+		// itself; only the invocation that actually changed bytes should narrate.
+		const regenCount = (r.stdout.match(/regenerated design-system\/manifest\.generated\.ts/g) ?? [])
+			.length;
+		expect(regenCount).toBe(1);
+		// And the embedded no-op narration must not double "sync complete".
+		const completeCount = (r.stdout.match(/sync complete/g) ?? []).length;
+		expect(completeCount).toBeLessThanOrEqual(1);
+	});
+
 	it("apply: manage-portal-scope installs portal-scope.module.css when upgrading to v0.9.0", async () => {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
