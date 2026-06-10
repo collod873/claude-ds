@@ -2,7 +2,9 @@
 
 Status: **PASS** (release gate) — verified 2026-06-10 by Collin's session
 Run date: 2026-06-10
-Candidate: claude-ds `main` @ `368597c` (tag `v1.7.0`)
+Candidate: claude-ds `main` @ `368597c`; tag `v1.7.0` cut from `93a7745`
+(delta is test-only — #499/PR #500 fixed release-bump-sensitive test
+fixtures; zero consumer-facing changes after the verified candidate)
 Consumer: Crewops `e694a8e` (clean local clone; packVersion v1.0.0 pre-upgrade)
 CLI under test: locally built `dist/cli.js` at version 1.7.0 (npm-linked)
 
