@@ -32,7 +32,7 @@ import { MIGRATION_REGISTRY } from "./migration-registry.js";
 import { loadProject, type ProjectContext } from "./project.js";
 import type { ProjectState } from "./remediation-planner.js";
 import { scanDriftAndIntegrity } from "./reports/drift-integrity-scan.js";
-import { scanScaffoldPresence } from "./reports/scaffold-presence.js";
+import { scanScaffoldDrift } from "./reports/scaffold-drift.js";
 import { checkVersionCurrency } from "./version-currency.js";
 import { cliVersion } from "./version-vocab.js";
 
@@ -65,21 +65,19 @@ export async function deriveProjectState(cwd: string): Promise<ProjectState> {
 }
 
 async function deriveFromCtx(ctx: ProjectContext): Promise<ProjectState> {
-	const { cwd, cfg, manifest, auditConfig } = ctx;
-	const { appDir, claudeMdTarget } = auditConfig;
+	const { cwd, cfg } = ctx;
 
 	const upgradeAvailable = checkVersionCurrency({
 		pinned: cfg.packVersion,
 		installed: cliVersion(),
 	}).upgradeAvailable;
 
-	const scaffold = await scanScaffoldPresence(ctx, {
-		manifest,
-		appDir,
-		claudeMdTarget,
-		verbose: false,
-	});
-	const scaffoldGap = scaffold.entries.some((e) => e.entry.category === "managed" && !e.present);
+	// `scaffoldGap` honors the documented contract — a managed file is missing
+	// OR its bytes drifted from the manifest. Both fall out of the sync op's
+	// read-only plan() (a missing file plans a create; a drifted one plans a
+	// rewrite), so the planner and `sync` cannot disagree about whether sync
+	// has work (#463). Presence alone left stale-but-present files invisible.
+	const { gap: scaffoldGap } = await scanScaffoldDrift(ctx);
 
 	// Repair: probe the verification chain by planning each idempotent
 	// migration directly. A `plan()` that returns `[]` means the end-state

@@ -88,10 +88,16 @@ describe("frontDoorCmd (TTY dashboard + commitment gate)", () => {
 		// future migration that adds another end-state adopt doesn't yet seed.
 		const healed = await runCli(["heal"], { cwd: dir });
 		expect(healed.code).toBe(0);
-		await writeFile(
-			join(dir, "package.json"),
-			JSON.stringify({ scripts: { build: "next build" } }),
-		);
+		// Add a user `build` script. package.json is a managed hybrid file (owned
+		// keys: scripts, devDependencies), and #463 makes `scaffoldGap` content-
+		// aware — so the script must be added WITHOUT drifting the owned keys, or
+		// the gate would (correctly) plan sync. mergeScripts keeps non-pack scripts
+		// ahead of the pack-owned ones, so writing `build` first in canonical
+		// 2-space format keeps the file byte-identical to what sync would produce.
+		const pkgPath = join(dir, "package.json");
+		const pkg = JSON.parse(await readFile(pkgPath, "utf8"));
+		pkg.scripts = { build: "next build", ...pkg.scripts };
+		await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 
 		const out = await captureFrontDoor({ cwd: dir });
 
@@ -155,6 +161,31 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
 
 		expect(out).toMatch(/What's wrong: .*upgrade available/);
 		expect(out).toMatch(/upgrade — pack v0\.0\.1 → /);
+	});
+
+	it("adopted + content-drifted managed file: dashboard isn't clean, gate plans sync (#463)", async () => {
+		// A managed file PRESENT on disk but byte-drifted. Presence-only health
+		// reported "Managed files: N/N ✓" while `sync --dry-run` would rewrite it;
+		// the dashboard must now reflect the drift (no clean tick) and the gate
+		// must plan `sync`.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		// Clean fixed point first, so the only thing wrong is the drift we inject.
+		const healed = await runCli(["heal"], { cwd: dir });
+		expect(healed.code).toBe(0);
+
+		await writeFile(
+			join(dir, ".claude/hooks/atom-imports.sh"),
+			"#!/usr/bin/env bash\n# drifted — not canonical\n",
+		);
+
+		const out = await captureFrontDoor({ cwd: dir });
+
+		// No "clean" claim: the managed-files line must not carry the ✓ tick.
+		expect(out).not.toMatch(/Managed files: \d+\/\d+ ✓/);
+		expect(out).toMatch(/scaffold incomplete/);
+		// And the gate plans the restore.
+		expect(out).toMatch(/sync — restore managed scaffold files/);
 	});
 
 	it("adopted + missing managed files: the gate previews the real sync Change[]", async () => {

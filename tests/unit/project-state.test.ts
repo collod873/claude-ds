@@ -15,9 +15,30 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import pkg from "../../package.json" with { type: "json" };
+import { makeSyncPackFiles } from "../../src/lib/ops/sync-pack-files.js";
+import { loadProject } from "../../src/lib/project.js";
 import { deriveProjectState } from "../../src/lib/project-state.js";
 import { planRemediation } from "../../src/lib/remediation-planner.js";
+import { run } from "../../src/lib/runner.js";
 import { cleanup, freshTmpDir } from "../helpers/tmpdir.js";
+
+/**
+ * Materialize the full canonical scaffold in-process by applying the same sync
+ * pack-files op `sync` runs, looped to a fixed point exactly as `heal` does.
+ * One pass isn't enough — a hybrid-JSON file (`.claude/settings.json`) is
+ * written raw on the missing-file create and only reformats to its merged
+ * canonical bytes on the next pass — so the loop mirrors how a consumer
+ * actually reaches a clean tree. Lets the content-drift tests start from an
+ * all-present, byte-clean tree so the assertion isolates *content* drift from
+ * *presence* drift.
+ */
+async function syncScaffold(dir: string): Promise<void> {
+	for (let i = 0; i < 5; i++) {
+		const ctx = await loadProject(dir);
+		const report = await run(ctx, [makeSyncPackFiles({})], "apply", { quiet: true });
+		if (report.applied.length === 0) return;
+	}
+}
 
 const BASE_CFG = {
 	pack: "next-react",
@@ -73,6 +94,44 @@ describe("deriveProjectState", () => {
 		const state = await deriveProjectState(dir);
 		expect(state.scaffoldGap).toBe(true);
 		expect(planRemediation(state)).toContain("sync");
+	});
+
+	it("a present-but-content-drifted managed file sets scaffoldGap (and the planner emits sync) (#463)", async () => {
+		// The bug this issue fixes: presence-only `scaffoldGap` reported a
+		// stale-but-present managed file as clean, so heal/front-door never
+		// scheduled `sync`. Start from a fully-synced tree (every managed file
+		// present and byte-identical → no presence gap), then drift ONE managed
+		// file's bytes. The OLD existence check yields `scaffoldGap: false` here;
+		// the contract (missing OR bytes drifted) requires `true`.
+		await writeFile(
+			join(dir, ".claude-ds.json"),
+			JSON.stringify({ ...BASE_CFG, packVersion: `v${pkg.version}` }),
+		);
+		await syncScaffold(dir);
+		// A managed hook file, overwritten with bytes that differ from upstream.
+		await writeFile(
+			join(dir, ".claude/hooks/atom-imports.sh"),
+			"#!/usr/bin/env bash\n# drifted — not the canonical bytes\n",
+		);
+
+		const state = await deriveProjectState(dir);
+		expect(state.scaffoldGap).toBe(true);
+		expect(planRemediation(state)).toContain("sync");
+	});
+
+	it("a fully clean synced tree yields scaffoldGap:false and converges (#463)", async () => {
+		// The negative pole: every managed file present AND byte-identical to the
+		// manifest. `scaffoldGap` must be false so the loop reaches a fixed point
+		// instead of scheduling `sync` forever.
+		await writeFile(
+			join(dir, ".claude-ds.json"),
+			JSON.stringify({ ...BASE_CFG, packVersion: `v${pkg.version}` }),
+		);
+		await syncScaffold(dir);
+
+		const state = await deriveProjectState(dir);
+		expect(state.scaffoldGap).toBe(false);
+		expect(planRemediation(state)).not.toContain("sync");
 	});
 
 	it("a regressed migration end-state sets repairNeeded", async () => {
