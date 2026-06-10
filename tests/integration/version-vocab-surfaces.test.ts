@@ -91,7 +91,7 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 	});
 
 	describe("upgrade", () => {
-		it("empty chain (pinned at last applied migration): body says `pack is at vX`, no phantom arrow", async () => {
+		it("empty chain (pinned at last applied migration): pin advances to the CLI, no phantom arrow", async () => {
 			await writeFile(
 				join(dir, ".claude-ds.json"),
 				JSON.stringify({ ...BASE_CFG, packVersion: EMPTY_CHAIN_PIN }),
@@ -102,7 +102,15 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 				expect(r.stdout).toMatch(
 					new RegExp(`no registered migrations between ${escapeRegex(EMPTY_CHAIN_PIN)} and `),
 				);
-				expect(r.stdout).toMatch(new RegExp(`pack is at ${escapeRegex(EMPTY_CHAIN_PIN)}`));
+				// Defect 1 (#531, ADR-0029): an empty range still advances the pin to
+				// the CLI so "upgrade available" clears — it no longer freezes at the
+				// stale pin. The "pin advanced …" line is "pin", not "pack", so it can
+				// never be the phantom `pack X → Y` migration arrow.
+				expect(r.stdout).toMatch(
+					new RegExp(`pin advanced ${escapeRegex(EMPTY_CHAIN_PIN)} → ${escapeRegex(CLI_VERSION)}`),
+				);
+				const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+				expect(cfg.packVersion).toBe(CLI_VERSION);
 			} else {
 				// A migration is registered at the CLI version itself (pin === CLI),
 				// so upgrade is a no-op end-state verify rather than a stale pin bump.
