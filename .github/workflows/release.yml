@@ -50,4 +50,19 @@ jobs:
       # Trusted publishing needs npm >= 11.5.1; the bundled npm may lag.
       - run: npm install -g npm@latest
       - run: npm ci
-      - run: npm publish
+      # Smoke the exact artifact that ships (#526): the release job above
+      # tests a build on a different runner, but the tarball that reaches npm
+      # is built HERE. Pack once, run the shared consumer smoke against it,
+      # then publish that same file — tested and shipped bytes are identical.
+      # (Publishing a tarball is compatible with OIDC trusted publishing; the
+      # tarball restriction only applies to --provenance, which we disable in
+      # publishConfig.)
+      - name: Pack, smoke, and publish the same tarball
+        run: |
+          set -euo pipefail
+          # `prepare` prints to stdout during pack — derive the name from the
+          # version instead of capturing `npm pack` output.
+          npm pack >/dev/null
+          TARBALL="$PWD/claude-ds-$(node -p "require('./package.json').version").tgz"
+          bash scripts/smoke-tarball.sh "$TARBALL"
+          npm publish "$TARBALL"
