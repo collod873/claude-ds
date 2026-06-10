@@ -50,6 +50,7 @@ import { scanDriftAndIntegrity } from "../lib/reports/drift-integrity-scan.js";
 import { scanScaffoldDrift } from "../lib/reports/scaffold-drift.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import { scanRootDupes } from "../lib/root-dupes.js";
+import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 import { checkVersionCurrency } from "../lib/version-currency.js";
 import { cliVersion } from "../lib/version-vocab.js";
 
@@ -289,7 +290,28 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			progress,
 		});
 		if (outcome.kind === "converged") {
-			printLines(renderClosingSummary(cliVersion(), parsedCfg?.packVersion));
+			// Issue #510 — the same consumer-verify gate heal runs at convergence
+			// (#410 / PRD #407). The front door mutated the tree via driveRemediation;
+			// "Tree is clean" must mean the consumer's own verify is green on
+			// claude-ds-owned files, not merely that the planner reached a fixed
+			// point. Same attribution as heal (managedFiles + managedRoots): a
+			// scaffold-attributed error flips the verdict red and routes to repair;
+			// pre-existing consumer errors are noted but do not block. Without this
+			// the front door's verdict diverged from heal's — "Tree is clean" could
+			// coexist with a red typecheck heal would have caught.
+			progress.stop();
+			const verify = await runConsumerVerify(cwd, {
+				managedFiles: new Set(ctx.manifest.files.map((f) => f.path)),
+				managedRoots: ["design-system/"],
+			});
+			if (!verify.ok) {
+				printLines(renderRedGate(verify));
+				process.exit(1);
+				return;
+			}
+			printLines(
+				renderClosingSummary(cliVersion(), parsedCfg?.packVersion, verify.consumerErrors.length),
+			);
 		} else if (outcome.kind === "exhausted") {
 			printLines([
 				"",
@@ -316,7 +338,11 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
  * `converged`), so the go-ahead is unconditional here; the exhausted branch owns
  * the to-do framing.
  */
-function renderClosingSummary(version: string, pinnedBefore: string | undefined): string[] {
+function renderClosingSummary(
+	version: string,
+	pinnedBefore: string | undefined,
+	consumerErrorCount = 0,
+): string[] {
 	const lines = ["", `✓ Tree is clean — ${version}.`];
 	if (pinnedBefore && pinnedBefore !== version) {
 		const highlights = computeMigrationChain(pinnedBefore, version, MIGRATION_REGISTRY).flatMap(
@@ -326,7 +352,57 @@ function renderClosingSummary(version: string, pinnedBefore: string | undefined)
 			lines.push(`  New since ${pinnedBefore}: ${highlights.join(", ")}.`);
 		}
 	}
+	// The verify gate is green for claude-ds-owned files, but the consumer may
+	// carry pre-existing errors of its own (warn-only, #510). Note them so the
+	// clean verdict isn't read as "the whole tree typechecks."
+	if (consumerErrorCount > 0) {
+		lines.push(
+			`  ${consumerErrorCount} pre-existing consumer error(s) noted (not caused by claude-ds).`,
+		);
+	}
 	lines.push("  Nothing needs your attention — start working.");
+	return lines;
+}
+
+/**
+ * The red-gate report the front door prints when the consumer-verify gate fails
+ * after convergence (#510). Mirror of heal's `reportRedGate`, rendered to the
+ * front door's stdout channel (`printLines`) instead of `err()` so it sits with
+ * the dashboard the operator is already reading. Scaffold errors are listed
+ * (capped at 20); a non-tsc / timeout failure surfaces the `reason` + output
+ * tail so the failure is diagnosable from the report alone.
+ */
+function renderRedGate(verify: VerifyResult): string[] {
+	const lines = [""];
+	if (verify.scaffoldErrors.length > 0) {
+		lines.push(
+			`✗ Verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files:`,
+		);
+		for (const e of verify.scaffoldErrors.slice(0, 20)) {
+			lines.push(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
+		}
+		if (verify.scaffoldErrors.length > 20) {
+			lines.push(`  …and ${verify.scaffoldErrors.length - 20} more`);
+		}
+	} else {
+		lines.push(
+			`✗ Verify gate failed — ${verify.reason ?? `${verify.command} exited ${verify.exitCode}`}`,
+		);
+	}
+	if (verify.outputTail) {
+		lines.push("  ── verify output (tail) ──");
+		for (const line of verify.outputTail.split("\n")) lines.push(`  ${line}`);
+	}
+	if (verify.consumerErrors.length > 0) {
+		lines.push(
+			`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`,
+		);
+	}
+	lines.push(
+		verify.timedOut
+			? "Re-run after warming the consumer's tsc/test cache, or raise the verify timeout via CLAUDE_DS_VERIFY_TIMEOUT."
+			: "Run `claude-ds audit` to see what remains, then re-run.",
+	);
 	return lines;
 }
 
