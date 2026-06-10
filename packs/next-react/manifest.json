@@ -168,6 +168,18 @@
       "category": "managed"
     },
     {
+      "path": "design-system/charts/ramp.ts",
+      "category": "managed"
+    },
+    {
+      "path": "design-system/charts/tremor-preset.ts",
+      "category": "managed"
+    },
+    {
+      "path": "design-system/charts/index.ts",
+      "category": "managed"
+    },
+    {
       "path": "design-system/icons/.keep",
       "category": "seeded"
     },
@@ -512,6 +524,7 @@
     "design-system/atoms",
     "design-system/composites",
     "design-system/references",
+    "design-system/charts",
     "design-system/types",
     "design-system/icons",
     "design-system/hooks",

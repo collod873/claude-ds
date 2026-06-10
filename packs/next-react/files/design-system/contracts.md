@@ -2,6 +2,11 @@
 
 - Atoms may not import from composites.
 - Color values must come from `tokens.json`; raw hex is forbidden in design-system files.
+- Charts must take their colors from the DS chart ramp (`@ds/charts` —
+  `chartColors` / `categoryColors` / `statusChartColor`), never from
+  chart-specific color literals. The ramp is token-derived (`color.chart.*` in
+  `tokens.json`); the tremor preset is a thin feed layer over it and tremor's
+  component API stays fully exposed.
 - Failures are logged to `failure-log.md` via `.claude/hooks/lib/log-failure.sh`.
 
 ## Per-component bundle
