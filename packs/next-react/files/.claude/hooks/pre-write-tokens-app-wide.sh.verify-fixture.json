@@ -1,0 +1,11 @@
+{
+  "pass": {
+    "arg": "src/components/Card.tsx",
+    "setup": [
+      {
+        "path": "src/components/Card.tsx",
+        "content": "export const Card = () => <div style={{ color: '#e53e3e' }}>x</div>;\n"
+      }
+    ]
+  }
+}

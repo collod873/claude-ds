@@ -6,6 +6,7 @@
 set -euo pipefail
 
 source "$(dirname "$0")/lib/read-hook-input.sh"
+source "$(dirname "$0")/lib/read-enforcement.sh"
 file="$HOOK_FILE_PATH"
 if [ -z "$file" ]; then exit 0; fi
 
@@ -19,6 +20,10 @@ esac
 case "$file" in
   *design-system/*) exit 0 ;;
 esac
+
+# Honor the consumer-declared app-wide exclusions (#465) — pdf/email/shadcn ui
+# files opt out of the aesthetic gate via design-system/enforcement.json.
+if enf_is_excluded "$file"; then exit 0; fi
 
 if [ ! -f "$file" ]; then
   exit 0
