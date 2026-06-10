@@ -16,7 +16,7 @@ jobs:
           node-version: "20"
 
       - name: Install claude-ds
-        run: npm install -g github:collod873/claude-ds
+        run: npm install -g claude-ds@^1
 
       - name: Run audit
         run: claude-ds audit

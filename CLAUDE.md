@@ -3,7 +3,7 @@
 When reporting information to me be extremely concise and sacrifice grammar for the sake of concision.
 
 CLI that syncs a shared design-system governance scaffold into consumer repos
-via `npx github:collod873/claude-ds#vX.Y.Z`.
+via `npx claude-ds@^1` (npm registry; legacy `github:` installs still resolve).
 
 **Never break a consumer** — the CLI never deletes user content or edits outside
 its declared ownership. Overrides every other goal.

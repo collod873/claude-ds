@@ -1,11 +1,11 @@
 name: Install Smoke
 
-# Exercise the literal consumer install path. Source-tree CI never runs the
-# command consumers actually run — `npx github:collod873/claude-ds#<ref>` —
-# which is the only path where the `prepare` lifecycle (build + guarded hook
-# installer) executes against a real git install. In particular the hook
-# installer's INIT_CWD guard, the branch that keeps a consumer repo's
-# `core.hookspath` untouched, has no coverage anywhere else. See #477.
+# Exercise the literal consumer install path. Source-tree CI runs tests
+# against src/, but consumers install the packed tarball — the only artifact
+# where the `files` allowlist applies. A runtime file missing from that
+# allowlist (pack manifest, pack files) passes every unit test and still
+# breaks every consumer, so install from the tarball exactly like npm would
+# and run a real command. See #477.
 on:
   push:
     branches: [main]
@@ -20,67 +20,58 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 15
     steps:
-      # Checkout only to read the expected version off the ref under test.
       - uses: actions/checkout@v5
-        with:
-          # On pull_request, default checkout is the synthetic merge commit but
-          # npx must fetch a ref that exists on the remote — use the head SHA
-          # for both so the version we read matches the package we install.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
 
-      - name: Install via npx from a scratch consumer repo
-        env:
-          TEST_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          REPO: ${{ github.repository }}
-          # The repo is private and npm resolves `github:` over ssh, which the
-          # runner's service environment can't auth. Rewrite npm's spawned git
-          # to authenticated https via env-scoped config — never the host
-          # gitconfig (the runner shares this machine with a human).
-          GIT_CONFIG_COUNT: "3"
-          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ github.token }}@github.com/.insteadOf"
-          GIT_CONFIG_VALUE_0: "ssh://git@github.com/"
-          GIT_CONFIG_KEY_1: "url.https://x-access-token:${{ github.token }}@github.com/.insteadOf"
-          GIT_CONFIG_VALUE_1: "git@github.com:"
-          GIT_CONFIG_KEY_2: "url.https://x-access-token:${{ github.token }}@github.com/.insteadOf"
-          GIT_CONFIG_VALUE_2: "https://github.com/"
+      - name: Pack tarball and install in a scratch consumer repo
         run: |
           set -euo pipefail
           EXPECTED="v$(node -p "require('./package.json').version")"
-          echo "checkpoint: expecting $EXPECTED at $TEST_SHA"
+          echo "checkpoint: expecting $EXPECTED"
+
+          npm ci
+          # Don't capture `npm pack` stdout: the `prepare` lifecycle (hook
+          # installer) prints to stdout and corrupts the captured filename.
+          # The tarball name is deterministic from the version instead.
+          npm pack >/dev/null
+          TARBALL="$PWD/claude-ds-${EXPECTED#v}.tgz"
+          test -f "$TARBALL" || { echo "FAIL: expected tarball $TARBALL not found"; exit 1; }
+          echo "checkpoint: packed $TARBALL"
 
           SCRATCH=$(mktemp -d)
           # Fresh npm cache: the self-hosted runner's persistent cache must not
-          # be able to satisfy the install with a previously built clone.
+          # be able to satisfy the install with a previously built copy.
           export npm_config_cache=$(mktemp -d)
-          trap 'rm -rf "$SCRATCH" "$npm_config_cache"' EXIT
+          trap 'rm -rf "$SCRATCH" "$npm_config_cache" "$TARBALL"' EXIT
 
           git -C "$SCRATCH" init -q
           printf '{"name":"scratch-consumer","private":true}\n' > "$SCRATCH/package.json"
           cd "$SCRATCH"
           echo "checkpoint: scratch consumer repo ready"
 
-          GOT=$(npx --yes "github:${REPO}#${TEST_SHA}" -V)
+          npm install --no-save "$TARBALL"
+          GOT=$(npx --no-install claude-ds -V)
           if [ "$GOT" != "$EXPECTED" ]; then
             echo "FAIL: version mismatch — got '$GOT', expected '$EXPECTED'"
             exit 1
           fi
-          echo "OK: CLI ran from git install and printed $GOT"
+          echo "OK: CLI ran from tarball install and printed $GOT"
 
           # One representative real command: init reads the pack manifest and
           # copies pack files out of the installed package, so a runtime file
           # missing from the `files` allowlist fails here.
-          npx --yes "github:${REPO}#${TEST_SHA}" init --pack next-react --yes
+          npx --no-install claude-ds init --pack next-react --yes
           if [ ! -f .claude-ds.json ]; then
             echo "FAIL: init exited 0 but wrote no .claude-ds.json"
             exit 1
           fi
           echo "OK: init scaffolded the scratch project"
 
-          # Never-break-a-consumer: prepare's hook installer must NOT have
-          # touched the consumer repo's git config on this install path.
+          # Never-break-a-consumer: installing the package must NOT touch the
+          # consumer repo's git config (tarball installs don't run `prepare`,
+          # and this proves it stays that way).
           if HOOKSPATH=$(git config core.hookspath); then
             echo "FAIL: install set consumer core.hookspath to '$HOOKSPATH'"
             exit 1

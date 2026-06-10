@@ -333,7 +333,7 @@ by `sync`, not a `DRIFT-` rule. `doctor`'s verdict names it as such.
 
 ### Pack version
 The semver tag (`0.8.0`, `0.9.0`, ...) a consumer is pinned to in its
-`.claude-ds.json`. Consumed via `npx github:collod873/claude-ds#vX.Y.Z`.
+`.claude-ds.json`. Consumed via `npx claude-ds@^1` from the npm registry.
 Distinct from "what's at HEAD" — consumers move between versions via
 migration Ops, not by chasing `main`. Releases require a filled
 `verification.md` confirming Crewops upgraded successfully against the
