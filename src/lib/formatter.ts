@@ -6,7 +6,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { info } from "./log.js";
 
@@ -37,6 +37,34 @@ async function fileExists(p: string): Promise<boolean> {
 	}
 }
 
+/**
+ * Detect a biome / prettier dependency declared in the consumer's `package.json`
+ * (issue #493). A consumer can run biome via `extends`-only config, a non-standard
+ * config path, or a `lint`/`format` script without a config file detectFormatter
+ * recognises — but the dependency is always declared. Biome wins over prettier
+ * when both are present (it is the formatter that owns the showcase territory in
+ * the failing Crewops shape). Returns null when package.json is absent/unparseable
+ * so a consumer with no formatter still behaves exactly as before.
+ */
+async function detectFormatterFromPackageJson(cwd: string): Promise<DetectedFormatter> {
+	let raw: string;
+	try {
+		raw = await readFile(join(cwd, "package.json"), "utf8");
+	} catch {
+		return null;
+	}
+	let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+	try {
+		pkg = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+	if ("@biomejs/biome" in deps) return "biome";
+	if ("prettier" in deps) return "prettier";
+	return null;
+}
+
 export async function detectFormatter(cwd: string): Promise<DetectedFormatter> {
 	for (const name of BIOME_CONFIGS) {
 		if (await fileExists(join(cwd, name))) return "biome";
@@ -44,7 +72,10 @@ export async function detectFormatter(cwd: string): Promise<DetectedFormatter> {
 	for (const name of PRETTIER_CONFIGS) {
 		if (await fileExists(join(cwd, name))) return "prettier";
 	}
-	return null;
+	// #493: config-file detection misses extends-only / non-standard-path setups.
+	// Fall back to the declared dependency so the showcase files claude-ds writes
+	// still get run through the consumer's formatter.
+	return detectFormatterFromPackageJson(cwd);
 }
 
 /**
@@ -59,6 +90,59 @@ async function resolveFormatterBin(name: string, cwd: string): Promise<string | 
 	const which = spawnSync("which", [name], { encoding: "utf8" });
 	if (which.status === 0 && which.stdout.trim()) return which.stdout.trim();
 	return null;
+}
+
+/** A detected formatter together with its resolved binary path. */
+export interface ResolvedFormatter {
+	kind: "biome" | "prettier";
+	bin: string;
+}
+
+/**
+ * Detect the consumer's formatter AND resolve its binary in one shot, so a caller
+ * formatting many files (issue #493) pays the detect + `which` cost once. Returns
+ * null when no formatter is configured or its binary can't be found — callers then
+ * skip formatting silently (the "no formatter → behaves as today" contract).
+ */
+export async function resolveConsumerFormatter(cwd: string): Promise<ResolvedFormatter | null> {
+	const kind = await detectFormatter(cwd);
+	if (!kind) return null;
+	const bin = await resolveFormatterBin(kind, cwd);
+	if (!bin) return null;
+	return { kind, bin };
+}
+
+/**
+ * Format a single file's content **in memory** via the consumer's formatter,
+ * using its stdin filter (`biome check --write --stdin-file-path=…` /
+ * `prettier --stdin-filepath …`). No file on disk is read or written — the bytes
+ * round-trip through stdin/stdout — so this is safe to call from an Operation's
+ * `plan()` (issue #493: "format before hashing"). `filePath` only tells the
+ * formatter which syntax/overrides to apply.
+ *
+ * Best-effort: returns the original `content` unchanged on any failure (non-zero
+ * exit, empty output, a formatter that doesn't support stdin), so a hostile or
+ * unexpected formatter can never blank out a file claude-ds is about to write.
+ */
+export function formatContent(
+	rf: ResolvedFormatter,
+	content: string,
+	filePath: string,
+	cwd: string,
+): string {
+	const args =
+		rf.kind === "biome"
+			? ["check", "--write", `--stdin-file-path=${filePath}`]
+			: ["--stdin-filepath", filePath];
+	let r: ReturnType<typeof spawnSync>;
+	try {
+		r = spawnSync(rf.bin, args, { cwd, encoding: "utf8", input: content });
+	} catch {
+		return content;
+	}
+	if (r.status !== 0) return content;
+	const out = typeof r.stdout === "string" ? r.stdout : "";
+	return out.length > 0 ? out : content;
 }
 
 /**
