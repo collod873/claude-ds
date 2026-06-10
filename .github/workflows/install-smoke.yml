@@ -40,12 +40,12 @@ jobs:
           # to authenticated https via env-scoped config — never the host
           # gitconfig (the runner shares this machine with a human).
           GIT_CONFIG_COUNT: "3"
-          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ github.token }}@github.com/.insteadOf
-          GIT_CONFIG_VALUE_0: ssh://git@github.com/
-          GIT_CONFIG_KEY_1: url.https://x-access-token:${{ github.token }}@github.com/.insteadOf
-          GIT_CONFIG_VALUE_1: git@github.com:
-          GIT_CONFIG_KEY_2: url.https://x-access-token:${{ github.token }}@github.com/.insteadOf
-          GIT_CONFIG_VALUE_2: https://github.com/
+          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ github.token }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_0: "ssh://git@github.com/"
+          GIT_CONFIG_KEY_1: "url.https://x-access-token:${{ github.token }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_1: "git@github.com:"
+          GIT_CONFIG_KEY_2: "url.https://x-access-token:${{ github.token }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_2: "https://github.com/"
         run: |
           set -euo pipefail
           EXPECTED="v$(node -p "require('./package.json').version")"
