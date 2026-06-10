@@ -37,6 +37,8 @@ import { buildCommitmentGate } from "../lib/gate-preview.js";
 import { type IntegrityRuleId, isIntegrityFixable } from "../lib/integrity/index.js";
 import { detectBuildCommand } from "../lib/log.js";
 import { parseManifest } from "../lib/manifest.js";
+import { computeMigrationChain } from "../lib/migration-framework.js";
+import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
 import { resolveManifestPath } from "../lib/paths.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { deriveProjectState } from "../lib/project-state.js";
@@ -287,7 +289,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			progress,
 		});
 		if (outcome.kind === "converged") {
-			printLines(["", "✓ Tree is clean."]);
+			printLines(renderClosingSummary(cliVersion(), parsedCfg?.packVersion));
 		} else if (outcome.kind === "exhausted") {
 			printLines([
 				"",
@@ -297,6 +299,35 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 	} finally {
 		progress.stop();
 	}
+}
+
+/**
+ * The closing summary the front door prints once the loop reaches a fixed point
+ * (#503). The bare "✓ Tree is clean" was correct but told the operator nothing
+ * about what the run delivered — the field-report user's whole goal was to "hop
+ * into a session right after and get to work without thinking about the run."
+ *
+ * So the footer states three things, capped at ~3 lines: the version the tree is
+ * now at, what landed since the version they were pinned to (sourced from the
+ * migration chain's `highlights`, omitted when no upgrade happened), and the
+ * "nothing needs your attention — start working" go-ahead. The convergence path
+ * has, by construction, no Pending decisions (the front door resolves
+ * Ambiguities inline) and no unfixable findings (those return `exhausted`, not
+ * `converged`), so the go-ahead is unconditional here; the exhausted branch owns
+ * the to-do framing.
+ */
+function renderClosingSummary(version: string, pinnedBefore: string | undefined): string[] {
+	const lines = ["", `✓ Tree is clean — ${version}.`];
+	if (pinnedBefore && pinnedBefore !== version) {
+		const highlights = computeMigrationChain(pinnedBefore, version, MIGRATION_REGISTRY).flatMap(
+			(mv) => mv.highlights ?? [],
+		);
+		if (highlights.length > 0) {
+			lines.push(`  New since ${pinnedBefore}: ${highlights.join(", ")}.`);
+		}
+	}
+	lines.push("  Nothing needs your attention — start working.");
+	return lines;
 }
 
 /**

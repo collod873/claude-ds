@@ -5,6 +5,14 @@ import { type RunMode, type RunOptions, type RunReport, run } from "./runner.js"
 export interface MigrationVersion {
 	version: string;
 	ops: Operation[];
+	/**
+	 * Short, human-facing release highlights for this version — what a consumer
+	 * *got* by reaching it, in their words not the migration's machine names.
+	 * Sourced into the front door's closing summary ("New since vX: …", #503) by
+	 * walking the migration chain. Curated to one phrase each so the footer stays
+	 * ~3 lines; omit when a version's migrations carry no operator-visible payload.
+	 */
+	highlights?: string[];
 }
 
 /** Parse semver string (strips pre-release suffix) → [major, minor, patch]. */
