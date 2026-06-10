@@ -1,21 +1,27 @@
 name: Agent Auto-Merge
 
-# When agent review passes and adds `ready-to-merge`, merge the PR and close
-# its linked issues. The close is authored with AGENT_PAT, which fires the
-# `issues:closed` event — so promotion of dependent `agent:queued` issues is
-# owned solely by agent-promote-queued.yml (no inline cascade here), and the
-# parent PRD's auto-close is owned by agent-close-completed-prd.yml. We keep
-# one inline cascade — closing the parent PRD when its last sub-issue lands —
-# as a same-run fallback so the PRD doesn't briefly linger if the event-driven
-# close is delayed; it's idempotent with close-completed-prd.yml.
+# When agent review passes and adds `ready-to-merge`, arm GitHub auto-merge so
+# the PR lands only after the repo's required status checks go green (ADR-0006).
+# On repos with no required checks (no ruleset, or auto-merge disallowed) the
+# arm fails fast and we land the PR directly — the pre-ADR-0006 behavior.
+#
+# Both the arm and the direct merge run as AGENT_PAT, never GITHUB_TOKEN: the
+# eventual merge fires this file's own `closed` job plus CI on main, and
+# GITHUB_TOKEN-authored events never trigger workflows. The `closed` job owns
+# everything that used to run inline after a synchronous merge: closing linked
+# issues (authored with AGENT_PAT so `issues:closed` fires — promotion of
+# dependent `agent:queued` issues stays solely with agent-promote-queued.yml,
+# and the parent PRD's auto-close with agent-close-completed-prd.yml), one
+# same-run PRD-close fallback (idempotent with close-completed-prd.yml), and
+# re-kicking armed sibling PRs so staleness is re-checked against the new main.
 
 on:
   pull_request_target:
-    types: [labeled]
+    types: [labeled, closed]
 
 jobs:
   merge:
-    if: github.event.label.name == 'ready-to-merge'
+    if: github.event.action == 'labeled' && github.event.label.name == 'ready-to-merge'
     runs-on: self-hosted
     timeout-minutes: 5
     permissions:
@@ -41,28 +47,37 @@ jobs:
           sparse-checkout: .sandcastle/agent-workflows/shared
           sparse-checkout-cone-mode: false
 
-      - name: Merge PR
-        id: merge
+      - name: Arm auto-merge (or land directly)
         run: |
           set -uo pipefail
-          # Decision tree: land a mergeable, non-stale PR; hand stale/conflicting
+          # Decision tree: arm a mergeable, non-stale PR; hand stale/conflicting
           # ones to the rebase robot (which re-arms ready-to-merge on a real
           # rebase); briefly retry while GitHub is still computing mergeability
           # (UNKNOWN right after a push).
           #
-          # We gate on `mergeable` + staleness, NOT on mergeStateStatus=CLEAN.
-          # This repo has no required PR checks — agent review is the merge gate
-          # (it sets ready-to-merge) — and THIS job's own in-progress `merge`
-          # check run holds the PR at UNSTABLE while we poll, so CLEAN is
-          # unreachable from inside the job. Gating on CLEAN deadlocks and
-          # bounces to the rebase robot forever (the merge loop).
+          # We gate on `mergeable` + staleness, NOT on mergeStateStatus=CLEAN:
+          # required checks are still running when this job fires (that's the
+          # point of arming auto-merge), and this job's own in-progress check
+          # run holds the PR at UNSTABLE anyway — so CLEAN is unreachable from
+          # inside the job. Gating on CLEAN deadlocks and bounces to the rebase
+          # robot forever (the merge loop).
+          #
+          # All merge paths use AGENT_PAT. A GITHUB_TOKEN merge suppresses the
+          # `closed` event, which silently kills the whole post-merge cascade.
+          if [ -n "${AGENT_PAT:-}" ]; then
+            MERGE_TOKEN="$AGENT_PAT"
+          else
+            MERGE_TOKEN="$GH_TOKEN"
+            echo "::warning::AGENT_PAT unset — merging as GITHUB_TOKEN. The closed event will NOT fire, so linked issues stay open and queued dependents are never promoted. Close them manually."
+          fi
           merged=false
           rebase=false
           for attempt in 1 2 3 4 5 6; do
-            data=$(gh pr view "$PR_NUMBER" --json state,mergeable,mergeStateStatus)
+            data=$(gh pr view "$PR_NUMBER" --json state,mergeable,mergeStateStatus,autoMergeRequest)
             st=$(echo "$data" | jq -r '.state')
             m=$(echo "$data" | jq -r '.mergeable')
             s=$(echo "$data" | jq -r '.mergeStateStatus')
+            armed=$(echo "$data" | jq -r '.autoMergeRequest != null')
             # A transient API failure leaves st empty — without this guard it
             # reads as "not OPEN" below and the job silently skips the merge,
             # eating the ready-to-merge label.
@@ -76,14 +91,28 @@ jobs:
               merged=skip; break
             fi
             # Genuinely stale or conflicting → rebase robot. Check this FIRST so a
-            # BEHIND/DIRTY PR is never landed.
+            # BEHIND/DIRTY PR is never landed or left armed.
             if [ "$m" = "CONFLICTING" ] || [ "$s" = "DIRTY" ] || [ "$s" = "BEHIND" ]; then
               echo "PR #$PR_NUMBER is stale/conflicting (mergeable=$m state=$s)."
               rebase=true; break
             fi
-            # Mergeable and not stale → land it (UNSTABLE/HAS_HOOKS included).
+            # Already armed (a re-kick from the closed job, or a duplicate
+            # labeled event) — GitHub lands it when the checks pass; done here.
+            if [ "$armed" = "true" ]; then
+              echo "Auto-merge already armed on #$PR_NUMBER — GitHub merges when required checks pass."
+              merged=armed; break
+            fi
+            # Mergeable and not stale → arm it (UNSTABLE/HAS_HOOKS included).
             if [ "$m" = "MERGEABLE" ] && [ "$s" != "DRAFT" ]; then
-              if gh pr merge "$PR_NUMBER" --squash --delete-branch; then
+              if GH_TOKEN="$MERGE_TOKEN" gh pr merge "$PR_NUMBER" --auto --squash --delete-branch; then
+                echo "Auto-merge armed — GitHub merges #$PR_NUMBER when required checks pass."
+                merged=armed
+                break
+              fi
+              # --auto is rejected when the repo has no required checks to wait
+              # for (no ruleset, allow_auto_merge off, or the PR is already
+              # CLEAN). Land it directly — identical to the pre-ADR-0006 path.
+              if GH_TOKEN="$MERGE_TOKEN" gh pr merge "$PR_NUMBER" --squash --delete-branch; then
                 merged=true
                 break
               fi
@@ -97,8 +126,7 @@ jobs:
             echo "Mergeability still computing (mergeable=$m state=$s); retry $attempt..."
             sleep 5
           done
-          echo "merged=$merged" >> "$GITHUB_OUTPUT"
-          if [ "$merged" = "true" ] || [ "$merged" = "skip" ]; then
+          if [ "$merged" != "false" ]; then
             exit 0
           fi
           # Either a real conflict, or mergeability never settled. Hand to the
@@ -115,8 +143,56 @@ jobs:
           npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" update-branch
           gh pr comment "$PR_NUMBER" --body "Auto-merge couldn't fast-forward (a sibling PR likely landed first) — handed to \`agent:update-branch\` to rebase. The approval is parked as \`merge-pending-update\` and flips back to \`ready-to-merge\` once the branch is current."
 
+  # Runs when an agent-approved PR actually lands — immediately on the direct
+  # path, minutes later (after required checks) on the armed path. Fires only
+  # because the merge above was AGENT_PAT-authored; see the header comment.
+  cascade:
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'ready-to-merge')
+    runs-on: self-hosted
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      AGENT_PAT: ${{ secrets.AGENT_PAT }}
+
+    steps:
+      - name: Checkout main (for the shared labels module)
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          path: _shared
+          sparse-checkout: .sandcastle/agent-workflows/shared
+          sparse-checkout-cone-mode: false
+
+      - name: Re-kick armed sibling PRs
+        run: |
+          set -euo pipefail
+          # This merge moved main, so every other approved-and-waiting PR is now
+          # BEHIND — or newly CONFLICTING, in which case GitHub silently disarms
+          # its auto-merge with no event to catch. Cycling ready-to-merge (via
+          # AGENT_PAT, so the labeled event fires) re-runs the merge job's
+          # decision tree against the new main: stale siblings hand off to the
+          # rebase robot exactly as the old synchronous poll did. This keeps the
+          # wave draining serially instead of stalling on a disarmed PR.
+          siblings=$(gh pr list --state open --label ready-to-merge --json number --jq '.[].number')
+          if [ -z "$siblings" ]; then
+            echo "No armed siblings to re-evaluate."
+          fi
+          for n in $siblings; do
+            echo "Re-evaluating sibling PR #$n against the new main"
+            npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts remove-trigger-label pr "$n" ready-to-merge
+            npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$n" ready-to-merge
+          done
+
       - name: Close linked issues and cascade-close the parent PRD
-        if: steps.merge.outputs.merged == 'true'
         run: |
           set -euo pipefail
           owner="${GH_REPO%/*}"
@@ -132,6 +208,9 @@ jobs:
           fi
 
           for issue in $closed_issues; do
+            # GitHub's native auto-close may have beaten us here. That's fine:
+            # the merge was AGENT_PAT-authored, so the native close is too, and
+            # its issues:closed event already fired the downstream owners.
             state=$(gh issue view "$issue" --json state --jq '.state')
             if [ "$state" = "OPEN" ]; then
               echo "Closing #$issue"
