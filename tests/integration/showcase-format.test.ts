@@ -84,8 +84,12 @@ describe("issue #493 — showcase chrome is consumer-formatted before staging", 
 		});
 		expect(r.code).toBe(0);
 		const page = await readFile(join(dir, "app", "design", "page.tsx"), "utf8");
-		// The Op ran the canonical bytes through the formatter (marker proves it).
+		// The Op ran the canonical bytes through the formatter (marker proves it)…
 		expect(page.includes(MARKER)).toBe(true);
+		// …exactly once: sync must exclude in-memory-formatted paths from its
+		// post-apply batch (the `alreadyFormatted` set). A second pass would have
+		// the fake formatter append a second marker — assert that didn't happen.
+		expect(page.split(MARKER).length - 1).toBe(1);
 	}, 60_000);
 
 	it("a second sync reports app/design as in-sync (no ping-pong)", async () => {
