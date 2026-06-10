@@ -299,7 +299,6 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			// pre-existing consumer errors are noted but do not block. Without this
 			// the front door's verdict diverged from heal's — "Tree is clean" could
 			// coexist with a red typecheck heal would have caught.
-			progress.stop();
 			// Reload the context after the loop, as heal does: an upgrade inside
 			// driveRemediation can change the managed-file set, so attribution must
 			// run against the post-remediation manifest, not the pre-loop one.
@@ -308,6 +307,10 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 				managedFiles: new Set(settledCtx.manifest.files.map((f) => f.path)),
 				managedRoots: ["design-system/"],
 			});
+			// Stop progress only after the gate returns, as heal does (heal.ts): the
+			// spinner stays live through the verify subprocess so a multi-second run
+			// (the timeout ceiling is 300s) reads as "still working," not a freeze.
+			progress.stop();
 			if (!verify.ok) {
 				printLines(renderRedGate(verify));
 				process.exit(1);
