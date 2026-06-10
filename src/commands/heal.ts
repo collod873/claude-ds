@@ -384,21 +384,40 @@ async function reportPendingAndExit(
 
 /** Surface scaffold errors on stderr. Mirror of `audit.ts:reportRedGate`. */
 function reportRedGate(verify: VerifyResult): void {
-	err(
-		`heal: verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
-	);
-	for (const e of verify.scaffoldErrors.slice(0, 20)) {
-		err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
+	if (verify.scaffoldErrors.length > 0) {
+		err(
+			`heal: verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
+		);
+		for (const e of verify.scaffoldErrors.slice(0, 20)) {
+			err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
+		}
+		if (verify.scaffoldErrors.length > 20) {
+			err(`  …and ${verify.scaffoldErrors.length - 20} more`);
+		}
+	} else {
+		// No parseable TS errors — a timeout or a non-tsc failure (Biome/eslint/
+		// vitest). The reason carries the timeout label + limit or the env-failure
+		// note; the raw output tail makes it diagnosable from the report alone (#494).
+		err(
+			`heal: verify gate failed — ${verify.reason ?? `${verify.command} exited ${verify.exitCode}`}`,
+		);
 	}
-	if (verify.scaffoldErrors.length > 20) {
-		err(`  …and ${verify.scaffoldErrors.length - 20} more`);
+	if (verify.outputTail) {
+		err("  ── verify output (tail) ──");
+		for (const line of verify.outputTail.split("\n")) {
+			err(`  ${line}`);
+		}
 	}
 	if (verify.consumerErrors.length > 0) {
 		err(
 			`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`,
 		);
 	}
-	err("Address the listed errors in the managed files and re-run `claude-ds heal`.");
+	err(
+		verify.timedOut
+			? "Re-run with a longer verify timeout or after warming the consumer's tsc/test cache, then `claude-ds heal`."
+			: "Address the failure above and re-run `claude-ds heal`.",
+	);
 }
 
 /** Compact JSON envelope for the verify result on the headless surface. */
@@ -407,6 +426,7 @@ function verifyJson(verify: VerifyResult): Record<string, unknown> {
 		ok: verify.ok,
 		command: verify.command,
 		exitCode: verify.exitCode,
+		timedOut: verify.timedOut,
 		scaffoldErrorCount: verify.scaffoldErrors.length,
 		consumerErrorCount: verify.consumerErrors.length,
 		scaffoldErrors: verify.scaffoldErrors.slice(0, 20).map((e) => ({
@@ -417,5 +437,6 @@ function verifyJson(verify: VerifyResult): Record<string, unknown> {
 			message: e.message,
 		})),
 		reason: verify.reason,
+		...(verify.outputTail !== undefined ? { outputTail: verify.outputTail } : {}),
 	};
 }

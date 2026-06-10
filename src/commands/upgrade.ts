@@ -428,14 +428,26 @@ export async function upgradeCmd(opts: {
 }
 
 function reportRedGate(verify: VerifyResult): void {
-	err(
-		`verify gate failed: ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
-	);
-	for (const e of verify.scaffoldErrors.slice(0, 20)) {
-		err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
+	if (verify.scaffoldErrors.length > 0) {
+		err(
+			`verify gate failed: ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
+		);
+		for (const e of verify.scaffoldErrors.slice(0, 20)) {
+			err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
+		}
+		if (verify.scaffoldErrors.length > 20) {
+			err(`  …and ${verify.scaffoldErrors.length - 20} more`);
+		}
+	} else {
+		// Timeout or non-tsc failure (Biome/eslint/vitest) — no parseable TS
+		// errors. The reason + output tail keep the failure diagnosable (#494).
+		err(`verify gate failed: ${verify.reason ?? `${verify.command} exited ${verify.exitCode}`}`);
 	}
-	if (verify.scaffoldErrors.length > 20) {
-		err(`  …and ${verify.scaffoldErrors.length - 20} more`);
+	if (verify.outputTail) {
+		err("  ── verify output (tail) ──");
+		for (const line of verify.outputTail.split("\n")) {
+			err(`  ${line}`);
+		}
 	}
 	if (verify.consumerErrors.length > 0) {
 		err(
@@ -449,6 +461,7 @@ function verifyJson(verify: VerifyResult): Record<string, unknown> {
 		ok: verify.ok,
 		command: verify.command,
 		exitCode: verify.exitCode,
+		timedOut: verify.timedOut,
 		scaffoldErrorCount: verify.scaffoldErrors.length,
 		consumerErrorCount: verify.consumerErrors.length,
 		scaffoldErrors: verify.scaffoldErrors.slice(0, 20).map((e) => ({
@@ -459,6 +472,7 @@ function verifyJson(verify: VerifyResult): Record<string, unknown> {
 			message: e.message,
 		})),
 		reason: verify.reason,
+		...(verify.outputTail !== undefined ? { outputTail: verify.outputTail } : {}),
 	};
 }
 

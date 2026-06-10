@@ -71,6 +71,13 @@ export interface VerifyResult {
 	timedOut: boolean;
 	/** Pre-existing or environmental note (e.g. "no verify command detected"). */
 	reason?: string;
+	/**
+	 * Truncated tail of the combined stdout/stderr, populated only when the
+	 * run failed (timeout or non-zero exit). Carries the raw failing output
+	 * so a non-tsc failure (Biome, eslint, vitest) is diagnosable from the
+	 * report alone instead of being dropped on the floor (issue #494).
+	 */
+	outputTail?: string;
 }
 
 /** Injectable subprocess executor — tests stub this to assert no real spawn. */
@@ -110,6 +117,8 @@ export interface RunConsumerVerifyOpts {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MANAGED_ROOTS = ["design-system/"];
+/** Max chars of raw failing output kept in `outputTail` — the tail, where the failure summary lives. */
+const OUTPUT_TAIL_CHARS = 4_000;
 
 /**
  * Detect the consumer's verify command. Tries (in order):
@@ -191,14 +200,26 @@ export async function runConsumerVerify(
 		managedRoots: opts.managedRoots ?? DEFAULT_MANAGED_ROOTS,
 	});
 
-	// Env failure: non-zero exit with no parseable errors. Treat as a
-	// scaffold problem so the gate fails loud rather than warning the
-	// operator about a silent runner crash.
 	let ok = scaffoldErrors.length === 0;
 	let reason: string | undefined;
-	if (result.exitCode !== 0 && errors.length === 0) {
+	let outputTail: string | undefined;
+
+	if (result.timedOut) {
+		// Timeout is distinct from a lint/test failure: a cold consumer (fresh
+		// install, no tsc/test cache) can legitimately exceed a limit tuned for
+		// warm runs. Label it as such and show the configured limit (issue #494).
 		ok = false;
-		reason = `${command.label} exited ${result.exitCode} with no parseable errors`;
+		reason = `${command.label} timed out after ${timeoutMs}ms (exit ${result.exitCode}) — a cold consumer (fresh install, no tsc/test cache) can exceed a limit tuned for warm runs; raise the timeout or warm the cache`;
+		outputTail = tailOf(result.stdout, result.stderr);
+	} else if (result.exitCode !== 0 && errors.length === 0) {
+		// Non-zero exit with no parseable TS errors: an env failure of the gate
+		// itself, OR a non-tsc failure (Biome, eslint, vitest) whose output shape
+		// the TS parser doesn't recognize. Treat as a scaffold problem so the
+		// gate fails loud, and carry the raw output so the failure is diagnosable
+		// from the report alone (issue #494).
+		ok = false;
+		reason = `${command.label} exited ${result.exitCode} with no parseable TS errors (likely a non-tsc failure — Biome/eslint/vitest — or an env failure of the verify command itself); see outputTail`;
+		outputTail = tailOf(result.stdout, result.stderr);
 	}
 
 	return {
@@ -210,6 +231,7 @@ export async function runConsumerVerify(
 		consumerErrors,
 		timedOut: result.timedOut,
 		reason,
+		...(outputTail !== undefined ? { outputTail } : {}),
 	};
 }
 
@@ -270,6 +292,18 @@ function isScaffoldPath(file: string, opts: PartitionOpts): boolean {
 		if (normalized.startsWith(prefix)) return true;
 	}
 	return false;
+}
+
+/**
+ * Last `OUTPUT_TAIL_CHARS` of the combined stdout/stderr, trimmed. Keeps the
+ * tail (where the failure summary lives), prefixed with an ellipsis when
+ * truncated so the reader knows the head was dropped.
+ */
+function tailOf(stdout: string, stderr: string): string | undefined {
+	const combined = `${stdout}${stderr}`.trim();
+	if (combined === "") return undefined;
+	if (combined.length <= OUTPUT_TAIL_CHARS) return combined;
+	return `…${combined.slice(-OUTPUT_TAIL_CHARS)}`;
 }
 
 async function exists(p: string): Promise<boolean> {

@@ -284,6 +284,93 @@ describe("runConsumerVerify", () => {
 		}
 	});
 
+	it("labels a timeout as a timeout (not a parse failure) and shows the limit", async () => {
+		const cwd = await freshTmpDir("rcv-timeout-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const result = await runConsumerVerify(cwd, {
+				timeoutMs: 1234,
+				exec: stubExec({ exitCode: 124, stdout: "Linting…\n", timedOut: true }),
+			});
+			expect(result.ok).toBe(false);
+			expect(result.timedOut).toBe(true);
+			// Labeled as a timeout, distinct from the generic "no parseable errors".
+			expect(result.reason).toMatch(/timed out/i);
+			// The configured limit is shown so a cold-run overrun is diagnosable.
+			expect(result.reason).toMatch(/1234/);
+			expect(result.reason).not.toMatch(/no parseable errors/);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
+
+	it("carries the truncated raw output when a verify fails with zero parseable TS errors", async () => {
+		const cwd = await freshTmpDir("rcv-rawtail-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			// A Biome lint failure: real errors, but not in tsc's diagnostic shape.
+			const stdout = [
+				"design-system/atoms/button.tsx:3:1 lint/style/useConst  ━━━",
+				"  × This let declares a variable that is never reassigned.",
+				"Checked 42 files. Found 11 errors.",
+			].join("\n");
+			const result = await runConsumerVerify(cwd, {
+				exec: stubExec({ exitCode: 1, stdout }),
+			});
+			expect(result.ok).toBe(false);
+			expect(result.errors).toEqual([]);
+			// The raw failing output survives in the contract for diagnosis.
+			expect(result.outputTail).toBeDefined();
+			expect(result.outputTail).toMatch(/Found 11 errors/);
+			expect(result.outputTail).toMatch(/lint\/style\/useConst/);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
+
+	it("truncates the raw output tail to a bounded size", async () => {
+		const cwd = await freshTmpDir("rcv-rawtail-trunc-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const stdout = `${"x".repeat(10_000)}\nFINAL LINE: build failed`;
+			const result = await runConsumerVerify(cwd, {
+				exec: stubExec({ exitCode: 1, stdout }),
+			});
+			expect(result.outputTail).toBeDefined();
+			// Bounded — keeps the tail (where the failure summary lives), not the head.
+			expect(result.outputTail?.length).toBeLessThan(10_000);
+			expect(result.outputTail).toMatch(/FINAL LINE: build failed/);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
+
+	it("leaves outputTail undefined on a green run", async () => {
+		const cwd = await freshTmpDir("rcv-green-tail-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const result = await runConsumerVerify(cwd, {
+				exec: stubExec({ exitCode: 0, stdout: "Found 0 errors.\n" }),
+			});
+			expect(result.ok).toBe(true);
+			expect(result.outputTail).toBeUndefined();
+		} finally {
+			await cleanup(cwd);
+		}
+	});
+
 	it("returns ok=true with a `no verify command` reason when nothing is detectable", async () => {
 		const cwd = await freshTmpDir("rcv-none-");
 		try {
