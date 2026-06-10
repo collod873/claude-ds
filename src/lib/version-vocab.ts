@@ -3,8 +3,8 @@
  *
  * Two distinct things kept being conflated in user-facing copy:
  *   - **CLI version** (`pkg.version`): the installed `claude-ds` binary, what
- *     `npx github:collod873/claude-ds#vX.Y.Z` (or a local `npm link`) resolves
- *     to. Always written `v${pkg.version}`.
+ *     `npx claude-ds@X.Y.Z` (or a local `npm link`) resolves to. Always
+ *     written `v${pkg.version}`.
  *   - **Pack pin** (`cfg.packVersion`): the `packVersion` field in the
  *     consumer's `.claude-ds.json`, i.e. the migration target the consumer is
  *     pinned to. Only `upgrade` (and `adopt` on first run) mutates this.

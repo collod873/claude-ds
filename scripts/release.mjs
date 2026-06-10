@@ -4,9 +4,9 @@
 //   npm run release <patch|minor|major|X.Y.Z> ["one-line summary"]
 //
 // The pushed tag is the trigger — .github/workflows/release.yml reacts to
-// `v*` tags, rebuilds, and cuts a GitHub Release with auto-generated notes.
-// This script never touches the README: install strings use `#semver:^1`,
-// so there are no per-release pins to keep in sync.
+// `v*` tags, rebuilds, publishes to npm, and cuts a GitHub Release with
+// auto-generated notes. This script never touches the README: install
+// strings use the npm `@^1` range, so there are no per-release pins to sync.
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -64,5 +64,7 @@ sh(`git commit -m ${JSON.stringify(msg)}`);
 sh(`git tag -a ${tag} -m ${JSON.stringify(msg)}`);
 sh(`git push origin main ${tag}`);
 
-console.log(`\n✓ ${tag} pushed. release.yml will build + cut the GitHub Release.`);
+console.log(
+	`\n✓ ${tag} pushed. release.yml will build, publish to npm, and cut the GitHub Release.`,
+);
 console.log(`  watch: gh run watch  ·  release: gh release view ${tag} --web\n`);

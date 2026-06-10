@@ -1,8 +1,9 @@
 name: Release
 
 # Tag-driven: `npm run release <bump>` pushes a v* tag and this reacts to it.
-# Rebuild from the tagged tree, then cut a GitHub Release with auto-generated
-# notes (the commit log since the previous tag is the changelog).
+# Rebuild from the tagged tree, publish to the npm registry, then cut a
+# GitHub Release with auto-generated notes (the commit log since the previous
+# tag is the changelog).
 on:
   push:
     tags: ["v*"]
@@ -30,3 +31,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+
+  # Publish runs on a GitHub-hosted runner because npm trusted publishing
+  # (OIDC, no long-lived token) does not support self-hosted runners. It
+  # waits for the verify/release job so a broken tree never reaches npm.
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for npm trusted publishing
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm >= 11.5.1; the bundled npm may lag.
+      - run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm publish

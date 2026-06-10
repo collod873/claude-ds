@@ -1,8 +1,18 @@
 {
   "name": "claude-ds",
   "version": "1.7.0",
+  "description": "Design-system governance scaffold CLI — installs a consistent design-system layout, Claude Code hooks, and contracts into consumer projects, then keeps them in sync across releases.",
+  "keywords": ["design-system", "scaffold", "cli", "claude-code", "governance"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/collod873/claude-ds.git"
+  },
   "license": "MIT",
   "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "provenance": false
+  },
   "bin": {
     "claude-ds": "dist/cli.js"
   },
