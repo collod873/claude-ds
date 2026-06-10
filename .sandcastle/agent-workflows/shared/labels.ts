@@ -33,6 +33,11 @@ export const LIFECYCLE_LABELS = {
 
 export const MERGE_GATE_LABELS = {
   readyToMerge: "ready-to-merge",
+  // Parked approval while the rebase robot owns the PR. ready-to-merge must
+  // only ever mean "mergeable right now" — leaving it on during a rebase made
+  // the PR list lie. Auto-merge swaps to this on handoff; update-branch swaps
+  // back after a real rebase.
+  mergePendingUpdate: "merge-pending-update",
 } as const;
 
 // Labels that, when added by AGENT_PAT, fire a downstream workflow.
@@ -176,6 +181,7 @@ export const SHORT_KEY_TO_LABEL: Record<string, TriggerLabel> = {
   "to-issues": TRIGGER_LABELS.toIssues,
   // merge-gate labels (used by addTriggerLabel)
   "ready-to-merge": MERGE_GATE_LABELS.readyToMerge,
+  "merge-pending-update": MERGE_GATE_LABELS.mergePendingUpdate,
 };
 
 export const parseTrigger = (input: string): TriggerLabel => {
