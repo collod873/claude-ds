@@ -45,6 +45,7 @@ import { planRemediation } from "../lib/remediation-planner.js";
 import { renderDashboard } from "../lib/render/index.js";
 import { createProgress, printLines } from "../lib/render/tty-layer.js";
 import { scanDriftAndIntegrity } from "../lib/reports/drift-integrity-scan.js";
+import { scanScaffoldDrift } from "../lib/reports/scaffold-drift.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import { scanRootDupes } from "../lib/root-dupes.js";
 import { checkVersionCurrency } from "../lib/version-currency.js";
@@ -135,6 +136,17 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		verbose: false,
 	});
 
+	// Content-aware health (#463): presence alone reported "N/N ✓" while `sync`
+	// would still rewrite a stale-but-present managed file. Subtract the files
+	// the sync op plans to rewrite (drift, not missing-file creates — those
+	// already lower `present`) so the dashboard never claims clean when sync has
+	// work. Only meaningful once adopted; pre-adopt has no scaffold to drift.
+	let scaffoldPresentClean = scaffold.present;
+	if (ctx.kind === "adopted") {
+		const drift = await scanScaffoldDrift(ctx);
+		scaffoldPresentClean -= drift.driftedPresent;
+	}
+
 	// Missing managed files — same shape doctor's adopted branch computes (#58
 	// honors app_dir when resolving manifest paths).
 	const managedFiles = manifest.files.filter((f) => f.category === "managed");
@@ -199,7 +211,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		cwd,
 		mode: ctx.kind === "adopted" ? "adopted" : "pre-adopt",
 		pack,
-		scaffold: { present: scaffold.present, total: scaffold.total },
+		scaffold: { present: scaffoldPresentClean, total: scaffold.total },
 		missingManaged,
 		rootDupes: rootDupes.length,
 		findings,

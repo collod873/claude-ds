@@ -271,6 +271,34 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
 		expect(r.stdout).not.toMatch(/converged in \d+ iteration\(s\) — 0 changes, 0 findings/);
 	}, 30000);
 
+	// Issue #463 — heal/front-door must deliver managed-file bug fixes to a
+	// consumer whose file is PRESENT but content-drifted, with no manual `sync`.
+	// Before the fix, `scaffoldGap` was presence-only, so a stale-but-present
+	// managed file was invisible and `sync` was never scheduled — the headline
+	// "adopt → heal, no thinking about fixes" promise silently failed for the
+	// exact case it exists to cover.
+	it("heals a present-but-content-drifted managed file via heal alone (#463)", async () => {
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		// Bring the tree to a clean fixed point first, then capture the canonical
+		// bytes of a managed file as the ground truth heal must restore.
+		const baseHeal = await runCli(["heal"], { cwd: dir });
+		expect(baseHeal.code).toBe(0);
+
+		const hookPath = join(dir, ".claude/hooks/atom-imports.sh");
+		const canonical = await readFile(hookPath, "utf8");
+
+		// Drift the file's bytes — present on disk, but stale (the shape a shipped
+		// managed-file bug fix produces in an existing consumer).
+		await writeFile(hookPath, "#!/usr/bin/env bash\n# drifted — not canonical\n");
+		expect(await readFile(hookPath, "utf8")).not.toBe(canonical);
+
+		// A single `heal` — no manual `sync` — must restore canonical bytes.
+		const healed = await runCli(["heal"], { cwd: dir });
+		expect(healed.code).toBe(0);
+		expect(await readFile(hookPath, "utf8")).toBe(canonical);
+	}, 60000);
+
 	it("reports `converged` and exits 0 on an already-clean tree", async () => {
 		await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
 		await mkdir(join(dir, "design-system/atoms"), { recursive: true });
