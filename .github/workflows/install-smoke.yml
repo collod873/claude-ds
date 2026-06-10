@@ -32,7 +32,12 @@ jobs:
           echo "checkpoint: expecting $EXPECTED"
 
           npm ci
-          TARBALL="$PWD/$(npm pack --silent)"
+          # Don't capture `npm pack` stdout: the `prepare` lifecycle (hook
+          # installer) prints to stdout and corrupts the captured filename.
+          # The tarball name is deterministic from the version instead.
+          npm pack >/dev/null
+          TARBALL="$PWD/claude-ds-${EXPECTED#v}.tgz"
+          test -f "$TARBALL" || { echo "FAIL: expected tarball $TARBALL not found"; exit 1; }
           echo "checkpoint: packed $TARBALL"
 
           SCRATCH=$(mktemp -d)
