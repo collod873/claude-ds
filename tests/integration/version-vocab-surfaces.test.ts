@@ -20,10 +20,42 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import pkg from "../../package.json" with { type: "json" };
 import { frontDoorCmd } from "../../src/commands/front-door";
+import { computeMigrationChain } from "../../src/lib/migration-framework";
+import { MIGRATION_REGISTRY } from "../../src/lib/migration-registry";
+import { semverLt } from "../../src/lib/version-currency";
 import { runCli } from "../helpers/runcli";
 import { cleanup, freshTmpDir } from "../helpers/tmpdir";
 
 const CLI_VERSION = `v${pkg.version}`;
+
+/**
+ * The empty-chain fixtures used to hardcode a `v1.0.0` pin and assume nothing
+ * was registered between it and the CLI version (#499). That held for v1.1–v1.6
+ * but `backfill-chart-tokens@v1.7.0` (PR #492) made `v1.0.0 → v1.7.0` non-empty
+ * the instant `package.json` says `1.7.0` — a bomb that only detonated inside
+ * the release bump, never on main.
+ *
+ * Derive the pin instead: the highest registered migration version `<=` the CLI
+ * is the last migration the CLI applies, so the chain from it up to the CLI is
+ * empty *by construction* — regardless of which migrations exist. Whenever the
+ * CLI is ahead of every applied migration (the normal case for a release that
+ * adds no migration at its own version) this pin is also stale, giving the
+ * genuine `pin bump only` scenario #412 guards. When a migration is registered
+ * at the CLI version itself (the release that ships it, e.g. cutting v1.7.0),
+ * the pin equals the CLI — there is no stale-but-empty gap, so those surfaces
+ * report up-to-date rather than `pin bump only`. Either way no phantom arrow.
+ */
+const EMPTY_CHAIN_PIN = (() => {
+	const atOrBelowCli = MIGRATION_REGISTRY.map((m) => m.version).filter(
+		(v) => !semverLt(CLI_VERSION, v),
+	);
+	return atOrBelowCli.reduce((hi, v) => (semverLt(hi, v) ? v : hi), atOrBelowCli[0] ?? CLI_VERSION);
+})();
+
+/** True when the derived pin is below the CLI — i.e. a genuinely stale pin whose
+ *  migration chain is still empty. False only when a migration sits at the CLI
+ *  version itself (pin === CLI), where no stale-empty gap exists. */
+const HAS_STALE_EMPTY_CHAIN = semverLt(EMPTY_CHAIN_PIN, CLI_VERSION);
 
 /** Pre-#412 phantom shape — any surface rendering this for an empty chain is
  *  the regression we are guarding against. */
@@ -50,15 +82,34 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 		await cleanup(dir);
 	});
 
+	// The fixtures below are only meaningful if the derived pin really yields an
+	// empty chain. Assert it here so a future migration registered between the
+	// pin and the CLI fails this fast unit check on `main` — instead of silently
+	// re-arming the #499 bomb that only went off inside the release bump.
+	it("fixture sanity: derived pin yields a genuinely empty migration chain", () => {
+		expect(computeMigrationChain(EMPTY_CHAIN_PIN, CLI_VERSION, MIGRATION_REGISTRY)).toEqual([]);
+	});
+
 	describe("upgrade", () => {
-		it("empty chain (pinned v1.0.0, CLI ahead): body says `pack is at vX`, no phantom arrow", async () => {
-			await writeFile(join(dir, ".claude-ds.json"), JSON.stringify(BASE_CFG));
+		it("empty chain (pinned at last applied migration): body says `pack is at vX`, no phantom arrow", async () => {
+			await writeFile(
+				join(dir, ".claude-ds.json"),
+				JSON.stringify({ ...BASE_CFG, packVersion: EMPTY_CHAIN_PIN }),
+			);
 			const r = await runCli(["upgrade", "--yes"], { cwd: dir });
 			expect(r.code).toBe(0);
-			expect(r.stdout).toMatch(/no registered migrations between v1\.0\.0 and /);
-			expect(r.stdout).toMatch(/pack is at v1\.0\.0/);
+			if (HAS_STALE_EMPTY_CHAIN) {
+				expect(r.stdout).toMatch(
+					new RegExp(`no registered migrations between ${escapeRegex(EMPTY_CHAIN_PIN)} and `),
+				);
+				expect(r.stdout).toMatch(new RegExp(`pack is at ${escapeRegex(EMPTY_CHAIN_PIN)}`));
+			} else {
+				// A migration is registered at the CLI version itself (pin === CLI),
+				// so upgrade is a no-op end-state verify rather than a stale pin bump.
+				expect(r.stdout).toMatch(new RegExp(`already at ${escapeRegex(CLI_VERSION)}`));
+			}
 			// Headline / body cannot contradict — the phantom `pack X → Y` line that
-			// claimed a migration while the body said `pack is at v1.0.0` must not
+			// claimed a migration while the body said the pack was unchanged must not
 			// appear anywhere in the captured stream.
 			expect(r.stdout).not.toMatch(PHANTOM_PACK_ARROW);
 		});
@@ -75,23 +126,31 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 	});
 
 	describe("front-door / heal commitment gate", () => {
-		it("empty chain (pinned v1.0.0): gate header is `pin bump only`, not `pack X → Y`", async () => {
-			// Adopt and force a state where upgrade is in the plan (stale pin), but
-			// the chain is empty — pinned v1.0.0 against CLI v1.4.0 with no
-			// registered migrations beyond v1.0.0. The headline used to read
-			// `upgrade — pack v1.0.0 → v1.4.0` (phantom). Per #412 it must read
-			// `upgrade — pin bump only — pack stays v1.0.0`.
+		it("empty chain (pinned at last applied migration): gate header is `pin bump only`, not `pack X → Y`", async () => {
+			// Adopt and force a stale pin whose migration chain to the CLI is empty.
+			// The headline used to read `upgrade — pack vX → vY` (phantom); per #412
+			// it must read `upgrade — pin bump only — pack stays vX`.
 			const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
 			expect(adopt.code).toBe(0);
 			const cfgPath = join(dir, ".claude-ds.json");
 			const cfg = JSON.parse(await readFile(cfgPath, "utf8"));
-			cfg.packVersion = "v1.0.0";
+			cfg.packVersion = EMPTY_CHAIN_PIN;
 			await writeFile(cfgPath, JSON.stringify(cfg, null, 2));
 
 			const out = await captureFrontDoor({ cwd: dir });
 
-			expect(out).toMatch(/upgrade available/);
-			expect(out).toMatch(/upgrade — pin bump only — pack stays v1\.0\.0/);
+			if (HAS_STALE_EMPTY_CHAIN) {
+				expect(out).toMatch(/upgrade available/);
+				expect(out).toMatch(
+					new RegExp(`upgrade — pin bump only — pack stays ${escapeRegex(EMPTY_CHAIN_PIN)}`),
+				);
+			} else {
+				// A migration is registered at the CLI version (pin === CLI): no
+				// stale-but-empty gap exists, so the gate reports up-to-date. The
+				// pin-bump-only headline is only reachable when the CLI is ahead of
+				// every registered migration.
+				expect(out).not.toMatch(/upgrade available/);
+			}
 			expect(out).not.toMatch(PHANTOM_PACK_ARROW);
 		});
 
