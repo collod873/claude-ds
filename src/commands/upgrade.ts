@@ -360,12 +360,20 @@ export async function upgradeCmd(opts: {
 	// next .tsx edit, leaving the build broken in the meantime.
 	const buildScript = join(cwd, "scripts", "build-manifest.ts");
 	if (existsSync(buildScript)) {
+		// #502: the embedded sync above already regenerated the manifest, so this
+		// post-apply safety run is usually a byte-for-byte no-op. Log only when it
+		// actually changed the file, so a pass narrates the regen once at most.
+		const manifestPath = join(cwd, "design-system", "manifest.generated.ts");
+		const before = await readFile(manifestPath, "utf8").catch(() => null);
 		try {
 			await execFile("node", ["--experimental-strip-types", buildScript], {
 				cwd,
 				timeout: 30_000,
 			});
-			humanLog("regenerated design-system/manifest.generated.ts");
+			const after = await readFile(manifestPath, "utf8").catch(() => null);
+			if (after !== before) {
+				humanLog("regenerated design-system/manifest.generated.ts");
+			}
 		} catch (e: unknown) {
 			const exitCode = (e as { code?: number }).code ?? "?";
 			humanLog(

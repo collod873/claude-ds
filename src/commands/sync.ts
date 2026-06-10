@@ -100,12 +100,35 @@ export async function syncCmd(opts: {
 	const planResult = await op.plan(ctx);
 	const decisions = planResult.outcome.decisions;
 
+	// #18d: compute whether .claude-ds.json config keys (aside from packVersion)
+	// will change — needed up front so a no-drift pass can be detected before
+	// narrating.
+	const nonVersionKeys = Object.keys(cfg).filter((k) => k !== "packVersion") as Array<
+		keyof typeof cfg
+	>;
+	const changedConfigKeys = nonVersionKeys.filter(
+		(k) => JSON.stringify(cfg[k]) !== JSON.stringify({ ...cfg, packVersion: target }[k]),
+	);
+	const configChanged = changedConfigKeys.length > 0;
+
+	// #502: the convergence loop runs sync twice (embedded in `upgrade`, then as
+	// its own standalone step). The second pass is a no-op, yet it used to reprint
+	// the per-reason skip count + "config unchanged" + "sync complete", forcing the
+	// reader to reconcile two passes with conflicting skip counts. A pass that
+	// changes nothing is collapsed to a single `sync: no drift` line. --verbose
+	// (explicit request for detail) and --dry-run (its own preview contract) opt
+	// out of the collapse.
+	const planClean = decisions.every((d) => d.verdict.action === "skip");
+	const collapse = planClean && !configChanged && !verbose && !opts.dryRun;
+
 	// Render preview in the existing user-facing format (tests assert on these labels).
 	// #450: by default the per-file `skip: <path> — …` lines are a ~40-line wall
 	// that buries the one `rewrite:` line that actually matters. Keep every
 	// action line (rewrite/create/abort/rewrite-region) visible; collapse the
 	// no-op `skip` decisions to a per-reason count. --verbose lists them all.
-	if (verbose) {
+	if (collapse) {
+		// Suppressed — narrated as a single `sync: no drift` line below.
+	} else if (verbose) {
 		for (const d of decisions) {
 			info(`${d.displayAction}: ${d.displayPath} — ${d.verdict.reason}`);
 		}
@@ -132,17 +155,12 @@ export async function syncCmd(opts: {
 		}
 	}
 
-	// #18d: summarise whether .claude-ds.json config keys (aside from packVersion) will change.
-	{
-		const nonVersionKeys = Object.keys(cfg).filter((k) => k !== "packVersion") as Array<
-			keyof typeof cfg
-		>;
-		const nextVersion = target;
-		const changedKeys = nonVersionKeys.filter(
-			(k) => JSON.stringify(cfg[k]) !== JSON.stringify({ ...cfg, packVersion: nextVersion }[k]),
-		);
-		if (changedKeys.length > 0) {
-			info(`config will change: ${changedKeys.join(", ")}`);
+	// #18d: summarise whether .claude-ds.json config keys (aside from packVersion)
+	// will change. Suppressed on a no-drift pass (#502) — the single `sync: no
+	// drift` line below stands in for the whole no-op narration.
+	if (!collapse) {
+		if (configChanged) {
+			info(`config will change: ${changedConfigKeys.join(", ")}`);
 		} else {
 			info("config unchanged");
 		}
@@ -198,13 +216,24 @@ export async function syncCmd(opts: {
 	}
 
 	const buildScript = join(cwd, "scripts", "build-manifest.ts");
+	let manifestChanged = false;
 	if (existsSync(buildScript)) {
+		// #502: build-manifest is idempotent, so the convergence loop re-runs it
+		// across sync + upgrade and used to narrate "regenerated …" on every
+		// invocation even when the bytes were identical. Log only when the output
+		// actually changed, so a pass regenerates the line once (or not at all).
+		const manifestPath = join(cwd, "design-system", "manifest.generated.ts");
+		const before = await readFile(manifestPath, "utf8").catch(() => null);
 		try {
 			await execFile("node", ["--experimental-strip-types", buildScript], {
 				cwd,
 				timeout: 30_000,
 			});
-			info("regenerated design-system/manifest.generated.ts");
+			const after = await readFile(manifestPath, "utf8").catch(() => null);
+			if (after !== before) {
+				manifestChanged = true;
+				info("regenerated design-system/manifest.generated.ts");
+			}
 		} catch (e: unknown) {
 			const exitCode = (e as { code?: number }).code ?? "?";
 			info(
@@ -259,7 +288,15 @@ export async function syncCmd(opts: {
 		}
 	}
 
-	info(`sync complete → ${target}${verify ? ` (verified via ${verify.command})` : ""}`);
+	// #502: collapse a no-op pass to one line. `collapse` was decided pre-apply
+	// from an all-skip plan + unchanged config; honour it only when nothing
+	// actually moved (a deleted/stale generated manifest can still get rewritten
+	// here, in which case the real "regenerated …" + "sync complete" lines stand).
+	if (collapse && writes === 0 && aborts === 0 && !manifestChanged) {
+		info("sync: no drift");
+	} else {
+		info(`sync complete → ${target}${verify ? ` (verified via ${verify.command})` : ""}`);
+	}
 	const brownfield = await hasConsumerTierFiles(cwd);
 
 	if (opts.json) {

@@ -405,3 +405,41 @@ describe("Issue #18d — sync preview config line", () => {
 		expect(r.stdout).toMatch(/config (unchanged|will change)/i);
 	});
 });
+
+describe("#502 — no-op sync collapses to one glanceable line", () => {
+	let dir: string;
+	beforeEach(async () => {
+		dir = await freshTmpDir();
+	});
+	afterEach(async () => {
+		await cleanup(dir);
+	});
+
+	it("re-sync on an in-sync tree prints 'sync: no drift', not full re-narration", async () => {
+		const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(adopt.code).toBe(0);
+		// First sync settles any residual delta between adopt and sync; the second
+		// is guaranteed a pure no-op.
+		await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir });
+		const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir });
+		expect(r.code).toBe(0);
+		expect(r.stdout).toContain("sync: no drift");
+		// Full narration suppressed on a no-op pass (the #502 conflicting-counts fix).
+		expect(r.stdout).not.toContain("sync complete");
+		expect(r.stdout).not.toMatch(/already in sync/);
+		expect(r.stdout).not.toContain("regenerated design-system/manifest.generated.ts");
+	}, 30_000);
+
+	it("--verbose still lists per-file skips on a no-op tree", async () => {
+		const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(adopt.code).toBe(0);
+		await runCli(["sync", "--offline-fixture", "packs/next-react"], { cwd: dir });
+		const r = await runCli(["sync", "--verbose", "--offline-fixture", "packs/next-react"], {
+			cwd: dir,
+		});
+		expect(r.code).toBe(0);
+		// Verbose explicitly asked for detail — the one-liner collapse does not apply.
+		expect(r.stdout).toMatch(/skip:/);
+		expect(r.stdout).toContain("sync complete");
+	}, 30_000);
+});
