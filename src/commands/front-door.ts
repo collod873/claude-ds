@@ -300,8 +300,12 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			// the front door's verdict diverged from heal's — "Tree is clean" could
 			// coexist with a red typecheck heal would have caught.
 			progress.stop();
+			// Reload the context after the loop, as heal does: an upgrade inside
+			// driveRemediation can change the managed-file set, so attribution must
+			// run against the post-remediation manifest, not the pre-loop one.
+			const settledCtx = await loadProject(cwd);
 			const verify = await runConsumerVerify(cwd, {
-				managedFiles: new Set(ctx.manifest.files.map((f) => f.path)),
+				managedFiles: new Set(settledCtx.manifest.files.map((f) => f.path)),
 				managedRoots: ["design-system/"],
 			});
 			if (!verify.ok) {
