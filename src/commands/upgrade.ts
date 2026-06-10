@@ -253,20 +253,53 @@ export async function upgradeCmd(opts: {
 
 	if (chain.length === 0) {
 		humanLog(`no registered migrations between ${from} and ${to}`);
-		humanLog(`pack is at ${from}`);
 		const dr = await verifyEndStates(ctx, from, { ...opts, renderMode, jsonAccumulator });
 		if (typeof dr !== "number") return dr;
 		const drifted = dr;
+
+		// Defect 1 (#531, ADR-0029): an empty migration range is informational,
+		// never a blocker. The installed CLI is ahead of the pinned pack but no
+		// registered migration spans the gap — there are no bytes to migrate, yet
+		// the pin must still advance to `to`, otherwise "upgrade available" never
+		// clears and the heal loop repeats this no-op forever (the Crewops
+		// v1.7.0 → v1.8.0 convergence failure). Advancing the pin without
+		// migrations is safe because the pin records migration progress only;
+		// managed-file reconciliation is owned by `sync`, which heal runs
+		// immediately after this step. A dry-run previews but never writes.
+		if (opts.dryRun) {
+			humanLog(`pack is at ${from}`);
+			if (opts.json) {
+				return emitUpgradeHeadless(
+					HEADLESS_EXIT.OK,
+					drifted > 0 ? "repaired" : "no-op",
+					jsonAccumulator ?? [],
+					{ from, to, drifted, applied: false, dryRun: true, chainLength: 0 },
+					{ findingsCount: 0 },
+				);
+			}
+			return success(upgradeHint(drifted > 0 ? "repaired" : "no-op"));
+		}
+
+		const detectedImports = await detectAllowedImports(cwd, ctx.cfg.domain_roots);
+		const pinCtx = await loadProject(cwd);
+		const pinReport = await run(pinCtx, [finalizeUpgrade(to, detectedImports)], "apply");
+		if (pinReport.failed) {
+			const m = `pin advance failed: ${pinReport.failed.error}`;
+			err(m);
+			if (opts.json) emitHeadless(errorResult("upgrade", m));
+			return commandError(2);
+		}
+		humanLog(`pin advanced ${from} → ${to} (no migrations to apply)`);
 		if (opts.json) {
 			return emitUpgradeHeadless(
 				HEADLESS_EXIT.OK,
-				drifted > 0 ? "repaired" : "no-op",
+				"applied",
 				jsonAccumulator ?? [],
-				{ from, to, drifted, applied: false, chainLength: 0 },
+				{ from, to, drifted, applied: true, chainLength: 0 },
 				{ findingsCount: 0 },
 			);
 		}
-		return success(upgradeHint(drifted > 0 ? "repaired" : "no-op"));
+		return success(upgradeHint("applied"));
 	}
 
 	humanLog(`upgrading from ${from} → ${to}`);
