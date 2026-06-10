@@ -31,6 +31,14 @@ function stubExec(returned: {
 	});
 }
 
+/** Exec stub that records the resolved `timeoutMs` the runner passed it. */
+function capturingExec(seen: { timeoutMs: number }): ExecFn {
+	return async (_cmd, _args, { timeoutMs }) => {
+		seen.timeoutMs = timeoutMs;
+		return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
+	};
+}
+
 describe("parseVerifyErrors", () => {
 	it("parses a tsc-style diagnostic line", () => {
 		const raw = `design-system/atoms/button.tsx(12,7): error TS2304: Cannot find name 'Foo'.`;
@@ -380,6 +388,78 @@ describe("runConsumerVerify", () => {
 			expect(result.command).toBe("(none)");
 			expect(result.reason).toMatch(/no verify command/);
 		} finally {
+			await cleanup(cwd);
+		}
+	});
+
+	it("defaults the verify timeout to 300_000 ms (suite-scaled — issue #497)", async () => {
+		const cwd = await freshTmpDir("rcv-timeout-default-");
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			const seen = { timeoutMs: -1 };
+			await runConsumerVerify(cwd, { exec: capturingExec(seen) });
+			expect(seen.timeoutMs).toBe(300_000);
+		} finally {
+			await cleanup(cwd);
+		}
+	});
+
+	it("honors CLAUDE_DS_VERIFY_TIMEOUT (seconds) as a timeout override", async () => {
+		const cwd = await freshTmpDir("rcv-timeout-env-");
+		const prev = process.env.CLAUDE_DS_VERIFY_TIMEOUT;
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			process.env.CLAUDE_DS_VERIFY_TIMEOUT = "45";
+			const seen = { timeoutMs: -1 };
+			await runConsumerVerify(cwd, { exec: capturingExec(seen) });
+			expect(seen.timeoutMs).toBe(45_000);
+		} finally {
+			if (prev === undefined) delete process.env.CLAUDE_DS_VERIFY_TIMEOUT;
+			else process.env.CLAUDE_DS_VERIFY_TIMEOUT = prev;
+			await cleanup(cwd);
+		}
+	});
+
+	it("lets opts.timeoutMs win over the env var", async () => {
+		const cwd = await freshTmpDir("rcv-timeout-precedence-");
+		const prev = process.env.CLAUDE_DS_VERIFY_TIMEOUT;
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			process.env.CLAUDE_DS_VERIFY_TIMEOUT = "45";
+			const seen = { timeoutMs: -1 };
+			await runConsumerVerify(cwd, { timeoutMs: 9_999, exec: capturingExec(seen) });
+			expect(seen.timeoutMs).toBe(9_999);
+		} finally {
+			if (prev === undefined) delete process.env.CLAUDE_DS_VERIFY_TIMEOUT;
+			else process.env.CLAUDE_DS_VERIFY_TIMEOUT = prev;
+			await cleanup(cwd);
+		}
+	});
+
+	it("ignores a non-numeric CLAUDE_DS_VERIFY_TIMEOUT and falls back to the default", async () => {
+		const cwd = await freshTmpDir("rcv-timeout-bad-env-");
+		const prev = process.env.CLAUDE_DS_VERIFY_TIMEOUT;
+		try {
+			await writeFile(
+				join(cwd, "package.json"),
+				JSON.stringify({ scripts: { verify: "tsc --noEmit" } }),
+			);
+			process.env.CLAUDE_DS_VERIFY_TIMEOUT = "not-a-number";
+			const seen = { timeoutMs: -1 };
+			await runConsumerVerify(cwd, { exec: capturingExec(seen) });
+			expect(seen.timeoutMs).toBe(300_000);
+		} finally {
+			if (prev === undefined) delete process.env.CLAUDE_DS_VERIFY_TIMEOUT;
+			else process.env.CLAUDE_DS_VERIFY_TIMEOUT = prev;
 			await cleanup(cwd);
 		}
 	});

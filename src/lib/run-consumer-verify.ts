@@ -111,11 +111,24 @@ export interface RunConsumerVerifyOpts {
 	command?: { cmd: string; args: string[]; label: string };
 	/** Override the subprocess executor (test seam). */
 	exec?: ExecFn;
-	/** Subprocess timeout. Default 60_000 ms. */
+	/**
+	 * Subprocess timeout. Resolution order: this option → the
+	 * `CLAUDE_DS_VERIFY_TIMEOUT` env var (whole seconds) → `DEFAULT_TIMEOUT_MS`.
+	 */
 	timeoutMs?: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+/**
+ * Default verify timeout. 300s, not 60s (issue #497): a real consumer's full
+ * verify chain (`typecheck && lint && test`) routinely exceeds a minute on a
+ * warm run — vitest's cold import alone can be ~40s — so a 60s ceiling SIGKILLs
+ * green suites and heal reports `verify-failed` on a passing tree. 300s is
+ * suite-scaled; outliers raise it per-run via `--verify-timeout` (heal) or the
+ * `CLAUDE_DS_VERIFY_TIMEOUT` env var.
+ */
+const DEFAULT_TIMEOUT_MS = 300_000;
+/** Env var (whole seconds) overriding the verify timeout when no explicit `timeoutMs` is passed. */
+const TIMEOUT_ENV_VAR = "CLAUDE_DS_VERIFY_TIMEOUT";
 const DEFAULT_MANAGED_ROOTS = ["design-system/"];
 /** Max chars of raw failing output kept in `outputTail` — the tail, where the failure summary lives. */
 const OUTPUT_TAIL_CHARS = 4_000;
@@ -190,7 +203,7 @@ export async function runConsumerVerify(
 	}
 
 	const exec = opts.exec ?? defaultExec;
-	const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+	const timeoutMs = opts.timeoutMs ?? envTimeoutMs() ?? DEFAULT_TIMEOUT_MS;
 	const result = await exec(command.cmd, command.args, { cwd, timeoutMs });
 
 	const errors = parseVerifyErrors(result.stdout + "\n" + result.stderr);
@@ -209,7 +222,7 @@ export async function runConsumerVerify(
 		// install, no tsc/test cache) can legitimately exceed a limit tuned for
 		// warm runs. Label it as such and show the configured limit (issue #494).
 		ok = false;
-		reason = `${command.label} timed out after ${timeoutMs}ms (exit ${result.exitCode}) — a cold consumer (fresh install, no tsc/test cache) can exceed a limit tuned for warm runs; raise the timeout or warm the cache`;
+		reason = `${command.label} timed out after ${timeoutMs}ms (exit ${result.exitCode}) — a cold consumer (fresh install, no tsc/test cache) can exceed a limit tuned for warm runs; raise it via heal --verify-timeout <s> or CLAUDE_DS_VERIFY_TIMEOUT (seconds), or warm the cache`;
 		outputTail = tailOf(result.stdout, result.stderr);
 	} else if (result.exitCode !== 0 && errors.length === 0) {
 		// Non-zero exit with no parseable TS errors: an env failure of the gate
@@ -304,6 +317,20 @@ function tailOf(stdout: string, stderr: string): string | undefined {
 	if (combined === "") return undefined;
 	if (combined.length <= OUTPUT_TAIL_CHARS) return combined;
 	return `…${combined.slice(-OUTPUT_TAIL_CHARS)}`;
+}
+
+/**
+ * Resolve the `CLAUDE_DS_VERIFY_TIMEOUT` env var (whole seconds) to
+ * milliseconds, or `undefined` when unset / not a positive number — so a
+ * typo'd value falls back to the default rather than silently disabling the
+ * gate with a 0/NaN timeout.
+ */
+function envTimeoutMs(): number | undefined {
+	const raw = process.env[TIMEOUT_ENV_VAR];
+	if (raw === undefined || raw.trim() === "") return undefined;
+	const seconds = Number(raw);
+	if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+	return Math.round(seconds * 1000);
 }
 
 async function exists(p: string): Promise<boolean> {
