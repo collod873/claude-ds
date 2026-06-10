@@ -1,18 +1,21 @@
 import { allRuleIds, type DriftRuleId } from "./drift/index.js";
 import { allIntegrityRuleIds, type IntegrityRuleId } from "./integrity/index.js";
 import { allOwnedConcernIds, type OwnedConcernId } from "./owned-concerns/index.js";
+import { allStructuralBypassIds, type StructuralBypassId } from "./structural-bypass/index.js";
 
 /**
- * Valid `rule` values in `exceptions.json` (ADR-0017, #316).
+ * Valid `rule` values in `exceptions.json` (ADR-0017 / ADR-0026, #316).
  *
- * Unifies the three audit-rule families consumers can dismiss: drift +
- * integrity rules surfaced by `audit`, and Owned-concern findings surfaced
- * by `doctor --completeness`. One shape, one shape only — there is no
- * separate "completeness exception" kind. `permanent: true` covers
- * detector over-match ("not actually DS"); an issue link covers a tracked
- * gap pending upstream removal (ADR-0003).
+ * Unifies the audit-rule families consumers can dismiss: drift + integrity
+ * rules surfaced by `audit`, Owned-concern findings surfaced by
+ * `doctor --completeness`, and structural-bypass triage candidates surfaced
+ * advisory by `audit` (ADR-0026). One shape, one shape only — there is no
+ * separate "completeness exception" or "advisory exception" kind.
+ * `permanent: true` covers detector over-match ("not actually a bypass" — the
+ * non-badge `rounded-full` pill); an issue link covers a tracked gap pending
+ * upstream removal (ADR-0003).
  */
-export type AuditRuleId = DriftRuleId | IntegrityRuleId | OwnedConcernId;
+export type AuditRuleId = DriftRuleId | IntegrityRuleId | OwnedConcernId | StructuralBypassId;
 
 export class ExceptionError extends Error {}
 
@@ -45,6 +48,7 @@ export function parseExceptions(raw: string): Exception[] {
 		...allRuleIds(),
 		...allIntegrityRuleIds(),
 		...allOwnedConcernIds(),
+		...allStructuralBypassIds(),
 	]);
 	const arr: unknown[] = parsed.exceptions;
 	const result: Exception[] = [];
@@ -57,7 +61,7 @@ export function parseExceptions(raw: string): Exception[] {
 
 		if (!validIds.has(entry.rule))
 			throw new ExceptionError(
-				`unknown rule ID "${entry.rule}" in exceptions.json — registered IDs: ${[...allRuleIds(), ...allIntegrityRuleIds(), ...allOwnedConcernIds()].join(", ")}`,
+				`unknown rule ID "${entry.rule}" in exceptions.json — registered IDs: ${[...allRuleIds(), ...allIntegrityRuleIds(), ...allOwnedConcernIds(), ...allStructuralBypassIds()].join(", ")}`,
 			);
 
 		if (typeof entry.path !== "string")
