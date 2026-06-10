@@ -108,6 +108,26 @@ interface DispatchOpts {
 }
 
 /**
+ * What a dispatched step did. `progress` is the explicit progress/no-op signal
+ * (#532): `true` when the step changed bytes, `false` when it visited its work
+ * and changed nothing (a skip-all reconform, a no-op pass). The loop renders ✔
+ * only on progress; a no-progress step reports "nothing to do" instead, so a
+ * checkmark always means the step cleared real work (defect 6).
+ *
+ * For the command-wrapped members (`sync`/`upgrade`/`classify`/`audit`) the
+ * driver can't introspect the RunReport buried inside the command, so it reports
+ * `progress: true` — those steps only land in the plan when their state signal
+ * fires, so a no-op is the exception, and the iteration-level fixed-point check
+ * (byte-stable + plan still non-empty → named blocker) catches a stuck command
+ * step regardless. `reconform` runs through `run()` here directly, so it reports
+ * its real per-Op progress.
+ */
+interface StepResult {
+	exitCode: number;
+	progress: boolean;
+}
+
+/**
  * Map a planner `LoopStep` to the command that executes it.
  *
  * `repair` routes to `upgradeCmd` — the same code path that verifies and
@@ -137,26 +157,6 @@ interface DispatchOpts {
  * refuse on the very state the driver just produced. The caller is responsible
  * for the top-level clean-tree decision before the loop runs.
  */
-/**
- * What a dispatched step did. `progress` is the explicit progress/no-op signal
- * (#532): `true` when the step changed bytes, `false` when it visited its work
- * and changed nothing (a skip-all reconform, a no-op pass). The loop renders ✔
- * only on progress; a no-progress step reports "nothing to do" instead, so a
- * checkmark always means the step cleared real work (defect 6).
- *
- * For the command-wrapped members (`sync`/`upgrade`/`classify`/`audit`) the
- * driver can't introspect the RunReport buried inside the command, so it reports
- * `progress: true` — those steps only land in the plan when their state signal
- * fires, so a no-op is the exception, and the iteration-level fixed-point check
- * (byte-stable + plan still non-empty → named blocker) catches a stuck command
- * step regardless. `reconform` runs through `run()` here directly, so it reports
- * its real per-Op progress.
- */
-interface StepResult {
-	exitCode: number;
-	progress: boolean;
-}
-
 export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<StepResult> {
 	const { cwd, answers, pendingSink, progress } = opts;
 	// Issue #437 (ADR-0018): each loop member runs as a plain function and returns
