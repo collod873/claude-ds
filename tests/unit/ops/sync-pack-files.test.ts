@@ -163,6 +163,29 @@ describe("syncPackFiles op — plan()", () => {
 		expect(c.mode).toBe("executable");
 	});
 
+	it("does not set mode: 'executable' on data files under .claude/hooks/ (#507)", async () => {
+		await mkdir(join(packDir, "files", ".claude", "hooks"), { recursive: true });
+		await writeFile(
+			join(packDir, "files", ".claude/hooks/atom-imports.sh.verify-fixture.json"),
+			"{}\n",
+		);
+		await writeFile(join(packDir, "files", ".claude/hooks/README.md"), "# hooks\n");
+		const manifest: Manifest = makeManifest({
+			files: [
+				{ path: ".claude/hooks/atom-imports.sh.verify-fixture.json", category: "seeded" },
+				{ path: ".claude/hooks/README.md", category: "seeded" },
+			],
+		});
+		const op = makeSyncPackFiles();
+		const { changes } = await op.plan(makeCtx(manifest));
+		expect(changes).toHaveLength(2);
+		for (const ch of changes) {
+			const c = ch as Extract<Change, { kind: "write" }>;
+			expect(c.kind).toBe("write");
+			expect(c.mode).toBeUndefined();
+		}
+	});
+
 	it("does not set mode on write Changes for non-hook/script paths", async () => {
 		await writeFile(join(packDir, "files", "a.txt"), "new\n");
 		const manifest: Manifest = makeManifest({
