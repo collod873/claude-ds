@@ -45,6 +45,7 @@ import { setConfigMode } from "./ops/set-config-mode.js";
 import { loadProject } from "./project.js";
 import { deriveProjectState } from "./project-state.js";
 import { type LoopStep, planRemediation } from "./remediation-planner.js";
+import { renderPerFileNotices } from "./render/index.js";
 import type { ProgressController } from "./render/tty-layer.js";
 import { run } from "./runner.js";
 
@@ -162,10 +163,18 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
 			const ctx = await loadProject(cwd);
 			const report = await run(ctx, [planGeneratedIntegrityFixes()], "apply");
 			const outcome = report.ops[0]?.outcome as GenIntegrityOutcome | undefined;
-			for (const file of outcome?.skipped ?? []) {
-				progress.info(
-					`reconform: ${file} skipped — JSX-bearing example can't be regenerated (ADR-0026); verify by hand`,
-				);
+			// #534: collapse a per-file wall of identical "verify by hand" notices to
+			// one count via the shared rendering-layer path (defect 5). The driver runs
+			// heal's inner steps quietly, so it never opts into the verbose per-file list.
+			const skipNotices = (outcome?.skipped ?? []).map((file) => ({
+				kind: "reconform-skipped-jsx",
+				line: `reconform: ${file} skipped — JSX-bearing example can't be regenerated (ADR-0026); verify by hand`,
+			}));
+			for (const line of renderPerFileNotices(skipNotices, {
+				summarize: (_kind, n) =>
+					`reconform: ${n} files skipped — JSX-bearing examples can't be regenerated (ADR-0026); verify by hand`,
+			})) {
+				progress.info(line);
 			}
 			return report.failed ? 1 : 0;
 		}
