@@ -91,17 +91,20 @@ main();
 `;
 
 describe("owned-concern registry", () => {
-	it("exposes OWNED-TOKEN-LINT as the one registered concern", () => {
+	it("exposes the registered concerns", () => {
 		const ids = allOwnedConcernIds();
 		expect(ids).toContain("OWNED-TOKEN-LINT");
+		expect(ids).toContain("OWNED-BASE-UI-ASCHILD-VALIDATOR");
+		expect(ids).toContain("OWNED-APP-WIDE-TOKEN-LINT");
 	});
 
-	it("ships exactly one concern (grow-on-demand per ADR-0017)", () => {
-		// This guard is intentional: a second concern lands only on real
-		// shadow-infra evidence from a consumer, accompanied by an updated
-		// ADR-0017 amendment. If you are flipping this expectation, that
-		// amendment is the contract you are signing.
-		expect(allOwnedConcernIds()).toHaveLength(1);
+	it("ships exactly three concerns (grow-on-demand per ADR-0017)", () => {
+		// This guard is intentional: a concern lands only on real shadow-infra
+		// evidence from a consumer, accompanied by an updated ADR-0017
+		// amendment. The base-ui / app-wide entries are the v1.7.0 Crewops dig
+		// (#505). If you are flipping this expectation, that amendment is the
+		// contract you are signing.
+		expect(allOwnedConcernIds()).toHaveLength(3);
 	});
 
 	it("returns a description for every registered concern", () => {
@@ -117,6 +120,18 @@ describe("owned-concern registry", () => {
 	// DRIFT-TOKEN-PARITY ships.
 	it("OWNED-TOKEN-LINT is superseded by DRIFT-TOKEN-PARITY", () => {
 		expect(ownedConcernSupersededBy("OWNED-TOKEN-LINT")).toBe("DRIFT-TOKEN-PARITY");
+	});
+
+	// #505: the v1.7.0 hooks are the designated absorbers of Crewops's two
+	// hand-rolled validators. The supersession names the shipped hook.
+	it("OWNED-BASE-UI-ASCHILD-VALIDATOR is superseded by the base-ui hook", () => {
+		expect(ownedConcernSupersededBy("OWNED-BASE-UI-ASCHILD-VALIDATOR")).toBe(
+			"HOOK-BASE-UI-ASCHILD",
+		);
+	});
+
+	it("OWNED-APP-WIDE-TOKEN-LINT is superseded by the app-wide tokens hook", () => {
+		expect(ownedConcernSupersededBy("OWNED-APP-WIDE-TOKEN-LINT")).toBe("HOOK-TOKENS-APP-WIDE");
 	});
 });
 
@@ -178,6 +193,139 @@ describe("OWNED-TOKEN-LINT detector", () => {
 		const b = evaluateOwnedConcerns(input);
 		expect(a).toEqual(b);
 	});
+
+	// #505: the DS-parity tightening must not also catch the app-wide
+	// write-time validator — that file has no design-system / tokens.json /
+	// parity signal, only generic raw-value vocabulary. Claiming it here would
+	// mis-supersede it with DRIFT-TOKEN-PARITY (a DS-scoped parity check that
+	// does NOT cover app-wide raw-value blocking) — the false-supersession the
+	// gate exists to prevent.
+	it("stays silent on the app-wide write-time token validator (owned elsewhere)", () => {
+		const findings = evaluateOwnedConcerns({
+			file: ".claude/hooks/ui-token-validator.sh",
+			source: UI_TOKEN_VALIDATOR_FIXTURE,
+		});
+		expect(findings.filter((f) => f.concernId === "OWNED-TOKEN-LINT")).toHaveLength(0);
+	});
+});
+
+// #505 — Crewops's hand-rolled base-ui asChild gate. base-ui composes via the
+// `render` prop, not Radix's asChild; this script blocks a stray asChild at
+// write time. The pack's pre-write-base-ui.sh (BASEUI-001) absorbs it.
+const BASE_UI_ASCHILD_VALIDATOR_FIXTURE = `#!/usr/bin/env bash
+# base-ui-aschild-validator.sh — base-ui composes via the \`render\` prop, not
+# Radix's asChild. Block any stray asChild on a base-ui part: it is a silent
+# no-op. Runs as a PreToolUse hook on .tsx writes.
+set -euo pipefail
+file="$1"
+case "$file" in *.tsx|*.jsx) ;; *) exit 0 ;; esac
+if grep -nE '\\basChild\\b' "$file"; then
+  echo "$file: asChild is Radix-only; base-ui uses render={<El/>}" >&2
+  exit 2
+fi
+exit 0
+`;
+
+// #505 — Crewops's hand-rolled app-wide token validator. Blocks raw
+// color/spacing literals across ALL component files, not just design-system/.
+// The pack's pre-write-tokens-app-wide.sh (TOK-*) absorbs it. Deliberately
+// carries NO design-system / tokens.json / parity vocabulary, so it is the
+// app-wide concern's shape, not OWNED-TOKEN-LINT's.
+const UI_TOKEN_VALIDATOR_FIXTURE = `#!/usr/bin/env bash
+# ui-token-validator.sh — block raw color and spacing literals in ALL UI
+# component files (app/, components/, ui/). Every value must come from our
+# design tokens. Runs app-wide as a PreToolUse hook on every .tsx/.css write.
+set -euo pipefail
+file="$1"
+case "$file" in *.tsx|*.jsx|*.css) ;; *) exit 0 ;; esac
+violations=0
+if grep -nE '#[0-9a-fA-F]{3,8}' "$file"; then
+  echo "$file: raw color — use a design token" >&2
+  violations=1
+fi
+if grep -nE '[0-9]+(px|rem)' "$file"; then
+  echo "$file: raw spacing — use a design token" >&2
+  violations=1
+fi
+[ "$violations" -eq 0 ] || exit 2
+`;
+
+// A plain Radix component that legitimately uses asChild — zero validator
+// shape, zero base-ui vocabulary. Must never flag.
+const RADIX_ASCHILD_USAGE_FIXTURE = `import { Slot } from "@radix-ui/react-slot";
+
+export function Button({ asChild, ...props }) {
+  const Comp = asChild ? Slot : "button";
+  return <Comp {...props} />;
+}
+`;
+
+describe("OWNED-BASE-UI-ASCHILD-VALIDATOR detector", () => {
+	it("flags a hand-rolled base-ui asChild validator anywhere in the tree", () => {
+		const findings = evaluateOwnedConcerns({
+			file: ".claude/hooks/base-ui-aschild-validator.sh",
+			source: BASE_UI_ASCHILD_VALIDATOR_FIXTURE,
+		});
+		const hit = findings.find((f) => f.concernId === "OWNED-BASE-UI-ASCHILD-VALIDATOR");
+		expect(hit).toBeDefined();
+		expect(hit!.supersededBy).toBe("HOOK-BASE-UI-ASCHILD");
+	});
+
+	it("keys on intent, not filename — flags even when renamed", () => {
+		const findings = evaluateOwnedConcerns({
+			file: "scripts/aschild-guard.sh",
+			source: BASE_UI_ASCHILD_VALIDATOR_FIXTURE,
+		});
+		expect(findings.filter((f) => f.concernId === "OWNED-BASE-UI-ASCHILD-VALIDATOR")).toHaveLength(
+			1,
+		);
+	});
+
+	it("stays silent on a plain Radix component that uses asChild", () => {
+		const findings = evaluateOwnedConcerns({
+			file: "design-system/atoms/Button.tsx",
+			source: RADIX_ASCHILD_USAGE_FIXTURE,
+		});
+		expect(findings).toHaveLength(0);
+	});
+
+	it("stays silent on an empty file", () => {
+		expect(evaluateOwnedConcerns({ file: "x.sh", source: "" })).toHaveLength(0);
+	});
+});
+
+describe("OWNED-APP-WIDE-TOKEN-LINT detector", () => {
+	it("flags a hand-rolled app-wide token validator anywhere in the tree", () => {
+		const findings = evaluateOwnedConcerns({
+			file: ".claude/hooks/ui-token-validator.sh",
+			source: UI_TOKEN_VALIDATOR_FIXTURE,
+		});
+		const hit = findings.find((f) => f.concernId === "OWNED-APP-WIDE-TOKEN-LINT");
+		expect(hit).toBeDefined();
+		expect(hit!.supersededBy).toBe("HOOK-TOKENS-APP-WIDE");
+	});
+
+	it("does not also fire OWNED-TOKEN-LINT — exactly one concern claims it", () => {
+		// The two token concerns are mutually exclusive: one owns DS-parity, the
+		// other app-wide raw-value blocking. A file claimed by both would carry
+		// conflicting supersessions.
+		const findings = evaluateOwnedConcerns({
+			file: ".claude/hooks/ui-token-validator.sh",
+			source: UI_TOKEN_VALIDATOR_FIXTURE,
+		});
+		const tokenConcerns = findings.filter(
+			(f) => f.concernId === "OWNED-TOKEN-LINT" || f.concernId === "OWNED-APP-WIDE-TOKEN-LINT",
+		);
+		expect(tokenConcerns.map((f) => f.concernId)).toEqual(["OWNED-APP-WIDE-TOKEN-LINT"]);
+	});
+
+	it("stays silent on the DS-parity lint-tokens.ts (owned by OWNED-TOKEN-LINT)", () => {
+		const findings = evaluateOwnedConcerns({
+			file: "scripts/lint-tokens.ts",
+			source: LINT_TOKENS_FIXTURE,
+		});
+		expect(findings.filter((f) => f.concernId === "OWNED-APP-WIDE-TOKEN-LINT")).toHaveLength(0);
+	});
 });
 
 describe("formatOwnedConcernFinding — completeness gating", () => {
@@ -198,6 +346,21 @@ describe("formatOwnedConcernFinding — completeness gating", () => {
 		expect(line).toMatch(/scripts\/lint-tokens\.ts/);
 		expect(line).toMatch(/OWNED-TOKEN-LINT/);
 		expect(line).toMatch(/superseded by DRIFT-TOKEN-PARITY/);
+		expect(line).toMatch(/remove|delete/i);
+		expect(line).not.toMatch(/possible shadow DS infra/i);
+	});
+
+	it("recommends removal when supersededBy names a shipped hook (live)", () => {
+		// #505: a hook is a real shipped capability. When the scanner has
+		// confirmed it live (supersededBy retained), removal is advised.
+		const line = formatOwnedConcernFinding({
+			file: ".claude/hooks/ui-token-validator.sh",
+			line: 1,
+			concernId: "OWNED-APP-WIDE-TOKEN-LINT",
+			supersededBy: "HOOK-TOKENS-APP-WIDE",
+			message: "hand-rolled app-wide token validator in .claude/hooks/ui-token-validator.sh",
+		});
+		expect(line).toMatch(/superseded by HOOK-TOKENS-APP-WIDE/);
 		expect(line).toMatch(/remove|delete/i);
 		expect(line).not.toMatch(/possible shadow DS infra/i);
 	});
@@ -230,6 +393,8 @@ describe("owned-concern id totality", () => {
 			const check: OwnedConcernId = id;
 			switch (check) {
 				case "OWNED-TOKEN-LINT":
+				case "OWNED-BASE-UI-ASCHILD-VALIDATOR":
+				case "OWNED-APP-WIDE-TOKEN-LINT":
 					expect(ownedConcernDescription(check)).toBeTruthy();
 					break;
 				default: {

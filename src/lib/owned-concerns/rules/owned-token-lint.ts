@@ -30,12 +30,23 @@ import type { OwnedConcern, OwnedConcernFinding, OwnedConcernInput } from "../ru
  * Pure: reads file content + path only. No FS, no consumer-code coupling.
  */
 
-const TOKEN_GOVERNANCE_SIGNALS: readonly RegExp[] = [
+// DS-parity-scoped governance: the signals that mark a *design-system* token
+// linter (the JSON↔CSS parity / tier-walking shape DRIFT-TOKEN-PARITY covers).
+// At least one is required to fire (#505). The generic "raw color/spacing"
+// phrases alone are NOT enough — those also describe the app-wide write-time
+// validator (`ui-token-validator.sh`), which OWNED-APP-WIDE-TOKEN-LINT owns
+// and the app-wide hook (not DRIFT-TOKEN-PARITY) supersedes. Without this
+// gate, OWNED-TOKEN-LINT mis-claimed that validator with a false supersession.
+const DS_PARITY_SIGNALS: readonly RegExp[] = [
 	/design-system-ignore/i,
-	/raw\s+(?:color|spacing|hex|primitive)/i,
-	/raw\s+(?:color|spacing|hex)\s+(?:and|or)\s+(?:color|spacing)/i,
 	/token-governance/i,
 	/should\s+come\s+from\s+(?:design-system\/)?tokens\.json/i,
+];
+
+const TOKEN_GOVERNANCE_SIGNALS: readonly RegExp[] = [
+	...DS_PARITY_SIGNALS,
+	/raw\s+(?:color|spacing|hex|primitive)/i,
+	/raw\s+(?:color|spacing|hex)\s+(?:and|or)\s+(?:color|spacing)/i,
 ];
 
 const RAW_COLOR_SIGNATURES: readonly RegExp[] = [
@@ -71,6 +82,12 @@ function detect(input: OwnedConcernInput): OwnedConcernFinding | null {
 
 	const governance = countMatches(source, TOKEN_GOVERNANCE_SIGNALS);
 	if (governance === 0) return null;
+
+	// #505: a DS-parity governance signal is required. A file with only the
+	// generic "raw color/spacing" vocabulary (and no tokens.json / parity /
+	// design-system-ignore signal) is the app-wide validator's shape, not this
+	// concern's — OWNED-APP-WIDE-TOKEN-LINT owns it.
+	if (countMatches(source, DS_PARITY_SIGNALS) === 0) return null;
 
 	const rawColor = countMatches(source, RAW_COLOR_SIGNATURES);
 	const rawSpacing = countMatches(source, RAW_SPACING_SIGNATURES);

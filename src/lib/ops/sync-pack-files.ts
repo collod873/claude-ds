@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { ENFORCEMENT_PATH } from "../enforcement.js";
+import { applyDetectedEnforcement, detectEnforcement } from "../enforcement-detect.js";
 import { formatContent, resolveConsumerFormatter } from "../formatter.js";
 import type { Manifest } from "../manifest.js";
 import type { Change, Operation, PlanResult } from "../operation.js";
@@ -140,6 +142,19 @@ export function makeSyncPackFiles(opts: SyncPackFilesOpts = {}): SyncPackFilesOp
 				// prior state are treated as "upstream wins" rather than false-abort on hand-edit detection.
 				const prev: string | null = null;
 				const current = (await ctx.exists(writePath)) ? await readFile(dest, "utf8") : null;
+
+				// #505: enforcement.json is `seeded` — recreated from pack bytes when
+				// missing. The pack defaults (radix / design-system) silently neuter
+				// the v1.7.0 opt-in hooks on a base-ui / app-wide consumer. Derive the
+				// flags from the tree before writing the fresh seed so the new hooks
+				// land live and the consumer's hand-rolled validators become flaggable
+				// duplicates (not dead-weight survivors). Only on first create — never
+				// re-touch an existing consumer-owned file.
+				if (f.path === ENFORCEMENT_PATH && current === null) {
+					const detected = await detectEnforcement(ctx.cwd);
+					upstream = applyDetectedEnforcement(upstream, detected);
+				}
+
 				const verdict = diffFile(
 					{ category: f.category, format: f.format, owned_keys: f.owned_keys },
 					{ prev, upstream, current },
