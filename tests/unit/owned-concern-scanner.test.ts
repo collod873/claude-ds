@@ -213,3 +213,62 @@ describe("scanOwnedConcerns", () => {
 		]);
 	});
 });
+
+// #505 — a hook-backed supersession only holds while the absorbing hook is
+// live (enforcement.json activates it). The scanner reads enforcement.json and
+// downgrades `supersededBy` to `null` when the gate is dormant, so completeness
+// never advises deleting a hand-rolled guard while the pack hook is inert
+// (ADR-0017 addendum — the false-delete defect).
+const UI_TOKEN_VALIDATOR_SRC = `#!/usr/bin/env bash
+# ui-token-validator.sh — block raw color/spacing literals in ALL UI component
+# files (app/, components/, ui/). Every value must come from our design tokens.
+# Runs app-wide as a PreToolUse hook on every .tsx/.css write.
+set -euo pipefail
+file="$1"
+case "$file" in *.tsx|*.jsx|*.css) ;; *) exit 0 ;; esac
+if grep -nE '#[0-9a-fA-F]{3,8}' "$file"; then echo "raw color — use a design token" >&2; exit 2; fi
+if grep -nE '[0-9]+(px|rem)' "$file"; then echo "raw spacing — use a design token" >&2; exit 2; fi
+`;
+
+async function writeEnforcement(dir: string, cfg: Record<string, unknown>): Promise<void> {
+	await mkdir(join(dir, "design-system"), { recursive: true });
+	await writeFile(join(dir, "design-system", "enforcement.json"), JSON.stringify(cfg, null, 2));
+}
+
+describe("scanOwnedConcerns — hook-liveness gate (#505)", () => {
+	let dir: string;
+	beforeEach(async () => {
+		dir = await fresh();
+		await mkdir(join(dir, ".claude", "hooks"), { recursive: true });
+		await writeFile(join(dir, ".claude", "hooks", "ui-token-validator.sh"), UI_TOKEN_VALIDATOR_SRC);
+	});
+	afterEach(async () => {
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("retains the hook supersession when the absorbing hook is live", async () => {
+		await writeEnforcement(dir, { tokenScope: "app-wide", componentLib: "radix" });
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: [],
+		});
+		const hit = findings.find((f) => f.concernId === "OWNED-APP-WIDE-TOKEN-LINT");
+		expect(hit).toBeDefined();
+		expect(hit!.supersededBy).toBe("HOOK-TOKENS-APP-WIDE");
+	});
+
+	it("downgrades supersededBy to null when the hook is dormant (default scope)", async () => {
+		// No enforcement.json → defaults → tokenScope=design-system → app-wide
+		// hook inert. The validator is still flagged (over-flag bias) but removal
+		// is NOT advised — deleting it would drop the consumer's only live guard.
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: [],
+		});
+		const hit = findings.find((f) => f.concernId === "OWNED-APP-WIDE-TOKEN-LINT");
+		expect(hit).toBeDefined();
+		expect(hit!.supersededBy).toBeNull();
+	});
+});

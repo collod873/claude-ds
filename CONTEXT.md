@@ -251,7 +251,14 @@ superseded by `DRIFT-TOKEN-PARITY`" only because the pack now ships
 `DRIFT-TOKEN-PARITY`. When a concern names no shipped capability
 (`supersededBy: null`), completeness flags "possible shadow DS infra" and never
 advises deletion — the prior `DRIFT-RAW-PRIMITIVE` claim was the false-delete
-defect the gate exists to kill.
+defect the gate exists to kill. A superseder may be a **pack hook**
+(`HookCapabilityId`: `HOOK-BASE-UI-ASCHILD`, `HOOK-TOKENS-APP-WIDE`), not only a
+drift/integrity rule — but a hook is opt-in, so the concern declares
+`supersededByLiveWhen` and the scanner downgrades the supersession to `null`
+when `design-system/enforcement.json` hasn't activated the hook (a dormant hook
+covers nothing — #505, ADR-0017 2026-06-10 addendum). That `enforcement.json` is
+seeded from tree detection (base-ui imports, hand-rolled validators) rather than
+pack defaults, so the v1.7.0 hooks land live instead of inert.
 _Note_: distinct from **Managed roots**, which answer *"what does the pack own
 and overwrite?"* (the safety north star). Owned concern answers *"what counts as
 DS infrastructure?"* (completeness). Conflating the two is the original ADR-0003

@@ -1,4 +1,6 @@
 import type { OwnedConcern, OwnedConcernId } from "./rule.js";
+import { appWideTokenValidatorRule } from "./rules/app-wide-token-validator.js";
+import { baseUiAsChildValidatorRule } from "./rules/base-ui-aschild-validator.js";
 import { ownedTokenLintRule } from "./rules/owned-token-lint.js";
 
 /**
@@ -8,14 +10,18 @@ import { ownedTokenLintRule } from "./rules/owned-token-lint.js";
  * concern here fails to build. Mirrors `DRIFT_RULES_BY_ID` /
  * `INTEGRITY_RULES_BY_ID`.
  *
- * Ships with exactly one entry. Grow-on-demand discipline lives in ADR-0017:
- * a second concern lands only on real consumer shadow-infra evidence,
- * accompanied by an updated ADR amendment. A pre-built detector library
- * for concerns nobody has shadowed is the speculative-infra failure mode
+ * Grow-on-demand discipline lives in ADR-0017: a concern lands only on real
+ * consumer shadow-infra evidence, accompanied by an ADR amendment. The
+ * base-ui / app-wide entries are the v1.7.0 Crewops dig (#505) — its
+ * hand-rolled `base-ui-aschild-validator.sh` and `ui-token-validator.sh`,
+ * which the v1.7.0 hooks were built to absorb. A pre-built detector library
+ * for concerns nobody has shadowed remains the speculative-infra failure mode
  * the registry exists to avoid.
  */
 export const OWNED_CONCERNS_BY_ID: Record<OwnedConcernId, OwnedConcern> = {
 	"OWNED-TOKEN-LINT": ownedTokenLintRule,
+	"OWNED-BASE-UI-ASCHILD-VALIDATOR": baseUiAsChildValidatorRule,
+	"OWNED-APP-WIDE-TOKEN-LINT": appWideTokenValidatorRule,
 };
 
 /**

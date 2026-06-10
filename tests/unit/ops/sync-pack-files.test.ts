@@ -199,6 +199,93 @@ describe("syncPackFiles op — plan()", () => {
 		expect(c.mode).toBeUndefined();
 	});
 
+	it("seeds enforcement.json with flags detected from the tree (#505)", async () => {
+		// base-ui consumer with a hand-rolled app-wide token validator — the
+		// Crewops shape. The seeded enforcement.json must reflect that, not the
+		// pack defaults, or the v1.7.0 hooks land inert.
+		const seed = `{
+  "$schema-note": "seeded once",
+  "tokenScope": "design-system",
+  "componentLib": "radix",
+  "appWideExclude": ["**/ui/**"]
+}
+`;
+		await mkdir(join(packDir, "files", "design-system"), { recursive: true });
+		await writeFile(join(packDir, "files", "design-system/enforcement.json"), seed);
+		await mkdir(join(cwd, "src"), { recursive: true });
+		await writeFile(
+			join(cwd, "src/Picker.tsx"),
+			`import { Select } from "@base-ui-components/react/select";\nexport const P = () => <Select.Root />;\n`,
+		);
+		await mkdir(join(cwd, ".claude/hooks"), { recursive: true });
+		await writeFile(
+			join(cwd, ".claude/hooks/ui-token-validator.sh"),
+			`#!/usr/bin/env bash\n# block raw color/spacing in ALL UI component files app-wide\nif grep -nE '#[0-9a-fA-F]{3,8}' "$1"; then echo "raw color — use a design token"; exit 2; fi\n`,
+		);
+		const manifest: Manifest = makeManifest({
+			files: [{ path: "design-system/enforcement.json", category: "seeded" }],
+		});
+		const op = makeSyncPackFiles();
+		const { changes } = await op.plan(makeCtx(manifest));
+		expect(changes).toHaveLength(1);
+		const c = changes[0] as Extract<Change, { kind: "write" }>;
+		const written = JSON.parse(c.after.toString("utf8"));
+		expect(written.componentLib).toBe("base-ui");
+		expect(written.tokenScope).toBe("app-wide");
+		// The rest of the seed is preserved untouched.
+		expect(written.appWideExclude).toEqual(["**/ui/**"]);
+	});
+
+	it("seeds enforcement.json with pack defaults when the tree warrants them (#505)", async () => {
+		const seed = `{
+  "tokenScope": "design-system",
+  "componentLib": "radix"
+}
+`;
+		await mkdir(join(packDir, "files", "design-system"), { recursive: true });
+		await writeFile(join(packDir, "files", "design-system/enforcement.json"), seed);
+		await mkdir(join(cwd, "src"), { recursive: true });
+		await writeFile(
+			join(cwd, "src/Picker.tsx"),
+			`import * as Select from "@radix-ui/react-select";\nexport const P = () => <Select.Root />;\n`,
+		);
+		const manifest: Manifest = makeManifest({
+			files: [{ path: "design-system/enforcement.json", category: "seeded" }],
+		});
+		const op = makeSyncPackFiles();
+		const { changes } = await op.plan(makeCtx(manifest));
+		expect(changes).toHaveLength(1);
+		const c = changes[0] as Extract<Change, { kind: "write" }>;
+		const written = JSON.parse(c.after.toString("utf8"));
+		expect(written.componentLib).toBe("radix");
+		expect(written.tokenScope).toBe("design-system");
+	});
+
+	it("never re-touches an existing enforcement.json — detection is create-only (#505)", async () => {
+		const seed = `{ "tokenScope": "design-system", "componentLib": "radix" }\n`;
+		await mkdir(join(packDir, "files", "design-system"), { recursive: true });
+		await writeFile(join(packDir, "files", "design-system/enforcement.json"), seed);
+		// Consumer already has one (with their own edits). base-ui in the tree
+		// must NOT cause a rewrite — seeded files are written once.
+		await mkdir(join(cwd, "design-system"), { recursive: true });
+		await writeFile(
+			join(cwd, "design-system/enforcement.json"),
+			`{ "tokenScope": "design-system", "componentLib": "radix" }\n`,
+		);
+		await mkdir(join(cwd, "src"), { recursive: true });
+		await writeFile(
+			join(cwd, "src/Picker.tsx"),
+			`import { Select } from "@base-ui-components/react/select";\n`,
+		);
+		const manifest: Manifest = makeManifest({
+			files: [{ path: "design-system/enforcement.json", category: "seeded" }],
+		});
+		const op = makeSyncPackFiles();
+		const { changes, outcome } = await op.plan(makeCtx(manifest));
+		expect(changes).toEqual([]);
+		expect(outcome.decisions[0].displayAction).toBe("skip");
+	});
+
 	it("plan() is cached — repeat calls return the same changes array, no double diffFile work", async () => {
 		await writeFile(join(packDir, "files", "a.txt"), "new\n");
 		const manifest: Manifest = makeManifest({

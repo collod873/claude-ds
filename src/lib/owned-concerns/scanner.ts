@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { SCAN_SKIP_DIRS } from "../build-outputs.js";
+import { readEnforcement } from "../enforcement.js";
 import { isManifestOrKeepfile } from "../manifest.js";
 import { OWNED_CONCERNS } from "./registry.js";
 import type { OwnedConcernId, SupersedingRuleId } from "./rule.js";
@@ -106,6 +107,13 @@ export async function scanOwnedConcerns(
 		isGenerated = picomatch(generatedPatterns, { dot: true });
 	}
 
+	// #505: hook-backed supersessions only hold while the absorbing hook is
+	// live. Read the consumer's enforcement flags once; a concern whose
+	// `supersededByLiveWhen` flag is unset has its supersession downgraded to
+	// `null` below ("possible shadow DS infra"), so completeness never advises
+	// deleting a hand-rolled guard while the pack hook lies dormant.
+	const enforcement = await readEnforcement(cwd);
+
 	const files = await walkRepo(cwd);
 	const findings: OwnedConcernScannerFinding[] = [];
 
@@ -124,11 +132,14 @@ export async function scanOwnedConcerns(
 		for (const concern of OWNED_CONCERNS) {
 			const hit = concern.detect({ file, source });
 			if (!hit) continue;
+			// Gate hook-backed supersessions on the hook actually being live.
+			const live = concern.supersededByLiveWhen;
+			const supersededBy = live && enforcement[live.key] !== live.value ? null : hit.supersededBy;
 			findings.push({
 				file: hit.file,
 				line: 1,
 				concernId: hit.concernId,
-				supersededBy: hit.supersededBy,
+				supersededBy,
 				message: hit.message,
 			});
 		}

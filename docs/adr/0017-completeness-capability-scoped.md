@@ -158,3 +158,40 @@ Two corrections:
 The over-flag principle stands; what it may *say* tightens: it flags
 "possible shadow DS infra," but it may only recommend **removal** when it
 can name a shipped capability that genuinely covers the same failure mode.
+
+## Addendum (2026-06-10) — hook supersessions, gated on the hook being live (#505)
+
+The v1.7.0 Crewops dig surfaced two more real misses. Crewops is base-ui with
+app-wide token enforcement, yet `doctor --completeness` printed clean while two
+hand-rolled validators sat in the tree: `base-ui-aschild-validator.sh` (blocks
+the Radix-only `asChild` prop on base-ui parts) and `ui-token-validator.sh`
+(blocks raw color/spacing literals across *all* component files). The v1.7.0
+hooks `pre-write-base-ui.sh` (BASEUI-001) and `pre-write-tokens-app-wide.sh`
+(TOK-*) were built to absorb exactly these — their own headers say so — yet the
+registry had no detector for either. Grow-on-demand: two new Owned concerns
+land, **`OWNED-BASE-UI-ASCHILD-VALIDATOR`** and **`OWNED-APP-WIDE-TOKEN-LINT`**.
+
+These force two refinements:
+
+1. **A superseder may be a pack hook, not only a drift/integrity rule.** A hook
+   is a real shipped capability; `SupersedingRuleId` gains a `HookCapabilityId`
+   arm (`HOOK-BASE-UI-ASCHILD`, `HOOK-TOKENS-APP-WIDE`). The discipline from the
+   2026-06-07 addendum holds unchanged — the supersession must name a real
+   shipped thing — it just now admits hooks.
+
+2. **A hook superseder is gated on the hook actually being live.** The v1.7.0
+   hooks are *opt-in*: inert unless `design-system/enforcement.json` sets
+   `componentLib="base-ui"` / `tokenScope="app-wide"`. A dormant hook covers
+   nothing, so advising removal of the hand-rolled guard while the hook sleeps
+   is the false-delete defect this ADR's first addendum exists to kill. Each
+   hook-backed concern declares `supersededByLiveWhen`; the scanner reads
+   enforcement.json once and downgrades `supersededBy` to `null` ("possible
+   shadow DS infra," no removal advice) when the flag is unset. The scanner
+   still never branches on concern id — it reads a declarative field.
+
+This pairs with the #505 seeding fix: `enforcement.json` is a `seeded` file, and
+recreating it with the pack defaults (radix / DS-scoped) is what left the new
+hooks inert in the first place. Seeding now derives `componentLib`/`tokenScope`
+from the tree (base-ui imports, and the same hand-rolled validators these
+detectors flag), so a fresh seed reflects reality and the hooks land live —
+after which completeness can honestly recommend retiring the duplicates.
