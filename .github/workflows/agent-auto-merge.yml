@@ -63,6 +63,14 @@ jobs:
             st=$(echo "$data" | jq -r '.state')
             m=$(echo "$data" | jq -r '.mergeable')
             s=$(echo "$data" | jq -r '.mergeStateStatus')
+            # A transient API failure leaves st empty — without this guard it
+            # reads as "not OPEN" below and the job silently skips the merge,
+            # eating the ready-to-merge label.
+            if [ -z "$st" ]; then
+              echo "gh pr view failed (API blip?); retry $attempt..."
+              sleep 5
+              continue
+            fi
             if [ "$st" != "OPEN" ]; then
               echo "PR #$PR_NUMBER is $st — nothing to merge."
               merged=skip; break
@@ -75,8 +83,16 @@ jobs:
             fi
             # Mergeable and not stale → land it (UNSTABLE/HAS_HOOKS included).
             if [ "$m" = "MERGEABLE" ] && [ "$s" != "DRAFT" ]; then
-              if gh pr merge "$PR_NUMBER" --squash --delete-branch; then merged=true; fi
-              break
+              if gh pr merge "$PR_NUMBER" --squash --delete-branch; then
+                merged=true
+                break
+              fi
+              # Transient API failure — re-poll and retry within the loop. A
+              # real conflict shows up as CONFLICTING/DIRTY on the next poll
+              # and hands off to the rebase robot as before.
+              echo "gh pr merge failed; re-polling (attempt $attempt)..."
+              sleep 5
+              continue
             fi
             echo "Mergeability still computing (mergeable=$m state=$s); retry $attempt..."
             sleep 5
@@ -86,14 +102,18 @@ jobs:
             exit 0
           fi
           # Either a real conflict, or mergeability never settled. Hand to the
-          # rebase robot; on success it re-fires ready-to-merge and we land it
-          # on the next auto-merge pass. Use AGENT_PAT so the labeled event
-          # actually triggers agent-update-branch.
+          # rebase robot. Park the approval as merge-pending-update so the PR
+          # never reads ready-to-merge while it's stale/conflicting — on a real
+          # rebase the robot swaps it back to ready-to-merge (a fresh labeled
+          # event) and we land it on the next auto-merge pass. Use AGENT_PAT so
+          # the labeled event actually triggers agent-update-branch.
           if [ "$rebase" = "false" ]; then
             echo "Mergeability never settled — handing to rebase robot to recompute."
           fi
+          npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts remove-trigger-label pr "$PR_NUMBER" ready-to-merge
+          npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" merge-pending-update
           npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" update-branch
-          gh pr comment "$PR_NUMBER" --body "Auto-merge couldn't fast-forward (a sibling PR likely landed first) — handed to \`agent:update-branch\` to rebase and retry automatically."
+          gh pr comment "$PR_NUMBER" --body "Auto-merge couldn't fast-forward (a sibling PR likely landed first) — handed to \`agent:update-branch\` to rebase. The approval is parked as \`merge-pending-update\` and flips back to \`ready-to-merge\` once the branch is current."
 
       - name: Close linked issues and cascade-close the parent PRD
         if: steps.merge.outputs.merged == 'true'

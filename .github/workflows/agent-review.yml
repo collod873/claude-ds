@@ -100,6 +100,7 @@ jobs:
         env:
           VERDICT_FILE: ${{ runner.temp }}/verdict.txt
           AGENT_PAT: ${{ secrets.AGENT_PAT }}
+          MAX_AUTO_RETRIES: 1
         run: |
           set -uo pipefail
           verdict=""
@@ -110,7 +111,20 @@ jobs:
           if [ "$verdict" = "approve" ]; then
             npx -y tsx .sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" ready-to-merge
           elif [ "$verdict" = "request_changes" ]; then
-            npx -y tsx .sandcastle/agent-workflows/shared/labels.ts mark-blocked pr "$PR_NUMBER" --body "Automated review verdict: **request changes** — holding merge. See the review comments above. Re-add \`agent:review\` after addressing, or merge manually if you disagree."
+            # Auto-retry slots (ADR-0004): while slots remain, chain
+            # agent:implement to address the feedback instead of blocking.
+            # The retry comment doubles as the counter — its presence on the
+            # PR is the spent-slot record, so there is no extra label or
+            # state file to drift.
+            retry_marker="Automated review requested changes — auto-retrying"
+            prior=$(gh pr view "$PR_NUMBER" --json comments --jq \
+              '[.comments[] | select(.author.login == "github-actions" and (.body | startswith("Automated review requested changes — auto-retrying")))] | length')
+            if [ "$prior" -lt "$MAX_AUTO_RETRIES" ]; then
+              gh pr comment "$PR_NUMBER" --body "$retry_marker: chaining \`agent:implement\` to address the review feedback (retry $((prior + 1))/${MAX_AUTO_RETRIES}). A request-changes verdict after the last retry blocks for a human."
+              npx -y tsx .sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" implement
+            else
+              npx -y tsx .sandcastle/agent-workflows/shared/labels.ts mark-blocked pr "$PR_NUMBER" --body "Automated review verdict: **request changes** — holding merge (auto-retry slot already used). See the review comments above. Re-add \`agent:review\` after addressing, or merge manually if you disagree."
+            fi
           else
             # No machine-readable verdict (e.g. a PR branch cut before the verdict
             # change shipped, so it runs the old review.ts). Do NOT auto-block —
@@ -130,6 +144,24 @@ jobs:
           REPLIES: ${{ runner.temp }}/replies.json
         run: npx tsx .sandcastle/agent-workflows/shared/review-publish.ts post-replies "$PR_NUMBER" "$REPLIES"
 
+      # Don't let a cheap failed POST destroy the expensive review: if anything
+      # after review.ts fails (e.g. a GitHub API blip while publishing), the
+      # review output is preserved as a run artifact. Replay without re-running
+      # the review: download the artifact, then
+      #   npx tsx .sandcastle/agent-workflows/shared/review-publish.ts post-review <pr> review_payload.json
+      # and apply verdict.txt / replies.json by hand if needed.
+      - name: Preserve review output on failure (replayable artifact)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-output-pr-${{ github.event.pull_request.number }}
+          path: |
+            ${{ runner.temp }}/review_payload.json
+            ${{ runner.temp }}/verdict.txt
+            ${{ runner.temp }}/replies.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Mark blocked on failure
         if: failure()
         env:
@@ -139,12 +171,18 @@ jobs:
           if [ -f "${RUNNER_TEMP}/failure_reason.txt" ]; then
             reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
           fi
+          artifact_note=""
+          if [ -f "${RUNNER_TEMP}/review_payload.json" ]; then
+            artifact_note="The review itself completed — its output is preserved as the \`review-output-pr-${PR_NUMBER}\` artifact on the run, replayable via \`review-publish.ts\` without re-running the review."
+          fi
           body=$(cat <<EOF
           \`agent:review\` run failed.
 
           **Reason:** $reason
 
           **Workflow run:** $RUN_URL
+
+          $artifact_note
 
           Re-add \`agent:review\` to retry.
           EOF

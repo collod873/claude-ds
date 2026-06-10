@@ -98,6 +98,7 @@ jobs:
           has_commits=$(cat "${RUNNER_TEMP}/has_commits.txt")
           if [ "$has_commits" != "true" ]; then
             echo "No commits this run — skipping push."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           set +e
@@ -118,6 +119,7 @@ jobs:
             cat push_err.txt
             exit $status
           fi
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
 
       - name: Post thread replies (best-effort)
         # Best-effort + jq iteration (not `seq`): see agent-review.yml. BSD
@@ -175,6 +177,15 @@ jobs:
             body=$(printf '%s' "$item" | jq -r '.body')
             gh pr comment "$PR_NUMBER" --body "$body" || echo "Failed to post top-level comment (best-effort)" >&2
           done
+
+      - name: Request automated re-review (chain into agent-review.yml)
+        # Closes the retry loop (ADR-0004): after feedback is addressed and
+        # pushed, the PR goes back through the merge gate instead of sitting
+        # unlabeled. No-commit runs skip this — nothing changed to re-review.
+        if: steps.state.outputs.proceed == 'true' && steps.inputs.outputs.proceed == 'true' && success() && steps.push.outputs.pushed == 'true'
+        env:
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+        run: npx -y tsx .sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" review
 
       - name: Mark blocked on failure
         if: steps.state.outputs.proceed == 'true' && steps.inputs.outputs.proceed == 'true' && failure()

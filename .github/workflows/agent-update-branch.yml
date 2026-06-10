@@ -136,15 +136,16 @@ jobs:
         run: |
           set -uo pipefail
           # The rebase robot is the only thing that mends a PR auto-merge gave up
-          # on (sibling landed first). After a clean rebase the PR is mergeable
-          # again, but a force-push is not a `labeled` event, so nothing re-fires
-          # the merge. If the PR still carries ready-to-merge (i.e. review already
-          # approved it), remove+re-add it to emit a fresh `labeled` event that
-          # re-triggers agent-auto-merge. Guard on the label so an unapproved PR
-          # is never auto-merged.
-          has_rtm=$(gh pr view "$PR_NUMBER" --json labels --jq '[.labels[].name] | index("ready-to-merge") != null')
-          if [ "$has_rtm" != "true" ]; then
-            echo "PR #$PR_NUMBER is not ready-to-merge — leaving it for the normal review flow."
+          # on (sibling landed first). Auto-merge parks the approval as
+          # merge-pending-update on handoff (so the PR never reads ready-to-merge
+          # while it's stale/conflicting). After a clean rebase the PR is
+          # mergeable again, but a force-push is not a `labeled` event — so swap
+          # merge-pending-update back to ready-to-merge to emit a fresh `labeled`
+          # event that re-triggers agent-auto-merge. Guard on the label so an
+          # unapproved PR is never auto-merged.
+          has_pending=$(gh pr view "$PR_NUMBER" --json labels --jq '[.labels[].name] | index("merge-pending-update") != null')
+          if [ "$has_pending" != "true" ]; then
+            echo "PR #$PR_NUMBER has no parked approval (merge-pending-update) — leaving it for the normal review flow."
             exit 0
           fi
           # Only re-arm if this run actually advanced the branch. If the rebase
@@ -153,10 +154,10 @@ jobs:
           # instead of spinning.
           if [ "$PUSHED" != "true" ]; then
             echo "Rebase was a no-op (branch already current) — not re-arming to avoid a merge loop."
-            npx -y tsx .sandcastle/agent-workflows/shared/labels.ts remove-trigger-label pr "$PR_NUMBER" ready-to-merge
+            npx -y tsx .sandcastle/agent-workflows/shared/labels.ts remove-trigger-label pr "$PR_NUMBER" merge-pending-update
             npx -y tsx .sandcastle/agent-workflows/shared/labels.ts mark-blocked pr "$PR_NUMBER" --body "Auto-merge handed this PR to the rebase robot, but the branch was already up to date — nothing to rebase. Re-arming would loop, so I've stopped and marked it \`agent:blocked\`. (Usually a stale-mergeability race; re-add \`ready-to-merge\` to retry.)"
             exit 0
           fi
-          npx -y tsx .sandcastle/agent-workflows/shared/labels.ts remove-trigger-label pr "$PR_NUMBER" ready-to-merge
+          npx -y tsx .sandcastle/agent-workflows/shared/labels.ts remove-trigger-label pr "$PR_NUMBER" merge-pending-update
           npx -y tsx .sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" ready-to-merge
           echo "Re-armed ready-to-merge on #$PR_NUMBER — auto-merge will retry the merge."
