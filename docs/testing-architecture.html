@@ -209,7 +209,7 @@
         </div>
         <div class="suite">
           <span class="name">install-smoke.yml</span>
-          <p><code>npm pack</code> → install the <b>real tarball</b> into a <b>Next-shaped</b> scratch consumer (<code>src/app/</code> tree, tsconfig alias, next/react deps) with a <b>cold npm cache</b> → <code>npx claude-ds -V</code> + <code>adopt --pack next-react</code>, asserting scaffold files land, <code>app_dir</code> is detected as <code>src/app</code>, and the consumer's git config stays untouched (#525). The <b>only</b> check that exercises the published artifact and the <code>files</code> allowlist (the #477 bug class: passes every unit test, breaks every consumer).</p>
+          <p><code>npm pack</code> → install the <b>real tarball</b> into a <b>Next-shaped</b> scratch consumer (<code>src/app/</code> tree, tsconfig alias, next/react deps) with a <b>cold npm cache</b> → <code>npx claude-ds -V</code> + <code>adopt --pack next-react</code>, asserting scaffold files land, <code>app_dir</code> is detected as <code>src/app</code>, and the consumer's git config stays untouched (#525). Exercises the published artifact and the <code>files</code> allowlist (the #477 bug class: passes every unit test, breaks every consumer). The smoke itself lives in <code>scripts/smoke-tarball.sh</code>; the release publish job runs the same script against the exact tarball it ships, then publishes that file (#526).</p>
           <span class="tag real">Real install path</span>
         </div>
       </div>
