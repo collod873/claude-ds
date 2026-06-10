@@ -126,6 +126,16 @@ describe("scanStructuralBypass", () => {
 		expect(findings).toEqual([]);
 	});
 
+	it("excludes files matching manifest generated_patterns (picomatch)", async () => {
+		await write(dir, "app/generated/Card.gen.tsx", HAND_ROLLED_CARD);
+		const findings = await scanStructuralBypass({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: ["**/*.gen.tsx"],
+		});
+		expect(findings).toEqual([]);
+	});
+
 	it("skips generated companions and dependency/build dirs", async () => {
 		await write(dir, "app/Button.showcase.tsx", HAND_ROLLED_CARD);
 		await write(dir, "node_modules/pkg/Card.tsx", HAND_ROLLED_CARD);

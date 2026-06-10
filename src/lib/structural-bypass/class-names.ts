@@ -10,11 +10,17 @@
  *   - `className='rounded-full px-2'`
  *   - `` className={`rounded-lg ${maybe} border`} `` (template literal)
  *
- * A `className={someVar}` (bare identifier, no literal) yields nothing — we
- * only inspect literal utility text, never resolve variables. That is the
- * intended floor: a fully dynamic className is invisible to a static
- * signature, and the over-flag bias is spent on the literal cases that
- * dominate real hand-rolls.
+ * Two shapes yield nothing, by design:
+ *   - `className={someVar}` (bare identifier, no literal) — we never resolve
+ *     variables; a fully dynamic className is invisible to a static signature.
+ *   - `className={cn("rounded-lg …")}` / `clsx(…)` and other helper calls —
+ *     the literals live *inside* an expression, not as the attribute value,
+ *     and this extractor only reads the direct attribute value. This is a
+ *     known recall gap for the shadcn `cn()` idiom (see ADR-0026 follow-up):
+ *     v1 catches the direct-literal cases; widening to helper-call literals
+ *     is an evidence-driven, ADR-amended extension, not a silent change here.
+ *
+ * The over-flag bias is therefore spent on the direct-literal cases only.
  */
 
 export interface ClassNameMatch {
