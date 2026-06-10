@@ -164,7 +164,14 @@ export async function runFormatter(
 		return;
 	}
 
-	const args = formatter === "biome" ? ["check", "--write", ...files] : ["--write", ...files];
+	// #501: synced paths (.claude/, design-system/, scripts/) often sit outside a
+	// consumer's biome `includes`, so `check --write` errors with a ~20-line "no
+	// files processed" dump and exits non-zero on every sync. --no-errors-on-unmatched
+	// tolerates the mismatch (the pack ships pre-formatted) so the warn doesn't recur.
+	const args =
+		formatter === "biome"
+			? ["check", "--write", "--no-errors-on-unmatched", ...files]
+			: ["--write", ...files];
 
 	info(`running formatter: ${bin} ${args.slice(0, 2).join(" ")} <${files.length} file(s)>`);
 
