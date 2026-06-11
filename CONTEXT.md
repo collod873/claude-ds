@@ -321,7 +321,9 @@ signal that share a remedy resolve to the same step. `deriveProjectState` folds
 its findings through it (`ownerForFinding`), so the front-door planner *composes
 its plan from the registry*: an Operation owner lands its step, a terminal owner
 is surfaced as terminal — never silently dropped. The four terminal states:
-`hand-verify` (ADR-0026 JSX showcase, verify-gate attribution builds on it),
+`hand-verify` (ADR-0026 JSX showcase the *consumer* authored; an error in a
+claude-ds `@generated` file is **never** hand-verify but a claude-ds defect —
+ADR-0030, #537),
 `completeness` (Owned-concern, remove by hand), `advisory` (structural-bypass
 triage), `manual` (unfixable + non-relocatable — hand-edit or `exceptions.json`,
 the planner's `unresolvableFindings`). Totality is enforced by
@@ -540,6 +542,18 @@ non-zero with an "N decisions need you" report plus an `--answers` scaffold to
 fill and re-run. This supersedes ADR-0014's "every ambiguity gets a safe
 default" for genuine Ambiguities — the agent no longer makes project decisions
 that were Collin's to make. See ADR-0023.
+
+### Hand-verify fixed point
+The verify gate's second partial fixed point (#537), sibling to the Pending one.
+After heal converges and claude-ds's own files type-check, the consumer's verify
+can still fail on **hand-verify** errors — JSX-bearing showcases the consumer
+authored that claude-ds can't regenerate (ADR-0026). Re-running can't clear them,
+so heal names each file and exits on a distinct code (`HEAL_EXIT_HAND_VERIFY`, 4),
+never the circular "run audit, then re-run." The gate partitions errors three
+ways: **scaffold** (claude-ds defect, incl. `@generated`-file errors — ADR-0030 —
+which block, exit 1), **hand-verify** (the consumer's to fix, this fixed point),
+and **consumer-scope** (pre-existing, warn-only). The `@generated` header is the
+discriminator: claude-ds wrote it ⇒ defect; the consumer did ⇒ hand-verify.
 
 ### First-run greet
 The bare-`claude-ds` action's pre-config branch. When no `.claude-ds.json`

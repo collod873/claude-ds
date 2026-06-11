@@ -25,7 +25,11 @@ import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
 import { finalizeUpgrade } from "../lib/ops/finalize-upgrade.js";
 import { loadProject } from "../lib/project.js";
 import { renderChangeSummary, renderChangesJson, type SummaryEntry } from "../lib/render/index.js";
-import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
+import {
+	handVerifyNote,
+	runConsumerVerify,
+	type VerifyResult,
+} from "../lib/run-consumer-verify.js";
 import type { RunReport } from "../lib/runner.js";
 import { renderDiff, run } from "../lib/runner.js";
 import { cliVersion } from "../lib/version-vocab.js";
@@ -440,11 +444,13 @@ export async function upgradeCmd(opts: {
 			}
 			return findingsRemain();
 		}
+		const hv = handVerifyNote(verify);
+		if (hv) humanLog(`verify gate: ${hv}`);
 		if (verify.consumerErrors.length > 0) {
 			humanLog(
 				`verify gate passed (${verify.command}) — ${verify.consumerErrors.length} pre-existing consumer error(s) noted but not caused by claude-ds`,
 			);
-		} else {
+		} else if (!hv) {
 			humanLog(`verify gate green (${verify.command})`);
 		}
 	}
@@ -504,6 +510,7 @@ function verifyJson(verify: VerifyResult): Record<string, unknown> {
 		exitCode: verify.exitCode,
 		timedOut: verify.timedOut,
 		scaffoldErrorCount: verify.scaffoldErrors.length,
+		handVerifyErrorCount: verify.handVerifyErrors.length,
 		consumerErrorCount: verify.consumerErrors.length,
 		scaffoldErrors: verify.scaffoldErrors.slice(0, 20).map((e) => ({
 			file: e.file,

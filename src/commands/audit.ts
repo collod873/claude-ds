@@ -26,7 +26,11 @@ import { type AuditFinding, scanDriftAndIntegrity } from "../lib/reports/drift-i
 import { formatFindings, formatScorecard } from "../lib/reports/findings-format.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import { formatStrictWarnings, scanUnexpectedFiles } from "../lib/reports/unexpected-files.js";
-import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
+import {
+	handVerifyNote,
+	runConsumerVerify,
+	type VerifyResult,
+} from "../lib/run-consumer-verify.js";
 import {
 	formatStructuralBypassFinding,
 	type StructuralBypassFinding,
@@ -376,6 +380,10 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 			}
 			return findingsRemain();
 		}
+		{
+			const hv = verify && handVerifyNote(verify);
+			if (hv) info(`verify gate: ${hv}`);
+		}
 		if (verify && verify.consumerErrors.length > 0) {
 			info(
 				`verify gate passed (${verify.command}) — ${verify.consumerErrors.length} pre-existing consumer error(s) noted but not caused by claude-ds`,
@@ -456,6 +464,10 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 					});
 				}
 				return findingsRemain();
+			}
+			{
+				const hv = handVerifyNote(verify);
+				if (hv) info(`verify gate: ${hv}`);
 			}
 			if (verify.consumerErrors.length > 0) {
 				info(
@@ -566,6 +578,7 @@ function verifyJson(verify: VerifyResult): Record<string, unknown> {
 		exitCode: verify.exitCode,
 		timedOut: verify.timedOut,
 		scaffoldErrorCount: verify.scaffoldErrors.length,
+		handVerifyErrorCount: verify.handVerifyErrors.length,
 		consumerErrorCount: verify.consumerErrors.length,
 		scaffoldErrors: verify.scaffoldErrors.slice(0, 20).map((e) => ({
 			file: e.file,

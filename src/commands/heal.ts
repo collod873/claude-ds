@@ -57,6 +57,22 @@ const DEFAULT_MAX_ITERATIONS = 3;
 export const HEAL_EXIT_PENDING = 3;
 
 /**
+ * Stable named exit code for the second partial fixed point (issue #537):
+ * automatable work settled, bytes stable, and the only remaining verify-gate
+ * blockers are ADR-0026 hand-verify errors — consumer-authored JSX-bearing
+ * showcases claude-ds can't regenerate. Distinct from:
+ *   0 — fully converged, verify gate green
+ *   1 — red gate (a claude-ds defect, incl. errors in `@generated` files) /
+ *       did-not-converge / iteration ceiling hit
+ *   3 — partial fixed point: Pending decisions remain
+ *   4 — partial fixed point: only hand-verify blockers remain. Re-running can't
+ *       converge (claude-ds doesn't own these files); the operator verifies each
+ *       named example by hand. "Needs Collin," not a hard failure — external
+ *       automation routes on it like the Pending exit (ADR-0030 / defects 7, 8).
+ */
+export const HEAL_EXIT_HAND_VERIFY = 4;
+
+/**
  * Default path heal writes the `--answers` scaffold to when Pending decisions
  * remain. Re-exported from the scaffold Op so heal's CLI surface (this file)
  * carries the user-visible filename without duplicating the literal.
@@ -265,6 +281,16 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 				process.exit(1);
 				return;
 			}
+			// Second partial fixed point (issue #537): claude-ds's own files are
+			// clean, bytes are stable, but the consumer's verify still fails on
+			// hand-verify-only blockers — JSX-bearing showcases the consumer authored
+			// that claude-ds can't regenerate (ADR-0026, narrowed by ADR-0030). Looping
+			// can't clear them, so — mirroring the Pending exit — name each blocker and
+			// exit on a distinct code instead of the circular "run audit, then re-run."
+			if (verify.handVerifyErrors.length > 0) {
+				reportHandVerifyAndExit(verify, outcome.iterations, maxIterations, opts.json);
+				return;
+			}
 			const consumerNote =
 				verify.consumerErrors.length > 0
 					? ` — ${verify.consumerErrors.length} pre-existing consumer error(s) noted (not caused by claude-ds)`
@@ -391,6 +417,51 @@ async function reportPendingAndExit(
 	process.exit(HEAL_EXIT_PENDING);
 }
 
+/**
+ * Stable named-exit reporter for the hand-verify partial fixed point (#537).
+ * Names each consumer-authored showcase the verify gate flags so heal's parting
+ * guidance is specific — never the circular "run audit, then re-run" (defect 8),
+ * which can't converge here: claude-ds doesn't own these files and re-running
+ * regenerates nothing. Exits on `HEAL_EXIT_HAND_VERIFY`, mirroring the Pending
+ * exit's "needs Collin, not a hard failure" contract.
+ */
+function reportHandVerifyAndExit(
+	verify: VerifyResult,
+	iterations: number,
+	maxIterations: number,
+	json?: boolean,
+): void {
+	const count = verify.handVerifyErrors.length;
+	err(
+		`heal: converged everything automatable, but ${count} hand-verify blocker${count === 1 ? "" : "s"} remain — ` +
+			`JSX-bearing example(s) you authored that claude-ds can't regenerate (ADR-0026). Verify each by hand:`,
+	);
+	for (const e of verify.handVerifyErrors.slice(0, 20)) {
+		err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
+	}
+	if (count > 20) err(`  …and ${count - 20} more`);
+	err(
+		`These are yours to fix — claude-ds leaves JSX-bearing showcases untouched. ` +
+			`Re-running heal won't change them; edit each file above so it type-checks, then re-run \`claude-ds heal\`.`,
+	);
+	if (json) {
+		emitHeadless({
+			command: "heal",
+			ok: false,
+			verdict: "hand-verify",
+			exitCode: HEAL_EXIT_HAND_VERIFY,
+			actions: { iterations, maxIterations },
+			remaining: {
+				findingsCount: 0,
+				pending: 0,
+				handVerify: count,
+				verify: verifyJson(verify),
+			},
+		});
+	}
+	process.exit(HEAL_EXIT_HAND_VERIFY);
+}
+
 /** Surface scaffold errors on stderr. Mirror of `audit.ts:reportRedGate`. */
 function reportRedGate(verify: VerifyResult): void {
 	if (verify.scaffoldErrors.length > 0) {
@@ -403,14 +474,27 @@ function reportRedGate(verify: VerifyResult): void {
 		if (verify.scaffoldErrors.length > 20) {
 			err(`  …and ${verify.scaffoldErrors.length - 20} more`);
 		}
-	} else {
-		// No parseable TS errors — a timeout or a non-tsc failure (Biome/eslint/
-		// vitest). The reason carries the timeout label + limit or the env-failure
-		// note; the raw output tail makes it diagnosable from the report alone (#494).
+		// Defect 7: these live in claude-ds-managed files — including `@generated`
+		// showcases whose header forbids editing. claude-ds owns the fix; the
+		// remedy is never to hand-edit them. Non-circular guidance: if a re-run
+		// reproduces them (regeneration is deterministic), it's a claude-ds bug.
+		if (verify.consumerErrors.length > 0) {
+			err(
+				`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`,
+			);
+		}
 		err(
-			`heal: verify gate failed — ${verify.reason ?? `${verify.command} exited ${verify.exitCode}`}`,
+			"These are claude-ds's to fix — do not hand-edit `@generated` files. " +
+				"If a re-run reproduces them, report a claude-ds bug (regeneration is deterministic, so re-running won't clear them).",
 		);
+		return;
 	}
+	// No parseable TS errors — a timeout or a non-tsc failure (Biome/eslint/
+	// vitest). The reason carries the timeout label + limit or the env-failure
+	// note; the raw output tail makes it diagnosable from the report alone (#494).
+	err(
+		`heal: verify gate failed — ${verify.reason ?? `${verify.command} exited ${verify.exitCode}`}`,
+	);
 	if (verify.outputTail) {
 		err("  ── verify output (tail) ──");
 		for (const line of verify.outputTail.split("\n")) {
@@ -437,8 +521,16 @@ function verifyJson(verify: VerifyResult): Record<string, unknown> {
 		exitCode: verify.exitCode,
 		timedOut: verify.timedOut,
 		scaffoldErrorCount: verify.scaffoldErrors.length,
+		handVerifyErrorCount: verify.handVerifyErrors.length,
 		consumerErrorCount: verify.consumerErrors.length,
 		scaffoldErrors: verify.scaffoldErrors.slice(0, 20).map((e) => ({
+			file: e.file,
+			line: e.line,
+			col: e.col,
+			code: e.code,
+			message: e.message,
+		})),
+		handVerifyErrors: verify.handVerifyErrors.slice(0, 20).map((e) => ({
 			file: e.file,
 			line: e.line,
 			col: e.col,

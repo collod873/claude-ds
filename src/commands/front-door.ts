@@ -371,6 +371,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 					parsedCfg?.packVersion,
 					verify.consumerErrors.length,
 					handRolledInfra,
+					verify.handVerifyErrors.length,
 				),
 			);
 		} else if (outcome.kind === "exhausted") {
@@ -404,6 +405,7 @@ function renderClosingSummary(
 	pinnedBefore: string | undefined,
 	consumerErrorCount = 0,
 	handRolledInfra = 0,
+	handVerifyCount = 0,
 ): string[] {
 	const lines = ["", `✓ Tree is clean — ${version}.`];
 	if (pinnedBefore && pinnedBefore !== version) {
@@ -420,6 +422,14 @@ function renderClosingSummary(
 	if (consumerErrorCount > 0) {
 		lines.push(
 			`  ${consumerErrorCount} pre-existing consumer error(s) noted (not caused by claude-ds).`,
+		);
+	}
+	// ADR-0026 hand-verify: JSX-bearing showcases the consumer authored that
+	// claude-ds can't regenerate. claude-ds's own files type-check, but these
+	// don't — name them so "clean" isn't read as "the whole tree compiles" (#537).
+	if (handVerifyCount > 0) {
+		lines.push(
+			`  ${handVerifyCount} hand-verify example(s) need your eye — claude-ds can't regenerate JSX-bearing showcases (ADR-0026).`,
 		);
 	}
 	// The remediation loop converged, but completeness (ADR-0003) is not a loop
