@@ -34,7 +34,8 @@
     "test": "vitest run",
     "test:fast": "vitest run tests/unit",
     "test:watch": "vitest",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "release:canary": "node scripts/release-canary.mjs"
   },
   "engines": {
     "node": ">=22.6"
