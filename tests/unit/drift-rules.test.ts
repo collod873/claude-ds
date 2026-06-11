@@ -1357,3 +1357,83 @@ describe("DRIFT-ROLE-NO-CONTRACT rule (PRD #301 / #311)", () => {
 		expect(findings.filter((f) => f.ruleId === "DRIFT-ROLE-NO-CONTRACT")).toHaveLength(0);
 	});
 });
+
+describe("DRIFT-META-EXAMPLES-INVALID-PROP rule", () => {
+	const base = {
+		locationTier: "atom" as const,
+		metaKind: null,
+		classifierVerdict: { tier: "atom" as const, signals: [] },
+	};
+
+	const ENUM_BADGE = `import { cva } from "class-variance-authority";
+const badge = cva("base", {
+  variants: { tone: { neutral: "n", danger: "d" } },
+});
+export function Badge({ tone }: { tone?: "neutral" | "danger" }) {
+  return <span className={badge({ tone })} />;
+}
+`;
+
+	it('fires on an out-of-range variant value (the Crewops tone: "dark" shape)', () => {
+		const source = `${ENUM_BADGE}export const meta = {
+  kind: "atom" as const,
+  examples: [{ name: "dark", props: { tone: "dark" } }],
+};
+`;
+		const findings = evaluateDrift({ ...base, file: "design-system/atoms/badge.tsx", source });
+		const hit = findings.find((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP");
+		expect(hit).toBeDefined();
+		expect(hit!.message).toContain('tone="dark"');
+	});
+
+	it("fires on an unknown prop key (sub-element axis leaked onto the component)", () => {
+		const source = `${ENUM_BADGE}export const meta = {
+  kind: "atom" as const,
+  examples: [{ name: "leak", props: { tone: "neutral", density: "compact" } }],
+};
+`;
+		const findings = evaluateDrift({ ...base, file: "design-system/atoms/badge.tsx", source });
+		const hit = findings.find((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP");
+		expect(hit).toBeDefined();
+		expect(hit!.message).toContain('unknown prop "density"');
+		// The valid axis value is not flagged.
+		expect(hit!.message).not.toContain("tone=");
+	});
+
+	it("does not fire on a clean file whose example props match the axis surface", () => {
+		const source = `${ENUM_BADGE}export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "neutral", props: { tone: "neutral" } },
+    { name: "danger", props: { tone: "danger", className: "extra" } },
+  ],
+};
+`;
+		const findings = evaluateDrift({ ...base, file: "design-system/atoms/badge.tsx", source });
+		expect(findings.filter((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP")).toHaveLength(0);
+	});
+
+	it("does not fire on a non-CVA file (no axis surface to validate against)", () => {
+		const source = `export function Label() { return <span />; }
+export const meta = {
+  kind: "atom" as const,
+  examples: [{ name: "x", props: { whatever: "value" } }],
+};
+`;
+		const findings = evaluateDrift({ ...base, file: "design-system/atoms/label.tsx", source });
+		expect(findings.filter((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP")).toHaveLength(0);
+	});
+
+	it("does not fire when source is absent or file is outside a DS tier", () => {
+		const noSource = evaluateDrift({ ...base, file: "design-system/atoms/badge.tsx" });
+		expect(noSource.filter((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP")).toHaveLength(0);
+
+		const outside = evaluateDrift({
+			...base,
+			locationTier: null,
+			file: "src/badge.tsx",
+			source: ENUM_BADGE,
+		});
+		expect(outside.filter((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP")).toHaveLength(0);
+	});
+});
