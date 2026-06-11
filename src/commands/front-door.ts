@@ -29,12 +29,12 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import { ownerForFinding } from "../lib/complaint-ownership.js";
 import { type Config, parseConfig } from "../lib/config.js";
 import { composeDashboardState } from "../lib/dashboard.js";
-import { type DriftRuleId, isExtractionNeededFinding, isFixable } from "../lib/drift/index.js";
+import { isExtractionNeededFinding } from "../lib/drift/index.js";
 import { type Exception, parseExceptions } from "../lib/exceptions.js";
 import { buildCommitmentGate } from "../lib/gate-preview.js";
-import { type IntegrityRuleId, isIntegrityFixable } from "../lib/integrity/index.js";
 import { detectBuildCommand } from "../lib/log.js";
 import { parseManifest } from "../lib/manifest.js";
 import { computeMigrationChain } from "../lib/migration-framework.js";
@@ -194,12 +194,14 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		const active = driftIntegrity.findings.filter((f) => !suppressed.has(`${f.ruleId}:${f.file}`));
 		findings = active.map((f) => ({ ruleId: f.ruleId, file: f.file, message: f.message }));
 		extractionCount = active.filter(isExtractionNeededFinding).length;
+		// "Unfixable" for the gate's classify/auto-fix split is "owner is not
+		// `audit --fix`" — classify-relocatable, extraction, and terminal-manual
+		// findings all fall here. Resolved through the same complaint-ownership
+		// registry the planner composes from (#533), so the front-door's status
+		// numbers cannot diverge from the steps the plan dispatches.
 		unfixableCount = active.filter((f) => {
-			if (isExtractionNeededFinding(f)) return true;
-			if (f.ruleId.startsWith("INTEGRITY-")) {
-				return !isIntegrityFixable(f.ruleId as IntegrityRuleId);
-			}
-			return !isFixable(f.ruleId as DriftRuleId);
+			const owner = ownerForFinding(f);
+			return !(owner.kind === "operation" && owner.step === "audit --fix");
 		}).length;
 
 		// Owned-concern scan (ADR-0017 / #514): repo-wide, signature-as-identity.
