@@ -47,7 +47,8 @@ import { deriveProjectState } from "./project-state.js";
 import { type LoopStep, planRemediation } from "./remediation-planner.js";
 import { renderPerFileNotices } from "./render/index.js";
 import type { ProgressController } from "./render/tty-layer.js";
-import { run } from "./runner.js";
+import { createRunLedger, type RunLedger } from "./run-ledger.js";
+import { type RunReport, run } from "./runner.js";
 
 export type { LoopStep } from "./remediation-planner.js";
 
@@ -125,6 +126,14 @@ interface DispatchOpts {
 interface StepResult {
 	exitCode: number;
 	progress: boolean;
+	/**
+	 * The step's `RunReport`, when the driver dispatched it through `run()` directly
+	 * (`reconform`). The driver feeds it to the run ledger (#579) so the outcome can
+	 * carry an inventory of what heal wrote. The command-wrapped members
+	 * (`sync`/`upgrade`/`classify`/`audit`) return a `CommandResult`, not a report —
+	 * surfacing their writes into the ledger is a follow-up PRD-#575 slice.
+	 */
+	report?: RunReport;
 }
 
 /**
@@ -214,7 +223,7 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
 			// stamp ✔ on it; reading the Runner's per-Op progress signal tells the
 			// loop to report "nothing to do" instead (defect 6).
 			const madeProgress = report.ops.some((o) => o.progress);
-			return { exitCode: report.failed ? 1 : 0, progress: madeProgress };
+			return { exitCode: report.failed ? 1 : 0, progress: madeProgress, report };
 		}
 		case "migrate-layout":
 		case "reconcile":
@@ -300,11 +309,16 @@ export interface DriveOpts {
  *     once naming the blocker rather than spin the same no-op to the ceiling.
  *     `lastStep` is that blocker (the re-derived plan's first step, else the last
  *     phase that ran), for the failure message.
+ *
+ * Every variant carries the run `ledger` (#579) — the deduplicated inventory of
+ * what heal wrote across all passes, accumulated from each step's RunReport. heal
+ * reads it at exit to print the blast radius on a failure path; on `converged` it
+ * is simply unread. The driver owns the ledger so commands never re-scan the tree.
  */
 export type DriveOutcome =
-	| { kind: "converged"; iterations: number }
-	| { kind: "pending" }
-	| { kind: "exhausted"; lastStep: LoopStep | null };
+	| { kind: "converged"; iterations: number; ledger: RunLedger }
+	| { kind: "pending"; ledger: RunLedger }
+	| { kind: "exhausted"; lastStep: LoopStep | null; ledger: RunLedger };
 
 /**
  * Walk the shared remediation plan to a fixed point.
@@ -319,6 +333,9 @@ export type DriveOutcome =
 export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 	const { cwd, maxIterations, answers, pendingSink, progress } = opts;
 	let lastStep: LoopStep | null = null;
+	// One ledger for the whole run — every step's writes accumulate here and the
+	// same instance rides out on the outcome so heal can state the blast radius (#579).
+	const ledger = createRunLedger();
 
 	for (let iter = 1; iter <= maxIterations; iter++) {
 		opts.onIteration?.(iter, maxIterations);
@@ -336,10 +353,10 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 			// surface it as non-convergence so heal exits loudly and the operator
 			// sees the audit findings instead of a "Tree is clean" message.
 			if (state.unresolvableFindings) {
-				return { kind: "exhausted", lastStep: null };
+				return { kind: "exhausted", lastStep: null, ledger };
 			}
 			await promoteModeAtConvergence(cwd, progress);
-			return { kind: "converged", iterations: iter };
+			return { kind: "converged", iterations: iter, ledger };
 		}
 
 		// C3 (#414) — surface the labeled pass with the plan it'll run, so the
@@ -353,6 +370,10 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 			lastStep = step;
 			progress.start(step);
 			const result = await dispatchStep(step, { cwd, answers, pendingSink, progress });
+			// Record what the step wrote into the run ledger (#579). Only steps the
+			// driver dispatches through `run()` directly (reconform) surface a report
+			// today; command-wrapped members are a follow-up slice.
+			if (result.report) ledger.record(step, result.report);
 			// ✔-requires-progress (#532): a checkmark may only render for a step
 			// whose report shows progress. A step that visited its work and changed
 			// nothing (a skip-all reconform) reports "nothing to do" — never a ✔ that
@@ -373,7 +394,7 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 		// input — surface it so heal can write a scaffold and exit on the named
 		// PENDING code rather than spinning to the ceiling-failure exit.
 		if (stable && pendingThisIter > 0) {
-			return { kind: "pending" };
+			return { kind: "pending", ledger };
 		}
 
 		// This pass ran the full plan and changed zero bytes. Re-derive state: the
@@ -397,11 +418,11 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 			const nextPlan = planRemediation(nextState);
 			if (nextPlan.length === 0 && !nextState.unresolvableFindings) {
 				await promoteModeAtConvergence(cwd, progress);
-				return { kind: "converged", iterations: iter };
+				return { kind: "converged", iterations: iter, ledger };
 			}
-			return { kind: "exhausted", lastStep: nextPlan[0] ?? lastStep };
+			return { kind: "exhausted", lastStep: nextPlan[0] ?? lastStep, ledger };
 		}
 	}
 
-	return { kind: "exhausted", lastStep };
+	return { kind: "exhausted", lastStep, ledger };
 }
