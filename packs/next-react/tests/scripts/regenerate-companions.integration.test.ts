@@ -1,9 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm, readFile, cp } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from "node:fs";
+
+// The companion script is now a thin shim that invokes the built CLI
+// (`claude-ds regen-showcases`, #568). The hook runs that shim as a subprocess,
+// so the REGEN-001 step needs a built `dist/cli.js`; build it once and point the
+// shim at it via the CLAUDE_DS_CLI override (no claude-ds install in the temp
+// consumer).
+const REPO_ROOT = resolve(".");
+const DIST_CLI = join(REPO_ROOT, "dist", "cli.js");
 
 const HOOK = resolve("packs/next-react/files/.claude/hooks/regenerate-companions.sh");
 const VALIDATORS_LIB = resolve("packs/next-react/files/scripts/lib/ds-validators.sh");
@@ -82,14 +90,20 @@ function runHook(
   const r = spawnSync("bash", [".claude/hooks/regenerate-companions.sh"], {
     cwd: dir,
     encoding: "utf8",
-    timeout: 15_000,
+    timeout: 60_000,
     input,
+    env: { ...process.env, CLAUDE_DS_CLI: DIST_CLI },
   });
   return { status: r.status, stderr: r.stderr ?? "", stdout: r.stdout ?? "" };
 }
 
 describe("regenerate-companions.sh [integration]", () => {
   let dir: string;
+
+  beforeAll(() => {
+    const build = spawnSync("npm", ["run", "build"], { cwd: REPO_ROOT, encoding: "utf8" });
+    expect(build.status, build.stderr).toBe(0);
+  }, 180_000);
 
   beforeEach(async () => {
     dir = await fresh();

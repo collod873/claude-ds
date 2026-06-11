@@ -1,15 +1,31 @@
+// Showcase emission is owned by the CLI's `regen-showcases` command (PRD #566,
+// issue #568, ADR-0031); the pack ships a thin shim that invokes it. These
+// integration tests therefore drive the command in-process via `runCli` — the
+// exact code path the shim delegates to — and assert on the generated
+// `.showcase.tsx` bytes. They used to spawn the (now-retired) self-contained
+// pack generator script; the assertions are unchanged.
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { runCli } from "../../../../tests/helpers/runcli";
 import { compileEmitted } from "../../../../tests/helpers/compile-emitted";
 
-const SCRIPT = resolve("packs/next-react/files/scripts/generate-showcase-companion.ts");
+/** SpawnSync-shaped result so the assertions below stay verbatim. */
+interface GenResult {
+  status: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Run the canonical regenerator over `cwd`, the path the pack shim delegates to. */
+async function runGen(cwd: string): Promise<GenResult> {
+  const r = await runCli(["regen-showcases"], { cwd });
+  return { status: r.code, stdout: r.stdout, stderr: r.stderr };
+}
 
 const FIXTURE_ATOM = resolve("packs/next-react/tests/fixtures/showcase-companion-atom-meta");
 const FIXTURE_CVA = resolve("packs/next-react/tests/fixtures/showcase-companion-cva");
@@ -43,7 +59,7 @@ function copyFixture(fixtureSrc: string, dest: string, relPath: string): void {
 
 interface SharedRun {
   dir: string;
-  r: SpawnSyncReturns<string>;
+  r: GenResult;
 }
 
 let sharedGenRun: Promise<SharedRun> | null = null;
@@ -387,7 +403,7 @@ function sharedGen(): Promise<SharedRun> {
       ].join("\n")
     );
 
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const r = await runGen(dir);
     return { dir, r };
   })();
   return sharedGenRun;
@@ -495,7 +511,7 @@ function sharedAliasGen(): Promise<SharedRun> {
       ].join("\n")
     );
 
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const r = await runGen(dir);
     return { dir, r };
   })();
   return sharedAliasRun;
@@ -524,10 +540,7 @@ describe("generate-showcase-companion.ts [integration]", () => {
   it("exits 0 when design-system dirs are absent", async () => {
     const dir = await fresh();
     try {
-      const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-        cwd: dir,
-        encoding: "utf8",
-      });
+      const r = await runGen(dir);
       expect(r.status).toBe(0);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -677,7 +690,7 @@ describe("generate-showcase-companion.ts [integration] — ATOM fixture cluster"
     const dsDir = join(dir, "design-system", "atoms");
     await mkdir(dsDir, { recursive: true });
     copyFixture(FIXTURE_ATOM, dir, "design-system/atoms/button.tsx");
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const r = await runGen(dir);
     expect(r.status).toBe(0);
     content = await readFile(join(dsDir, "button.showcase.tsx"), "utf8");
   });
@@ -725,7 +738,7 @@ describe("generate-showcase-companion.ts [integration] — CVA fixture cluster",
     const dsDir = join(dir, "design-system", "atoms");
     await mkdir(dsDir, { recursive: true });
     copyFixture(FIXTURE_CVA, dir, "design-system/atoms/badge.tsx");
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const r = await runGen(dir);
     expect(r.status).toBe(0);
     content = await readFile(join(dsDir, "badge.showcase.tsx"), "utf8");
   });
@@ -778,7 +791,7 @@ describe("generate-showcase-companion.ts [integration] — REF fixture cluster",
     const refDir = join(dir, "design-system", "references");
     await mkdir(refDir, { recursive: true });
     copyFixture(FIXTURE_REF, dir, "design-system/references/tokens-page.tsx");
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const r = await runGen(dir);
     expect(r.status).toBe(0);
     content = await readFile(join(refDir, "tokens-page.showcase.tsx"), "utf8");
   });
@@ -893,7 +906,7 @@ describe("reconform integrity check (GEN-001 / GEN-002)", () => {
     );
 
     // Generate companions first
-    spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    await runGen(dir);
 
     // Now run reconform — should report no GEN violations
     const r = await runCli(["reconform"], { cwd: dir, stdin: "\n" });
@@ -991,8 +1004,8 @@ describe("error boundary and stub-meta placeholder", () => {
 
 // ── v0.7.0 hand-off contract: full-variant matrix + states + analyzer hook ──
 
-/** Set up a Crewops-shaped fixture: one CVA atom with states + optional analyzer. */
-async function seedCrewopsFixture(dir: string, opts: { withAnalyzer: boolean }): Promise<string> {
+/** Set up a Crewops-shaped fixture: one CVA atom with states. */
+async function seedCrewopsFixture(dir: string): Promise<string> {
   const dsDir = join(dir, "design-system", "atoms");
   await mkdir(dsDir, { recursive: true });
   await writeFile(
@@ -1015,27 +1028,6 @@ async function seedCrewopsFixture(dir: string, opts: { withAnalyzer: boolean }):
       `};`,
     ].join("\n")
   );
-  if (opts.withAnalyzer) {
-    const scriptsDir = join(dir, "scripts");
-    await mkdir(scriptsDir, { recursive: true });
-    await writeFile(
-      join(scriptsDir, "analyze-component-usage.ts"),
-      [
-        `export default async function analyze(_files: string[]) {`,
-        `  const m = new Map();`,
-        `  const literal = new Map();`,
-        `  const intent = new Map();`,
-        `  intent.set("primary", 3);`,
-        `  literal.set("intent", intent);`,
-        `  m.set("Button", { literal, dynamicProps: new Set(["size"]) });`,
-        `  return m;`,
-        `}`,
-      ].join("\n")
-    );
-    const appDir = join(dir, "app");
-    await mkdir(appDir, { recursive: true });
-    await writeFile(join(appDir, "page.tsx"), `export default function P() { return null; }\n`);
-  }
   return join(dsDir, "button.showcase.tsx");
 }
 
@@ -1045,11 +1037,8 @@ describe("v0.7.0 hand-off contract (issue #60) — no-analyzer cluster", () => {
 
   beforeAll(async () => {
     dir = await fresh();
-    const showcasePath = await seedCrewopsFixture(dir, { withAnalyzer: false });
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const showcasePath = await seedCrewopsFixture(dir);
+    const r = await runGen(dir);
     expect(r.status).toBe(0);
     showcaseContent = await readFile(showcasePath, "utf8");
   });
@@ -1075,34 +1064,17 @@ describe("v0.7.0 hand-off contract (issue #60) — no-analyzer cluster", () => {
   });
 });
 
-describe("v0.7.0 hand-off contract (issue #60) — bespoke", () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await fresh();
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
-  it("(d) with stub analyzer present, tag column appears in output", async () => {
-    const showcasePath = await seedCrewopsFixture(dir, { withAnalyzer: true });
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
-    expect(r.status).toBe(0);
-    const content = await readFile(showcasePath, "utf8");
-    const hasTag = content.includes("✓") || content.includes("⚠") || content.includes("✗");
-    expect(hasTag).toBe(true);
-  });
-});
+// The component-usage analyzer (`scripts/analyze-component-usage.ts`) — the
+// optional ✓/⚠/✗ "Used at callsites" tag column — is NOT supported by the
+// CLI-canonical generator (issue #567 dropped it; the single emission path
+// takes source text + meta only). Its former "with-analyzer" clusters are
+// retired with the shim (#568, ADR-0031); the no-analyzer behaviour below is
+// the whole behaviour now.
 
 // ── v0.7.8 showcase format finalization (issue #65) ──────────────────────────
 
 /** Seed an atom whose CVA matches a name from explicit examples (overlap intent). */
-async function seedButtonWithIconAndStates(dir: string, opts: { withAnalyzer: boolean }): Promise<string> {
+async function seedButtonWithIconAndStates(dir: string): Promise<string> {
   const dsDir = join(dir, "design-system", "atoms");
   await mkdir(dsDir, { recursive: true });
   await writeFile(
@@ -1125,28 +1097,6 @@ async function seedButtonWithIconAndStates(dir: string, opts: { withAnalyzer: bo
       `};`,
     ].join("\n")
   );
-  if (opts.withAnalyzer) {
-    const scriptsDir = join(dir, "scripts");
-    await mkdir(scriptsDir, { recursive: true });
-    await writeFile(
-      join(scriptsDir, "analyze-component-usage.ts"),
-      [
-        `export default async function analyze(_files: string[]) {`,
-        `  const m = new Map();`,
-        `  const literal = new Map();`,
-        `  const intent = new Map();`,
-        `  intent.set("primary", 8);`,
-        `  intent.set("ghost", 2);`,
-        `  literal.set("intent", intent);`,
-        `  m.set("Button", { literal, dynamicProps: new Set() });`,
-        `  return m;`,
-        `}`,
-      ].join("\n")
-    );
-    const appDir = join(dir, "app");
-    await mkdir(appDir, { recursive: true });
-    await writeFile(join(appDir, "page.tsx"), `export default function P() { return null; }\n`);
-  }
   return join(dsDir, "button.showcase.tsx");
 }
 
@@ -1156,11 +1106,8 @@ describe("v0.7.8 showcase format finalization (issue #65) — no-analyzer cluste
 
   beforeAll(async () => {
     dir = await fresh();
-    const showcasePath = await seedButtonWithIconAndStates(dir, { withAnalyzer: false });
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const showcasePath = await seedButtonWithIconAndStates(dir);
+    const r = await runGen(dir);
     expect(r.status).toBe(0);
     content = await readFile(showcasePath, "utf8");
   });
@@ -1183,45 +1130,6 @@ describe("v0.7.8 showcase format finalization (issue #65) — no-analyzer cluste
     expect(content).toMatch(/size="icon-sm"[\s\S]*?<Square/);
   });
 
-});
-
-describe("v0.7.8 showcase format finalization (issue #65) — with-analyzer cluster", () => {
-  let dir: string;
-  let content: string;
-
-  beforeAll(async () => {
-    dir = await fresh();
-    const showcasePath = await seedButtonWithIconAndStates(dir, { withAnalyzer: true });
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], {
-      cwd: dir,
-      encoding: "utf8",
-    });
-    expect(r.status).toBe(0);
-    content = await readFile(showcasePath, "utf8");
-  });
-
-  afterAll(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
-  it("(#3) per-cell ✓/⚠/✗ tags are dropped from the Variants grid", () => {
-    const variantsIdx = content.indexOf(">Variants<");
-    const usageIdx = content.indexOf(">Usage<");
-    expect(variantsIdx).toBeGreaterThan(-1);
-    expect(usageIdx).toBeGreaterThan(-1);
-    const variantsBlock = content.slice(variantsIdx);
-    expect(variantsBlock).not.toContain("✓");
-    expect(variantsBlock).not.toContain("✗");
-    expect(variantsBlock).not.toContain("⚠");
-    expect(usageIdx).toBeLessThan(variantsIdx);
-  });
-
-  it("(#3) Usage block renders ✓ Used (in CVA) and ✗ Unknown (not in CVA) rows", () => {
-    expect(content).toContain(">Usage<");
-    expect(content).toMatch(/✓[\s\S]*?Used[\s\S]*?intent="primary" \(8\)/);
-    expect(content).toMatch(/✗[\s\S]*?Unknown at callsites[\s\S]*?intent="ghost" \(2\)/);
-    expect(content).not.toContain("⚠");
-  });
 });
 
 // ── AST-based meta extractor integration tests (issue #61 cycle 2) ───────────
@@ -1251,7 +1159,7 @@ describe("AST-based meta extractor (A3) — data-grid fixture", () => {
     await mkdir(dsDir, { recursive: true });
     copyFixture(FIXTURE_AST_EXTRACTOR, dir, "design-system/atoms/data-grid.tsx");
     copyFixture(FIXTURE_AST_EXTRACTOR, dir, "design-system/atoms/grid-fixtures.ts");
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const r = await runGen(dir);
     expect(r.status).toBe(0);
     showcaseContent = await readFile(join(dsDir, "data-grid.showcase.tsx"), "utf8");
   });
@@ -1289,7 +1197,7 @@ describe("AST-based meta extractor (A3) — data-table carries-refs fixture", ()
     dir = await fresh();
     copyFixture(FIXTURE_CARRIES_REFS, dir, "design-system/composites/data-table.tsx");
     copyFixture(FIXTURE_CARRIES_REFS, dir, "design-system/_fixtures/job-fixtures.ts");
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const r = await runGen(dir);
     expect(r.status).toBe(0);
     content = await readFile(join(dir, "design-system/composites/data-table.showcase.tsx"), "utf8");
   });
@@ -1332,7 +1240,7 @@ describe("AST-based meta extractor (A3) — alias fixtures (#93) cluster", () =>
     copyFixture(FIXTURE_ALIAS_FIXTURES, dir, "design-system/_fixtures/address-fixtures.ts");
     await writeFile(join(dir, "package.json"), JSON.stringify({ name: "test-consumer" }));
     await writeFile(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }));
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const r = await runGen(dir);
     expect(r.status).toBe(0);
     content = await readFile(join(dir, "design-system/composites/contact-card.showcase.tsx"), "utf8");
   });
@@ -1534,7 +1442,7 @@ describe("JSX attribute / children emission regressions", () => {
       ].join("\n")
     );
 
-    const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
+    const r = await runGen(dir);
     expect(r.status).toBe(0);
   });
 

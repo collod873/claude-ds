@@ -17,6 +17,7 @@ import { initCmd } from "./commands/init.js";
 import { migrateLayoutCmd } from "./commands/migrate-layout.js";
 import { reconcileCmd } from "./commands/reconcile.js";
 import { reconformCmd } from "./commands/reconform.js";
+import { regenShowcasesCmd } from "./commands/regen-showcases.js";
 import { syncCmd } from "./commands/sync.js";
 import { upgradeCmd } from "./commands/upgrade.js";
 import { versionCmd } from "./commands/version.js";
@@ -380,6 +381,19 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 		.option("--force", "delete all findings without prompting")
 		.action(async (opts: { dryRun?: boolean; force?: boolean }) => {
 			await reconcileCmd({ dryRun: opts.dryRun, force: opts.force, cwd: defaults.cwd });
+		});
+
+	// The canonical showcase regenerator (PRD #566, issue #568). Hidden: not a
+	// command a consumer hand-types — the pack's PostToolUse hook invokes it
+	// through the thin `generate-showcase-companion` shim, and heal's reconform
+	// owns the integrity-driven regen. Registered + runnable as the single
+	// emission path so the shim and any tooling delegate here, never to a second
+	// generator (ADR-0031).
+	program
+		.command("regen-showcases", { hidden: true })
+		.description("regenerate every design-system component's .showcase.tsx companion")
+		.action(async () => {
+			await regenShowcasesCmd({ cwd: defaults.cwd });
 		});
 
 	// Loop member (ADR-0025) — demoted from `--help` billing. See `sync` above.

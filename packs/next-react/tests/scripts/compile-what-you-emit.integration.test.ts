@@ -1,10 +1,10 @@
-import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type CompileResult, compileEmitted } from "../../../../tests/helpers/compile-emitted";
+import { runCli } from "../../../../tests/helpers/runcli";
 
 /**
  * Compile-what-you-emit (PRD #546, issue #551).
@@ -27,7 +27,6 @@ import { type CompileResult, compileEmitted } from "../../../../tests/helpers/co
  * lands and flips them green.
  */
 
-const SCRIPT = resolve("packs/next-react/files/scripts/generate-showcase-companion.ts");
 const FIXTURE_ROOT = resolve("packs/next-react/tests/fixtures/compile-what-you-emit");
 const ATOM_REL = "design-system/atoms/crewops-atom.tsx";
 const SHOWCASE_REL = "design-system/atoms/crewops-atom.showcase.tsx";
@@ -79,13 +78,14 @@ describe("generator emits type-correct showcase for the Crewops-shape atom", () 
 	let result: CompileResult;
 
 	beforeAll(async () => {
-		// Run the real generator (as it ships) over a copy of the fixture atom,
-		// then compile what it emitted against the real component.
+		// Run the canonical regenerator (the path the pack shim delegates to) over
+		// a copy of the fixture atom, then compile what it emitted against the real
+		// component.
 		const dir = await mkdtemp(join(tmpdir(), "compile-what-you-emit-"));
 		mkdirSync(join(dir, "design-system", "atoms"), { recursive: true });
 		copyFileSync(join(FIXTURE_ROOT, ATOM_REL), join(dir, ATOM_REL));
-		const r = spawnSync("node", ["--experimental-strip-types", SCRIPT], { cwd: dir, encoding: "utf8" });
-		expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+		const r = await runCli(["regen-showcases"], { cwd: dir });
+		expect(r.code, `${r.stdout}\n${r.stderr}`).toBe(0);
 		const emitted = await readFile(join(dir, SHOWCASE_REL), "utf8");
 		await rm(dir, { recursive: true, force: true });
 		result = compileEmitted([{ path: SHOWCASE_REL, content: emitted }], FIXTURE_ROOT);

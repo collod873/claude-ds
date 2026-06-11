@@ -23,7 +23,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "node scripts/sync-cva-analyzer.mjs && tsc -p . && chmod +x dist/cli.js",
+    "build": "tsc -p . && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.tests.json",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
