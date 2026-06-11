@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { runCli } from "../../../../tests/helpers/runcli";
+import { compileEmitted } from "../../../../tests/helpers/compile-emitted";
 
 const SCRIPT = resolve("packs/next-react/files/scripts/generate-showcase-companion.ts");
 
@@ -592,6 +593,17 @@ describe("generate-showcase-companion.ts [integration] — ATOM fixture cluster"
   it("header in .showcase.tsx includes the source filename", () => {
     expect(content).toContain("Source: button.tsx meta block.");
   });
+
+  // Compile-what-you-emit (PRD #546 #10, issue #551): the typecheck step is not
+  // CVA-only. The plain-atom emission gets the same oracle, against the real,
+  // precisely-typed Button through the fixture's own tsconfig.
+  it("emitted .showcase.tsx typechecks against the real Button component", () => {
+    const r = compileEmitted(
+      [{ path: "design-system/atoms/button.showcase.tsx", content }],
+      FIXTURE_ATOM,
+    );
+    expect(r.hasErrors, r.messages.join("\n")).toBe(false);
+  });
 });
 
 // ── CVA fixture cluster (shared spawn) ──────────────────────────────────────
@@ -631,6 +643,20 @@ describe("generate-showcase-companion.ts [integration] — CVA fixture cluster",
   it("CVA-expanded .showcase.tsx does not contain @ts-nocheck", () => {
     expect(content).not.toContain("@ts-nocheck");
   });
+
+  // Compile-what-you-emit (PRD #546, issue #551): string assertions only encode
+  // the generator's own beliefs. This typechecks the emitted showcase against
+  // the real, precisely-typed Badge through the fixture's own tsconfig — the
+  // ground truth the Crewops breakage slipped past. Single-CVA Badge is the
+  // clean case, so this is green; the multi-CVA Crewops-shape regressions live
+  // (red, as expected-fail tripwires) in compile-what-you-emit.integration.test.ts.
+  it("CVA-expanded .showcase.tsx typechecks against the real Badge component", () => {
+    const r = compileEmitted(
+      [{ path: "design-system/atoms/badge.showcase.tsx", content }],
+      FIXTURE_CVA,
+    );
+    expect(r.hasErrors, r.messages.join("\n")).toBe(false);
+  });
 });
 
 // ── REF fixture cluster (shared spawn) ──────────────────────────────────────
@@ -658,6 +684,17 @@ describe("generate-showcase-companion.ts [integration] — REF fixture cluster",
     expect(content).toContain('import { meta } from "./tokens-page"');
     expect(content).toContain("meta.render()");
     expect(content).toContain("Design Tokens");
+  });
+
+  // Compile-what-you-emit (PRD #546 #10, issue #551): a reference showcase calls
+  // meta.render() rather than spreading example props, but it is still emitted
+  // .tsx — so it gets the same compiler oracle against the real fixture.
+  it("emitted reference .showcase.tsx typechecks against the real meta", () => {
+    const r = compileEmitted(
+      [{ path: "design-system/references/tokens-page.showcase.tsx", content }],
+      FIXTURE_REF,
+    );
+    expect(r.hasErrors, r.messages.join("\n")).toBe(false);
   });
 
   it("reference showcase wraps content in prose div", () => {
