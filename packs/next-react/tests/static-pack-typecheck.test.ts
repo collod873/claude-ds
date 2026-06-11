@@ -230,7 +230,11 @@ describe("static pack templates typecheck under a consumer tsc (#577)", () => {
 			encoding: "utf8",
 			timeout: 120_000,
 		});
-		const output = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
+		// r.error is set when the spawn itself fails (binary missing, timeout) —
+		// in that case r.status is null and r.stdout/stderr are empty, so surface
+		// it or a CI timeout reports an opaque "exited null".
+		const spawnError = r.error ? `\nspawn error: ${r.error.message}` : "";
+		const output = `${r.stdout ?? ""}\n${r.stderr ?? ""}${spawnError}`;
 		expect(output, `tsc reported diagnostics in shipped templates:\n${output}`).not.toMatch(
 			/error TS\d+/,
 		);
