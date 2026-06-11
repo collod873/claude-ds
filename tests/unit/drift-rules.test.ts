@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
 	allRuleIds,
+	attributedAxes,
 	type DriftRuleInput,
 	EXTRACTION_NEEDED_MARKER,
 	evaluateDrift,
 	isExtractionNeededFinding,
-	parseCvaVariants,
 	ruleDescription,
 } from "../../src/lib/drift/index.js";
 
@@ -874,6 +874,9 @@ const buttonVariants = cva("base", {
     variant: { default: "def", ghost: "gho", outline: "out" },
   },
 });
+export function Button({ variant }: { variant?: string }) {
+  return <button className={buttonVariants({ variant })} />;
+}
 export const meta = {
   kind: "atom" as const,
   examples: [
@@ -900,6 +903,9 @@ const badgeVariants = cva("base", {
     tone: { info: "inf", warning: "wrn", error: "err" },
   },
 });
+export function Badge({ tone }: { tone?: string }) {
+  return <span className={badgeVariants({ tone })} />;
+}
 export const meta = {
   kind: "atom" as const,
   examples: [
@@ -969,6 +975,9 @@ const chipVariants = cva("base", {
     size: { sm: "s", md: "m", lg: "l" },
   },
 });
+export function Chip({ variant, size }: { variant?: string; size?: string }) {
+  return <span className={chipVariants({ variant, size })} />;
+}
 export const meta = {
   kind: "atom" as const,
   examples: [
@@ -1080,8 +1089,19 @@ export const meta = {
 	});
 });
 
-describe("parseCvaVariants", () => {
-	it("returns base variant axes and values", () => {
+// `attributedAxes` is the analyzer-backed adapter (#554) the two CVA-consuming
+// fixers read — it replaced the deleted file-wide regex parser. It returns the
+// variant axes attributed to the file's *exported* component(s), with typed
+// values, pseudo-state axes filtered. (Per-component attribution itself is
+// covered exhaustively in cva-analyzer.test.ts; these cases pin the
+// fixer-layer concerns: pseudo-state filtering and enum/boolean typing.)
+describe("attributedAxes", () => {
+	const obj = (src: string) => {
+		const result = attributedAxes(src);
+		return result === null ? null : Object.fromEntries(result);
+	};
+
+	it("returns enum axes with typed values for the exported component", () => {
 		const source = `import { cva } from "class-variance-authority";
 const buttonVariants = cva("btn", {
   variants: {
@@ -1089,12 +1109,44 @@ const buttonVariants = cva("btn", {
     size: { default: "btn-md", sm: "btn-sm", lg: "btn-lg" },
   },
   defaultVariants: { variant: "default", size: "default" },
-});`;
-		const result = parseCvaVariants(source);
-		expect(result).toEqual({
-			variant: ["default", "ghost", "outline"],
-			size: ["default", "sm", "lg"],
+});
+export function Button({ variant, size }: { variant?: string; size?: string }) {
+  return <button className={buttonVariants({ variant, size })} />;
+}`;
+		expect(obj(source)).toEqual({
+			variant: { kind: "enum", values: ["default", "ghost", "outline"] },
+			size: { kind: "enum", values: ["default", "sm", "lg"] },
 		});
+	});
+
+	it("types a true/false axis as boolean, not enum string values", () => {
+		const source = `import { cva } from "class-variance-authority";
+const inputVariants = cva("input", {
+  variants: {
+    size: { sm: "s", md: "m" },
+    invalid: { true: "border-red", false: "border-gray" },
+  },
+});
+export function Input({ size, invalid }: { size?: string; invalid?: boolean }) {
+  return <input className={inputVariants({ size, invalid })} />;
+}`;
+		expect(obj(source)).toEqual({
+			size: { kind: "enum", values: ["sm", "md"] },
+			invalid: { kind: "boolean" },
+		});
+	});
+
+	it("excludes a sub-element cva()'s axes from the exported component (multi-CVA)", () => {
+		const source = `import { cva } from "class-variance-authority";
+const triggerVariants = cva("trigger", { variants: { density: { compact: "c", roomy: "r" } } });
+function Marker({ density }: { density?: string }) {
+  return <span className={triggerVariants({ density })} />;
+}
+const comboboxVariants = cva("combobox", { variants: { size: { sm: "s", lg: "l" } } });
+export function Combobox({ size }: { size?: string }) {
+  return <div className={comboboxVariants({ size })}><Marker /></div>;
+}`;
+		expect(obj(source)).toEqual({ size: { kind: "enum", values: ["sm", "lg"] } });
 	});
 
 	it("excludes pseudo-state variant axes (hover, active, pressed, etc.)", () => {
@@ -1114,17 +1166,14 @@ const buttonVariants = cva("btn", {
     selected: { true: "bg-primary text-white" },
     checked: { true: "checked:bg-primary" },
   },
-  compoundVariants: [
-    { variant: "ghost", hover: true, class: "hover:bg-transparent" },
-    { variant: "outline", focus: true, class: "focus:ring-primary" },
-  ],
   defaultVariants: { variant: "default", size: "default" },
-});`;
-		const result = parseCvaVariants(source);
+});
+export function Button(props: import("class-variance-authority").VariantProps<typeof buttonVariants>) {
+  return <button className={buttonVariants(props)} />;
+}`;
+		const result = attributedAxes(source);
 		expect(result).not.toBeNull();
-		expect(Object.keys(result!)).toEqual(["variant", "size"]);
-		expect(result!.variant).toEqual(["default", "ghost", "outline"]);
-		expect(result!.size).toEqual(["default", "sm", "icon"]);
+		expect([...result!.keys()]).toEqual(["variant", "size"]);
 	});
 
 	it("excludes focusVisible and focusWithin pseudo-state axes", () => {
@@ -1135,9 +1184,11 @@ const v = cva("base", {
     focusVisible: { true: "ring-2" },
     focusWithin: { true: "ring-1" },
   },
-});`;
-		const result = parseCvaVariants(source);
-		expect(result).toEqual({ tone: ["info", "warning"] });
+});
+export function Note({ tone }: { tone?: string }) {
+  return <div className={v({ tone })} />;
+}`;
+		expect(obj(source)).toEqual({ tone: { kind: "enum", values: ["info", "warning"] } });
 	});
 
 	it("returns null when no non-pseudo-state variants remain", () => {
@@ -1147,14 +1198,15 @@ const v = cva("base", {
     hover: { true: "hover-style" },
     focus: { true: "focus-style" },
   },
-});`;
-		const result = parseCvaVariants(source);
-		expect(result).toBeNull();
+});
+export function Note(props: import("class-variance-authority").VariantProps<typeof v>) {
+  return <div className={v(props)} />;
+}`;
+		expect(attributedAxes(source)).toBeNull();
 	});
 
 	it("returns null for source without cva()", () => {
-		const result = parseCvaVariants("export function Foo() { return <div />; }");
-		expect(result).toBeNull();
+		expect(attributedAxes("export function Foo() { return <div />; }")).toBeNull();
 	});
 });
 

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
 
-import { parseCvaVariants } from "../cva.js";
+import { attributedEnumVariants } from "../cva.js";
 import { extractUntilStatement } from "../extract.js";
 import type { DriftFinding, DriftRule, DriftRuleInput, FixResult } from "../rule.js";
 
@@ -470,7 +470,10 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 			continue;
 		}
 
-		const cvaVariants = parseCvaVariants(atomSource);
+		// Enum axes attributed to the atom's exported component (analyzer-backed,
+		// #554): a sub-element cva()'s axes never leak in, so the fixer never
+		// infers a variant prop the atom doesn't accept.
+		const cvaVariants = attributedEnumVariants(atomSource);
 
 		if (!cvaVariants) {
 			// No variants — auto-replace all instances

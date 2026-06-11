@@ -1559,7 +1559,7 @@ const buttonVariants = cva("base", {
     variant: { default: "def", ghost: "gho", destructive: "des" },
   },
 });
-export function Button() { return <button />; }
+export function Button({ variant }: { variant?: string }) { return <button className={buttonVariants({ variant })} />; }
 export const meta = { kind: "atom" as const, examples: [] };
 `;
 			await mkdir(join(dir, "design-system/atoms"), { recursive: true });
@@ -1589,7 +1589,7 @@ const buttonVariants = cva("base", {
     variant: { default: "def", ghost: "gho", destructive: "des" },
   },
 });
-export function Button() { return <button />; }
+export function Button({ variant }: { variant?: string }) { return <button className={buttonVariants({ variant })} />; }
 export const meta = {
   kind: "atom" as const,
   examples: [
@@ -1625,7 +1625,7 @@ const chipVariants = cva("base", {
     size: { sm: "s", md: "m", lg: "l" },
   },
 });
-export function Chip() { return <span />; }
+export function Chip({ variant, size }: { variant?: string; size?: string }) { return <span className={chipVariants({ variant, size })} />; }
 export const meta = {
   kind: "atom" as const,
   examples: [
@@ -1661,7 +1661,7 @@ const v = cva("base", {
     tone: { info: "i", warning: "w", error: "e" },
   },
 });
-export function Alert() { return <div />; }
+export function Alert({ tone }: { tone?: string }) { return <div className={v({ tone })} />; }
 export const meta = { kind: "atom" as const, examples: [] };
 `;
 			await mkdir(join(dir, "design-system/atoms"), { recursive: true });
@@ -1680,6 +1680,89 @@ export const meta = { kind: "atom" as const, examples: [] };
 			expect(content).toContain('tone: "info"');
 			expect(content).toContain('tone: "warning"');
 			expect(content).toContain('tone: "error"');
+		});
+
+		// #554 regression — a boolean CVA axis (`invalid: { true, false }`) must
+		// land in meta as boolean LITERALS, never the string "true". The emitted
+		// `<Input invalid="true" />` is a string where the prop types as `boolean`,
+		// the Crewops defect-2 break. Red under the old regex parser (which
+		// flattened every axis value to a quoted string).
+		it("writes boolean axis values as `true`/`false` literals, never quoted strings", async () => {
+			const source = `import { cva, type VariantProps } from "class-variance-authority";
+const inputVariants = cva("base", {
+  variants: {
+    size: { sm: "s", md: "m" },
+    invalid: { true: "border-red", false: "border-gray" },
+  },
+});
+export function Input(props: VariantProps<typeof inputVariants>) {
+  return <input className={inputVariants(props)} />;
+}
+export const meta = { kind: "atom" as const, examples: [] };
+`;
+			await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+			await writeFile(join(dir, "design-system/atoms/input.tsx"), source);
+
+			const finding: DriftFinding = {
+				ruleId: "DRIFT-CVA-VARIANT-UNRENDERED",
+				file: "design-system/atoms/input.tsx",
+				message: "unexercised",
+			};
+			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const result = await fixAndApply(fixer, finding, dir);
+
+			expect(result.fixed).toBe(true);
+			const content = await readFile(join(dir, "design-system/atoms/input.tsx"), "utf8");
+			expect(content).toContain("invalid: true");
+			expect(content).toContain("invalid: false");
+			// The defect: a boolean written as a quoted string.
+			expect(content).not.toContain('invalid: "true"');
+			expect(content).not.toContain('invalid: "false"');
+		});
+
+		// #554 regression — in a multi-CVA file, a sub-element cva() consumed only
+		// by a non-exported part must NOT have its axes written onto the exported
+		// component's examples. The old file-wide regex parser attributed
+		// `markerVariants`' `density` axis to the exported Combobox and wrote
+		// `<Combobox density="roomy" />` — a prop Combobox never accepted (Crewops
+		// defect 1). Red under the regex parser; green once the fixer reads the
+		// component-attribution analyzer.
+		it("never writes a sub-element axis the exported component does not accept", async () => {
+			const source = `import { cva } from "class-variance-authority";
+const markerVariants = cva("marker", {
+  variants: { density: { compact: "c", roomy: "r" } },
+});
+function Marker({ density }: { density?: string }) {
+  return <span className={markerVariants({ density })} />;
+}
+const comboboxVariants = cva("combobox", {
+  variants: { size: { sm: "s", lg: "l" } },
+});
+export function Combobox({ size }: { size?: string }) {
+  return <div className={comboboxVariants({ size })}><Marker /></div>;
+}
+export const meta = { kind: "atom" as const, examples: [] };
+`;
+			await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+			await writeFile(join(dir, "design-system/atoms/combobox.tsx"), source);
+
+			const finding: DriftFinding = {
+				ruleId: "DRIFT-CVA-VARIANT-UNRENDERED",
+				file: "design-system/atoms/combobox.tsx",
+				message: "unexercised",
+			};
+			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const result = await fixAndApply(fixer, finding, dir);
+
+			expect(result.fixed).toBe(true);
+			const content = await readFile(join(dir, "design-system/atoms/combobox.tsx"), "utf8");
+			// The exported component's own axis is exercised…
+			expect(content).toContain('size: "sm"');
+			expect(content).toContain('size: "lg"');
+			// …but the sub-element axis is never written into an example. (`density`
+			// still appears in the untouched markerVariants source — scope the
+			// assertion to the emitted example props.)
+			expect(content).not.toMatch(/props:\s*\{\s*density/);
 		});
 
 		it("returns fixed=false if file cannot be read", async () => {
@@ -1717,7 +1800,7 @@ const buttonVariants = cva("base", {
     variant: { default: "def", ghost: "gho", destructive: "des" },
   },
 });
-export function Button() { return <button />; }
+export function Button({ variant }: { variant?: string }) { return <button className={buttonVariants({ variant })} />; }
 export const meta = {
   kind: "atom" as const,
   examples: [
