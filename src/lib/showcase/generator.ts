@@ -24,7 +24,7 @@
 // and no regex fallback here.
 
 import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, join, resolve as resolvePath } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import type * as TS from "typescript";
 import * as ts from "typescript";
 import {
@@ -1197,9 +1197,13 @@ function buildScopes(
 
 			let resolved = rawSpec;
 			if (rawSpec.startsWith("@/")) {
+				// resolveAtPrefix returns a consumer-root-relative path; make it
+				// absolute from consumerRoot. (`resolvePath(x).startsWith("/")` was
+				// always true — path.resolve always yields an absolute path — so this
+				// join never fired and `@/`-aliased value imports silently dropped to
+				// `null`, #568.)
 				resolved = resolveAtPrefix(rawSpec, consumerRoot);
-				// Make absolute from consumerRoot
-				if (!resolvePath(resolved).startsWith("/")) {
+				if (!isAbsolute(resolved)) {
 					resolved = join(consumerRoot, resolved);
 				}
 			} else {
@@ -1276,8 +1280,17 @@ function extractMetaFromAST(filePath: string): {
 		if (!hasExport) continue;
 		for (const decl of stmt.declarationList.declarations) {
 			if (!ts.isIdentifier(decl.name) || decl.name.text !== "meta") continue;
-			if (decl.initializer && ts.isObjectLiteralExpression(decl.initializer)) {
-				metaInit = decl.initializer;
+			// Unwrap `satisfies Meta` / `as const` / `as Meta` so the object literal
+			// under the assertion is found. Without this the AST extractor returned
+			// null and (with no regex fallback, #567) the companion silently dropped
+			// to a no-meta skip — the exact shape `export const meta = {…} satisfies
+			// Meta` a typed consumer writes (#568).
+			let initExpr = decl.initializer;
+			while (initExpr && (ts.isAsExpression(initExpr) || ts.isSatisfiesExpression(initExpr))) {
+				initExpr = initExpr.expression;
+			}
+			if (initExpr && ts.isObjectLiteralExpression(initExpr)) {
+				metaInit = initExpr;
 				break;
 			}
 		}
