@@ -5,6 +5,7 @@ import { dsImportsFeatureRule } from "./rules/ds-imports-feature.js";
 import { inlineStaticStyleRule } from "./rules/inline-static-style.js";
 import { metaExamplesCorruptRule } from "./rules/meta-examples-corrupt.js";
 import { metaExamplesDuplicateRule } from "./rules/meta-examples-duplicate.js";
+import { metaExamplesInvalidPropRule } from "./rules/meta-examples-invalid-prop.js";
 import { metaKindMissingRule } from "./rules/meta-kind-missing.js";
 import { misclassifiedAtomRule } from "./rules/misclassified-atom.js";
 import { misclassifiedCompositeRule } from "./rules/misclassified-composite.js";
@@ -38,6 +39,7 @@ export const DRIFT_RULES_BY_ID: Record<DriftRuleId, DriftRule> = {
 	"DRIFT-CVA-VARIANT-UNRENDERED": cvaVariantUnrenderedRule,
 	"DRIFT-META-EXAMPLES-DUPLICATE": metaExamplesDuplicateRule,
 	"DRIFT-META-EXAMPLES-CORRUPT": metaExamplesCorruptRule,
+	"DRIFT-META-EXAMPLES-INVALID-PROP": metaExamplesInvalidPropRule,
 	"DRIFT-STALE-META-STATES": staleMetaStatesRule,
 	"DRIFT-TOKEN-PARITY": tokenParityRule,
 };
