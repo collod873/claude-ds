@@ -615,6 +615,135 @@ export function collectExportedComponentNames(
 	return new Set(collectComponents(ts, sf, collectExportedNames(ts, sf)).map((c) => c.name));
 }
 
+// ── coverage-loss diagnostics: unresolvable props type ──────────────────────────
+
+/**
+ * A coverage-loss diagnostic for one exported component (#570): it consumes a
+ * `cva()`, but its props type is an external type the analyzer cannot resolve,
+ * so one or more consumed axes were dropped for lack of local evidence rather
+ * than proven NOT to be props. The component may have vanished from
+ * `analyzeCvaComponents` entirely (every axis dropped) — this surfaces it so
+ * the silent shrink is visible. Detection stays conservative (the axes are
+ * still dropped, exactly as before); only the diagnostic is new.
+ */
+export interface UnresolvablePropsDiagnostic {
+	/** The exported component whose props type could not be resolved. */
+	component: string;
+	/** The external type name referenced by the props annotation (e.g. an import). */
+	unresolvedType: string;
+	/** Consumed cva axes dropped for lack of exposure evidence (would-be props). */
+	droppedAxes: string[];
+}
+
+/** TS utility generics whose name is not an unresolvable user/import type. */
+const RESOLVABLE_UTILITY_TYPES = new Set([
+	"VariantProps",
+	"Omit",
+	"Pick",
+	"Partial",
+	"Required",
+	"Readonly",
+	"Record",
+	"Exclude",
+	"Extract",
+	"NonNullable",
+	"Parameters",
+	"ReturnType",
+	"Awaited",
+	"InstanceType",
+]);
+
+/**
+ * The leftmost external type name a props annotation references that the
+ * analyzer cannot resolve locally — a bare `TypeReference` whose name is
+ * neither a local interface/alias nor a known utility generic, and is not
+ * qualified (`React.X` resolves to a library type, not a missing local one).
+ * Returns `null` when every referenced type is locally resolvable.
+ */
+function unresolvedPropsTypeName(
+	ts: typeof TS,
+	typeNode: TS.TypeNode | undefined,
+	typeDecls: Map<string, TS.InterfaceDeclaration | TS.TypeAliasDeclaration>,
+): string | null {
+	if (!typeNode) return null;
+	let found: string | null = null;
+	const walk = (node: TS.Node): void => {
+		if (found) return;
+		if (ts.isTypeReferenceNode(node)) {
+			// A qualified `React.X` resolves to a library type. Its type arguments
+			// are specializers (e.g. `React.ButtonHTMLAttributes<HTMLButtonElement>`),
+			// not the props contract — descending into them would misreport the DOM
+			// element type as the unresolvable props type. Stop here.
+			if (ts.isQualifiedName(node.typeName)) return;
+			if (ts.isIdentifier(node.typeName)) {
+				const name = node.typeName.text;
+				if (!RESOLVABLE_UTILITY_TYPES.has(name) && !typeDecls.has(name)) {
+					found = name;
+					return;
+				}
+				// A resolvable utility generic (`Omit<BadgeProps, …>`) or local alias
+				// can still wrap an unresolvable external type in its arguments — that
+				// inner type is the real props shape, so descend into the arguments.
+				node.typeArguments?.forEach(walk);
+				return;
+			}
+		}
+		node.forEachChild(walk);
+	};
+	walk(typeNode);
+	return found;
+}
+
+/**
+ * Per-file coverage-loss diagnostics: exported components that consume a
+ * `cva()` whose props type is unresolvable, with the axes that were dropped as
+ * a result (#570). Pure-syntactic, same `createSourceFile` pass as
+ * `analyzeCvaComponents`; no type checker.
+ */
+export function cvaUnresolvedPropsDiagnostics(
+	ts: typeof TS,
+	source: string,
+	fileName = "component.tsx",
+): UnresolvablePropsDiagnostic[] {
+	if (!source.includes("cva(")) return [];
+
+	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	const cvaDefs = collectCvaDefs(ts, sf);
+	if (cvaDefs.size === 0) return [];
+	const cvaNames = new Set(cvaDefs.keys());
+	const typeDecls = collectTypeDecls(ts, sf);
+	const exportedNames = collectExportedNames(ts, sf);
+
+	const diagnostics: UnresolvablePropsDiagnostic[] = [];
+	for (const component of collectComponents(ts, sf, exportedNames)) {
+		const consumed = new Set<string>();
+		for (const name of consumedViaProps(ts, component.firstParamType, cvaNames, typeDecls)) {
+			consumed.add(name);
+		}
+		for (const name of consumedViaBody(ts, component.node, cvaNames)) consumed.add(name);
+		if (consumed.size === 0) continue;
+
+		const exposure = collectExposure(ts, component, cvaNames, typeDecls);
+		const droppedAxes: string[] = [];
+		for (const cvaName of consumed) {
+			const config = cvaDefs.get(cvaName);
+			if (!config) continue;
+			const spreadOmissions = exposure.wholesale.get(cvaName);
+			for (const axisName of Object.keys(config.axes)) {
+				const spreadExposed = spreadOmissions !== undefined && !spreadOmissions.has(axisName);
+				if (!spreadExposed && !exposure.names.has(axisName)) droppedAxes.push(axisName);
+			}
+		}
+		if (droppedAxes.length === 0) continue;
+
+		const unresolvedType = unresolvedPropsTypeName(ts, component.firstParamType, typeDecls);
+		if (!unresolvedType) continue;
+
+		diagnostics.push({ component: component.name, unresolvedType, droppedAxes });
+	}
+	return diagnostics;
+}
+
 // ── required props of a component ───────────────────────────────────────────────
 
 /**

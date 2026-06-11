@@ -14,6 +14,11 @@ import { MIGRATION_REGISTRY } from "../lib/migration-registry.js";
 import { detectPackageManager } from "../lib/package-manager.js";
 import { resolveManifestPath } from "../lib/paths.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
+import {
+	type CvaCoverageWarning,
+	formatCvaCoverageWarning,
+	scanCvaCoverage,
+} from "../lib/reports/cva-coverage.js";
 import { scanRootDupes } from "../lib/root-dupes.js";
 import { checkVersionCurrency } from "../lib/version-currency.js";
 import { cliVersion, LABEL_CLI, LABEL_PIN } from "../lib/version-vocab.js";
@@ -130,6 +135,12 @@ export async function doctorCmd(opts: {
 
 	// #23: scan for root-level dupes of canonical design-system/ files
 	const rootDupes = await scanRootDupes(cwd, manifest.deprecated_paths);
+
+	// Coverage-loss diagnostics (#570): surface silent CVA coverage shrink —
+	// unresolvable props types and failed render-target resolution. Informational
+	// (does not flip the exit code, like upgrade/repair); makes "the rule went
+	// quiet" distinguishable from "nothing is wrong".
+	const coverageWarnings: CvaCoverageWarning[] = await scanCvaCoverage(ctx);
 
 	let result: DoctorResult;
 
@@ -271,6 +282,15 @@ export async function doctorCmd(opts: {
 			!upgradeAvailable;
 		if (everythingClean) verdictLines.push("- ✓ All clear");
 	}
+	// Coverage-loss diagnostics (#570) — informational, surfaced in both modes.
+	// A CVA rule going quiet is not a project defect, so it does not flip the
+	// exit code; it is shown so silent shrink does not pass for "nothing wrong".
+	if (coverageWarnings.length > 0) {
+		verdictLines.push(
+			`- ⚠ Coverage-loss diagnostics: ${coverageWarnings.length} (a CVA rule went quiet, not "nothing wrong")`,
+		);
+		for (const w of coverageWarnings) verdictLines.push(`  ${formatCvaCoverageWarning(w).trim()}`);
+	}
 	verdictLines.push("");
 	// #344: --json is the machine surface — suppress the human verdict block.
 	if (!opts.json) process.stdout.write(verdictLines.join("\n"));
@@ -344,6 +364,7 @@ export async function doctorCmd(opts: {
 				repairNeeded,
 				upgradeAvailable,
 				openExceptions,
+				coverageWarnings,
 			},
 			...result,
 		};

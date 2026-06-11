@@ -36,6 +36,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// The SAME package-manager detector consumers get — imported from the built
+// artifact, never re-implemented. A local copy diverged once already (missing
+// bun.lockb, missing cache isolation); importing it kills that divergence class.
+import { detectPackageManager } from "../dist/lib/package-manager.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -149,18 +153,6 @@ function git(dir, args) {
 	return res.stdout ?? "";
 }
 
-/**
- * The consumer's package manager, from its lockfile — the same signal adopt's
- * own detection uses. Installing with npm in a pnpm consumer fails on peer-dep
- * conflicts the consumer's real installs never see (npm resolves peers
- * strictly; pnpm does not), so the canary must install the way the consumer does.
- */
-function detectPackageManager(dir) {
-	if (existsSync(join(dir, "pnpm-lock.yaml"))) return "pnpm";
-	if (existsSync(join(dir, "yarn.lock"))) return "yarn";
-	return "npm";
-}
-
 /** Run `heal --json` via the installed bin and return its parsed envelope. */
 function runHeal(bin, dir) {
 	const { code, stdout } = capture(bin, ["heal", "--json"], { cwd: dir });
@@ -186,8 +178,9 @@ async function main(argv) {
 	if (!existsSync(tarball)) die(`npm pack produced no ${basename(tarball)}`);
 
 	const scratch = mkdtempSync(join(tmpdir(), "ds-canary-"));
-	// Fresh npm cache so a persistent cache can't satisfy the install from a
-	// previously built copy — same guard the release smoke uses.
+	// Fresh package-manager cache so a persistent cache can't satisfy the install
+	// from a previously built copy — same guard the release smoke uses. Every
+	// manager (npm/pnpm/yarn/bun) is pointed inside this one throwaway dir below.
 	const npmCache = mkdtempSync(join(tmpdir(), "ds-canary-cache-"));
 	const consumerDir = join(scratch, "consumer");
 	try {
@@ -200,8 +193,10 @@ async function main(argv) {
 			...process.env,
 			npm_config_cache: npmCache,
 			npm_config_store_dir: join(npmCache, "pnpm-store"),
+			YARN_CACHE_FOLDER: join(npmCache, "yarn-cache"),
+			BUN_INSTALL_CACHE_DIR: join(npmCache, "bun-cache"),
 		};
-		const pm = detectPackageManager(consumerDir);
+		const pm = await detectPackageManager(consumerDir);
 		console.log(`▶ installing the consumer's own deps (${pm})`);
 		sh(pm, ["install"], { cwd: consumerDir, env: npmEnv });
 		console.log("▶ installing the release-candidate tarball");
