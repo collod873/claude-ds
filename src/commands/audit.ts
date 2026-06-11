@@ -22,6 +22,11 @@ import { type IntegrityRuleId, isIntegrityFixable } from "../lib/integrity/index
 import { detectBuildCommand, err, info, setJsonMode } from "../lib/log.js";
 import { parseManifest } from "../lib/manifest.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
+import {
+	type CvaCoverageWarning,
+	formatCvaCoverageWarning,
+	scanCvaCoverage,
+} from "../lib/reports/cva-coverage.js";
 import { type AuditFinding, scanDriftAndIntegrity } from "../lib/reports/drift-integrity-scan.js";
 import { formatFindings, formatScorecard } from "../lib/reports/findings-format.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
@@ -204,6 +209,33 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 	const driftIntegrity = await scanDriftAndIntegrity(ctx);
 	info(driftIntegrity.coverageLine);
 
+	// Coverage-loss diagnostics (#570): make silent CVA coverage shrink visible.
+	// Non-blocking — these never enter `activeFindings`, the scorecard, or the
+	// exit code (no change to detection/fix behavior, per the v1.8.2 stance); the
+	// warning is the new part.
+	const coverageWarnings: CvaCoverageWarning[] = await scanCvaCoverage(ctx);
+	const coverageEnvelope =
+		coverageWarnings.length > 0
+			? {
+					coverageWarnings: coverageWarnings.map((w) =>
+						w.kind === "render-target-unresolved"
+							? {
+									kind: w.kind,
+									file: w.file,
+									expected: w.expected,
+									components: w.components,
+								}
+							: {
+									kind: w.kind,
+									file: w.file,
+									component: w.component,
+									unresolvedType: w.unresolvedType,
+									axes: w.axes,
+								},
+					),
+				}
+			: {};
+
 	const initialActive: AuditFinding[] = driftIntegrity.findings.filter(
 		(f) => !suppressedSet.has(suppressedKey(f.ruleId, f.file)),
 	);
@@ -291,6 +323,14 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 		);
 		for (const f of bypassFindings) info(formatStructuralBypassFinding(f));
 	}
+
+	if (coverageWarnings.length > 0) {
+		info(
+			`\nCoverage-loss diagnostics (${coverageWarnings.length}, non-blocking) — a CVA rule went quiet, not "nothing wrong":`,
+		);
+		for (const w of coverageWarnings) info(formatCvaCoverageWarning(w));
+	}
+
 	info(
 		formatScorecard({
 			scaffoldPresent: scaffold.present,
@@ -336,6 +376,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 					findings: activeFindings.map((f) => ({ ruleId: f.ruleId, file: f.file })),
 					missingScaffold: scaffold.total - scaffold.present,
 					...advisoryEnvelope,
+					...coverageEnvelope,
 				},
 			});
 		}
@@ -375,6 +416,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 						warnings: warningCount,
 						verify: verifyJson(verify),
 						...advisoryEnvelope,
+						...coverageEnvelope,
 					},
 				});
 			}
@@ -407,6 +449,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 					findingsCount: 0,
 					...(verify ? { verify: verifyJson(verify) } : {}),
 					...advisoryEnvelope,
+					...coverageEnvelope,
 				},
 			});
 		}
@@ -426,7 +469,12 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 				verdict: "warnings",
 				exitCode: HEADLESS_EXIT.OK,
 				actions: {},
-				remaining: { warnings: warningCount, findingsCount: 0, ...advisoryEnvelope },
+				remaining: {
+					warnings: warningCount,
+					findingsCount: 0,
+					...advisoryEnvelope,
+					...coverageEnvelope,
+				},
 			});
 		}
 		return success(
@@ -460,6 +508,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 							warnings: warningCount,
 							verify: verifyJson(verify),
 							...advisoryEnvelope,
+							...coverageEnvelope,
 						},
 					});
 				}
@@ -495,6 +544,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 						warnings: warningCount,
 						verify: verifyJson(verify),
 						...advisoryEnvelope,
+						...coverageEnvelope,
 					},
 				});
 			}
@@ -508,7 +558,12 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 				verdict: "clean",
 				exitCode: HEADLESS_EXIT.OK,
 				actions: { fixedCount: fixSummary.fixedCount },
-				remaining: { findingsCount: 0, warnings: warningCount, ...advisoryEnvelope },
+				remaining: {
+					findingsCount: 0,
+					warnings: warningCount,
+					...advisoryEnvelope,
+					...coverageEnvelope,
+				},
 			});
 		}
 		return success(
