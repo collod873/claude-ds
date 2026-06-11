@@ -84,4 +84,40 @@ export function Badge() {
 		const source = `export function Badge() { return <span />; }`;
 		expect(cvaCoverageWarnings(source, "design-system/atoms/badge.tsx")).toEqual([]);
 	});
+
+	it("does not misreport a qualified library type's generic argument as the props type", () => {
+		// `React.ButtonHTMLAttributes<HTMLButtonElement>` resolves to a library
+		// type; the DOM element is just a specializer, not the props contract. The
+		// walker must not descend into it and surface "HTMLButtonElement".
+		const source = `
+import { cva } from "class-variance-authority";
+import * as React from "react";
+const badge = cva("badge", { variants: { tone: { neutral: "n", danger: "d" } } });
+export function Badge(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button className={badge({ tone: "neutral" })} {...props} />;
+}
+`;
+		expect(cvaCoverageWarnings(source, "design-system/atoms/badge.tsx")).toEqual([]);
+	});
+
+	it("surfaces an unresolvable external type wrapped in a utility generic", () => {
+		// `Omit<BadgeProps, …>` is resolvable, but the wrapped `BadgeProps` is the
+		// real props shape and is unresolvable — descent into utility args must keep
+		// surfacing it (not the utility name).
+		const source = `
+import { cva } from "class-variance-authority";
+import type { BadgeProps } from "./badge-types";
+const badge = cva("badge", { variants: { tone: { neutral: "n", danger: "d" } } });
+export function Badge(props: Omit<BadgeProps, "className">) {
+  return <span className={badge({ tone: "neutral" })} {...props} />;
+}
+`;
+		const up = cvaCoverageWarnings(source, "design-system/atoms/badge.tsx").find(
+			(w) => w.kind === "unresolvable-props",
+		);
+		expect(up).toBeDefined();
+		if (up?.kind === "unresolvable-props") {
+			expect(up.unresolvedType).toBe("BadgeProps");
+		}
+	});
 });

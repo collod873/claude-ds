@@ -2868,12 +2868,22 @@ function unresolvedPropsTypeName(
 	const walk = (node: TS.Node): void => {
 		if (found) return;
 		if (ts.isTypeReferenceNode(node)) {
-			if (!ts.isQualifiedName(node.typeName) && ts.isIdentifier(node.typeName)) {
+			// A qualified `React.X` resolves to a library type. Its type arguments
+			// are specializers (e.g. `React.ButtonHTMLAttributes<HTMLButtonElement>`),
+			// not the props contract — descending into them would misreport the DOM
+			// element type as the unresolvable props type. Stop here.
+			if (ts.isQualifiedName(node.typeName)) return;
+			if (ts.isIdentifier(node.typeName)) {
 				const name = node.typeName.text;
 				if (!RESOLVABLE_UTILITY_TYPES.has(name) && !typeDecls.has(name)) {
 					found = name;
 					return;
 				}
+				// A resolvable utility generic (`Omit<BadgeProps, …>`) or local alias
+				// can still wrap an unresolvable external type in its arguments — that
+				// inner type is the real props shape, so descend into the arguments.
+				node.typeArguments?.forEach(walk);
+				return;
 			}
 		}
 		node.forEachChild(walk);
