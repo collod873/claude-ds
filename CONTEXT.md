@@ -379,9 +379,10 @@ by `sync`, not a `DRIFT-` rule. `doctor`'s verdict names it as such.
 The semver tag (`0.8.0`, `0.9.0`, ...) a consumer is pinned to in its
 `.claude-ds.json`. Consumed via `npx claude-ds@^1` from the npm registry.
 Distinct from "what's at HEAD" — consumers move between versions via
-migration Ops, not by chasing `main`. Releases require a filled
-`verification.md` confirming Crewops upgraded successfully against the
-candidate.
+migration Ops, not by chasing `main`. Migration-bearing releases (a
+`src/lib/ops/migrations/v<v>/` dir exists) require Crewops verification
+against the candidate — today via the release canary (PRD #546);
+non-migration releases ship on a green `verify` alone (ADR-0011 addendum).
 
 ### Reserved example name
 A name in `meta.examples` that the showcase chrome treats as a named state

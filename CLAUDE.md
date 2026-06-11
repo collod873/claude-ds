@@ -15,6 +15,9 @@ defect; end state is zero local DS infra. `adopt → heal` gets there — `heal`
 - Build/test: edit `src/`, then `npm run build` (global CLI reads `dist/cli.js`).
   `npm run verify` (lint + test + build) before pushing — the pre-push hook runs it anyway.
 - Changing public-facing behavior → check `README.md`.
+- Release: `npm run release <patch|minor|major|X.Y.Z> ["summary"]` — self-contained
+  (migration gate/canary, verify, fixture refresh, tag, push, watch, npm confirm).
+  No manual steps; `--dry-run` to preview.
 - Roadmap = GitHub issues; check `gh issue list` first.
 - The `agent-*` label pipeline owns delegated work (branch+PR per sub-issue, auto-merge).
   Don't hand-commit pipeline work to `main`.

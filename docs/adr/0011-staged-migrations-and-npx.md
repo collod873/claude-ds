@@ -190,3 +190,16 @@ Whether `repair` is a standalone command or a mode of `upgrade` is an
 implementation detail; what this ADR fixes is that the two states are named,
 verdicted, and surfaced **distinctly** — and that the front door, which
 routes the consumer to the right verb, keeps the memory burden at zero.
+
+## Addendum (2026-06-11) — gate enforcement moved into `release.mjs`
+
+The verification gate's mechanical home, `auto-tag.yml`, was deleted in the
+release-automation wipe (`1d6dca4`), leaving the migration-scoped gate
+above enforced by nothing. It now lives in `scripts/release.mjs`, the single
+release entry point: when `src/lib/ops/migrations/v<next>/` exists, the
+script runs the release canary (PRD #546) against a fresh clone of the real
+consumer (default `../Crewops`, `--canary` to override) and refuses to tag
+on failure; on success it auto-writes `pack/versions/<next>/verification.md`
+from the canary result, so ADR-0014's binding-acceptance record exists
+without a human remembering a ceremonial file. Non-migration releases tag
+freely on green verify, unchanged.
