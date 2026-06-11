@@ -38,3 +38,15 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  # Fan-in gate: the ruleset requires this single stable name instead of the
+  # matrix leg names, so the matrix can change shape per branch without the
+  # ruleset stranding PRs (sandcastle ADR-0009, #602). `if: always()` is
+  # load-bearing — without it a failed matrix SKIPS this job, and a skipped
+  # required check satisfies the ruleset, so failures would merge.
+  ci-ok:
+    needs: [ci]
+    if: always()
+    runs-on: self-hosted
+    steps:
+      - run: test "${{ needs.ci.result }}" = "success"
