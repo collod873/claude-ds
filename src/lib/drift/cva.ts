@@ -2,14 +2,18 @@ import { basename } from "node:path";
 
 import * as ts from "typescript";
 
-import {
-	analyzeCvaComponents,
-	type ComponentCva,
-	type CvaAttribution,
-	type CvaAxis,
-} from "../cva/analyzer.js";
+import { analyzeCvaComponents, type CvaAxis } from "../cva/analyzer.js";
+// The primary-component selection rule and its `toPascalCase` display-name
+// derivation live in the showcase generator (issue #567) — the single module
+// that owns them, matching the generator's own render-target selection. Both
+// the CVA-consuming fixers (via `primaryComponent` below) and the generator
+// delegate here, so they can never disagree on which export a file showcases.
+import { primaryComponent } from "../showcase/generator.js";
 
 export type { CvaAxis } from "../cva/analyzer.js";
+// Re-exported so `meta-examples-invalid-prop` keeps importing the selection rule
+// from here unchanged; `primaryComponent` is also used directly below.
+export { primaryComponent, primaryComponentNames } from "../showcase/generator.js";
 
 /**
  * Pseudo-state axes (hover, focus, dark, …) are CSS state selectors expressed as
@@ -35,43 +39,6 @@ const PSEUDO_STATE_AXES = new Set([
 	"focusVisible",
 	"focusWithin",
 ]);
-
-/**
- * The component a file's `meta.examples` (and showcase) render on: the export
- * whose name is the PascalCase of the file's basename, matching the showcase
- * generator's own selection (`attribution[displayName] ?? attribution[componentName]`).
- *
- * Scoping to the render target — never the union of all exported components —
- * is what keeps the fixers and the generator agreeing. A trigger sub-component
- * may legitimately expose `size`; writing a `size` example into the ROOT's meta
- * would still emit `<Combobox size="sm">`, a prop the root rejects (the Crewops
- * v1.8.1 break).
- */
-export function primaryComponent(attribution: CvaAttribution, file: string): ComponentCva | null {
-	for (const name of primaryComponentNames(file)) {
-		const hit = attribution[name];
-		if (hit) return hit;
-	}
-	return null;
-}
-
-/**
- * The candidate export names the showcase generator resolves a file's render
- * target against, in its lookup order (PascalCase displayName, raw basename).
- */
-export function primaryComponentNames(file: string): string[] {
-	const base = basename(file).replace(/\.[^.]+$/, "");
-	return [toPascalCase(base), base];
-}
-
-/** Mirrors the showcase generator's display-name derivation. */
-function toPascalCase(name: string): string {
-	return name
-		.split(/[-_\s]+/)
-		.filter(Boolean)
-		.map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-		.join("");
-}
 
 /**
  * Variant axes attributed to the file's PRIMARY component (the one its showcase
