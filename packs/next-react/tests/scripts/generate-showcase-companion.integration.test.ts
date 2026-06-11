@@ -81,7 +81,7 @@ function sharedGen(): Promise<SharedRun> {
         `  },`,
         `  defaultVariants: { intent: "primary", size: "default" },`,
         `});`,
-        `export function Button({ intent, size, ...props }: any) { return <button {...props} />; }`,
+        `export function Button({ intent, size, ...props }: any) { return <button className={buttonVariants({ intent, size })} {...props} />; }`,
         `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
       ].join("\n")
     );
@@ -99,7 +99,7 @@ function sharedGen(): Promise<SharedRun> {
         `  },`,
         `  defaultVariants: { intent: "primary", size: "sm" },`,
         `});`,
-        `export function Btn(props: any) { return <button {...props} />; }`,
+        `export function Btn(props: any) { return <button className={v(props)} {...props} />; }`,
         `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
       ].join("\n")
     );
@@ -118,7 +118,7 @@ function sharedGen(): Promise<SharedRun> {
         `  },`,
         `  defaultVariants: { tone: "primary", size: "sm" },`,
         `});`,
-        `export function Pill(props: any) { return <span {...props} />; }`,
+        `export function Pill(props: any) { return <span className={v(props)} {...props} />; }`,
         `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
       ].join("\n")
     );
@@ -136,7 +136,7 @@ function sharedGen(): Promise<SharedRun> {
         `  },`,
         `  defaultVariants: { color: "red", size: "sm" },`,
         `});`,
-        `export function Chip(props: any) { return <div {...props} />; }`,
+        `export function Chip(props: any) { return <div className={v(props)} {...props} />; }`,
         `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
       ].join("\n")
     );
@@ -186,7 +186,7 @@ function sharedGen(): Promise<SharedRun> {
         `  variants: { intent: { primary: "p", secondary: "s" } },`,
         `  defaultVariants: { intent: "primary" },`,
         `});`,
-        `export function CvaAtom(props: any) { return <div {...props} />; }`,
+        `export function CvaAtom(props: any) { return <div className={v(props)} {...props} />; }`,
         // stub meta but CVA exists — should render normally
         `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
       ].join("\n")
@@ -899,7 +899,7 @@ async function seedCrewopsFixture(dir: string, opts: { withAnalyzer: boolean }):
       `  },`,
       `  defaultVariants: { intent: "primary", size: "md" },`,
       `});`,
-      `export function Button(props: any) { return <button {...props} />; }`,
+      `export function Button(props: any) { return <button className={v(props)} {...props} />; }`,
       `export const meta = {`,
       `  kind: "atom",`,
       `  examples: [{ name: "default", props: { children: "Click" } }],`,
@@ -1009,7 +1009,7 @@ async function seedButtonWithIconAndStates(dir: string, opts: { withAnalyzer: bo
       `  },`,
       `  defaultVariants: { intent: "primary", size: "md" },`,
       `});`,
-      `export function Button(props: any) { return <button {...props} />; }`,
+      `export function Button(props: any) { return <button className={v(props)} {...props} />; }`,
       `export const meta = {`,
       `  kind: "atom",`,
       `  examples: [{ name: "intent=primary_size=md", props: { children: "Click" } }],`,
@@ -1327,7 +1327,7 @@ describe("JSX attribute / children emission regressions", () => {
         `  },`,
         `  defaultVariants: { tone: "neutral", selected: false },`,
         `});`,
-        `export function Tag(props: { tone?: "neutral" | "primary"; selected?: boolean; children?: React.ReactNode }) { return <span {...props} />; }`,
+        `export function Tag(props: { tone?: "neutral" | "primary"; selected?: boolean; children?: React.ReactNode }) { return <span className={v(props)} {...props} />; }`,
         `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
       ].join("\n")
     );
@@ -1345,7 +1345,7 @@ describe("JSX attribute / children emission regressions", () => {
         `  },`,
         `  defaultVariants: { size: "md", "aria-invalid": false },`,
         `});`,
-        `export function InputX(props: any) { return <input {...props} />; }`,
+        `export function InputX(props: any) { return <input className={v(props)} {...props} />; }`,
         `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
       ].join("\n")
     );
@@ -1362,7 +1362,7 @@ describe("JSX attribute / children emission regressions", () => {
         `  },`,
         `  defaultVariants: { size: "md" },`,
         `});`,
-        `export function BrandMark({ size }: { size?: "sm" | "md" }) { return <svg data-size={size} />; }`,
+        `export function BrandMark({ size }: { size?: "sm" | "md" }) { return <svg className={v({ size })} data-size={size} />; }`,
         `export const meta = { kind: "atom", examples: [{ name: "default", props: {} }], skip: [] };`,
       ].join("\n")
     );
