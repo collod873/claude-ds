@@ -34,6 +34,7 @@ export type DriftRuleId =
 	| "DRIFT-INLINE-STATIC-STYLE"
 	| "DRIFT-META-EXAMPLES-DUPLICATE"
 	| "DRIFT-META-EXAMPLES-CORRUPT"
+	| "DRIFT-META-EXAMPLES-INVALID-PROP"
 	// Token-parity rule (PRD #340 / sub-issue #347; ADR-0017 addendum). Required
 	// before OWNED-TOKEN-LINT can legitimately claim supersession of a hand-rolled
 	// JSON↔CSS token-parity guard.
