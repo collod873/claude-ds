@@ -8,7 +8,8 @@ import type {
 } from "./rule.js";
 
 export type { Severity } from "../severity.js";
-export { parseCvaVariants } from "./cva.js";
+export type { CvaAxis } from "./cva.js";
+export { attributedAxes, attributedEnumVariants } from "./cva.js";
 export type {
 	DecisionAnswer,
 	DecisionKey,

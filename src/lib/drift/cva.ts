@@ -1,3 +1,15 @@
+import * as ts from "typescript";
+
+import { analyzeCvaComponents, type CvaAxis } from "../cva/analyzer.js";
+
+export type { CvaAxis } from "../cva/analyzer.js";
+
+/**
+ * Pseudo-state axes (hover, focus, dark, …) are CSS state selectors expressed as
+ * CVA boolean axes, not props the showcase enumerates as examples. The analyzer
+ * reports them like any other axis (it reads keys structurally); the fixer layer
+ * filters them so the CVA-unrendered rule never demands a `hover=true` example.
+ */
 const PSEUDO_STATE_AXES = new Set([
 	"hover",
 	"focus",
@@ -18,70 +30,48 @@ const PSEUDO_STATE_AXES = new Set([
 ]);
 
 /**
- * Extract CVA variant axis names and their values from source.
- * Matches the variants object inside a cva() call.
- * Filters out pseudo-state axes (hover, focus, active, etc.) that are
- * CSS state selectors, not settable props.
+ * Variant axes attributed to the file's exported component(s), keyed by axis
+ * name, with typed values (`{ kind: "enum"; values }` | `{ kind: "boolean" }`).
  *
- * Shared by the CVA-unrendered rule (detect + fix) and the raw-primitive
- * fixer (which parses the atom's own source to infer a variant prop).
+ * Backed by the AST component-attribution analyzer (`src/lib/cva/analyzer.ts`,
+ * issues #552/#554) — the file-wide regex parser is gone. Two consequences the
+ * fixers rely on: a sub-element `cva()` consumed only by a non-exported part
+ * never leaks its axes onto the exported component (so `audit --fix` stops
+ * writing props the component never accepted), and a `true`/`false` axis stays
+ * boolean (so meta examples land as `{ invalid: true }`, not `{ invalid: "true" }`).
+ *
+ * Pseudo-state axes are filtered. Axes shared across several exported components
+ * are de-duplicated by name (first attribution wins).
+ *
+ * Shared by the CVA-unrendered rule (detect + fix) and the raw-primitive fixer
+ * (which parses the atom's own source to infer a variant prop).
  */
-export function parseCvaVariants(source: string): Record<string, string[]> | null {
+export function attributedAxes(source: string): Map<string, CvaAxis> | null {
 	if (!source.includes("cva(")) return null;
 
-	const broadMatch = source.match(
-		/variants\s*:\s*\{([\s\S]*?)\}\s*(?:,\s*(?:defaultVariants|compoundVariants)|,?\s*\}\s*\))/,
-	);
-	if (!broadMatch) return null;
-
-	const varBlock = broadMatch[1];
-	const result: Record<string, string[]> = {};
-
-	// Brace-balanced extraction of top-level axis blocks
-	const axisStartRe = /(\w+)\s*:\s*\{/g;
-	let am: RegExpExecArray | null;
-	while ((am = axisStartRe.exec(varBlock)) !== null) {
-		const axisName = am[1];
-		if (PSEUDO_STATE_AXES.has(axisName)) continue;
-
-		// Walk forward from the opening { to find the balanced closing }
-		let depth = 1;
-		let i = am.index + am[0].length;
-		while (i < varBlock.length && depth > 0) {
-			if (varBlock[i] === "{") depth++;
-			else if (varBlock[i] === "}") depth--;
-			i++;
-		}
-		if (depth !== 0) continue;
-
-		const axisBody = varBlock.slice(am.index + am[0].length, i - 1);
-
-		// Extract only top-level keys (depth-0 `word:` patterns, outside strings)
-		const valueKeySet = new Set<string>();
-		const keyRe = /(\w+)\s*:/g;
-		let km: RegExpExecArray | null;
-		while ((km = keyRe.exec(axisBody)) !== null) {
-			const prefix = axisBody.slice(0, km.index);
-			let d = 0;
-			let inStr: string | null = null;
-			for (const ch of prefix) {
-				if (inStr) {
-					if (ch === inStr) inStr = null;
-					continue;
-				}
-				if (ch === '"' || ch === "'" || ch === "`") {
-					inStr = ch;
-					continue;
-				}
-				if (ch === "{" || ch === "[" || ch === "(") d++;
-				else if (ch === "}" || ch === "]" || ch === ")") d--;
-			}
-			if (d === 0 && !inStr) valueKeySet.add(km[1]);
-		}
-		if (valueKeySet.size > 0) {
-			result[axisName] = [...valueKeySet];
+	const attribution = analyzeCvaComponents(ts, source);
+	const axes = new Map<string, CvaAxis>();
+	for (const component of Object.values(attribution)) {
+		for (const [name, axis] of Object.entries(component.axes)) {
+			if (PSEUDO_STATE_AXES.has(name)) continue;
+			if (!axes.has(name)) axes.set(name, axis);
 		}
 	}
+	return axes.size > 0 ? axes : null;
+}
 
+/**
+ * Enum axes only, as a plain `axisName -> values[]` map — the shape the
+ * raw-primitive fixer's per-instance className inference consumes. Boolean axes
+ * carry no string class value to match against a className, so they're excluded.
+ */
+export function attributedEnumVariants(source: string): Record<string, string[]> | null {
+	const axes = attributedAxes(source);
+	if (!axes) return null;
+
+	const result: Record<string, string[]> = {};
+	for (const [name, axis] of axes) {
+		if (axis.kind === "enum") result[name] = axis.values;
+	}
 	return Object.keys(result).length > 0 ? result : null;
 }

@@ -4,26 +4,45 @@ import { join } from "node:path";
 import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
 
-import { parseCvaVariants } from "../cva.js";
+import { attributedAxes, type CvaAxis } from "../cva.js";
 import { extractExamplesContent } from "../examples.js";
 import type { DriftFinding, DriftRule, DriftRuleInput, FixResult } from "../rule.js";
 
+/** The settable values of one axis: an enum's string union, or a boolean's two literals. */
+function axisValues(axis: CvaAxis): (string | boolean)[] {
+	return axis.kind === "boolean" ? [true, false] : axis.values;
+}
+
 /**
  * Extract variant values exercised by meta.examples entries.
- * Scans each example's props for keys matching CVA axis names.
+ * Scans each example's props for keys matching CVA axis names. Enum axes match a
+ * quoted string (`tone: "accent"`); boolean axes match a `true`/`false` literal
+ * (`invalid: false`), so an example written with the correct boolean literal
+ * counts as exercising it — and a quoted `"true"` does not.
  */
-function parseExercisedVariants(source: string, axes: string[]): Map<string, Set<string>> {
-	const exercised = new Map<string, Set<string>>();
-	for (const axis of axes) exercised.set(axis, new Set());
+function parseExercisedVariants(
+	source: string,
+	axes: Map<string, CvaAxis>,
+): Map<string, Set<string | boolean>> {
+	const exercised = new Map<string, Set<string | boolean>>();
+	for (const axis of axes.keys()) exercised.set(axis, new Set());
 
 	const examplesContent = extractExamplesContent(source);
 	if (!examplesContent) return exercised;
 
-	for (const axis of axes) {
-		const re = new RegExp(`${axis}\\s*:\\s*["']([^"']+)["']`, "g");
-		let m: RegExpExecArray | null;
-		while ((m = re.exec(examplesContent)) !== null) {
-			exercised.get(axis)!.add(m[1]);
+	for (const [axis, kind] of axes) {
+		if (kind.kind === "boolean") {
+			const re = new RegExp(`${axis}\\s*:\\s*(true|false)\\b`, "g");
+			let m: RegExpExecArray | null;
+			while ((m = re.exec(examplesContent)) !== null) {
+				exercised.get(axis)!.add(m[1] === "true");
+			}
+		} else {
+			const re = new RegExp(`${axis}\\s*:\\s*["']([^"']+)["']`, "g");
+			let m: RegExpExecArray | null;
+			while ((m = re.exec(examplesContent)) !== null) {
+				exercised.get(axis)!.add(m[1]);
+			}
 		}
 	}
 
@@ -36,20 +55,19 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 	if (locationTier === null) return null;
 	if (source === undefined) return null;
 
-	const cvaVariants = parseCvaVariants(source);
-	if (!cvaVariants) return null;
+	const axes = attributedAxes(source);
+	if (!axes) return null;
 
 	// Empty examples is an authoritative stub signal — don't flag
 	const examplesMatch = source.match(/examples\s*:\s*\[\s*\]/);
 	if (examplesMatch) return null;
 
-	const axes = Object.keys(cvaVariants);
 	const exercised = parseExercisedVariants(source, axes);
 
 	const unexercised: string[] = [];
-	for (const axis of axes) {
+	for (const [axis, kind] of axes) {
 		const exercisedValues = exercised.get(axis)!;
-		for (const value of cvaVariants[axis]) {
+		for (const value of axisValues(kind)) {
 			if (!exercisedValues.has(value)) {
 				unexercised.push(`${axis}=${value}`);
 			}
@@ -66,7 +84,12 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 
 // --- DRIFT-CVA-VARIANT-UNRENDERED fixer ---
 
-function buildExampleStub(axis: string, value: string): string {
+function buildExampleStub(axis: string, value: string | boolean): string {
+	// Boolean axis values land as `{ invalid: true }` literals — never the string
+	// `"true"`, which a `boolean` prop rejects in the emitted showcase (#554).
+	if (typeof value === "boolean") {
+		return `{ name: "${axis}-${value}", props: { ${axis}: ${value} } }`;
+	}
 	return `{ name: "${value}", props: { ${axis}: "${value}" } }`;
 }
 
@@ -79,8 +102,8 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 		return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
 	}
 
-	const cvaVariants = parseCvaVariants(source);
-	if (!cvaVariants) {
+	const axes = attributedAxes(source);
+	if (!axes) {
 		return {
 			finding,
 			fixed: false,
@@ -89,13 +112,12 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 		};
 	}
 
-	const axes = Object.keys(cvaVariants);
 	const exercised = parseExercisedVariants(source, axes);
 
 	const stubs: string[] = [];
-	for (const axis of axes) {
+	for (const [axis, kind] of axes) {
 		const exercisedValues = exercised.get(axis)!;
-		for (const value of cvaVariants[axis]) {
+		for (const value of axisValues(kind)) {
 			if (!exercisedValues.has(value)) {
 				stubs.push(buildExampleStub(axis, value));
 			}
