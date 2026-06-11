@@ -193,7 +193,7 @@ describe("journey: heal end-to-end on the time-travel fixture (#538)", () => {
 	});
 
 	it("golden: the heal transcript matches its committed snapshot", () => {
-		const golden = goldenTranscript("heal", heal.code, heal.stdout + heal.stderr, {
+		const golden = goldenTranscript("heal", heal.code, heal.transcript, {
 			dir,
 			prevVersion: pinnedBefore,
 		});

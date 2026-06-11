@@ -36,11 +36,13 @@ export interface NormalizeOptions {
 export function normalizeTranscript(text: string, opts: NormalizeOptions): string {
 	let out = text;
 
-	// Absolute fixture paths — the literal tmp dir, then any realpath variant
-	// (macOS resolves `/var/folders/…` ⇄ `/private/var/folders/…`) and any
-	// stray `e2e-…-XXXX` mkdtemp suffix the literal replace missed.
-	out = out.split(opts.dir).join("<fixture>");
+	// Absolute fixture paths — the `/private` realpath variant FIRST (macOS
+	// resolves `/var/folders/…` ⇄ `/private/var/folders/…`), since it contains
+	// the literal dir as a substring; scrubbing the bare dir first would leave a
+	// dangling `/private<fixture>`. Then the literal tmp dir, then any stray
+	// `e2e-…-XXXX` mkdtemp path the literal replace missed.
 	out = out.split(`/private${opts.dir}`).join("<fixture>");
+	out = out.split(opts.dir).join("<fixture>");
 	out = out.replace(/\/[^\s()]*e2e-[a-z0-9-]+-[A-Za-z0-9]{6}/g, "<fixture>");
 
 	// Versions — replace the longer string first so a prefix can't shadow it.
