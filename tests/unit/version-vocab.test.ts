@@ -23,12 +23,17 @@ describe("upgradeHeadline", () => {
 		);
 	});
 
-	it("stale pin, empty chain: 'pin bump only — pack stays vX' (no phantom)", () => {
+	it("stale pin, empty chain: 'pin advance vX → vY (no migrations)'", () => {
 		// The Crewops scenario: pinned at v1.0.0, CLI at v1.4.0, but no migrations
 		// registered for that gap. Pre-#412 the gate header read `pack v1.0.0 →
-		// v1.4.0` while the body said `pack is at v1.0.0` — contradiction.
+		// v1.4.0` while the body said `pack is at v1.0.0` — a phantom migration.
+		// Post-#540 the empty range still ADVANCES the pin to the CLI (so "upgrade
+		// available" clears), which made the old `pin bump only — pack stays
+		// v1.0.0` the new contradiction (Crewops defect 3): the header claimed the
+		// pin stayed put while the body wrote the bump. The headline now names the
+		// real transition — still no `pack X → Y` migration arrow.
 		expect(upgradeHeadline({ from: "v1.0.0", to: "v1.4.0", chainLength: 0 })).toBe(
-			"pin bump only — pack stays v1.0.0",
+			"pin advance v1.0.0 → v1.4.0 (no migrations)",
 		);
 	});
 
