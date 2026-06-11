@@ -11,8 +11,10 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import {
 	analyzeCvaComponents,
+	collectExportedComponentNames,
 	collectFileCvaAxes,
 	collectRequiredPropNames,
+	cvaUnresolvedPropsDiagnostics,
 } from "../../src/lib/cva/analyzer.js";
 
 const analyze = (src: string) => analyzeCvaComponents(ts, src, "component.tsx");
@@ -468,5 +470,48 @@ export function Plain() {
 }
 `);
 		expect(result).toEqual({});
+	});
+});
+
+describe("source-keyed parse memo", () => {
+	// A detect+fix cycle drives several entry points over the same atom source;
+	// they must collectively parse it once. Instrument the injected compiler's
+	// createSourceFile rather than asserting any production-path internal.
+	it("parses identical source once across repeated analyzer entry-point calls", () => {
+		let parses = 0;
+		const counting = new Proxy(ts, {
+			get(target, prop, receiver) {
+				if (prop === "createSourceFile") {
+					return (...args: Parameters<typeof ts.createSourceFile>) => {
+						parses++;
+						return ts.createSourceFile(...args);
+					};
+				}
+				return Reflect.get(target, prop, receiver);
+			},
+		}) as typeof ts;
+
+		// Unique to this test so the process-global memo cannot collide with
+		// another test's fixture (or be pre-warmed by one).
+		const fileName = "parse-memo-fixture.tsx";
+		const source = `
+import { cva, type VariantProps } from "class-variance-authority";
+const memoBadge = cva("badge", {
+  variants: { size: { sm: "s", md: "m" } },
+  defaultVariants: { size: "md" },
+});
+export function MemoBadge(props: VariantProps<typeof memoBadge>) {
+  return <span className={memoBadge(props)} />;
+}
+`;
+
+		analyzeCvaComponents(counting, source, fileName);
+		analyzeCvaComponents(counting, source, fileName);
+		collectFileCvaAxes(counting, source, fileName);
+		collectExportedComponentNames(counting, source, fileName);
+		cvaUnresolvedPropsDiagnostics(counting, source, fileName);
+		collectRequiredPropNames(counting, source, ["MemoBadge"], fileName);
+
+		expect(parses).toBe(1);
 	});
 });
