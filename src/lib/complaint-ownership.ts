@@ -103,7 +103,8 @@ export const SIGNAL_OWNERS: Record<keyof ProjectState, Owner> = {
 	unresolvableFindings: {
 		kind: "terminal",
 		state: "manual",
-		reason: "unfixable findings remain whose remedy no loop step owns — hand-edit or exceptions.json",
+		reason:
+			"unfixable findings remain whose remedy no loop step owns — hand-edit or exceptions.json",
 	},
 };
 
@@ -113,7 +114,8 @@ export const PROJECT_STATE_SIGNALS = Object.keys(SIGNAL_OWNERS) as (keyof Projec
 const TERMINAL_COMPLETENESS: Owner = {
 	kind: "terminal",
 	state: "completeness",
-	reason: "hand-rolled DS infrastructure — remove it; surfaced by `claude-ds doctor --completeness` (ADR-0003)",
+	reason:
+		"hand-rolled DS infrastructure — remove it; surfaced by `claude-ds doctor --completeness` (ADR-0003)",
 };
 
 const TERMINAL_ADVISORY: Owner = {
