@@ -30,6 +30,7 @@ import {
 	runMigrations,
 } from "./migration-framework.js";
 import { MIGRATION_REGISTRY } from "./migration-registry.js";
+import { finalizeUpgrade } from "./ops/finalize-upgrade.js";
 import { makeSyncPackFiles } from "./ops/sync-pack-files.js";
 import type { ProjectContext } from "./project.js";
 import type { LoopStep } from "./remediation-planner.js";
@@ -75,8 +76,13 @@ function indent(lines: string[]): string[] {
  * planned `Change[]` as `SummaryEntry[]`. `null` for finding-driven steps
  * (`classify`, `audit --fix`) and the reserved-but-unwired slots — those are
  * previewed by count, not by Change.
+ *
+ * Exported so the plan/report reconciliation invariant (#536) can compare the
+ * planner's declared `Change[]` per step against what the step's apply path
+ * writes — the data-level guard against the defect-3 class (preview promising
+ * one thing while apply does another).
  */
-async function previewStepChanges(
+export async function previewStepChanges(
 	ctx: ProjectContext,
 	step: LoopStep,
 ): Promise<SummaryEntry[] | null> {
@@ -91,7 +97,20 @@ async function previewStepChanges(
 			const from = ctx.cfg.packVersion;
 			const to = cliVersion();
 			const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
-			if (chain.length === 0) return [];
+			if (chain.length === 0) {
+				// Empty migration range, but the pin still advances (#540, ADR-0029):
+				// `upgrade` applies `finalizeUpgrade` to move packVersion from → to so
+				// "upgrade available" clears. The preview must show that
+				// `.claude-ds.json` write — returning `[]` here rendered "(no file
+				// changes)" under a pin-advance header, the self-contradiction of
+				// Crewops defect 3 (#536). When `from === to` there is genuinely
+				// nothing to write (the end-state-verify case, owned by `repair`).
+				if (from === to) return [];
+				const report = await run(ctx, [finalizeUpgrade(to, ctx.cfg.allowed_imports)], "dry-run", {
+					quiet: true,
+				});
+				return summaryEntriesFromRun(report.ops);
+			}
 			const report = await runMigrations(ctx, chain, "dry-run", { quiet: true });
 			return summaryEntriesFromRun(report.ops);
 		}
@@ -115,8 +134,8 @@ function stepHeader(step: LoopStep, ctx: ProjectContext, counts: GateFindingCoun
 			// an empty chain cannot render `pack X → Y`. The previous header was
 			// synthesised from `(packVersion, pkg.version)` alone — when the CLI
 			// was ahead but no migrations spanned the gap, it falsely promised a
-			// migration while the body printed `(no file changes — version pin
-			// only)`.
+			// migration. On an empty chain the headline now names the real pin
+			// advance and the body (#536) shows the matching `.claude-ds.json` write.
 			const from = ctx.cfg.packVersion;
 			const to = cliVersion();
 			const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
@@ -318,7 +337,11 @@ export async function buildCommitmentGate(
 		const entries = await previewStepChanges(ctx, step);
 		if (entries !== null) {
 			if (entries.length === 0) {
-				lines.push("    (no file changes — version pin only)");
+				// A byte-deterministic step that plans nothing. The old "— version pin
+				// only" tail was upgrade-specific and, post-#540, contradicted the pin
+				// write the upgrade step now shows (Crewops defect 3, #536); kept
+				// generic so it can never imply a hidden change.
+				lines.push("    (no file changes)");
 			} else {
 				lines.push(...indent(render(entries)));
 			}
