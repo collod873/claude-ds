@@ -188,27 +188,33 @@ export function Tag() { return null; }
 	}, 60000);
 
 	it("a byte-stable pass with a complaint still present exits naming the blocker, never repeats it (#532 defect 2)", async () => {
-		// The Crewops defect 2: pinned at pack v1.7.0, CLI v1.8.0, an empty
-		// migration range between them. `upgradeAvailable` fires (1.7.0 < 1.8.0)
-		// so the planner schedules `upgrade`, but upgrade no-ops — there are no
-		// migrations to apply and it does not advance the pin — so the pass changes
-		// zero bytes while the "upgrade available" complaint persists. Before #532
-		// the driver read a stable pass with no *finding* as convergence and
-		// declared ✔ (or, with findings, looped the identical no-op to the ceiling).
-		// Now it re-derives, sees the next plan would be byte-for-byte identical,
-		// and exits naming the blocker instead of repeating it.
+		// Defect 2's shape: a step is scheduled to clear a complaint, runs, changes
+		// zero bytes, and the complaint persists — so the next pass would be
+		// byte-for-byte identical. The original Crewops instance was the empty-
+		// migration-range `upgrade` no-op, but #540 made upgrade advance the pin on
+		// an empty range, so that complaint now legitimately resolves. The contract
+		// is unchanged; the fixture moves to a complaint whose owning step genuinely
+		// cannot make progress headlessly: a DS file misplaced in the wrong tier.
+		// `DRIFT-MISPLACED` is classify-relocatable, so the planner schedules
+		// `classify` — but classify can only relocate it interactively (it reports
+		// "no files moved" and emits no Pending decision under heal), so the pass
+		// no-ops while the MISPLACED complaint persists. Before #532 the driver read
+		// a stable pass with findings as a loop-to-the-ceiling; now it re-derives,
+		// sees the next plan would be identical, and exits at once naming `classify`.
 		const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
 		expect(adopt.code).toBe(0);
 		const healed = await runCli(["heal"], { cwd: dir });
 		expect(healed.code).toBe(0);
 
-		// Re-pin to the previous published pack version. The on-disk scaffold is
-		// still the current pack's bytes, so the only outstanding complaint is the
-		// version pin — `upgrade` is the sole planned step, and it no-ops.
-		const cfgPath = join(dir, ".claude-ds.json");
-		const cfg = JSON.parse(await readFile(cfgPath, "utf8"));
-		cfg.packVersion = "v1.7.0";
-		await writeFile(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+		// An atom (no design-system tier imports) parked in composites/ — the
+		// classifier flags `DRIFT-MISPLACED`, the sole outstanding complaint. Its
+		// owning step is `classify`, which no-ops headlessly.
+		await writeFile(
+			join(dir, "design-system", "composites", "lonelybtn.tsx"),
+			`export function Lonelybtn() { return <button />; }
+export const meta = { kind: "atom" as const, examples: [] };
+`,
+		);
 
 		const outcome = await driveRemediation({
 			cwd: dir,
@@ -217,11 +223,14 @@ export function Tag() { return null; }
 		});
 
 		// Not converged (the complaint is unresolved), not spun to the ceiling
-		// running the identical pass three times — exited at once naming `upgrade`.
-		expect(outcome).toEqual({ kind: "exhausted", lastStep: "upgrade" });
-		// The pin was never silently advanced as a side effect.
-		const after = JSON.parse(await readFile(cfgPath, "utf8"));
-		expect(after.packVersion).toBe("v1.7.0");
+		// running the identical pass three times — exited at once naming `classify`.
+		expect(outcome).toEqual({ kind: "exhausted", lastStep: "classify" });
+		// The misplaced file was never silently relocated as a side effect.
+		const stillThere = await readFile(
+			join(dir, "design-system", "composites", "lonelybtn.tsx"),
+			"utf8",
+		);
+		expect(stillThere).toContain("Lonelybtn");
 	}, 60000);
 
 	it("reconform that skipped every file it visited reports no progress, not ✔ (#532 defect 6)", async () => {

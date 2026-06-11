@@ -222,8 +222,9 @@ changed zero bytes while its originating complaint persists is non-convergence
 — the plan is a pure function of the tree, so the next pass would be
 byte-for-byte identical; heal re-derives, and if the next plan is non-empty it
 exits at once naming the blocker instead of spinning the same no-op to the
-ceiling (the empty-migration-range "upgrade available" that used to masquerade
-as ✔ convergence — Crewops defect 2).
+ceiling (e.g. a `DRIFT-MISPLACED` file classify can only relocate interactively
+— Crewops defect 2; its original instance, the empty-migration-range "upgrade
+available," is now resolved upstream by #540's pin-advance).
 
 ### Intervention
 A manual correction or rescue the consumer had to make to reach a clean

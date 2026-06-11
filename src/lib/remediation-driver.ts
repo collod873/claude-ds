@@ -376,14 +376,16 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 		//
 		// #532 (defect 2): if the re-derived plan is non-empty, the next pass would
 		// be byte-for-byte identical to the one we just ran — the originating
-		// complaint (an empty-migration-range "upgrade available", an unfixable
-		// finding) is still present and its no-op step would simply repeat. Rather
-		// than burn another identical pass, stop and name the blocker. An empty
-		// next plan with no unresolvable findings is genuine convergence — the
-		// previous `findingsRemain` boolean check (classify/autoFix/unresolvable)
-		// is subsumed: those signals drive the very plan we re-derive here, plus the
-		// upgrade/sync/reconform signals it missed (#300's empty-chain shape used to
-		// masquerade as convergence because it was not a "finding").
+		// complaint (a `DRIFT-MISPLACED` file classify can only relocate
+		// interactively, an unfixable finding) is still present and its no-op step
+		// would simply repeat. Rather than burn another identical pass, stop and
+		// name the blocker. An empty next plan with no unresolvable findings is
+		// genuine convergence — the previous `findingsRemain` boolean check
+		// (classify/autoFix/unresolvable) is subsumed: those signals drive the very
+		// plan we re-derive here, plus the upgrade/sync/reconform signals it missed
+		// (#300's empty-chain shape used to masquerade as convergence because it was
+		// not a "finding"; the empty-migration-range "upgrade available" instance
+		// is now resolved upstream by #540's pin-advance).
 		if (stable && pendingThisIter === 0) {
 			const nextState = await deriveProjectState(cwd);
 			const nextPlan = planRemediation(nextState);
