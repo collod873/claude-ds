@@ -1,4 +1,5 @@
 name: Agent Implement
+run-name: "Implement: issue #${{ github.event.issue.number }}"
 
 on:
   issues:
@@ -151,7 +152,24 @@ jobs:
             echo "No commits beyond main — nothing to push."
             exit 0
           fi
-          git push --force origin "$BRANCH"
+          # --no-verify so a failing local hook (often the very failure being
+          # rescued) cannot also kill the rescue push. PR CI stays the gate.
+          set +e
+          git push --force --no-verify origin "$BRANCH" 2> push_err.txt
+          status=$?
+          set -e
+          cat push_err.txt
+          # A failed rescue push writes a real reason (don't clobber an earlier
+          # implement-step reason on success) so the blocked/triage handler never
+          # has to say "check workflow logs" — see #33's opaque stall.
+          if [ $status -ne 0 ]; then
+            {
+              echo "Rescue push to \`$BRANCH\` failed. Raw git output:"
+              echo
+              cat push_err.txt
+            } > "${RUNNER_TEMP}/failure_reason.txt"
+            exit $status
+          fi
 
       # PR title/description are written by the implement step itself: the agent
       # emits them as the last thing it does, with full context from the work it
@@ -216,33 +234,61 @@ jobs:
           AGENT_PAT: ${{ secrets.AGENT_PAT }}
         run: npx -y tsx .sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" review
 
-      - name: Mark blocked on failure
+      # Self-triage (ADR-0007): a post-work failure is a state the pipeline works
+      # through, not a place it stops. Spend one retry slot re-routing to
+      # agent:implement with the raw failing output as context; only once that
+      # slot is spent does the second failure block for a human. Mirror of the
+      # identical handler in agent-implement-pr.yml — keep the two in lockstep.
+      - name: Self-triage on failure — one retry slot, then block
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true' && failure()
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BRANCH: ${{ steps.branch.outputs.name }}
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
         run: |
-          reason="(no reason file written — check workflow logs)"
-          if [ -f "${RUNNER_TEMP}/failure_reason.txt" ]; then
-            reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
+          set -euo pipefail
+          reason_file="${RUNNER_TEMP}/failure_reason.txt"
+          [ -f "$reason_file" ] || echo "(no reason file written — check workflow logs)" > "$reason_file"
+
+          # Lost-work claim driven by the LOCAL repo, never a remote ls-remote:
+          # the rescue push may have failed, so the remote can lack commits the
+          # runner workdir still holds. The old remote-only check falsely said
+          # "no commits were made" while finished work sat stranded (#33).
+          if [ "$(git rev-list --count main..HEAD 2>/dev/null || echo 0)" -gt 0 ]; then
+            branch_note="Committed work is on \`$BRANCH\` (rescue-pushed when the push step succeeded; otherwise still in this run's workdir) — work was not lost."
+          else
+            branch_note="No commits were made before the failure — no work was lost."
           fi
-          branch_note="No branch was pushed (no commits were made)."
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            branch_note="Any commits made before the failure were pushed to \`$BRANCH\` — inspect or retry from there; work was not lost."
+
+          # This comment IS the context the re-routed implement run reads (gh
+          # issue view --comments). Carry the raw failing output verbatim — never
+          # a grep or summary (a grep-level triage is what misdiagnosed #32).
+          body_file="${RUNNER_TEMP}/self_triage_comment.md"
+          {
+            echo "\`agent:implement\` run failed."
+            echo
+            echo "**Reason:**"
+            echo
+            echo '```'
+            cat "$reason_file"
+            echo '```'
+            echo
+            echo "**Workflow run:** $RUN_URL"
+            echo
+            echo "$branch_note"
+          } > "$body_file"
+
+          # Spend one self-triage slot (its own marker key, cap 1). retry posts
+          # the context comment above and re-routes; terminal posts nothing here.
+          decision=$(npx -y tsx .sandcastle/agent-workflows/shared/retry-slot.ts spend issue "$ISSUE_NUMBER" self-triage 1 --body-file "$body_file" | jq -r '.decision')
+          if [ "$decision" = "retry" ]; then
+            echo "Self-triage slot free — re-routing to agent:implement with the failing output as context."
+            npx -y tsx .sandcastle/agent-workflows/shared/labels.ts add-trigger-label issue "$ISSUE_NUMBER" implement
+          else
+            echo "Self-triage slot spent — two attempts failed, the second with full context. Blocking for a human."
+            printf '\nRe-add `agent:implement` to retry.\n' >> "$body_file"
+            npx -y tsx .sandcastle/agent-workflows/shared/labels.ts mark-blocked issue "$ISSUE_NUMBER" --body-file "$body_file"
           fi
-          body=$(cat <<EOF
-          \`agent:implement\` run failed.
-
-          **Reason:** $reason
-
-          **Workflow run:** $RUN_URL
-
-          $branch_note
-
-          Re-add \`agent:implement\` to retry.
-          EOF
-          )
-          npx -y tsx .sandcastle/agent-workflows/shared/labels.ts mark-blocked issue "$ISSUE_NUMBER" --body "$body"
 
       - name: Always remove in-progress
         if: always() && steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'

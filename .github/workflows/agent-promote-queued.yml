@@ -1,4 +1,5 @@
 name: Agent Promote Queued
+run-name: "Promote queued: after #${{ github.event.issue.number }}"
 
 # When an issue closes, find every `agent:queued` issue that declared it as a
 # blocker via the native GitHub issue dependency relation. If any of those

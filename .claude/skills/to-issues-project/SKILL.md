@@ -43,11 +43,21 @@ Break the PRD into **tracer-bullet** sub-issues. Each slice is a thin vertical c
 - A completed slice is demoable or verifiable on its own
 - Prefer many thin slices over few thick ones
 - Sub-issues are **flat** — a sub-issue must not itself need sub-issues. If a slice is too big to leaf, split it into peer slices instead of nesting
-- Declare **real dependencies**, not order: the earlier slices a slice actually builds on (imports their module, extends their schema, calls their API). Those become native blocked-by links (step 6); a slice with none starts in the first wave
-- Touching the same area is **not** a dependency. Over-declaring serializes work that could run in parallel
+- Declare **real dependencies**, not order. There are exactly two reasons for an edge: a slice genuinely _builds on_ an earlier one (imports its module, extends its schema, calls its API), or two slices share files that couldn't be separated (residual overlap — see the chain-shape ladder below). Both become native blocked-by links (step 6); a slice with neither starts in the first wave. Over-declaring serializes work that could run in parallel
 </vertical-slice-rules>
 
-The workflow runs each sub-issue **independently and in parallel** — own session, own branch, own PR — building only on the slices it depends on (already merged to the default branch before it starts). Keep each slice single-session-sized (a couple of files, tests, typecheck), and don't leave two unblocked slices editing the same files in conflicting ways — if they'd collide, make one depend on the other.
+The workflow runs each sub-issue **independently and in parallel** — own session, own branch, own PR — building only on the slices it depends on (already merged to the default branch before it starts).
+
+### 4b. Get the chain shape right
+
+The sub-issues' **chain shape** decides whether the PRD runs in one wave or many. Depth serializes waves; width without overlap edges buys merge conflicts between siblings. When two slices would touch the same files, resolve it by this ladder — top to bottom, a higher rung always outranks a lower one:
+
+1. **Session-size ceiling (hard — outranks everything).** Every slice must stand on its own in a single agent session: a couple of files, tests, typecheck. Never merge or repartition slices into one that's too big for a single session, even to remove file overlap.
+2. **Redraw the boundaries.** First try cutting the slices differently so each owns its files outright. Most overlap is an artifact of where the line was drawn, not a true dependency.
+3. **Extract a prefactor slice.** If the overlap is a shared hub file that redrawing can't split, add a **prefactor slice** that restructures the _existing_ code so the feature slices behind it stop sharing files. A prefactor slice is behavior-preserving (verified by the existing tests staying green) and restructures only code that already exists — it never pre-builds scaffolding for future slices, which is horizontal layering in disguise. One prefactor slice blocking everything else buys full width for one wave of depth.
+4. **Blocker edge for residual overlap.** Only when overlap survives redrawing and prefactoring — two slices genuinely must touch the same files — add a blocked-by edge so they serialize instead of colliding. File overlap _is_ a real reason for a dependency, but only the overlap that's left after the rungs above; it's the last resort, not the first reach.
+
+Aim for a chain shape **as wide as the true dependencies allow**. A strictly linear chain of three or more slices signals the slicing failed, not that the overlap rule worked — surface it at the quiz (step 5) and widen it.
 
 ### 5. Quiz the user
 
@@ -60,7 +70,7 @@ Present the proposed breakdown as a numbered list. For each slice, show:
 Ask:
 
 - Is the granularity right? (too coarse / too fine)
-- Are the dependencies right? Anything declared dependent that could run in parallel — or two parallel slices that would collide?
+- Are the dependencies right? Walk the chain-shape ladder (step 4b): any declared edge that isn't a real build-on or residual file overlap (so it could run in parallel)? Any two parallel slices that touch the same files — and if so, can the boundaries be redrawn or a prefactor slice extracted before reaching for a blocker edge? Is the whole chain strictly linear (three or more slices, one wave at a time) — a sign the slicing should be widened?
 - Should any slices be merged, split, or dropped?
 
 Iterate until the user approves.

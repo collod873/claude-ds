@@ -52,16 +52,39 @@ Rules:
   native GitHub blocked-by link, and the implement workflow uses it to
   decide what runs. Every slice with an EMPTY `dependsOn` fans out and
   starts in parallel immediately; a slice only waits for the slices it
-  actually depends on. So:
-  - Only list a dependency when slice B truly cannot be built until slice
-    A's work exists on the default branch (B imports A's module, extends
-    A's schema, calls A's API). Shared-area-of-the-codebase is NOT a
-    dependency.
-  - Over-declaring serializes work that could run in parallel; declaring a
-    false dependency is worse than declaring none. Under-declaring lets a
-    slice start before its prerequisite has landed. Aim for the true graph.
-  - `dependsOn` may only reference EARLIER positions (a slice cannot depend
-    on a later one). Keep the list ordered so this holds.
+  actually depends on. A slice depends on another when it can't be built
+  until that work lands on the default branch (B imports A's module,
+  extends A's schema, calls A's API) — and, per the ladder below, when the
+  two slices still touch the same files.
+
+  Shape the chain by this priority ladder, top rule first:
+
+  1. **Slices stay session-sized.** This is a hard ceiling and outranks
+     everything below it — never grow a slice past one session to dodge an
+     overlap. If respecting the ceiling forces overlap, accept the overlap
+     and resolve it with the rules below.
+  2. **Remove file overlap before adding an edge.** When two slices would
+     touch the same files, first try to redraw the slice boundaries so they
+     don't. If they still must, extract a **prefactor slice** that
+     restructures the *existing* code so the feature slices stop sharing
+     files — and have the feature slices depend on it. A prefactor slice
+     restructures existing code ONLY; it never pre-builds scaffolding for
+     future slices (that is horizontal layering in disguise). One prefactor
+     slice blocking the rest buys full width for one wave of depth.
+  3. **A blocker edge covers only the overlap that remains.** Beyond the
+     genuine build dependencies above, after repartitioning and
+     prefactoring add a `dependsOn` edge solely where two slices still
+     touch the same files. Sharing an area of the codebase without editing
+     the same files is NOT a dependency — don't add an edge for it, or for
+     cosmetic ordering.
+  4. **Width is the goal.** A strictly linear result signals the slicing
+     failed, not that the overlap rule worked — and a fully linear chain is
+     flagged mechanically. Over-declaring serializes work that could run in
+     parallel; under-declaring lets two file-overlapping siblings collide.
+     Aim for the true graph.
+
+  `dependsOn` may only reference EARLIER positions (a slice cannot depend on
+  a later one). Keep the list ordered so this holds.
 
 Draft the ordered list of slices, each with a title, what to build,
 acceptance criteria, and its `dependsOn` list.
