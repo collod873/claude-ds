@@ -559,6 +559,90 @@ describe("runner — typed outcome threads through RunReport (PRD #258)", () => 
 });
 
 /**
+ * #532: every OpReport carries an explicit progress/no-op signal so heal can
+ * tell a step that cleared real work from one that visited everything and
+ * changed nothing. This is the unit-level **✔-requires-progress** invariant —
+ * a checkmark may only render for a step whose report shows progress, and the
+ * report's `progress` flag is the gate. Milliseconds, no real project boot.
+ */
+describe("runner — OpReport.progress signal (#532, ✔-requires-progress)", () => {
+	it("a create is progress", async () => {
+		const ctx = makeCtx(dir);
+		const op = writeOp("create", [
+			{ kind: "write", path: "new.txt", before: null, after: Buffer.from("hi") },
+		]);
+		const report = await run(ctx, [op], "apply");
+		expect(report.ops[0].progress).toBe(true);
+	});
+
+	it("a real modify is progress", async () => {
+		const ctx = makeCtx(dir);
+		const op = writeOp("modify", [
+			{ kind: "write", path: "f.txt", before: Buffer.from("old"), after: Buffer.from("new") },
+		]);
+		const spy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+		const report = await run(ctx, [op], "dry-run");
+		spy.mockRestore();
+		expect(report.ops[0].progress).toBe(true);
+	});
+
+	it("a delete and a rename are progress", async () => {
+		const ctx = makeCtx(dir);
+		const op = writeOp("mutate", [
+			{ kind: "delete", path: "gone.txt", before: Buffer.from("x") },
+			{ kind: "rename", path: "a.txt", after: "b.txt" },
+		]);
+		const spy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+		const report = await run(ctx, [op], "dry-run");
+		spy.mockRestore();
+		expect(report.ops[0].progress).toBe(true);
+	});
+
+	it("an empty changeset is a no-op (false)", async () => {
+		const ctx = makeCtx(dir);
+		const op = writeOp("empty", []);
+		const report = await run(ctx, [op], "apply");
+		expect(report.ops[0].progress).toBe(false);
+	});
+
+	it("a write whose after equals before is a no-op (false)", async () => {
+		const ctx = makeCtx(dir);
+		const same = Buffer.from("identical");
+		const op = writeOp("noop-write", [
+			{ kind: "write", path: "f.txt", before: same, after: Buffer.from("identical") },
+		]);
+		const spy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+		const report = await run(ctx, [op], "dry-run");
+		spy.mockRestore();
+		expect(report.ops[0].progress).toBe(false);
+	});
+
+	it("an abort-only plan is a no-op (false)", async () => {
+		const ctx = makeCtx(dir);
+		const op = writeOp("abort-only", [
+			{ kind: "abort", path: "managed.tsx", reason: "hand-edited" },
+		]);
+		const spy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+		const report = await run(ctx, [op], "dry-run");
+		spy.mockRestore();
+		expect(report.ops[0].progress).toBe(false);
+	});
+
+	it("a plan-time throw made no progress (false)", async () => {
+		const ctx = makeCtx(dir);
+		const bad: Operation = {
+			name: "bad",
+			plan: async () => {
+				throw new Error("boom");
+			},
+		};
+		const report = await run(ctx, [bad], "apply");
+		expect(report.ops[0].progress).toBe(false);
+		expect(report.ops[0].error).toBe("boom");
+	});
+});
+
+/**
  * PRD #266 capstone: `plan(ctx)` is a pure function of ctx.
  *
  * This is the literal statement the whole effort exists to enable. After
