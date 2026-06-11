@@ -277,21 +277,22 @@ export async function reconformCmd(opts: {
 		const genOutcome = genReport.ops[0]?.outcome as GenIntegrityOutcome | undefined;
 		const genViolations = genOutcome?.violations ?? [];
 		const genSkipped = genOutcome?.skipped ?? [];
-		// #509: name the ADR-0026-skipped companions. They're excluded from
-		// comparison (a JSX-bearing example the regex regenerator can't reproduce),
-		// so the integrity check can't confirm they're current — without this line a
-		// subset of broken showcases could hide behind "all generated files clean."
+		// #509: name the skipped companions. They're excluded from comparison
+		// (a source with no mechanically-regenerable showcase — today a
+		// namespace-only export, #69), so the integrity check can't confirm
+		// they're current — without this line a subset of broken showcases could
+		// hide behind "all generated files clean."
 		// #534: route through the shared per-file notice path so a repo with many
 		// skipped companions collapses to one count + `--verbose` (defect 5) instead
 		// of a per-file wall of identical "verify by hand" lines.
 		const skipNotices = genSkipped.map((s) => ({
-			kind: "integrity-skipped-jsx",
-			line: `integrity check: ${s} skipped (JSX-bearing example, ADR-0026) — not compared; verify by hand`,
+			kind: "integrity-skipped",
+			line: `integrity check: ${s} skipped (no mechanically-regenerable showcase) — not compared; verify by hand`,
 		}));
 		for (const line of renderPerFileNotices(skipNotices, {
 			verbose,
 			summarize: (_kind, n) =>
-				`integrity check: ${n} files skipped (JSX-bearing examples, ADR-0026) — not compared; verify by hand`,
+				`integrity check: ${n} files skipped (no mechanically-regenerable showcase) — not compared; verify by hand`,
 		})) {
 			info(c.cyan(line));
 		}

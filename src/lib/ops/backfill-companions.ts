@@ -2,6 +2,13 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Change, Operation } from "../operation.js";
 import type { ProjectContext } from "../project.js";
+import { toPascalCase } from "../showcase/generator.js";
+
+// Re-exported for back-compat: the single `toPascalCase` now lives in the
+// showcase generator (issue #567), the one module that owns display-name
+// derivation. This file's former local copy had drifted (split on `[-_]` only,
+// missing whitespace and empty-segment handling).
+export { toPascalCase };
 
 /** Tier directories scanned for atom/composite components missing companion files. */
 const TIER_DIRS = ["design-system/atoms", "design-system/composites"];
@@ -18,15 +25,6 @@ const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
 
 /** Filenames that are never component sources (flat layout). */
 const SKIP_PATTERNS = [/^index\.ts$/, /\.logic\.ts$/, /\.d\.ts$/];
-
-/** Convert kebab-case or snake_case to PascalCase for use as a JS identifier.
- *  e.g. "top-bar" → "TopBar", "tag_picker" → "TagPicker". */
-export function toPascalCase(name: string): string {
-	return name
-		.split(/[-_]/)
-		.map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-		.join("");
-}
 
 export function showcaseStub(displayName: string, fileBase: string): string {
 	return [

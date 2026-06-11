@@ -235,22 +235,23 @@ export const meta = { kind: "atom" as const, examples: [] };
 
 	it("reconform that skipped every file it visited reports no progress, not ✔ (#532 defect 6)", async () => {
 		// The Crewops defect 6: reconform printed ✔ after skipping every companion
-		// it visited (each an ADR-0026 JSX-bearing example the regex regenerator
-		// can't reproduce). A skip is not a fix — the showcase could be broken and
-		// the check simply can't tell. The step must report "nothing to do," which
-		// the loop keys off `StepResult.progress === false` to render instead of a ✔.
+		// it visited. A skip is not a fix — the showcase could be broken and the
+		// check simply can't tell. The step must report "nothing to do," which the
+		// loop keys off `StepResult.progress === false` to render instead of a ✔.
 		const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
 		expect(adopt.code).toBe(0);
 		const healed = await runCli(["heal"], { cwd: dir });
 		expect(healed.code).toBe(0);
 
-		// A source whose only example is JSX-bearing → unparseable → ADR-0026 skip,
-		// plus an existing companion so the integrity op visits (then skips) it.
+		// A namespace-only export (#69) → not callable → no mechanically-regenerable
+		// showcase → skip, plus an existing companion so the integrity op visits
+		// (then skips) it. (JSX-bearing examples are now regenerated, not skipped.)
 		await writeFile(
 			join(dir, "design-system", "atoms", "widget.tsx"),
-			`import type { Meta } from "@/design-system/types/meta";
-export const meta: Meta = { kind: "atom", examples: [{ name: "withIcon", props: { children: <Icon /> } }] };
-export function Widget() { return null; }
+			`import React from "react";
+function WidgetLine(props: any) { return <span {...props} />; }
+export const Widget = { Line: WidgetLine };
+export const meta = { kind: "atom" as const, examples: [{ name: "default", props: {} }], skip: [] };
 `,
 		);
 		await writeFile(
