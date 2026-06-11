@@ -580,9 +580,9 @@ function reportRevertState(cleanState: CleanTreeState): void {
 	}
 	if (cleanState === "dirty-overridden") {
 		err(
-			"heal ran with --allow-dirty, so its writes are mixed with changes already in your " +
-				"working tree — git can't separate them, so there's no automatic revert. " +
-				"The inventory below is exactly what heal wrote.",
+			"heal ran with --allow-dirty, so its writes may be mixed with changes already in your " +
+				"working tree — heal can't know the tree's prior state, so git can't separate them and " +
+				"there's no automatic revert. The inventory below is exactly what heal wrote.",
 		);
 		return;
 	}
