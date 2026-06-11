@@ -8,6 +8,16 @@
 // auto-generated notes. This script never touches the README: install
 // strings use the npm `@^1` range, so there are no per-release pins to sync.
 //
+// Release checklist (run by hand before tagging):
+//   1. Tarball smoke — proves a packed install adopts a fresh consumer:
+//        npm pack && bash scripts/smoke-tarball.sh claude-ds-<version>.tgz
+//      (also runs automatically in the publish job; #526.)
+//   2. Release canary (PRD #546) — heal a FRESH clone of the real consumer with
+//      the release candidate and assert exit 0 + green verify gate + idempotent
+//      second run, so "works in tests, breaks in Crewops" can't ship:
+//        npm run release:canary -- <consumer-path-or-url>
+//   3. `npm run release <bump>` (this script) — verify, tag, push.
+//
 // After a release lands on npm, refresh the time-travel fixture so its pin
 // advances one release behind the new latest (offline tests stay one version
 // back — PRD #529):

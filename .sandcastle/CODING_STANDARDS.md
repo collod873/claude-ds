@@ -50,6 +50,16 @@ PRs address their stated intent and nothing else. Reject drive-by refactors, spe
 - Framework: Vitest. Run `npm test`; typecheck with `npm run typecheck`. Unit tests
   live in `tests/unit/<module>.test.ts`.
 
+### Tripwire tests for deferred bugs (ADR-0030)
+
+Deferring a bug on a masking assumption requires a **tripwire test** — a test
+that fails when the assumption stops holding. A comment deferring a bug must
+cite the test that pins the assumption: `masked because X` with no test pinning
+X is not an acceptable deferral. The masking fix and its eventual unmasking
+often ship in the same product, so the assumption can die silently; the tripwire
+is what notices. Reject a deferral comment that names a masking assumption but
+cites no pinning test.
+
 ### Core Principle
 
 Tests verify behavior through public interfaces, not implementation details. Code can change entirely; tests shouldn't break unless behavior changed.
