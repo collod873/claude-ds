@@ -1096,8 +1096,8 @@ export const meta = {
 // covered exhaustively in cva-analyzer.test.ts; these cases pin the
 // fixer-layer concerns: pseudo-state filtering and enum/boolean typing.)
 describe("attributedAxes", () => {
-	const obj = (src: string) => {
-		const result = attributedAxes(src);
+	const obj = (src: string, file = "design-system/atoms/button.tsx") => {
+		const result = attributedAxes(src, file);
 		return result === null ? null : Object.fromEntries(result);
 	};
 
@@ -1130,7 +1130,7 @@ const inputVariants = cva("input", {
 export function Input({ size, invalid }: { size?: string; invalid?: boolean }) {
   return <input className={inputVariants({ size, invalid })} />;
 }`;
-		expect(obj(source)).toEqual({
+		expect(obj(source, "design-system/atoms/input.tsx")).toEqual({
 			size: { kind: "enum", values: ["sm", "md"] },
 			invalid: { kind: "boolean" },
 		});
@@ -1146,7 +1146,9 @@ const comboboxVariants = cva("combobox", { variants: { size: { sm: "s", lg: "l" 
 export function Combobox({ size }: { size?: string }) {
   return <div className={comboboxVariants({ size })}><Marker /></div>;
 }`;
-		expect(obj(source)).toEqual({ size: { kind: "enum", values: ["sm", "lg"] } });
+		expect(obj(source, "design-system/atoms/combobox.tsx")).toEqual({
+			size: { kind: "enum", values: ["sm", "lg"] },
+		});
 	});
 
 	it("excludes pseudo-state variant axes (hover, active, pressed, etc.)", () => {
@@ -1171,7 +1173,7 @@ const buttonVariants = cva("btn", {
 export function Button(props: import("class-variance-authority").VariantProps<typeof buttonVariants>) {
   return <button className={buttonVariants(props)} />;
 }`;
-		const result = attributedAxes(source);
+		const result = attributedAxes(source, "design-system/atoms/button.tsx");
 		expect(result).not.toBeNull();
 		expect([...result!.keys()]).toEqual(["variant", "size"]);
 	});
@@ -1188,7 +1190,9 @@ const v = cva("base", {
 export function Note({ tone }: { tone?: string }) {
   return <div className={v({ tone })} />;
 }`;
-		expect(obj(source)).toEqual({ tone: { kind: "enum", values: ["info", "warning"] } });
+		expect(obj(source, "design-system/atoms/note.tsx")).toEqual({
+			tone: { kind: "enum", values: ["info", "warning"] },
+		});
 	});
 
 	it("returns null when no non-pseudo-state variants remain", () => {
@@ -1202,11 +1206,13 @@ const v = cva("base", {
 export function Note(props: import("class-variance-authority").VariantProps<typeof v>) {
   return <div className={v(props)} />;
 }`;
-		expect(attributedAxes(source)).toBeNull();
+		expect(attributedAxes(source, "design-system/atoms/note.tsx")).toBeNull();
 	});
 
 	it("returns null for source without cva()", () => {
-		expect(attributedAxes("export function Foo() { return <div />; }")).toBeNull();
+		expect(
+			attributedAxes("export function Foo() { return <div />; }", "design-system/atoms/foo.tsx"),
+		).toBeNull();
 	});
 });
 
@@ -1438,8 +1444,16 @@ export function Badge({ tone }: { tone?: "neutral" | "danger" }) {
 		expect(hit!.message).toContain('tone="dark"');
 	});
 
-	it("fires on an unknown prop key (sub-element axis leaked onto the component)", () => {
-		const source = `${ENUM_BADGE}export const meta = {
+	it("fires on a sub-element axis leaked onto the component", () => {
+		// `density` is a real axis of the file's dot cva, but the dot is an
+		// internal part — older fixers wrote its axis into the root's examples.
+		const source = `${ENUM_BADGE}const dot = cva("dot", {
+  variants: { density: { compact: "c", cozy: "z" } },
+});
+function BadgeDot({ density }: { density?: "compact" | "cozy" }) {
+  return <i className={dot({ density })} />;
+}
+export const meta = {
   kind: "atom" as const,
   examples: [{ name: "leak", props: { tone: "neutral", density: "compact" } }],
 };
@@ -1447,9 +1461,28 @@ export function Badge({ tone }: { tone?: "neutral" | "danger" }) {
 		const findings = evaluateDrift({ ...base, file: "design-system/atoms/badge.tsx", source });
 		const hit = findings.find((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain('unknown prop "density"');
+		expect(hit!.message).toContain('leaked sub-element axis "density"');
 		// The valid axis value is not flagged.
 		expect(hit!.message).not.toContain("tone=");
+	});
+
+	it("stays silent when no export matches the filename (acronym casing)", () => {
+		// qr-code.tsx exports QRCode — PascalCase("qr-code") is "QrCode", so the
+		// render target is unknown. Condemning every axis-named prop against an
+		// empty surface would delete the valid `size` example; the rule must not
+		// touch user content it cannot validate.
+		const source = `import { cva } from "class-variance-authority";
+const qr = cva("qr", { variants: { size: { sm: "s", lg: "l" } } });
+export function QRCode({ size }: { size?: "sm" | "lg" }) {
+  return <svg className={qr({ size })} />;
+}
+export const meta = {
+  kind: "atom" as const,
+  examples: [{ name: "small", props: { size: "sm" } }],
+};
+`;
+		const findings = evaluateDrift({ ...base, file: "design-system/atoms/qr-code.tsx", source });
+		expect(findings.filter((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP")).toHaveLength(0);
 	});
 
 	it("does not fire on a clean file whose example props match the axis surface", () => {
@@ -1459,6 +1492,51 @@ export function Badge({ tone }: { tone?: "neutral" | "danger" }) {
     { name: "neutral", props: { tone: "neutral" } },
     { name: "danger", props: { tone: "danger", className: "extra" } },
   ],
+};
+`;
+		const findings = evaluateDrift({ ...base, file: "design-system/atoms/badge.tsx", source });
+		expect(findings.filter((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP")).toHaveLength(0);
+	});
+
+	it("fires on a sub-component's axis written into the root's examples (Crewops combobox shape)", () => {
+		// The trigger legitimately exposes `size`, but examples render on the root
+		// <Combobox>, which accepts neither `size` nor `invalid`. The union of all
+		// exported components must NOT vouch for these props (v1.8.2 canary break).
+		const source = `import { cva } from "class-variance-authority";
+export const triggerVariants = cva("trigger", {
+  variants: { size: { sm: "s", lg: "l" }, invalid: { true: "t", false: "f" } },
+});
+export function ComboboxTrigger({ size }: { size?: "sm" | "lg" }) {
+  const invalid = false;
+  return <button className={triggerVariants({ size, invalid })} />;
+}
+export function Combobox({ children }: { children?: unknown }) {
+  return <div>{children}</div>;
+}
+export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "default", props: { children: "composed by consumer" } },
+    { name: "sm", props: { size: "sm" } },
+    { name: "true", props: { invalid: "true" } },
+  ],
+};
+`;
+		const findings = evaluateDrift({ ...base, file: "design-system/atoms/combobox.tsx", source });
+		const hit = findings.find((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP");
+		expect(hit).toBeDefined();
+		expect(hit!.message).toContain('"size"');
+		expect(hit!.message).toContain('"invalid"');
+		// The reserved children example is untouched.
+		expect(hit!.message).not.toContain("children");
+	});
+
+	it("leaves a non-axis prop alone — it may be a real, even required, prop (Crewops radio shape)", () => {
+		// `value` matches no cva axis in the file; stripping it would break the
+		// hand-authored example (Radio requires it). Never touch non-axis props.
+		const source = `${ENUM_BADGE}export const meta = {
+  kind: "atom" as const,
+  examples: [{ name: "default", props: { tone: "neutral", value: "lead-inspection" } }],
 };
 `;
 		const findings = evaluateDrift({ ...base, file: "design-system/atoms/badge.tsx", source });

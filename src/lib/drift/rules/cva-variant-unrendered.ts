@@ -55,7 +55,7 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 	if (locationTier === null) return null;
 	if (source === undefined) return null;
 
-	const axes = attributedAxes(source);
+	const axes = attributedAxes(source, file);
 	if (!axes) return null;
 
 	// Empty examples is an authoritative stub signal — don't flag
@@ -102,7 +102,7 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 		return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
 	}
 
-	const axes = attributedAxes(source);
+	const axes = attributedAxes(source, finding.file);
 	if (!axes) {
 		return {
 			finding,

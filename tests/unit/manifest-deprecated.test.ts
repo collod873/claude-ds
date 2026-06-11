@@ -85,8 +85,9 @@ describe("parseManifest — deprecated_paths", () => {
 		);
 		const raw = await readFile(resolve(root, "manifest.json"), "utf8");
 		const m = parseManifest(raw);
-		expect(m.deprecated_paths).toHaveLength(21);
+		expect(m.deprecated_paths).toHaveLength(22);
 		const paths = m.deprecated_paths.map((d) => d.path);
+		expect(paths).toContain("scripts/lib/cva-analyzer.ts");
 		expect(paths).toContain("contracts.md");
 		expect(paths).toContain("exceptions.json");
 		expect(paths).toContain("failure-log.md");

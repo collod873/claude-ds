@@ -315,10 +315,6 @@
       "category": "managed"
     },
     {
-      "path": "scripts/lib/cva-analyzer.ts",
-      "category": "managed"
-    },
-    {
       "path": ".claude/hooks/regenerate-companions.sh",
       "category": "managed"
     },
@@ -440,6 +436,11 @@
     }
   ],
   "deprecated_paths": [
+    {
+      "path": "scripts/lib/cva-analyzer.ts",
+      "since_version": "v1.8.2",
+      "reason": "analyzer is inlined into scripts/generate-showcase-companion.ts (a .ts-extension import can't satisfy both strip-types execution and the consumer's typecheck)"
+    },
     {
       "path": "contracts.md",
       "since_version": "v0.3.0",

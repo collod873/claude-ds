@@ -3,9 +3,15 @@ import { join } from "node:path";
 
 import * as ts from "typescript";
 
-import { analyzeCvaComponents, type CvaAttribution, type CvaAxis } from "../../cva/analyzer.js";
+import {
+	analyzeCvaComponents,
+	type CvaAxis,
+	collectExportedComponentNames,
+	collectFileCvaAxes,
+} from "../../cva/analyzer.js";
 import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
+import { primaryComponent, primaryComponentNames } from "../cva.js";
 import type { DriftFinding, DriftRule, DriftRuleInput, FixResult } from "../rule.js";
 
 /**
@@ -15,21 +21,29 @@ import type { DriftFinding, DriftRule, DriftRuleInput, FixResult } from "../rule
  * component's actual variant surface, per the per-component CVA attribution
  * analyzer (#552). Two defects are caught, both residue of older buggy fixers:
  *
- *   - an **unknown prop key**: a prop no axis the component consumes accepts
- *     (the multi-CVA sub-element leak — `<Combobox size="sm">` where `size`
- *     belongs to an internal trigger, not the exported Combobox).
- *   - an **out-of-range variant value**: a prop keyed to a real enum axis but
- *     carrying a value outside that axis's declared set (the Crewops
- *     `tone: "dark"` — the leaked Tailwind `dark:` modifier).
+ *   - a **leaked sub-element axis**: a prop named after a cva axis defined in
+ *     the file but NOT attributed to the showcased component (the multi-CVA
+ *     sub-element leak — `<Combobox size="sm">` where `size` belongs to an
+ *     internal trigger, not the root the showcase renders).
+ *   - an **out-of-range variant value**: a prop keyed to a real axis of the
+ *     showcased component but carrying a value outside that axis's declared
+ *     set (the Crewops `tone: "dark"` — the leaked Tailwind `dark:` modifier).
+ *
+ * A prop that matches NO cva axis in the file is left alone: it is
+ * indistinguishable from a legitimate hand-authored prop (Crewops Radio's
+ * required `value`), and claude-ds's example writers only ever wrote
+ * axis-shaped props — so non-axis keys are not residue.
  *
  * This is fixable-managed territory, never hand-verify: claude-ds authored
  * these examples, so the repair (drop the offending prop, or the whole example
  * when its props go empty) is the tool fixing its own past output before it
  * regenerates a broken showcase on the next heal.
  *
- * The validation is scoped to components with a non-empty CVA attribution: a
- * file with no `cva()` surfaces no axes, so its examples are left untouched —
- * the rule never second-guesses a hand-authored non-CVA example.
+ * The valid surface is the PRIMARY component's attribution (the component the
+ * showcase renders examples on — see `primaryComponent`), never the union of
+ * every exported component's axes. The rule stays silent on files that define
+ * no cva axes at all: with no axis surface anywhere, it never second-guesses a
+ * hand-authored non-CVA example.
  */
 
 /**
@@ -64,25 +78,37 @@ function isReservedProp(key: string): boolean {
 	);
 }
 
-/** Union the axes of every attributed component into one valid-prop surface. */
-function axisSurface(attribution: CvaAttribution): Map<string, CvaAxis> {
-	const axes = new Map<string, CvaAxis>();
-	for (const component of Object.values(attribution)) {
-		for (const [name, axis] of Object.entries(component.axes)) {
-			const existing = axes.get(name);
-			if (!existing) {
-				axes.set(name, axis);
-				continue;
-			}
-			if (existing.kind === "enum" && axis.kind === "enum") {
-				axes.set(name, {
-					kind: "enum",
-					values: [...new Set([...existing.values, ...axis.values])],
-				});
-			}
-		}
-	}
-	return axes;
+/**
+ * The two surfaces validation needs.
+ *
+ * `primaryAxes` is the valid-prop surface: the axes of the PRIMARY component
+ * only — the one the showcase renders every example on. Never the union of all
+ * exported components: a trigger sub-component's `size` is a real axis on the
+ * trigger, but an example `{ size: "sm" }` still renders as `<Combobox size>`,
+ * a prop the root rejects (the Crewops v1.8.1 break). It may be empty (a
+ * multi-part atom whose cva lives on a sub-part).
+ *
+ * `fileAxisNames` is the residue-recognition surface: every axis any cva in
+ * the file declares. Only props on THIS surface (but off the primary one) are
+ * repairable residue; anything else is presumed a real component prop.
+ */
+function surfaces(
+	source: string,
+	file: string,
+): { primaryAxes: Map<string, CvaAxis>; fileAxisNames: Set<string> } | null {
+	const fileAxisNames = new Set(Object.keys(collectFileCvaAxes(ts, source, file)));
+	if (fileAxisNames.size === 0) return null;
+	const attribution = analyzeCvaComponents(ts, source, file);
+	const primary = primaryComponent(attribution, file);
+	if (primary) return { primaryAxes: new Map(Object.entries(primary.axes)), fileAxisNames };
+	// Unattributed primary: either the render target exists but consumes no cva
+	// (Crewops Combobox root — validate; axis-named props on it ARE residue), or
+	// no export matches the filename's PascalCase at all (QRCode in qr-code.tsx —
+	// the render target is unknown, and condemning every axis-named prop against
+	// an empty surface would delete valid user content; stay silent).
+	const exported = collectExportedComponentNames(ts, source, file);
+	if (!primaryComponentNames(file).some((n) => exported.has(n))) return null;
+	return { primaryAxes: new Map(), fileAxisNames };
 }
 
 interface PropLiteral {
@@ -110,10 +136,15 @@ function classifyProp(
 	key: string,
 	valueNode: ts.Expression | undefined,
 	axes: Map<string, CvaAxis>,
+	fileAxisNames: ReadonlySet<string>,
 ): string | null {
 	if (isReservedProp(key)) return null;
 	const axis = axes.get(key);
-	if (!axis) return `unknown prop "${key}"`;
+	if (!axis) {
+		// Axis-shaped but not the showcased component's: claude-ds residue.
+		// Not an axis anywhere: plausibly a real prop — never touch it.
+		return fileAxisNames.has(key) ? `leaked sub-element axis "${key}"` : null;
+	}
 
 	const lit = valueNode ? valueLiteral(valueNode) : null;
 	if (!lit) return null; // boolean `{true}`, shorthand, or non-literal — leave alone
@@ -188,9 +219,12 @@ function exampleName(entry: ts.ObjectLiteralExpression): string | null {
  * Walk every example's `props` object, classify each settable prop, and build
  * the repair plan. Pure over `(source, axes)`; shared by `detect` and `fix`.
  */
-function planRepair(source: string, axes: Map<string, CvaAxis>): RepairPlan {
+function planRepair(
+	source: string,
+	axes: Map<string, CvaAxis>,
+	fileAxisNames: ReadonlySet<string>,
+): RepairPlan {
 	const plan: RepairPlan = { offenses: [], propDeletes: [], entryDeletes: [] };
-	if (axes.size === 0) return plan;
 
 	const sf = ts.createSourceFile(
 		"examples.tsx",
@@ -236,7 +270,7 @@ function planRepair(source: string, axes: Map<string, CvaAxis>): RepairPlan {
 				continue;
 			}
 			settable++;
-			const detail = classifyProp(key, valueNode, axes);
+			const detail = classifyProp(key, valueNode, axes, fileAxisNames);
 			if (detail !== null) {
 				offendingNodes.push(p);
 				plan.offenses.push({ detail: label ? `"${label}" ${detail}` : detail });
@@ -308,8 +342,9 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 	if (source === undefined) return null;
 	if (!source.includes("cva(")) return null;
 
-	const axes = axisSurface(analyzeCvaComponents(ts, source, file));
-	const plan = planRepair(source, axes);
+	const s = surfaces(source, file);
+	if (!s) return null;
+	const plan = planRepair(source, s.primaryAxes, s.fileAxisNames);
 	if (plan.offenses.length === 0) return null;
 
 	const n = plan.offenses.length;
@@ -331,9 +366,9 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 		return { finding, fixed: false, message: `could not read ${finding.file}`, changes: [] };
 	}
 
-	const axes = axisSurface(analyzeCvaComponents(ts, source, finding.file));
-	const plan = planRepair(source, axes);
-	if (plan.offenses.length === 0) {
+	const s = surfaces(source, finding.file);
+	const plan = s ? planRepair(source, s.primaryAxes, s.fileAxisNames) : null;
+	if (!plan || plan.offenses.length === 0) {
 		return {
 			finding,
 			fixed: false,

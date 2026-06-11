@@ -1,5 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import * as ts from "typescript";
+import { collectFileCvaAxes, collectRequiredPropNames } from "../cva/analyzer.js";
 import { extractBraceEntries, extractExamplesContent } from "../drift/examples.js";
 import { formatContent, resolveConsumerFormatter } from "../formatter.js";
 import type { Change, Operation, PlanResult } from "../operation.js";
@@ -299,7 +301,61 @@ function regenShowcaseTsx(componentName: string, source: string, sourceName: str
 		};
 	}
 
-	const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = [...examples];
+	// Required-prop completion (ADR-0030) — mirrors the pack generator's two
+	// evidence sources: the component's own (locally resolvable) props type,
+	// and cross-example consensus for externally-typed components (Crewops
+	// Radio wraps base-ui's Root, whose required `value` lives in node_modules,
+	// invisible to the syntactic walk — but every other authored example
+	// carries it). An entry emitted without a required prop cannot compile;
+	// borrowing an optional prop is compile-safe.
+	const requiredProps = collectRequiredPropNames(
+		ts,
+		source,
+		[displayName, componentName],
+		sourceName,
+	);
+	const fileAxisNames = new Set(Object.keys(collectFileCvaAxes(ts, source, sourceName)));
+	const isCosmeticProp = (k: string): boolean =>
+		["children", "className", "class", "style", "id", "key", "ref"].includes(k) ||
+		k.startsWith("data-") ||
+		k.startsWith("aria-");
+	const consensusKeys = (pool: Array<{ props: Record<string, unknown> }>): Set<string> => {
+		if (pool.length === 0) return new Set();
+		return new Set(
+			Object.keys(pool[0].props).filter(
+				(k) => pool.every((ex) => k in ex.props) && !fileAxisNames.has(k) && !isCosmeticProp(k),
+			),
+		);
+	};
+	const authoredExamples = examples.filter((ex) => Object.keys(ex.props).length > 0);
+	const completeRequiredProps = (
+		props: Record<string, unknown>,
+		extraRequired: ReadonlySet<string>,
+		donors: Array<{ props: Record<string, unknown> }>,
+	): Record<string, unknown> => {
+		const out: Record<string, unknown> = { ...props };
+		for (const req of new Set([...requiredProps, ...extraRequired])) {
+			if (req in out || req === "children") continue;
+			const donor = donors.find((ex) => req in ex.props);
+			if (donor) out[req] = donor.props[req];
+		}
+		return out;
+	};
+
+	const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = examples.map(
+		(ex) => ({
+			name: ex.name,
+			props: completeRequiredProps(
+				ex.props,
+				consensusKeys(authoredExamples.filter((other) => other !== ex)),
+				examples,
+			),
+		}),
+	);
+	// Combos consult the COMPLETED examples: a residue entry that just gained a
+	// borrowed prop no longer breaks the consensus the cross-product needs.
+	const completedAuthored = explicitExamples.filter((ex) => Object.keys(ex.props).length > 0);
+	const comboRequired = consensusKeys(completedAuthored);
 
 	let cvaExamples: Array<{ name: string; props: Record<string, string> }> = [];
 	if (cvaConfig) {
@@ -350,8 +406,14 @@ function regenShowcaseTsx(componentName: string, source: string, sourceName: str
 				const groupLabel = primaryVal.charAt(0).toUpperCase() + primaryVal.slice(1);
 				const buttonBlocks = groupCombos
 					.map((ce) => {
-						const propsStr = Object.entries(ce.props)
-							.map(([k, v]) => `${k}="${v}"`)
+						const propsStr = Object.entries(
+							completeRequiredProps(ce.props, comboRequired, explicitExamples),
+						)
+							.map(([k, v]) => {
+								if (typeof v === "string") return `${k}="${v}"`;
+								if (typeof v === "boolean") return v ? k : `${k}={false}`;
+								return `${k}={${JSON.stringify(v)}}`;
+							})
 							.join(" ");
 						const children = autoChildren(ce.props, displayName);
 						const secondaryLabel = Object.entries(ce.props)

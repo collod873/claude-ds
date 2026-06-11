@@ -1999,10 +1999,19 @@ export const meta = {
 			await cleanup(dir);
 		});
 
+		// The dot is an internal sub-element: its axes (density/foo/bar) are real
+		// cva axes in the file but never props of the showcased Badge — the
+		// repairable-residue shape. Non-axis props are out of the rule's reach.
 		const BADGE = `import { cva } from "class-variance-authority";
 const badge = cva("base", {
   variants: { tone: { neutral: "n", danger: "d" }, size: { sm: "s", lg: "l" } },
 });
+const dot = cva("dot", {
+  variants: { density: { compact: "c" }, foo: { x: "fx" }, bar: { y: "by" } },
+});
+function BadgeDot({ density, foo, bar }: { density?: string; foo?: string; bar?: string }) {
+  return <i className={dot({ density, foo, bar })} />;
+}
 export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm" | "lg" }) {
   return <span className={badge({ tone, size })} />;
 }
@@ -2037,7 +2046,7 @@ export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm"
 			expect(result.fixed).toBe(true);
 
 			const content = await readFile(join(dir, "design-system/atoms/badge.tsx"), "utf8");
-			expect(content).not.toContain("density");
+			expect(content).not.toContain('density: "compact"');
 			expect(content).toContain('tone: "neutral"');
 			// Round-trip: re-detect is clean.
 			expect(detect(content)).toHaveLength(0);
@@ -2061,8 +2070,8 @@ export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm"
 			expect(result.fixed).toBe(true);
 
 			const content = await readFile(join(dir, "design-system/atoms/badge.tsx"), "utf8");
-			expect(content).not.toContain("foo");
-			expect(content).not.toContain("bar");
+			expect(content).not.toContain('foo: "x"');
+			expect(content).not.toContain('bar: "y"');
 			expect(content).toContain('tone: "neutral"');
 			expect(detect(content)).toHaveLength(0);
 		});

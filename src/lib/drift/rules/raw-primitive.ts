@@ -473,7 +473,7 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 		// Enum axes attributed to the atom's exported component (analyzer-backed,
 		// #554): a sub-element cva()'s axes never leak in, so the fixer never
 		// infers a variant prop the atom doesn't accept.
-		const cvaVariants = attributedEnumVariants(atomSource);
+		const cvaVariants = attributedEnumVariants(atomSource, atomPath);
 
 		if (!cvaVariants) {
 			// No variants — auto-replace all instances

@@ -9,7 +9,11 @@
 
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
-import { analyzeCvaComponents } from "../../src/lib/cva/analyzer.js";
+import {
+	analyzeCvaComponents,
+	collectFileCvaAxes,
+	collectRequiredPropNames,
+} from "../../src/lib/cva/analyzer.js";
 
 const analyze = (src: string) => analyzeCvaComponents(ts, src, "component.tsx");
 
@@ -194,6 +198,250 @@ export function Badge({ tone }: { tone?: string }) {
 		const flat = JSON.stringify(result.Badge.axes);
 		expect(flat).not.toContain("dark");
 		expect(flat).not.toContain("hover");
+	});
+});
+
+describe("analyzeCvaComponents — axis exposure (canary regression, v1.8.2)", () => {
+	it("drops an axis the component consumes internally but never accepts as a prop", () => {
+		// Crewops input.tsx: `invalid` is driven by the `aria-invalid` prop, never
+		// accepted as `invalid`. Body usage consumes the cva, but only `size` is a
+		// real prop — emitting `<Input invalid={true}>` fails the consumer's tsc.
+		const result = analyze(`
+import { cva } from "class-variance-authority";
+export const inputVariants = cva("input", {
+  variants: {
+    size: { sm: "s", md: "m" },
+    invalid: { true: "border-red", false: "border-gray" },
+  },
+  defaultVariants: { size: "md", invalid: false },
+});
+export function Input({ size = "md", "aria-invalid": ariaInvalid, ...props }: { size?: "sm" | "md"; "aria-invalid"?: boolean }) {
+  const isInvalid = ariaInvalid === true;
+  return <input className={inputVariants({ size, invalid: isInvalid })} {...props} />;
+}
+`);
+		expect(result.Input.axes).toEqual({ size: { kind: "enum", values: ["sm", "md"] } });
+		expect(result.Input.axes.invalid).toBeUndefined();
+		expect(result.Input.defaultVariants).toEqual({ size: "md" });
+	});
+
+	it("respects Omit<VariantProps<typeof x>, …> — excluded axes are not props", () => {
+		// Crewops avatar.tsx: props spread the cva's VariantProps but Omit `kind`,
+		// which the component derives internally.
+		const result = analyze(`
+import { cva, type VariantProps } from "class-variance-authority";
+const avatarRoot = cva("avatar", {
+  variants: { size: { sm: "s", lg: "l" }, kind: { image: "i", initials: "n" } },
+});
+type AvatarProps = Omit<VariantProps<typeof avatarRoot>, "kind"> & { src?: string };
+export function Avatar({ size, src }: AvatarProps) {
+  return <span className={avatarRoot({ size, kind: src ? "image" : "initials" })} />;
+}
+`);
+		expect(result.Avatar.axes).toEqual({ size: { kind: "enum", values: ["sm", "lg"] } });
+		expect(result.Avatar.axes.kind).toBeUndefined();
+	});
+
+	it("respects Omit<VariantProps<typeof x>, …> in a heritage clause", () => {
+		// Same Avatar shape as above, but `interface … extends Omit<…>` instead of
+		// a type-alias intersection: heritage clauses reference types as
+		// expressions, and the Omit keys must still carry into the spread.
+		const result = analyze(`
+import { cva, type VariantProps } from "class-variance-authority";
+const avatarRoot = cva("avatar", {
+  variants: { size: { sm: "s", lg: "l" }, kind: { image: "i", initials: "n" } },
+});
+interface AvatarProps extends Omit<VariantProps<typeof avatarRoot>, "kind"> {
+  src?: string;
+}
+export function Avatar({ size, src }: AvatarProps) {
+  return <span className={avatarRoot({ size, kind: src ? "image" : "initials" })} />;
+}
+`);
+		expect(result.Avatar.axes).toEqual({ size: { kind: "enum", values: ["sm", "lg"] } });
+		expect(result.Avatar.axes.kind).toBeUndefined();
+	});
+
+	it("resolves a locally-declared base interface referenced from a heritage clause", () => {
+		// `interface Props extends BaseProps` — the base's members are props even
+		// though the body consumes the axis with a literal, never reading it.
+		const result = analyze(`
+import { cva } from "class-variance-authority";
+const chip = cva("chip", { variants: { size: { sm: "s", lg: "l" } } });
+type BaseProps = { size?: "sm" | "lg" };
+interface ChipProps extends BaseProps {
+  label?: string;
+}
+export function Chip(props: ChipProps) {
+  return <span className={chip({ size: props.label ? "lg" : "sm" })} />;
+}
+`);
+		expect(result.Chip.axes).toEqual({ size: { kind: "enum", values: ["sm", "lg"] } });
+	});
+
+	it("does not surface a nested object member as top-level prop exposure", () => {
+		// `config`'s own type has a `size` member; the component accepts only
+		// `config`. Descending into member types would claim `size` as a prop and
+		// emit `<Thing size="sm">`, which the consumer's tsc rejects.
+		const result = analyze(`
+import { cva } from "class-variance-authority";
+const v = cva("thing", { variants: { size: { sm: "s", md: "m" } } });
+type Opt = { size: string };
+type ThingProps = { config?: Opt };
+export function Thing(props: ThingProps) {
+  return <div className={v({ size: "sm" })} />;
+}
+`);
+		expect(result.Thing).toBeUndefined();
+	});
+
+	it("collects exposure from reads off a destructuring rest binding", () => {
+		// Externally-typed props (unresolvable locally) read via `rest.variant` /
+		// `rest.size`: every key read off the rest binding is a caller prop, the
+		// same way `props.x` is.
+		const result = analyze(`
+import { cva } from "class-variance-authority";
+import type { ButtonProps } from "./button.types";
+export const buttonVariants = cva("btn", {
+  variants: { variant: { primary: "p", ghost: "g" }, size: { sm: "s", lg: "l" } },
+});
+export function Button({ className, ...rest }: ButtonProps) {
+  return <button className={buttonVariants({ variant: rest.variant, size: rest.size })} />;
+}
+`);
+		expect(result.Button.axes).toEqual({
+			variant: { kind: "enum", values: ["primary", "ghost"] },
+			size: { kind: "enum", values: ["sm", "lg"] },
+		});
+	});
+
+	it("does not treat an indexed-access value-type alias as a wholesale props spread", () => {
+		// Crewops combobox.tsx: `type Size = NonNullable<VariantProps<typeof v>["size"]>`
+		// extracts ONE axis's value type. The `typeof v` inside it must not expose
+		// every axis; only the member that uses the alias is a prop.
+		const result = analyze(`
+import { cva, type VariantProps } from "class-variance-authority";
+export const triggerVariants = cva("trigger", {
+  variants: {
+    size: { sm: "s", lg: "l" },
+    invalid: { true: "t", false: "f" },
+  },
+});
+type TriggerSize = NonNullable<VariantProps<typeof triggerVariants>["size"]>;
+type TriggerProps = { size?: TriggerSize; placeholder?: string };
+export function ComboboxTrigger({ size = "sm", placeholder, ...props }: TriggerProps) {
+  const invalid = false;
+  return <button className={triggerVariants({ size, invalid })} {...props} />;
+}
+`);
+		expect(result.ComboboxTrigger.axes).toEqual({
+			size: { kind: "enum", values: ["sm", "lg"] },
+		});
+		expect(result.ComboboxTrigger.axes.invalid).toBeUndefined();
+	});
+
+	it("attributes an exported cva consumed only by a non-exported sub-component to no one", () => {
+		// Crewops combobox.tsx root shape: the cva const itself is exported, but the
+		// only component applying it is non-exported. Exporting the cva must not
+		// attribute its axes to the file's other exported components.
+		const result = analyze(`
+import { cva } from "class-variance-authority";
+export const triggerVariants = cva("trigger", {
+  variants: { size: { sm: "s", lg: "l" } },
+});
+function Trigger({ size }: { size?: "sm" | "lg" }) {
+  return <button className={triggerVariants({ size })} />;
+}
+export function Combobox({ children }: { children?: unknown }) {
+  return <div><Trigger /></div>;
+}
+`);
+		expect(result.Combobox).toBeUndefined();
+		expect(Object.keys(result)).toEqual([]);
+	});
+});
+
+describe("collectFileCvaAxes — file-wide axis surface", () => {
+	it("unions every cva definition's axes regardless of attribution", () => {
+		const source = `
+import { cva } from "class-variance-authority";
+const a = cva("a", { variants: { size: { sm: "s" } } });
+const b = cva("b", { variants: { invalid: { true: "t", false: "f" } } });
+export function Root({ children }: { children?: unknown }) { return <div />; }
+`;
+		expect(collectFileCvaAxes(ts, source)).toEqual({
+			size: { kind: "enum", values: ["sm"] },
+			invalid: { kind: "boolean" },
+		});
+	});
+
+	it("returns an empty record for a file with no cva()", () => {
+		expect(collectFileCvaAxes(ts, "export function Plain() { return <div />; }")).toEqual({});
+	});
+});
+
+describe("collectRequiredPropNames", () => {
+	it("reports top-level members without `?`, resolving a local props type", () => {
+		// The Crewops radio shape: `value` required, `size` optional.
+		const source = `
+import { cva } from "class-variance-authority";
+const v = cva("radio", { variants: { size: { sm: "s", default: "d" } } });
+type RadioProps = { value: string; size?: "sm" | "default" };
+export function Radio({ value, size }: RadioProps) {
+  return <input value={value} className={v({ size })} />;
+}
+`;
+		expect([...collectRequiredPropNames(ts, source, ["Radio"])]).toEqual(["value"]);
+	});
+
+	it("respects Omit<> and never descends into a member's own type", () => {
+		const source = `
+type Base = { id: string; config: { mode: string }; label?: string };
+type Props = Omit<Base, "id">;
+export function Card(props: Props) { return <div />; }
+`;
+		const required = collectRequiredPropNames(ts, source, ["Card"]);
+		expect(required.has("config")).toBe(true);
+		expect(required.has("id")).toBe(false); // Omit'd away
+		expect(required.has("mode")).toBe(false); // nested member, not a prop
+		expect(required.has("label")).toBe(false); // optional
+	});
+
+	it("only reports a member required in EVERY union alternative", () => {
+		// Crewops Badge: `({ status: S; tone?: never } | { status?: never; tone?: T })`
+		// — `status` is required in one alternative only, so injecting it into a
+		// tone-keyed example breaks the discriminated union. `value` (required in
+		// both alternatives) survives; the intersection base's `id` survives.
+		const source = `
+type P = { id: string } & (
+  | { value: string; status: "draft" | "paid"; tone?: never }
+  | { value: string; status?: never; tone?: "neutral" | "danger" }
+);
+export function Badge(props: P) { return <span />; }
+`;
+		const required = collectRequiredPropNames(ts, source, ["Badge"]);
+		expect(required.has("id")).toBe(true);
+		expect(required.has("value")).toBe(true);
+		expect(required.has("status")).toBe(false);
+		expect(required.has("tone")).toBe(false);
+	});
+
+	it("respects Omit<> in a heritage clause", () => {
+		const source = `
+type Base = { value: string; label?: string };
+interface Props extends Omit<Base, "value"> {
+  id: string;
+}
+export function Field(props: Props) { return <div />; }
+`;
+		const required = collectRequiredPropNames(ts, source, ["Field"]);
+		expect(required.has("id")).toBe(true);
+		expect(required.has("value")).toBe(false); // Omit'd away in the heritage clause
+	});
+
+	it("returns nothing for an unresolvable or absent props type", () => {
+		const source = `export function Loose(props: any) { return <div />; }`;
+		expect(collectRequiredPropNames(ts, source, ["Loose"]).size).toBe(0);
 	});
 });
 

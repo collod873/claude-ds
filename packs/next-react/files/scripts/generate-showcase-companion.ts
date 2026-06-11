@@ -23,7 +23,11 @@ import { join, dirname, basename, resolve as resolvePath } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type * as TS from "typescript";
-import { analyzeCvaComponents, type ComponentCva } from "./lib/cva-analyzer.ts";
+// The CVA analyzer is INLINED below (see the marked region) rather than
+// imported: consumers run this script with `node --experimental-strip-types`,
+// which demands an explicit `.ts` specifier, while their tsconfig rejects
+// `.ts` specifiers without allowImportingTsExtensions (TS5097). One file
+// satisfies both.
 
 // ── typescript loader (optional — falls back to regex parseMeta if absent) ────
 // Resolved at runtime from the script's own location so it works when the
@@ -1754,13 +1758,73 @@ function emitAtomCompositeShowcase(
   const componentCva = attribution[displayName] ?? attribution[componentName] ?? null;
   const cvaConfig = componentCva ? cvaConfigFromAttribution(componentCva) : null;
 
+  // Required-prop completion (ADR-0030): an emitted entry missing a prop the
+  // component's own type marks required cannot compile (Crewops Radio's
+  // required `value`). Borrow the value from the first donor example that
+  // carries it — the showcase favors compiling over rendering the entry
+  // exactly as authored. `children` is excluded: combos receive children via
+  // autoChildren, never as an attribute.
+  //
+  // Two evidence sources, because the type walk is syntactic and local:
+  //   1. the component's own (locally resolvable) props type, and
+  //   2. cross-example consensus — Crewops Radio wraps base-ui's Root, whose
+  //      required `value` lives in node_modules, invisible to (1). A non-axis,
+  //      non-cosmetic prop EVERY other authored example carries is the
+  //      consumer's own statement of the minimum viable surface; borrowing an
+  //      optional prop is compile-safe while omitting a required one is not.
+  const requiredProps = tsRuntime
+    ? collectRequiredPropNames(tsRuntime, source, [displayName, componentName], sourceName)
+    : new Set<string>();
+  const fileAxisNames = tsRuntime
+    ? new Set(Object.keys(collectFileCvaAxes(tsRuntime, source, sourceName)))
+    : new Set<string>();
+  const isCosmeticProp = (k: string): boolean =>
+    ["children", "className", "class", "style", "id", "key", "ref"].includes(k) ||
+    k.startsWith("data-") ||
+    k.startsWith("aria-");
+  const consensusKeys = (pool: Array<{ props: Record<string, unknown> }>): Set<string> => {
+    if (pool.length === 0) return new Set();
+    return new Set(
+      Object.keys(pool[0].props).filter(
+        (k) => pool.every((ex) => k in ex.props) && !fileAxisNames.has(k) && !isCosmeticProp(k)
+      )
+    );
+  };
+  const authoredExamples = meta.examples.filter(
+    (ex) => ex.props && Object.keys(ex.props).length > 0
+  );
+  const completeRequiredProps = (
+    props: Record<string, unknown>,
+    extraRequired: ReadonlySet<string>,
+    donors: Array<{ props: Record<string, unknown> }>
+  ): Record<string, unknown> => {
+    const out: Record<string, unknown> = { ...props };
+    for (const req of new Set([...requiredProps, ...extraRequired])) {
+      if (req in out || req === "children") continue;
+      const donor = donors.find((ex) => ex.props && req in ex.props);
+      if (donor) out[req] = donor.props[req];
+    }
+    return out;
+  };
+
   // Explicit examples from meta.examples (authoritative — no children fallback applied).
   // Boolean-axis props authored as the strings "true"/"false" are coerced to real
   // booleans so they emit as `{true}`/`{false}` rather than a string attribute that
   // fails the component's boolean prop type.
   const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = meta.examples.map(
-    (ex) => ({ name: ex.name, props: coerceBooleanAxisProps(ex.props, cvaConfig) })
+    (ex) => ({
+      name: ex.name,
+      props: completeRequiredProps(
+        coerceBooleanAxisProps(ex.props, cvaConfig),
+        consensusKeys(authoredExamples.filter((other) => other !== ex)),
+        meta.examples
+      ),
+    })
   );
+  // Combos consult the COMPLETED examples: a residue entry that just gained a
+  // borrowed prop no longer breaks the consensus the cross-product needs.
+  const completedAuthored = explicitExamples.filter((ex) => Object.keys(ex.props).length > 0);
+  const comboRequired = consensusKeys(completedAuthored);
 
   // CVA auto-expansion. v0.7.8: do NOT dedup against explicit examples — Variants
   // is the exhaustive proof grid; overlap with Examples is intentional.
@@ -1835,14 +1899,23 @@ function emitAtomCompositeShowcase(
         const acceptsChildren = componentAcceptsChildren(source);
         const buttonBlocks = groupCombos
           .map((ce) => {
-            const propsStr = Object.entries(ce.props)
+            // Donor-borrowed required props join the render only — grouping,
+            // labels, and autoChildren stay driven by the axis combo itself.
+            const propsStr = Object.entries(
+              completeRequiredProps(ce.props, comboRequired, explicitExamples)
+            )
               .map(([k, v]) => {
                 // #66 / #67: boolean-shaped CVA axes (typed `boolean` by the analyzer)
-                // must emit as JSX expressions `{true}`/`{false}` so the component's
-                // boolean prop type accepts them. Plain string-valued axes stay quoted.
+                // arrive from the cartesian as the strings "true"/"false" and must
+                // emit as JSX expressions `{true}`/`{false}` so the component's
+                // boolean prop type accepts them.
                 if (cvaConfig.booleanAxes.has(k)) return `${k}={${v}}`;
-                return `${k}="${v}"`;
+                // Everything else — axis strings and donor-borrowed required props
+                // alike — uses renderPropsAttr: quote-bearing strings, fn markers,
+                // and `undefined` need the same handling the Examples section gets.
+                return renderPropsAttr({ [k]: v });
               })
+              .filter(Boolean)
               .join(" ");
             // Children fallback for auto-generated combos. Icon sizes get a
             // lucide Square placeholder; text sizes get the displayName —
@@ -2122,3 +2195,757 @@ main().catch((err) => {
   process.stderr.write(`generate-showcase-companion: ${(err as Error).message}\n`);
   process.exit(1);
 });
+
+// ── BEGIN cva-analyzer (mirrored from src/lib/cva/analyzer.ts — edit THERE; synced by scripts/sync-cva-analyzer.mjs) ──
+// SOURCE OF TRUTH for the CVA component-attribution analyzer (issue #552).
+//
+// This module is inlined byte-for-byte into the pack's showcase generator
+// (`packs/next-react/files/scripts/generate-showcase-companion.ts`, between
+// the `BEGIN/END cva-analyzer` markers) so the generator (a pack script that
+// cannot import the CLI's src tree) and the CLI's CVA-consuming fixers share
+// ONE implementation — not two parallel regex parsers that can drift
+// (PRD #546). Edit this file; the inlined region is regenerated by
+// `scripts/sync-cva-analyzer.mjs` (run from `npm run build`) and pinned
+// identical by `tests/unit/cva-analyzer-mirror.test.ts`.
+//
+// The TypeScript compiler module is injected (never imported here) so the
+// same source runs in both contexts: the CLI passes its own `typescript`
+// dependency; the pack script passes the consumer's runtime-resolved one.
+// Analysis is purely syntactic (a single `createSourceFile`, no type
+// checker), which keeps it cheap and portable.
+
+
+/** A variant axis with its value type. */
+export type CvaAxis =
+	// A string-union axis (`size: { sm, md, lg }`) — emitters render its values
+	// as JSX attributes.
+	| { kind: "enum"; values: string[] }
+	// A boolean axis (`invalid: { true, false }`) — emitters render `{true}` /
+	// `{false}` JSX expressions, never the strings "true"/"false".
+	| { kind: "boolean" };
+
+/** The CVA variant surface attributed to one exported component. */
+export interface ComponentCva {
+	/** Variant axes, keyed by axis name (the settable prop). */
+	axes: Record<string, CvaAxis>;
+	/** Default variant selections, typed (string for enum axes, boolean for boolean axes). */
+	defaultVariants: Record<string, string | boolean>;
+}
+
+/**
+ * Per-component CVA attribution for one source file, keyed by exported
+ * component name. A component appears only when it consumes at least one
+ * `cva()`; a `cva()` consumed solely by non-exported sub-elements is
+ * attributed to no one and is therefore absent from every entry.
+ */
+export type CvaAttribution = Record<string, ComponentCva>;
+
+interface CvaDef {
+	axes: Record<string, CvaAxis>;
+	defaultVariants: Record<string, string | boolean>;
+}
+
+/**
+ * Analyze one atom/composite source file and return, per exported component,
+ * the variant axes it consumes (with typed values) and its default variants.
+ *
+ * Attribution walks the AST: a `cva()` result belongs to the exported
+ * component whose props include `VariantProps<typeof thatCva>` or that applies
+ * it in its own JSX (`thatCva(...)`). A `cva()` consumed by multiple exported
+ * components is attributed to each.
+ *
+ * Each consumed axis is then exposure-filtered: it is attributed only when the
+ * component provably accepts it as a prop — destructured from the props
+ * parameter, named in a (locally resolvable) props type, read via `props.x`, or
+ * spread in wholesale through `VariantProps<typeof thatCva>` minus any
+ * `Omit<>`-excluded keys. An axis the component consumes internally but never
+ * accepts as a prop (derived from context or from another prop, like Crewops
+ * Input's `invalid` driven by `aria-invalid`) is dropped: emitting it would
+ * produce code the consumer's compiler rejects (ADR-0030).
+ */
+export function analyzeCvaComponents(
+	ts: typeof TS,
+	source: string,
+	fileName = "component.tsx",
+): CvaAttribution {
+	if (!source.includes("cva(")) return {};
+
+	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+	const cvaDefs = collectCvaDefs(ts, sf);
+	if (cvaDefs.size === 0) return {};
+	const cvaNames = new Set(cvaDefs.keys());
+
+	const typeDecls = collectTypeDecls(ts, sf);
+	const exportedNames = collectExportedNames(ts, sf);
+
+	const result: CvaAttribution = {};
+	for (const component of collectComponents(ts, sf, exportedNames)) {
+		const consumed = new Set<string>();
+		for (const name of consumedViaProps(ts, component.firstParamType, cvaNames, typeDecls)) {
+			consumed.add(name);
+		}
+		for (const name of consumedViaBody(ts, component.node, cvaNames)) {
+			consumed.add(name);
+		}
+		if (consumed.size === 0) continue;
+
+		// Consumption alone over-claims: a component may apply a cva() whose axis
+		// is derived internally and never accepted as a prop (Crewops Input drives
+		// `invalid` from `aria-invalid`; ComboboxTrigger pulls it from context).
+		// Emitting such an axis produces code the consumer's compiler rejects, so
+		// each axis additionally needs positive exposure evidence on the prop
+		// surface before it is attributed.
+		const exposure = collectExposure(ts, component, cvaNames, typeDecls);
+
+		const axes: Record<string, CvaAxis> = {};
+		const defaultVariants: Record<string, string | boolean> = {};
+		for (const cvaName of consumed) {
+			const config = cvaDefs.get(cvaName);
+			if (!config) continue;
+			const spreadOmissions = exposure.wholesale.get(cvaName);
+			for (const [axisName, axis] of Object.entries(config.axes)) {
+				const spreadExposed = spreadOmissions !== undefined && !spreadOmissions.has(axisName);
+				if (!spreadExposed && !exposure.names.has(axisName)) continue;
+				axes[axisName] = axis;
+				const dv = config.defaultVariants[axisName];
+				if (dv !== undefined) defaultVariants[axisName] = dv;
+			}
+		}
+		if (Object.keys(axes).length > 0) result[component.name] = { axes, defaultVariants };
+	}
+	return result;
+}
+
+// ── cva() definitions ─────────────────────────────────────────────────────────
+
+function collectCvaDefs(ts: typeof TS, sf: TS.SourceFile): Map<string, CvaDef> {
+	const defs = new Map<string, CvaDef>();
+	const visit = (node: TS.Node): void => {
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isIdentifier(node.name) &&
+			node.initializer &&
+			ts.isCallExpression(node.initializer) &&
+			ts.isIdentifier(node.initializer.expression) &&
+			node.initializer.expression.text === "cva"
+		) {
+			const config = parseCvaConfig(ts, sf, node.initializer);
+			if (config) defs.set(node.name.text, config);
+		}
+		node.forEachChild(visit);
+	};
+	visit(sf);
+	return defs;
+}
+
+function parseCvaConfig(ts: typeof TS, sf: TS.SourceFile, call: TS.CallExpression): CvaDef | null {
+	// cva(base?, { variants, defaultVariants }) — find the options object (the
+	// argument carrying `variants`).
+	const options = call.arguments.find(
+		(arg): arg is TS.ObjectLiteralExpression =>
+			ts.isObjectLiteralExpression(arg) && hasProperty(ts, arg, "variants"),
+	);
+	if (!options) return null;
+
+	const variantsObj = getObjectProperty(ts, options, "variants");
+	if (!variantsObj || !ts.isObjectLiteralExpression(variantsObj)) return null;
+
+	const axes: Record<string, CvaAxis> = {};
+	for (const prop of variantsObj.properties) {
+		if (!ts.isPropertyAssignment(prop)) continue;
+		const axisName = propName(ts, prop.name);
+		if (axisName === null) continue;
+		if (!ts.isObjectLiteralExpression(prop.initializer)) continue;
+
+		const valueKeys: string[] = [];
+		for (const valueProp of prop.initializer.properties) {
+			const key = ts.isPropertyAssignment(valueProp)
+				? propName(ts, valueProp.name)
+				: ts.isShorthandPropertyAssignment(valueProp)
+					? valueProp.name.text
+					: null;
+			if (key !== null) valueKeys.push(key);
+		}
+		if (valueKeys.length === 0) continue;
+
+		axes[axisName] = isBooleanAxis(valueKeys)
+			? { kind: "boolean" }
+			: { kind: "enum", values: valueKeys };
+	}
+	if (Object.keys(axes).length === 0) return null;
+
+	const defaultVariants: Record<string, string | boolean> = {};
+	const defaultsObj = getObjectProperty(ts, options, "defaultVariants");
+	if (defaultsObj && ts.isObjectLiteralExpression(defaultsObj)) {
+		for (const prop of defaultsObj.properties) {
+			if (!ts.isPropertyAssignment(prop)) continue;
+			const axisName = propName(ts, prop.name);
+			if (axisName === null) continue;
+			const value = literalValue(ts, prop.initializer, sf);
+			if (value !== undefined) defaultVariants[axisName] = value;
+		}
+	}
+
+	return { axes, defaultVariants };
+}
+
+/** A CVA axis is boolean when its only value keys are `true` / `false`. */
+function isBooleanAxis(keys: string[]): boolean {
+	return keys.every((k) => k === "true" || k === "false") && keys.includes("true");
+}
+
+// ── type declarations ──────────────────────────────────────────────────────────
+
+function collectTypeDecls(
+	ts: typeof TS,
+	sf: TS.SourceFile,
+): Map<string, TS.InterfaceDeclaration | TS.TypeAliasDeclaration> {
+	const decls = new Map<string, TS.InterfaceDeclaration | TS.TypeAliasDeclaration>();
+	const visit = (node: TS.Node): void => {
+		if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
+			decls.set(node.name.text, node);
+		}
+		node.forEachChild(visit);
+	};
+	visit(sf);
+	return decls;
+}
+
+// ── exported names ──────────────────────────────────────────────────────────────
+
+function collectExportedNames(ts: typeof TS, sf: TS.SourceFile): Set<string> {
+	const names = new Set<string>();
+	for (const stmt of sf.statements) {
+		if (ts.isFunctionDeclaration(stmt) && stmt.name && hasExportModifier(ts, stmt)) {
+			names.add(stmt.name.text);
+		} else if (ts.isVariableStatement(stmt) && hasExportModifier(ts, stmt)) {
+			for (const decl of stmt.declarationList.declarations) {
+				if (ts.isIdentifier(decl.name)) names.add(decl.name.text);
+			}
+		} else if (
+			ts.isExportDeclaration(stmt) &&
+			stmt.exportClause &&
+			ts.isNamedExports(stmt.exportClause)
+		) {
+			for (const spec of stmt.exportClause.elements) names.add(spec.name.text);
+		}
+	}
+	return names;
+}
+
+function hasExportModifier(ts: typeof TS, node: TS.HasModifiers): boolean {
+	return (ts.getModifiers(node) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+}
+
+// ── exported components ─────────────────────────────────────────────────────────
+
+interface ComponentDecl {
+	name: string;
+	node: TS.Node;
+	firstParamType: TS.TypeNode | undefined;
+}
+
+function collectComponents(
+	ts: typeof TS,
+	sf: TS.SourceFile,
+	exportedNames: Set<string>,
+): ComponentDecl[] {
+	const components: ComponentDecl[] = [];
+	for (const stmt of sf.statements) {
+		if (ts.isFunctionDeclaration(stmt) && stmt.name && isComponentName(stmt.name.text)) {
+			if (!exportedNames.has(stmt.name.text)) continue;
+			components.push({
+				name: stmt.name.text,
+				node: stmt,
+				firstParamType: stmt.parameters[0]?.type,
+			});
+		} else if (ts.isVariableStatement(stmt)) {
+			for (const decl of stmt.declarationList.declarations) {
+				if (!ts.isIdentifier(decl.name) || !isComponentName(decl.name.text)) continue;
+				if (!exportedNames.has(decl.name.text)) continue;
+				if (!decl.initializer) continue;
+				const fn = unwrapComponentFn(ts, decl.initializer);
+				if (fn)
+					components.push({
+						name: decl.name.text,
+						node: fn.node,
+						firstParamType: fn.firstParamType,
+					});
+			}
+		}
+	}
+	return components;
+}
+
+/**
+ * Recover the component function from a variable initializer. A component is
+ * either a bare arrow/function expression or one wrapped in a higher-order
+ * component call — `forwardRef(...)` / `memo(...)` (bare or `React.`-qualified),
+ * the dominant shadcn-style atom shape. Returns the inner function node (for
+ * body-usage attribution) and its props type: the inner param annotation when
+ * present, else the wrapper's props type argument (`forwardRef<Ref, Props>`).
+ */
+function unwrapComponentFn(
+	ts: typeof TS,
+	init: TS.Expression,
+): { node: TS.Node; firstParamType: TS.TypeNode | undefined } | null {
+	if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+		return { node: init, firstParamType: init.parameters[0]?.type };
+	}
+	if (ts.isCallExpression(init) && isHocName(ts, init.expression)) {
+		const inner = init.arguments.find(
+			(a): a is TS.ArrowFunction | TS.FunctionExpression =>
+				ts.isArrowFunction(a) || ts.isFunctionExpression(a),
+		);
+		if (inner) {
+			// forwardRef<Ref, Props>((props, ref) => …) carries the props type as its
+			// SECOND type argument; the inner params are usually unannotated.
+			const propsTypeArg = init.typeArguments?.[1];
+			return { node: inner, firstParamType: inner.parameters[0]?.type ?? propsTypeArg };
+		}
+	}
+	return null;
+}
+
+/** `forwardRef` / `memo`, bare or `React.`-qualified (matches the generator). */
+function isHocName(ts: typeof TS, callee: TS.Expression): boolean {
+	const HOCS = new Set(["forwardRef", "memo"]);
+	if (ts.isIdentifier(callee)) return HOCS.has(callee.text);
+	return (
+		ts.isPropertyAccessExpression(callee) &&
+		ts.isIdentifier(callee.expression) &&
+		callee.expression.text === "React" &&
+		HOCS.has(callee.name.text)
+	);
+}
+
+/** A component is an exported declaration whose name is PascalCase. */
+function isComponentName(name: string): boolean {
+	return name.length > 0 && name[0] === name[0].toUpperCase() && name[0] !== name[0].toLowerCase();
+}
+
+// ── attribution: props type (VariantProps<typeof X>) ────────────────────────────
+
+function consumedViaProps(
+	ts: typeof TS,
+	typeNode: TS.TypeNode | undefined,
+	cvaNames: Set<string>,
+	typeDecls: Map<string, TS.InterfaceDeclaration | TS.TypeAliasDeclaration>,
+): Set<string> {
+	const found = new Set<string>();
+	if (!typeNode) return found;
+	const seen = new Set<string>();
+
+	const walk = (node: TS.Node): void => {
+		if (ts.isTypeQueryNode(node)) {
+			const name = leftmostIdentText(ts, node.exprName);
+			if (name && cvaNames.has(name)) found.add(name);
+		}
+		if (ts.isTypeReferenceNode(node)) {
+			const name = leftmostIdentText(ts, node.typeName);
+			if (name && typeDecls.has(name) && !seen.has(name)) {
+				seen.add(name);
+				typeDecls.get(name)?.forEachChild(walk);
+			}
+		}
+		node.forEachChild(walk);
+	};
+	walk(typeNode);
+	return found;
+}
+
+// ── attribution: JSX body usage (X(...)) ────────────────────────────────────────
+
+function consumedViaBody(ts: typeof TS, node: TS.Node, cvaNames: Set<string>): Set<string> {
+	const found = new Set<string>();
+	const walk = (n: TS.Node): void => {
+		if (
+			ts.isCallExpression(n) &&
+			ts.isIdentifier(n.expression) &&
+			cvaNames.has(n.expression.text)
+		) {
+			found.add(n.expression.text);
+		}
+		n.forEachChild(walk);
+	};
+	walk(node);
+	return found;
+}
+
+// ── exposure: which axis names are actually props of the component ─────────────
+
+interface Exposure {
+	/** Prop names with positive evidence: destructured, typed, or `props.x`-read. */
+	names: Set<string>;
+	/**
+	 * cva names whose `VariantProps<typeof X>` (or bare `typeof X`) is spread into
+	 * the props type — every axis is a prop, minus the keys an enclosing `Omit<>`
+	 * excludes (Crewops Avatar: `Omit<VariantProps<typeof avatarRoot>, "kind">`).
+	 */
+	wholesale: Map<string, Set<string>>;
+}
+
+function collectExposure(
+	ts: typeof TS,
+	component: ComponentDecl,
+	cvaNames: Set<string>,
+	typeDecls: Map<string, TS.InterfaceDeclaration | TS.TypeAliasDeclaration>,
+): Exposure {
+	const exposure: Exposure = { names: new Set(), wholesale: new Map() };
+	collectValueExposure(ts, component.node, cvaNames, exposure);
+	if (component.firstParamType) {
+		collectTypeExposure(ts, component.firstParamType, cvaNames, typeDecls, exposure);
+	}
+	return exposure;
+}
+
+/**
+ * Prop names read off the first parameter: destructuring, `props.x`,
+ * `const { x } = props` — equally off a destructuring rest binding
+ * (`rest.x`), whose keys are caller props the same way `props.x` keys are.
+ * Additionally, forwarding the whole props object (or
+ * its destructuring rest) into a cva — `thatCva(props)` / `thatCva({ ...props })`
+ * — exposes that cva wholesale: every axis it reads arrives from the caller's
+ * props, the loosely-typed atom idiom.
+ */
+function collectValueExposure(
+	ts: typeof TS,
+	node: TS.Node,
+	cvaNames: Set<string>,
+	exposure: Exposure,
+): void {
+	const params = (node as TS.SignatureDeclaration).parameters;
+	const param = params?.[0];
+	if (!param) return;
+
+	let propsIdent: string | null = null;
+	let restIdent: string | null = null;
+	if (ts.isObjectBindingPattern(param.name)) {
+		addBindingNames(ts, param.name, exposure.names);
+		for (const el of param.name.elements) {
+			if (el.dotDotDotToken && ts.isIdentifier(el.name)) restIdent = el.name.text;
+		}
+	} else if (ts.isIdentifier(param.name)) {
+		propsIdent = param.name.text;
+	} else {
+		return;
+	}
+	const carriers = new Set([propsIdent, restIdent].filter((n): n is string => n !== null));
+
+	const walk = (n: TS.Node): void => {
+		if (
+			ts.isPropertyAccessExpression(n) &&
+			ts.isIdentifier(n.expression) &&
+			carriers.has(n.expression.text)
+		) {
+			exposure.names.add(n.name.text);
+		}
+		if (
+			ts.isVariableDeclaration(n) &&
+			n.initializer &&
+			ts.isIdentifier(n.initializer) &&
+			carriers.has(n.initializer.text) &&
+			ts.isObjectBindingPattern(n.name)
+		) {
+			addBindingNames(ts, n.name, exposure.names);
+		}
+		if (
+			carriers.size > 0 &&
+			ts.isCallExpression(n) &&
+			ts.isIdentifier(n.expression) &&
+			cvaNames.has(n.expression.text)
+		) {
+			const arg = n.arguments[0];
+			const forwardsProps =
+				arg !== undefined &&
+				((ts.isIdentifier(arg) && carriers.has(arg.text)) ||
+					(ts.isObjectLiteralExpression(arg) &&
+						arg.properties.some(
+							(p) =>
+								ts.isSpreadAssignment(p) &&
+								ts.isIdentifier(p.expression) &&
+								carriers.has(p.expression.text),
+						)));
+			if (forwardsProps && !exposure.wholesale.has(n.expression.text)) {
+				exposure.wholesale.set(n.expression.text, new Set());
+			}
+		}
+		n.forEachChild(walk);
+	};
+	walk(node);
+}
+
+function addBindingNames(
+	ts: typeof TS,
+	pattern: TS.ObjectBindingPattern,
+	names: Set<string>,
+): void {
+	for (const el of pattern.elements) {
+		if (el.dotDotDotToken) continue;
+		const key = el.propertyName
+			? propName(ts, el.propertyName)
+			: ts.isIdentifier(el.name)
+				? el.name.text
+				: null;
+		if (key !== null) names.add(key);
+	}
+}
+
+/**
+ * Prop names and cva spreads found in the props type, resolving local
+ * interfaces/aliases. An `Omit<…, "k">` wrapper carries its excluded keys down
+ * into the subtree it wraps. An indexed access `T["size"]` extracts one axis's
+ * VALUE type (the `type Size = NonNullable<VariantProps<typeof x>["size"]>`
+ * alias idiom) — the `typeof x` inside it is not a props spread, so the whole
+ * subtree is skipped; the prop itself surfaces via the member that uses the alias.
+ */
+function collectTypeExposure(
+	ts: typeof TS,
+	typeNode: TS.TypeNode,
+	cvaNames: Set<string>,
+	typeDecls: Map<string, TS.InterfaceDeclaration | TS.TypeAliasDeclaration>,
+	exposure: Exposure,
+): void {
+	const seen = new Set<string>();
+	const visit = (node: TS.Node, omit: ReadonlySet<string>): void => {
+		if (ts.isIndexedAccessTypeNode(node)) return;
+		if (ts.isPropertySignature(node)) {
+			const n = propName(ts, node.name);
+			if (n !== null) exposure.names.add(n);
+			// Stop at the member: descending into its own type would surface a
+			// nested object's members as top-level props.
+			return;
+		}
+		if (ts.isTypeQueryNode(node)) {
+			const name = leftmostIdentText(ts, node.exprName);
+			if (name && cvaNames.has(name)) {
+				const existing = exposure.wholesale.get(name);
+				// Two spreads of the same cva expose the union: keep only the keys
+				// every spread omits.
+				exposure.wholesale.set(
+					name,
+					existing ? new Set([...existing].filter((k) => omit.has(k))) : new Set(omit),
+				);
+			}
+		}
+		if (ts.isTypeReferenceNode(node)) {
+			const refName = leftmostIdentText(ts, node.typeName);
+			if (refName === "Omit" && node.typeArguments?.length === 2) {
+				const keys = literalStringKeys(ts, node.typeArguments[1]);
+				visit(node.typeArguments[0], new Set([...omit, ...keys]));
+				return;
+			}
+			if (refName && typeDecls.has(refName) && !seen.has(refName)) {
+				seen.add(refName);
+				typeDecls.get(refName)?.forEachChild((c) => visit(c, omit));
+			}
+		}
+		// Heritage clauses (`interface X extends Omit<…, "k">` / `extends LocalBase`)
+		// reference types as expressions, not TypeReferenceNodes — same resolution,
+		// same Omit key propagation.
+		if (ts.isExpressionWithTypeArguments(node) && ts.isIdentifier(node.expression)) {
+			const refName = node.expression.text;
+			if (refName === "Omit" && node.typeArguments?.length === 2) {
+				const keys = literalStringKeys(ts, node.typeArguments[1]);
+				visit(node.typeArguments[0], new Set([...omit, ...keys]));
+				return;
+			}
+			if (typeDecls.has(refName) && !seen.has(refName)) {
+				seen.add(refName);
+				typeDecls.get(refName)?.forEachChild((c) => visit(c, omit));
+			}
+		}
+		node.forEachChild((c) => visit(c, omit));
+	};
+	visit(typeNode, new Set());
+}
+
+/** String-literal keys of an `Omit` key type: `"a"` or `"a" | "b"`. */
+function literalStringKeys(ts: typeof TS, node: TS.TypeNode): string[] {
+	const keys: string[] = [];
+	const collect = (n: TS.TypeNode): void => {
+		if (ts.isLiteralTypeNode(n) && ts.isStringLiteral(n.literal)) keys.push(n.literal.text);
+		else if (ts.isUnionTypeNode(n)) n.types.forEach(collect);
+	};
+	collect(node);
+	return keys;
+}
+
+// ── file-wide axis surface (pre-attribution) ────────────────────────────────────
+
+/**
+ * The union of every `cva()` definition's axes in the file, regardless of which
+ * component (if any) consumes it. This is the "axis-shaped" surface the
+ * poisoned-example rule uses to recognize residue of older fixers: a meta
+ * example prop named after ANY file cva axis but absent from the showcased
+ * component's own attribution is a sub-element leak. A prop that is no axis at
+ * all is indistinguishable from a legitimate hand-authored prop (Crewops
+ * Radio's required `value`) and must be left alone.
+ */
+export function collectFileCvaAxes(
+	ts: typeof TS,
+	source: string,
+	fileName = "component.tsx",
+): Record<string, CvaAxis> {
+	if (!source.includes("cva(")) return {};
+	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	const axes: Record<string, CvaAxis> = {};
+	for (const config of collectCvaDefs(ts, sf).values()) {
+		Object.assign(axes, config.axes);
+	}
+	return axes;
+}
+
+/**
+ * Names of the file's exported components, independent of cva attribution.
+ * Lets the poisoned-example rule distinguish "the showcase's render target
+ * exists but consumes no cva" (its axis-named example props are residue —
+ * validate) from "no export matches the filename at all" (the render target
+ * is unknown — stay silent rather than delete possibly-valid props).
+ */
+export function collectExportedComponentNames(
+	ts: typeof TS,
+	source: string,
+	fileName = "component.tsx",
+): Set<string> {
+	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	return new Set(collectComponents(ts, sf, collectExportedNames(ts, sf)).map((c) => c.name));
+}
+
+// ── required props of a component ───────────────────────────────────────────────
+
+/**
+ * The REQUIRED prop names of the named component: top-level members of its
+ * props type without a `?`, resolving local interfaces/aliases, intersections,
+ * heritage, and `Omit<>` exclusions. Members' own types are never descended
+ * into (a nested object's members are not props), and `VariantProps<typeof x>`
+ * contributes nothing (axis props are optional by construction).
+ *
+ * The showcase generator uses this to complete emitted entries: an example or
+ * cross-product combo missing a required prop (Crewops Radio's `value`) cannot
+ * compile, so the generator borrows the value from a donor example (ADR-0030).
+ * Unresolvable external types are skipped — absence of evidence merges nothing.
+ */
+export function collectRequiredPropNames(
+	ts: typeof TS,
+	source: string,
+	componentNames: string[],
+	fileName = "component.tsx",
+): Set<string> {
+	const required = new Set<string>();
+	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	const typeDecls = collectTypeDecls(ts, sf);
+	const exportedNames = collectExportedNames(ts, sf);
+	const components = collectComponents(ts, sf, exportedNames);
+	const component = componentNames
+		.map((n) => components.find((c) => c.name === n))
+		.find((c) => c !== undefined);
+	if (!component?.firstParamType) return required;
+
+	const seen = new Set<string>();
+	const visit = (node: TS.Node, omit: ReadonlySet<string>, sink: Set<string>): void => {
+		if (ts.isIndexedAccessTypeNode(node)) return;
+		if (ts.isPropertySignature(node)) {
+			if (!node.questionToken) {
+				const n = propName(ts, node.name);
+				if (n !== null && !omit.has(n)) sink.add(n);
+			}
+			return;
+		}
+		if (ts.isUnionTypeNode(node)) {
+			// A member required in only SOME alternatives of a union is not
+			// required (Crewops Badge's `{ status } | { tone? }` discriminated
+			// union): only names every alternative requires survive.
+			let common: Set<string> | null = null;
+			for (const alt of node.types) {
+				const altRequired = new Set<string>();
+				visit(alt, omit, altRequired);
+				if (common === null) {
+					common = altRequired;
+				} else {
+					const prev: Set<string> = common;
+					common = new Set([...prev].filter((n) => altRequired.has(n)));
+				}
+			}
+			for (const n of common ?? []) sink.add(n);
+			return;
+		}
+		if (ts.isTypeReferenceNode(node)) {
+			const refName = leftmostIdentText(ts, node.typeName);
+			if (refName === "Omit" && node.typeArguments?.length === 2) {
+				const keys = literalStringKeys(ts, node.typeArguments[1]);
+				visit(node.typeArguments[0], new Set([...omit, ...keys]), sink);
+				return;
+			}
+			if (refName && typeDecls.has(refName) && !seen.has(refName)) {
+				seen.add(refName);
+				typeDecls.get(refName)?.forEachChild((c) => visit(c, omit, sink));
+			}
+		}
+		if (ts.isExpressionWithTypeArguments(node) && ts.isIdentifier(node.expression)) {
+			const refName = node.expression.text;
+			if (refName === "Omit" && node.typeArguments?.length === 2) {
+				const keys = literalStringKeys(ts, node.typeArguments[1]);
+				visit(node.typeArguments[0], new Set([...omit, ...keys]), sink);
+				return;
+			}
+			if (typeDecls.has(refName) && !seen.has(refName)) {
+				seen.add(refName);
+				typeDecls.get(refName)?.forEachChild((c) => visit(c, omit, sink));
+			}
+		}
+		node.forEachChild((c) => visit(c, omit, sink));
+	};
+	visit(component.firstParamType, new Set(), required);
+	return required;
+}
+
+// ── small AST helpers ───────────────────────────────────────────────────────────
+
+function propName(ts: typeof TS, name: TS.PropertyName): string | null {
+	if (ts.isIdentifier(name)) return name.text;
+	if (ts.isStringLiteral(name)) return name.text;
+	if (ts.isNumericLiteral(name)) return name.text;
+	return null;
+}
+
+function hasProperty(ts: typeof TS, obj: TS.ObjectLiteralExpression, key: string): boolean {
+	return obj.properties.some(
+		(p) =>
+			(ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
+			propName(ts, p.name) === key,
+	);
+}
+
+function getObjectProperty(
+	ts: typeof TS,
+	obj: TS.ObjectLiteralExpression,
+	key: string,
+): TS.Expression | null {
+	for (const p of obj.properties) {
+		if (ts.isPropertyAssignment(p) && propName(ts, p.name) === key) return p.initializer;
+	}
+	return null;
+}
+
+function literalValue(
+	ts: typeof TS,
+	node: TS.Expression,
+	sf: TS.SourceFile,
+): string | boolean | undefined {
+	if (ts.isStringLiteral(node)) return node.text;
+	if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
+	if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+	if (ts.isNumericLiteral(node)) return node.text;
+	if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+	void sf;
+	return undefined;
+}
+
+function leftmostIdentText(ts: typeof TS, name: TS.EntityName): string | null {
+	let current: TS.EntityName = name;
+	while (ts.isQualifiedName(current)) current = current.left;
+	return ts.isIdentifier(current) ? current.text : null;
+}
+// ── END cva-analyzer ──

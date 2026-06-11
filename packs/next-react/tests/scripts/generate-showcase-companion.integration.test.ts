@@ -104,6 +104,70 @@ function sharedGen(): Promise<SharedRun> {
       ].join("\n")
     );
 
+    // required-prop completion (v1.8.2 canary, Crewops radio) — entries missing
+    // a required prop inherit it from a donor example
+    await writeFile(
+      join(atomsDir, "radio.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const radioVariants = cva("radio", {`,
+        `  variants: { size: { sm: "s", default: "d" } },`,
+        `  defaultVariants: { size: "default" },`,
+        `});`,
+        `type RadioProps = { value: string; size?: "sm" | "default" };`,
+        `export function Radio({ value, size, ...props }: RadioProps) { return <input type="radio" value={value} className={radioVariants({ size })} {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [`,
+        `  { name: "default", props: { value: "lead-inspection" } },`,
+        `  { name: "small", props: { size: "sm" } },`,
+        `], skip: [] };`,
+      ].join("\n")
+    );
+
+    // required-prop completion via cross-example consensus (v1.8.2 canary,
+    // Crewops radio REAL shape) — the required `value` lives in an external
+    // package type the syntactic walk can't resolve; the only evidence is
+    // that every other authored example carries it
+    await writeFile(
+      join(atomsDir, "slider.tsx"),
+      [
+        `import React from "react";`,
+        `import { Slider as SliderPrimitive } from "@fake-ui/react/slider";`,
+        `import { cva } from "class-variance-authority";`,
+        `const sliderVariants = cva("slider", {`,
+        `  variants: { size: { sm: "s", default: "d" } },`,
+        `  defaultVariants: { size: "default" },`,
+        `});`,
+        `type SliderProps = SliderPrimitive.Root.Props & { size?: "sm" | "default" };`,
+        `export function Slider({ size, ...props }: SliderProps) { return <div className={sliderVariants({ size })} {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [`,
+        `  { name: "size=default", props: { value: "v-one" } },`,
+        `  { name: "size=sm", props: { size: "sm", value: "v-two" } },`,
+        `  { name: "default", props: { size: "default" } },`,
+        `], skip: [] };`,
+      ].join("\n")
+    );
+
+    // required-prop completion with a quote-bearing donor value — borrowed
+    // values must flow through renderPropsAttr (braced expression), not the
+    // raw `k="v"` combo template (malformed JSX)
+    await writeFile(
+      join(atomsDir, "toggle.tsx"),
+      [
+        `import React from "react";`,
+        `import { cva } from "class-variance-authority";`,
+        `const tg = cva("tg", {`,
+        `  variants: { size: { sm: "s", lg: "l" } },`,
+        `  defaultVariants: { size: "sm" },`,
+        `});`,
+        `type ToggleProps = { label: string; size?: "sm" | "lg" };`,
+        `export function Toggle({ label, size, ...props }: ToggleProps) { return <button aria-label={label} className={tg({ size })} {...props} />; }`,
+        `export const meta = { kind: "atom", examples: [`,
+        `  { name: "default", props: { label: "say \\"hi\\"" } },`,
+        `], skip: [] };`,
+      ].join("\n")
+    );
+
     // pretty label (Bug 3) — `pill.tsx`: was `badge.tsx` pre-cluster, renamed so the
     // multi-CVA-stubbed fixture below keeps the `badge.tsx` path
     await writeFile(
@@ -485,6 +549,50 @@ describe("generate-showcase-companion.ts [integration]", () => {
     // Must contain exactly the 2 real intent groups and 2 real sizes
     expect(content).toContain(">Primary<");
     expect(content).toContain(">Secondary<");
+  });
+
+  // ── required-prop completion (v1.8.2 canary, Crewops radio) ──────────────
+
+  it("entries missing a required prop inherit it from a donor example", async () => {
+    const { dir, r } = await sharedGen();
+    expect(r.status).toBe(0);
+
+    const content = await readFile(join(dir, "design-system", "atoms", "radio.showcase.tsx"), "utf8");
+    // Every rendered <Radio> carries the required `value` — the "small" example
+    // and both auto-combos borrow it from the donor example.
+    const renders = content.match(/<Radio /g) ?? [];
+    const withValue = content.match(/<Radio [^>\n]*value="lead-inspection"/g) ?? [];
+    expect(renders.length).toBeGreaterThanOrEqual(3);
+    expect(withValue.length).toBe(renders.length);
+  });
+
+  it("completes a required prop the type walk cannot see via cross-example consensus", async () => {
+    const { dir, r } = await sharedGen();
+    expect(r.status).toBe(0);
+
+    const content = await readFile(join(dir, "design-system", "atoms", "slider.showcase.tsx"), "utf8");
+    // `value` is required by an external package type (unresolvable locally);
+    // every other authored example carries it, so the residue entry AND the
+    // auto-combos must borrow it — emitting without it is a guaranteed TS2741.
+    const renders = content.match(/<Slider /g) ?? [];
+    const withValue = content.match(/<Slider [^>\n]*value="v-/g) ?? [];
+    expect(renders.length).toBeGreaterThanOrEqual(5); // 3 explicit + 2 combos
+    expect(withValue.length).toBe(renders.length);
+  });
+
+  it("donor-borrowed values with quotes emit as braced expressions in combos", async () => {
+    const { dir, r } = await sharedGen();
+    expect(r.status).toBe(0);
+
+    const content = await readFile(join(dir, "design-system", "atoms", "toggle.showcase.tsx"), "utf8");
+    // The borrowed `label` value contains a double quote: every render —
+    // explicit example AND auto-combos — must emit it as a braced JS
+    // expression, never as a raw attribute (which would be malformed JSX).
+    const renders = content.match(/<Toggle /g) ?? [];
+    const braced = content.match(/<Toggle [^>\n]*label=\{"say \\"hi\\""\}/g) ?? [];
+    expect(renders.length).toBeGreaterThanOrEqual(3);
+    expect(braced.length).toBe(renders.length);
+    expect(content).not.toContain('label="say "');
   });
 
   // ── children fallback (Bug 2) ─────────────────────────────────────────────
