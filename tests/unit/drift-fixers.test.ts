@@ -2104,6 +2104,37 @@ export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm"
 			expect(second.fixed).toBe(false);
 		});
 
+		it("keeps hand-authored props and the example when only some props are residue (#569)", async () => {
+			// Never-break-consumer pin (#569 fixture triage). A mixed example —
+			// offending CVA-axis residue (`size: "invalid"`) alongside hand-authored
+			// props (`data-testid`, `label`) — must drop ONLY the residue. The
+			// emptied-example path that two graders feared was deleting consumer
+			// content fires solely when EVERY prop is residue; one hand-authored prop
+			// blocks it, so the example survives intact.
+			const source = `${BADGE}export const meta = {
+  kind: "atom" as const,
+  examples: [{ name: "mixed", props: { size: "invalid", "data-testid": "x", label: "Hi" } }],
+};
+`;
+			await seed(source);
+			const finding = detect(source)[0];
+			expect(finding).toBeDefined();
+			expect(finding.message).toContain('size="invalid"');
+
+			const fixer = getFixer("DRIFT-META-EXAMPLES-INVALID-PROP")!;
+			const result = await fixAndApply(fixer, finding, dir);
+			expect(result.fixed).toBe(true);
+
+			const content = await readFile(join(dir, "design-system/atoms/badge.tsx"), "utf8");
+			// Residue gone…
+			expect(content).not.toContain('size: "invalid"');
+			// …hand-authored props preserved, and the example is NOT deleted.
+			expect(content).toContain('"data-testid": "x"');
+			expect(content).toContain('label: "Hi"');
+			expect(content).toContain('name: "mixed"');
+			expect(detect(content)).toHaveLength(0);
+		});
+
 		it("returns fixed=false on a clean file with no invalid props", async () => {
 			const source = `${BADGE}export const meta = {
   kind: "atom" as const,
