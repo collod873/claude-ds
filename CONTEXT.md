@@ -608,10 +608,15 @@ recommendedNext (the single-shot field), two brains.
   `tests/unit/no-direct-audit-config-detect.test.ts` (PRD #266 Phase B).
 - **One chokepoint for bytes.** All file mutation flows through the Runner. No raw
   `writeFile()` / `unlink()` / `rename()` calls under `src/commands/` or
-  `src/lib/checks/`, with these two structurally-forced carve-outs:
+  `src/lib/checks/`, with these structurally-forced carve-outs:
   - `init` — bootstrap write of `.claude-ds.json` before a `ProjectContext` (and
     therefore the Runner) can exist.
   - `doctor` — writes into a disposable tmp sandbox for hook verification; never
     touches consumer bytes.
+  - `regen-showcases` — the consumer-side companion regenerator the pack shim
+    invokes (#568, ADR-0031). Like the pack script it replaces, it rewrites
+    `@generated` companions on every DS edit (PostToolUse hook), pre-adopt and on
+    a dirty tree — no `ProjectContext`, not a reviewable remediation diff. The
+    Runner-mediated regen is reconform's generated-integrity path.
 
   Enforced by `tests/unit/no-direct-fs-mutation.test.ts` (PRD #221 capstone).

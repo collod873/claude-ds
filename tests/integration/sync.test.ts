@@ -79,6 +79,49 @@ describe("CLAUDE.md hybrid+markdown sync (fragment marker bug)", () => {
 	});
 });
 
+describe("showcase generator → shim migration (#568)", () => {
+	let dir: string;
+	beforeEach(async () => {
+		dir = await freshTmpDir();
+	});
+	afterEach(async () => {
+		await cleanup(dir);
+	});
+
+	it("sync replaces a consumer's legacy generator with the thin CLI shim", async () => {
+		await writeFile(
+			join(dir, ".claude-ds.json"),
+			JSON.stringify({ version: "v0.0.0", pack: "next-react", mode: "warn" }),
+		);
+		// Simulate an adopted consumer carrying the pre-#568 generator: a large
+		// self-contained script with the inlined CVA-analyzer region.
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		const legacy = [
+			"#!/usr/bin/env node --experimental-strip-types",
+			"// ── BEGIN cva-analyzer (mirrored from src/lib/cva/analyzer.ts) ──",
+			"export function analyzeCvaComponents() { /* …800 lines… */ }",
+			"// ── END cva-analyzer ──",
+			"async function main() { /* …directory walk + emit… */ }",
+			"main();",
+		].join("\n");
+		await writeFile(join(dir, "scripts/generate-showcase-companion.ts"), legacy);
+
+		const r = await runCli(["sync", "--offline-fixture", "packs/next-react"], {
+			cwd: dir,
+			stdin: "y\n",
+		});
+		expect(r.code).toBe(0);
+
+		const migrated = await readFile(join(dir, "scripts/generate-showcase-companion.ts"), "utf8");
+		// The inlined analyzer region is gone…
+		expect(migrated).not.toContain("BEGIN cva-analyzer");
+		expect(migrated).not.toContain("analyzeCvaComponents");
+		// …replaced by the shim that delegates to the CLI.
+		expect(migrated).toContain("regen-showcases");
+		expect(migrated).toContain("THIN SHIM");
+	});
+});
+
 describe("settings.json hybrid+json preservation", () => {
 	let dir: string;
 	beforeEach(async () => {

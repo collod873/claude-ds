@@ -1,13 +1,14 @@
 /**
- * Golden / anti-ping-pong test for the promoted showcase generator (issue #567).
+ * Shim end-to-end + emission-equivalence test (issues #567, #568).
  *
- * The CLI's in-process emission path (`src/lib/showcase/generator.ts`) must be
- * BYTE-IDENTICAL to the pack script's emission
- * (`packs/next-react/files/scripts/generate-showcase-companion.ts`) for the same
- * source. If they ever diverge, heal's generated-integrity check would rewrite a
- * consumer's pack-generated showcase on every run — the ping-pong "never break a
- * consumer" forbids. The pack script is untouched in this slice; this test is the
- * contract that lets a later slice reduce it to a shim.
+ * The pack ships a THIN SHIM (`generate-showcase-companion.ts`) that resolves
+ * the installed CLI and runs `claude-ds regen-showcases` (ADR-0031). This test
+ * builds the CLI, runs that shim against a temp consumer, and asserts the
+ * companions it writes are byte-identical to the CLI's in-process emission path
+ * (`src/lib/showcase/generator.ts`). Because the shim now invokes that same
+ * generator, the anti-ping-pong invariant (#567) is structural — but exercising
+ * shim → CLI subprocess → on-disk companion end-to-end is the acceptance gate
+ * that the shim resolves and delegates correctly.
  *
  * Covers the four shapes the acceptance criteria call out: a multi-cva file
  * (attribution scoping), a boolean axis (`{true}`/`{false}`), an acronym /
@@ -136,6 +137,11 @@ describe("showcase generator — CLI emission is byte-identical to the pack scri
 	let dir: string;
 
 	beforeAll(async () => {
+		// The shim spawns the built CLI (`dist/cli.js`); build it so the subprocess
+		// runs this branch's generator, not a stale artifact.
+		const build = spawnSync("npm", ["run", "build"], { cwd: resolve("."), encoding: "utf8" });
+		expect(build.status, build.stderr).toBe(0);
+
 		dir = await mkdtemp(join(tmpdir(), "showcase-golden-"));
 		// package.json so both findConsumerRoot() implementations resolve the same
 		// project root (and read no tsconfig — neither fixture uses @/ aliases).
@@ -154,7 +160,7 @@ describe("showcase generator — CLI emission is byte-identical to the pack scri
 			encoding: "utf8",
 		});
 		expect(r.status, r.stderr).toBe(0);
-	});
+	}, 180_000);
 
 	afterAll(async () => {
 		await rm(dir, { recursive: true, force: true });

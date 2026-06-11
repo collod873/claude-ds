@@ -5,8 +5,15 @@
  * other byte must flow through the Runner.
  *
  * Carve-outs (CONTEXT.md):
- *   - init.ts   — bootstrap write of .claude-ds.json before a ProjectContext exists
- *   - doctor.ts — disposable tmp sandbox for hook verification; never consumer bytes
+ *   - init.ts            — bootstrap write of .claude-ds.json before a ProjectContext exists
+ *   - doctor.ts          — disposable tmp sandbox for hook verification; never consumer bytes
+ *   - regen-showcases.ts — the consumer-side companion regenerator the pack shim
+ *                          invokes (#568). Like the pack script it replaces, it
+ *                          mechanically rewrites `@generated` companions on every
+ *                          DS edit (PostToolUse hook), pre-adopt and on a dirty
+ *                          tree — no ProjectContext, not a reviewable remediation
+ *                          Op. The Runner-mediated regen is reconform's
+ *                          generated-integrity path; this is its fast hook twin.
  */
 
 import { readdir, readFile } from "node:fs/promises";
@@ -18,7 +25,11 @@ const COMMANDS_DIR = fileURLToPath(new URL("../../src/commands", import.meta.url
 const CHECKS_DIR = fileURLToPath(new URL("../../src/lib/checks", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
-const ALLOWLIST = new Set<string>(["src/commands/init.ts", "src/commands/doctor.ts"]);
+const ALLOWLIST = new Set<string>([
+	"src/commands/init.ts",
+	"src/commands/doctor.ts",
+	"src/commands/regen-showcases.ts",
+]);
 
 // Word-boundary patterns — only match the bare identifier, not substrings.
 // `rename` uses a call-site pattern (`\brename\s*\(`) so that destructured,
