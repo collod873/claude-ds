@@ -79,8 +79,9 @@ export function commitTree(dir: string, message: string): void {
  * modified, added, and renamed (rename reports the destination, the path now on
  * disk). Forward-slashed, sorted. This is the run's *actual* tree diff that the
  * trusted-inventory invariant (#583) compares heal's reported `filesWritten`
- * against: the ledger must mirror disk, never claim a write that didn't land or
- * hide one that did. `-uall` lists individual untracked files, not directories.
+ * against: every write the ledger claims must be a real change on disk, and on a
+ * converged no-op re-run the two sets must match exactly. `-uall` lists individual
+ * untracked files, not directories.
  */
 export function gitChangedPaths(dir: string): string[] {
 	const res = spawnSync("git", ["-c", "core.quotepath=false", "status", "--porcelain", "-uall"], {

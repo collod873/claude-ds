@@ -19,11 +19,18 @@ import { cleanup } from "../helpers/tmpdir.js";
  *     regression — where re-running heal churns the tree and shifts the verdict or
  *     the named blockers — fails CI here instead of shipping.
  *
- *  2. Trusted inventory: heal's reported `filesWritten` ledger is a faithful mirror
- *     of the tree's actual modified/created set. Asserted via the headless JSON
- *     field (the prose ledger renders the same data), so the check is robust to
- *     wording. This catches any step that writes outside its RunReport — which
- *     would make the inventory lie about heal's blast radius.
+ *  2. Trusted inventory: heal's reported `filesWritten` ledger never lies about
+ *     what hit disk. Checked in two directions, because the ledger today records
+ *     only steps that return a RunReport (full step coverage is a later PRD-#575
+ *     slice — see remediation-driver), so a first-run ledger is a *subset* of the
+ *     tree diff, not yet its mirror:
+ *       - run 1 (subset): every path the ledger claims is genuinely changed on
+ *         disk — the inventory never fabricates a write.
+ *       - run 2 (equality): on the converged no-op re-run the ledger must equal
+ *         the tree diff exactly — a step writing outside its RunReport would put
+ *         bytes on disk the ledger omits and break this.
+ *     Asserted via the headless JSON field (the prose ledger renders the same
+ *     data), so the check is robust to wording.
  *
  * Assertions are external-behavior only: exit code, headless envelope, and the
  * git tree diff. Both invariants share one fixture: run heal (red gate), commit
