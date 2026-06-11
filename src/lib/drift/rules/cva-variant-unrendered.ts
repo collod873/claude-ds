@@ -25,23 +25,23 @@ function parseExercisedVariants(
 	axes: Map<string, CvaAxis>,
 ): Map<string, Set<string | boolean>> {
 	const exercised = new Map<string, Set<string | boolean>>();
-	for (const axis of axes.keys()) exercised.set(axis, new Set());
+	for (const name of axes.keys()) exercised.set(name, new Set());
 
 	const examplesContent = extractExamplesContent(source);
 	if (!examplesContent) return exercised;
 
-	for (const [axis, kind] of axes) {
-		if (kind.kind === "boolean") {
-			const re = new RegExp(`${axis}\\s*:\\s*(true|false)\\b`, "g");
+	for (const [name, axis] of axes) {
+		if (axis.kind === "boolean") {
+			const re = new RegExp(`${name}\\s*:\\s*(true|false)\\b`, "g");
 			let m: RegExpExecArray | null;
 			while ((m = re.exec(examplesContent)) !== null) {
-				exercised.get(axis)!.add(m[1] === "true");
+				exercised.get(name)!.add(m[1] === "true");
 			}
 		} else {
-			const re = new RegExp(`${axis}\\s*:\\s*["']([^"']+)["']`, "g");
+			const re = new RegExp(`${name}\\s*:\\s*["']([^"']+)["']`, "g");
 			let m: RegExpExecArray | null;
 			while ((m = re.exec(examplesContent)) !== null) {
-				exercised.get(axis)!.add(m[1]);
+				exercised.get(name)!.add(m[1]);
 			}
 		}
 	}
@@ -65,11 +65,11 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 	const exercised = parseExercisedVariants(source, axes);
 
 	const unexercised: string[] = [];
-	for (const [axis, kind] of axes) {
-		const exercisedValues = exercised.get(axis)!;
-		for (const value of axisValues(kind)) {
+	for (const [name, axis] of axes) {
+		const exercisedValues = exercised.get(name)!;
+		for (const value of axisValues(axis)) {
 			if (!exercisedValues.has(value)) {
-				unexercised.push(`${axis}=${value}`);
+				unexercised.push(`${name}=${value}`);
 			}
 		}
 	}
@@ -115,11 +115,11 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 	const exercised = parseExercisedVariants(source, axes);
 
 	const stubs: string[] = [];
-	for (const [axis, kind] of axes) {
-		const exercisedValues = exercised.get(axis)!;
-		for (const value of axisValues(kind)) {
+	for (const [name, axis] of axes) {
+		const exercisedValues = exercised.get(name)!;
+		for (const value of axisValues(axis)) {
 			if (!exercisedValues.has(value)) {
-				stubs.push(buildExampleStub(axis, value));
+				stubs.push(buildExampleStub(name, value));
 			}
 		}
 	}
