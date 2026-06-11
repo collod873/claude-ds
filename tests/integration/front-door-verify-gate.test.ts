@@ -35,6 +35,7 @@ function greenVerify(overrides: Partial<VerifyResult> = {}): VerifyResult {
 		exitCode: 0,
 		errors: [],
 		scaffoldErrors: [],
+		handVerifyErrors: [],
 		consumerErrors: [],
 		timedOut: false,
 		...overrides,

@@ -129,6 +129,7 @@ describe("verify gate — audit --fix (PRD #407 / issue #410)", () => {
 					raw: "",
 				},
 			],
+			handVerifyErrors: [],
 			consumerErrors: [],
 			timedOut: false,
 		});
@@ -165,6 +166,7 @@ describe("verify gate — audit --fix (PRD #407 / issue #410)", () => {
 			exitCode: 0,
 			errors: [],
 			scaffoldErrors: [],
+			handVerifyErrors: [],
 			consumerErrors: [],
 			timedOut: false,
 		});
@@ -205,6 +207,7 @@ describe("verify gate — audit --fix (PRD #407 / issue #410)", () => {
 				},
 			],
 			scaffoldErrors: [],
+			handVerifyErrors: [],
 			consumerErrors: [
 				{
 					file: "src/legacy/page.tsx",

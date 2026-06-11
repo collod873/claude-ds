@@ -21,7 +21,11 @@ import { detectFormatter, runFormatter } from "../lib/formatter.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 import { loadProject } from "../lib/project.js";
-import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
+import {
+	handVerifyNote,
+	runConsumerVerify,
+	type VerifyResult,
+} from "../lib/run-consumer-verify.js";
 import { run } from "../lib/runner.js";
 
 export async function syncCmd(opts: {
@@ -297,6 +301,10 @@ export async function syncCmd(opts: {
 	} else {
 		info(`sync complete → ${target}${verify ? ` (verified via ${verify.command})` : ""}`);
 	}
+	{
+		const hv = verify && handVerifyNote(verify);
+		if (hv) info(`verify gate: ${hv}`);
+	}
 	const brownfield = await hasConsumerTierFiles(cwd);
 
 	if (opts.json) {
@@ -353,6 +361,7 @@ function verifyJson(verify: VerifyResult): Record<string, unknown> {
 		exitCode: verify.exitCode,
 		timedOut: verify.timedOut,
 		scaffoldErrorCount: verify.scaffoldErrors.length,
+		handVerifyErrorCount: verify.handVerifyErrors.length,
 		consumerErrorCount: verify.consumerErrors.length,
 		scaffoldErrors: verify.scaffoldErrors.slice(0, 20).map((e) => ({
 			file: e.file,
