@@ -98,6 +98,38 @@ const FIXTURES: Record<string, string> = {
 		`], skip: [] };`,
 		``,
 	].join("\n"),
+
+	// ── "use client" directive: a leading client directive must survive verbatim
+	// onto the first line of the emitted showcase (Next.js client-component
+	// requirement). Exercises the `useClientLine` prefix the four atom fixtures
+	// above don't. ──
+	"client-badge": [
+		`"use client";`,
+		`import React from "react";`,
+		`import { cva } from "class-variance-authority";`,
+		`const badgeVariants = cva("badge", {`,
+		`  variants: { tone: { info: "i", warn: "w" } },`,
+		`  defaultVariants: { tone: "info" },`,
+		`});`,
+		`export function ClientBadge({ tone, ...props }: { tone?: "info" | "warn" }) {`,
+		`  return <span className={badgeVariants({ tone })} {...props} />;`,
+		`}`,
+		`export const meta = { kind: "atom", examples: [{ name: "default", props: { tone: "info" } }], skip: [] };`,
+		``,
+	].join("\n"),
+
+	// ── reference kind: a doc page rendered via `meta.render()` rather than the
+	// component itself — a wholly separate emitter (`emitReferenceShowcase`) the
+	// atom/composite fixtures never reach. ──
+	"tokens-ref": [
+		`import React from "react";`,
+		`export const meta = {`,
+		`  kind: "reference" as const,`,
+		`  title: "Design Tokens",`,
+		`  render: () => <div className="tokens">swatches</div>,`,
+		`};`,
+		``,
+	].join("\n"),
 };
 
 describe("showcase generator — CLI emission is byte-identical to the pack script (#567)", () => {

@@ -14,7 +14,7 @@
 // The byte-for-byte equivalence with the pack script (the anti-ping-pong
 // invariant: a CLI regen must not differ from a consumer's pack-generated
 // showcase, or heal would rewrite a clean tree forever) is pinned by the golden
-// test `tests/unit/showcase/golden.test.ts`. The pack script is untouched in
+// test `tests/integration/showcase-golden.test.ts`. The pack script is untouched in
 // this slice; a later slice reduces it to a shim over this module.
 //
 // Unlike the pack script (which runs under `node --experimental-strip-types` in
