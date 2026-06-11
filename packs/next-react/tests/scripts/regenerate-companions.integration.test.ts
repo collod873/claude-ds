@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from "node
 
 const HOOK = resolve("packs/next-react/files/.claude/hooks/regenerate-companions.sh");
 const VALIDATORS_LIB = resolve("packs/next-react/files/scripts/lib/ds-validators.sh");
+const CVA_ANALYZER_LIB = resolve("packs/next-react/files/scripts/lib/cva-analyzer.ts");
 const COMPANION_SCRIPT = resolve("packs/next-react/files/scripts/generate-showcase-companion.ts");
 const BUILD_MANIFEST_SCRIPT = resolve("packs/next-react/files/scripts/build-manifest.ts");
 const LOG_FAILURE = resolve("packs/next-react/files/.claude/hooks/lib/log-failure.sh");
@@ -60,6 +61,7 @@ async function scaffold(dir: string, fixtureSrc: string): Promise<void> {
   const scriptsDir = join(dir, "scripts", "lib");
   mkdirSync(scriptsDir, { recursive: true });
   copyFileSync(VALIDATORS_LIB, join(dir, "scripts", "lib", "ds-validators.sh"));
+  copyFileSync(CVA_ANALYZER_LIB, join(dir, "scripts", "lib", "cva-analyzer.ts"));
   copyFileSync(COMPANION_SCRIPT, join(dir, "scripts", "generate-showcase-companion.ts"));
   copyFileSync(BUILD_MANIFEST_SCRIPT, join(dir, "scripts", "build-manifest.ts"));
 

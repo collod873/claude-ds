@@ -23,6 +23,7 @@ import { join, dirname, basename, resolve as resolvePath } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type * as TS from "typescript";
+import { analyzeCvaComponents, type ComponentCva } from "./lib/cva-analyzer.ts";
 
 // ── typescript loader (optional — falls back to regex parseMeta if absent) ────
 // Resolved at runtime from the script's own location so it works when the
@@ -1305,153 +1306,65 @@ function parseSkip(source: string): string[] {
   }
 }
 
-// ── CVA parsing ───────────────────────────────────────────────────────────────
+// ── CVA cross-product (analyzer-sourced) ────────────────────────────────────────
 
 interface CvaConfig {
   variants: Record<string, string[]>;
   defaultVariants: Record<string, string>;
+  // Axis names whose values are booleans (`{ true, false }`). The Variants and
+  // Examples emitters render these as JSX expressions `{true}` / `{false}`, never
+  // the strings "true" / "false" (which would be a string where a boolean prop
+  // type is required).
+  booleanAxes: Set<string>;
 }
 
 /**
- * Parse cva() call from source to extract variant keys and values.
- * Pattern: cva(base, { variants: { size: { sm: "...", md: "..." }, tone: { ... } }, defaultVariants: { ... } })
+ * Project one exported component's analyzer attribution onto the legacy
+ * cross-product shape the emitters consume. Boolean axes expand to the literal
+ * value keys `["true", "false"]` (the cartesian/emitter pair maps them back to
+ * `{true}` / `{false}` JSX expressions via `booleanAxes`).
  *
- * LATENT BUG (multi-CVA files): the broad-fallback regex in this function and
- * extractVariantKeys() spans across cva() call boundaries in source files that
- * contain more than one cva() call (e.g. badge.tsx with badgeVariants and
- * dotVariants). This causes variant axes from the second CVA to bleed into the
- * first, producing malformed <Component variants="..."> JSX. The stub-signal
- * short-circuit in isStubMeta() (examples.length === 0) masks this for every
- * current consumer because those files all carry empty examples arrays. The
- * correct repair — rewriting parseCva as an AST pass returning
- * Map<cvaVarName, CvaConfig> paired with per-component JSX-body walking — is
- * deferred to the per-component CVA-targeting follow-up issue.
+ * The analyzer (PRD #546, issue #552) attributes each `cva()` to the exported
+ * component(s) that actually consume it — so a sub-element CVA owned by a
+ * non-exported part never reaches this projection, and the file-wide-regex
+ * boundary-spanning bug it replaces cannot recur.
  */
-function parseCva(source: string): CvaConfig | null {
-  if (!source.includes("cva(")) return null;
-
-  // Extract variants block from cva() call
-  const variantsMatch = source.match(/cva\s*\([^)]*\{\s*variants\s*:\s*(\{[\s\S]*?\})\s*(?:,\s*defaultVariants|\})\s*\)/);
-  if (!variantsMatch) {
-    // Try a broader match for multi-line cva definitions
-    const broadMatch = source.match(/variants\s*:\s*\{([\s\S]*?)\}\s*(?:,\s*(?:defaultVariants|compoundVariants)|\s*\}\s*\))/);
-    if (!broadMatch) return null;
-
-    try {
-      const varBlock = `{${broadMatch[1]}}`;
-      const variants = extractVariantKeys(varBlock, source);
-      const defaultVariants = extractDefaultVariants(source);
-      if (Object.keys(variants).length === 0) return null;
-      return { variants, defaultVariants };
-    } catch {
-      return null;
+function cvaConfigFromAttribution(component: ComponentCva): CvaConfig {
+  const variants: Record<string, string[]> = {};
+  const booleanAxes = new Set<string>();
+  for (const [axisName, axis] of Object.entries(component.axes)) {
+    if (axis.kind === "boolean") {
+      variants[axisName] = ["true", "false"];
+      booleanAxes.add(axisName);
+    } else {
+      variants[axisName] = axis.values;
     }
   }
-
-  try {
-    const variants = extractVariantKeys(variantsMatch[1], source);
-    const defaultVariants = extractDefaultVariants(source);
-    return { variants, defaultVariants };
-  } catch {
-    return null;
+  const defaultVariants: Record<string, string> = {};
+  for (const [k, v] of Object.entries(component.defaultVariants)) {
+    defaultVariants[k] = String(v);
   }
+  return { variants, defaultVariants, booleanAxes };
 }
 
-function extractVariantKeys(variantsBlock: string, _source: string): Record<string, string[]> {
-  const result: Record<string, string[]> = {};
-  // Strip string literals first so Tailwind modifier prefixes (hover:, focus:, etc.)
-  // inside class value strings are not mistaken for variant keys.
-  const stripped = stripStringLiterals(variantsBlock);
-
-  // Match each variant key and its value object. Variant axis names can be
-  // bare identifiers (`intent`) or quoted strings (`"aria-invalid"`). After
-  // stripStringLiterals the quoted-key text became `""`, so we must scan the
-  // ORIGINAL block for quoted-keyed axes — but locate their value object via
-  // brace-matching on the stripped block (so Tailwind modifier prefixes inside
-  // class strings stay neutralised).
-  const variantHits: Array<{ variantName: string; strippedValuesBlock: string }> = [];
-
-  // (a) bare-identifier axes from stripped block
-  const variantRe = /(\w+)\s*:\s*\{([^}]*)\}/g;
-  let m: RegExpExecArray | null;
-  while ((m = variantRe.exec(stripped)) !== null) {
-    variantHits.push({ variantName: m[1], strippedValuesBlock: m[2] });
+/**
+ * Coerce explicit-example props whose key is a boolean CVA axis from the strings
+ * "true"/"false" to real booleans, so `renderPropsAttr` emits `{true}`/`{false}`
+ * rather than a string attribute that fails the boolean prop type. Non-boolean
+ * axes and props the analyzer doesn't know about pass through untouched.
+ */
+function coerceBooleanAxisProps(
+  props: Record<string, unknown>,
+  cvaConfig: CvaConfig | null
+): Record<string, unknown> {
+  if (!cvaConfig || cvaConfig.booleanAxes.size === 0) return props;
+  const out: Record<string, unknown> = { ...props };
+  for (const axis of cvaConfig.booleanAxes) {
+    if (!(axis in out)) continue;
+    if (out[axis] === "true") out[axis] = true;
+    else if (out[axis] === "false") out[axis] = false;
   }
-
-  // (b) quoted-identifier axes (e.g. "aria-invalid") — scan original, then
-  //     slice the stripped block at the same offset to get the cleaned values.
-  const quotedAxisRe = /["']([A-Za-z_$][\w$-]*)["']\s*:\s*\{/g;
-  let qa: RegExpExecArray | null;
-  while ((qa = quotedAxisRe.exec(variantsBlock)) !== null) {
-    const variantName = qa[1];
-    if (variantHits.some((h) => h.variantName === variantName)) continue;
-    // Brace-match starting at the `{` position to extract the values block.
-    const openIdx = variantsBlock.indexOf("{", qa.index + qa[0].length - 1);
-    if (openIdx < 0) continue;
-    let depth = 0;
-    let endIdx = -1;
-    for (let i = openIdx; i < variantsBlock.length; i++) {
-      const ch = variantsBlock[i];
-      if (ch === "{") depth++;
-      else if (ch === "}") {
-        depth--;
-        if (depth === 0) {
-          endIdx = i;
-          break;
-        }
-      }
-    }
-    if (endIdx < 0) continue;
-    // Use stripped version of that slice so Tailwind modifiers don't leak
-    const rawSlice = variantsBlock.slice(openIdx + 1, endIdx);
-    const strippedValuesBlock = stripStringLiterals(rawSlice);
-    variantHits.push({ variantName, strippedValuesBlock });
-  }
-
-  for (const { variantName, strippedValuesBlock } of variantHits) {
-    // For value keys we need BOTH unquoted identifiers (from stripped block) AND
-    // quoted identifiers like "icon-sm" (which were removed by stripping).
-    // Locate the original values block for this variant name (try bare then quoted).
-    const origVariantReBare = new RegExp(`(?:^|[{,\\s])${variantName}\\s*:\\s*\\{([^}]*)\\}`);
-    const origVariantReQuoted = new RegExp(`["']${variantName}["']\\s*:\\s*\\{([^}]*)\\}`);
-    const origMatch = variantsBlock.match(origVariantReBare) ?? variantsBlock.match(origVariantReQuoted);
-    const origValuesBlock = origMatch ? origMatch[1] : strippedValuesBlock;
-
-    const valueKeys: string[] = [];
-
-    // Unquoted keys from the stripped block (no Tailwind modifier leakage)
-    const keyRe = /(\w+)\s*:/g;
-    let km: RegExpExecArray | null;
-    while ((km = keyRe.exec(strippedValuesBlock)) !== null) {
-      valueKeys.push(km[1]);
-    }
-
-    // Quoted keys from the original block (e.g. "icon-sm": ..., 'icon-lg': ...)
-    const quotedKeyRe = /["']([^"']+)["']\s*:/g;
-    let qm: RegExpExecArray | null;
-    while ((qm = quotedKeyRe.exec(origValuesBlock)) !== null) {
-      if (!valueKeys.includes(qm[1])) {
-        valueKeys.push(qm[1]);
-      }
-    }
-
-    if (valueKeys.length > 0) {
-      result[variantName] = valueKeys;
-    }
-  }
-  return result;
-}
-
-function extractDefaultVariants(source: string): Record<string, string> {
-  const dvMatch = source.match(/defaultVariants\s*:\s*\{([^}]*)\}/);
-  if (!dvMatch) return {};
-  const result: Record<string, string> = {};
-  const kvRe = /(\w+)\s*:\s*["']?(\w+)["']?/g;
-  let m: RegExpExecArray | null;
-  while ((m = kvRe.exec(dvMatch[1])) !== null) {
-    result[m[1]] = m[2];
-  }
-  return result;
+  return out;
 }
 
 /** Generate the full cross-product of CVA variants, minus skipped combos. */
@@ -1491,9 +1404,8 @@ function cvaCartesian(config: CvaConfig, skip: string[]): Array<{ name: string; 
  *
  * Two cases:
  *  1. examples.length === 0 — explicit empty array is an authoritative stub
- *     signal regardless of whether CVA is present. Multi-CVA files with empty
- *     examples must emit a placeholder, not auto-expand (which produces malformed
- *     JSX when the broad-fallback regex spans cva boundaries).
+ *     signal regardless of whether CVA is present, so a component still being
+ *     scaffolded emits a placeholder rather than a bare variant grid.
  *  2. examples.length === 1, name === "default", empty props, AND no CVA — the
  *     original default-stub convention; still honoured for backward compat.
  */
@@ -1835,12 +1747,23 @@ function emitAtomCompositeShowcase(
   const header = showcaseHeader(sourceName);
   const skip = meta.skip ?? [];
 
-  // Explicit examples from meta.examples (authoritative — no children fallback applied)
-  const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = [...meta.examples];
+  // CVA attribution (PRD #546): the analyzer returns, per exported component, the
+  // variant axes it actually consumes — sub-element CVAs owned by non-exported
+  // parts are attributed to no one and never reach this component's cross-product.
+  const attribution = tsRuntime ? analyzeCvaComponents(tsRuntime, source, sourceName) : {};
+  const componentCva = attribution[displayName] ?? attribution[componentName] ?? null;
+  const cvaConfig = componentCva ? cvaConfigFromAttribution(componentCva) : null;
+
+  // Explicit examples from meta.examples (authoritative — no children fallback applied).
+  // Boolean-axis props authored as the strings "true"/"false" are coerced to real
+  // booleans so they emit as `{true}`/`{false}` rather than a string attribute that
+  // fails the component's boolean prop type.
+  const explicitExamples: Array<{ name: string; props: Record<string, unknown> }> = meta.examples.map(
+    (ex) => ({ name: ex.name, props: coerceBooleanAxisProps(ex.props, cvaConfig) })
+  );
 
   // CVA auto-expansion. v0.7.8: do NOT dedup against explicit examples — Variants
   // is the exhaustive proof grid; overlap with Examples is intentional.
-  const cvaConfig = parseCva(source);
   let cvaExamples: Array<{ name: string; props: Record<string, string> }> = [];
   if (cvaConfig) {
     cvaExamples = cvaCartesian(cvaConfig, skip);
@@ -1914,11 +1837,10 @@ function emitAtomCompositeShowcase(
           .map((ce) => {
             const propsStr = Object.entries(ce.props)
               .map(([k, v]) => {
-                // #66 / #67: boolean-shaped CVA axes (values literally "true"/"false")
+                // #66 / #67: boolean-shaped CVA axes (typed `boolean` by the analyzer)
                 // must emit as JSX expressions `{true}`/`{false}` so the component's
                 // boolean prop type accepts them. Plain string-valued axes stay quoted.
-                if (v === "true") return `${k}={true}`;
-                if (v === "false") return `${k}={false}`;
+                if (cvaConfig.booleanAxes.has(k)) return `${k}={${v}}`;
                 return `${k}="${v}"`;
               })
               .join(" ");
