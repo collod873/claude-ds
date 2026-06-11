@@ -106,6 +106,48 @@ export function Beta({ size }: { size?: string }) {
 		expect(result.Alpha.axes).toEqual({ size: { kind: "enum", values: ["sm", "lg"] } });
 		expect(result.Beta.axes).toEqual({ size: { kind: "enum", values: ["sm", "lg"] } });
 	});
+
+	it("attributes a forwardRef-wrapped component via its body usage", () => {
+		// The dominant shadcn atom shape: the props type rides the forwardRef
+		// generics, not a param annotation, so attribution must come from the body.
+		const result = analyze(`
+import { cva } from "class-variance-authority";
+import * as React from "react";
+const buttonVariants = cva("btn", { variants: { tone: { primary: "p", danger: "d" } } });
+export const Button = React.forwardRef<HTMLButtonElement, { tone?: "primary" | "danger" }>(
+  ({ tone }, ref) => <button ref={ref} className={buttonVariants({ tone })} />,
+);
+`);
+		expect(Object.keys(result)).toEqual(["Button"]);
+		expect(result.Button.axes).toEqual({ tone: { kind: "enum", values: ["primary", "danger"] } });
+	});
+
+	it("attributes a forwardRef component via VariantProps in its type argument", () => {
+		// Props applied through a spread, so the body never names the cva — the only
+		// signal is `VariantProps<typeof X>` carried as forwardRef's props type arg.
+		const result = analyze(`
+import { cva, type VariantProps } from "class-variance-authority";
+import { forwardRef } from "react";
+const inputVariants = cva("input", { variants: { size: { sm: "s", lg: "l" } } });
+type InputProps = VariantProps<typeof inputVariants>;
+export const Input = forwardRef<HTMLInputElement, InputProps>((props, ref) => (
+  <input ref={ref} className={String(props.size)} />
+));
+`);
+		expect(result.Input.axes).toEqual({ size: { kind: "enum", values: ["sm", "lg"] } });
+	});
+
+	it("attributes a memo-wrapped component", () => {
+		const result = analyze(`
+import { cva } from "class-variance-authority";
+import { memo } from "react";
+const cardVariants = cva("card", { variants: { density: { compact: "c", cozy: "z" } } });
+export const Card = memo(function Card({ density }: { density?: string }) {
+  return <div className={cardVariants({ density })} />;
+});
+`);
+		expect(result.Card.axes).toEqual({ density: { kind: "enum", values: ["compact", "cozy"] } });
+	});
 });
 
 describe("analyzeCvaComponents — typed values", () => {

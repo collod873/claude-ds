@@ -246,18 +246,60 @@ function collectComponents(
 			for (const decl of stmt.declarationList.declarations) {
 				if (!ts.isIdentifier(decl.name) || !isComponentName(decl.name.text)) continue;
 				if (!exportedNames.has(decl.name.text)) continue;
-				const init = decl.initializer;
-				if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
+				if (!decl.initializer) continue;
+				const fn = unwrapComponentFn(ts, decl.initializer);
+				if (fn)
 					components.push({
 						name: decl.name.text,
-						node: init,
-						firstParamType: init.parameters[0]?.type,
+						node: fn.node,
+						firstParamType: fn.firstParamType,
 					});
-				}
 			}
 		}
 	}
 	return components;
+}
+
+/**
+ * Recover the component function from a variable initializer. A component is
+ * either a bare arrow/function expression or one wrapped in a higher-order
+ * component call — `forwardRef(...)` / `memo(...)` (bare or `React.`-qualified),
+ * the dominant shadcn-style atom shape. Returns the inner function node (for
+ * body-usage attribution) and its props type: the inner param annotation when
+ * present, else the wrapper's props type argument (`forwardRef<Ref, Props>`).
+ */
+function unwrapComponentFn(
+	ts: typeof TS,
+	init: TS.Expression,
+): { node: TS.Node; firstParamType: TS.TypeNode | undefined } | null {
+	if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+		return { node: init, firstParamType: init.parameters[0]?.type };
+	}
+	if (ts.isCallExpression(init) && isHocName(ts, init.expression)) {
+		const inner = init.arguments.find(
+			(a): a is TS.ArrowFunction | TS.FunctionExpression =>
+				ts.isArrowFunction(a) || ts.isFunctionExpression(a),
+		);
+		if (inner) {
+			// forwardRef<Ref, Props>((props, ref) => …) carries the props type as its
+			// SECOND type argument; the inner params are usually unannotated.
+			const propsTypeArg = init.typeArguments?.[1];
+			return { node: inner, firstParamType: inner.parameters[0]?.type ?? propsTypeArg };
+		}
+	}
+	return null;
+}
+
+/** `forwardRef` / `memo`, bare or `React.`-qualified (matches the generator). */
+function isHocName(ts: typeof TS, callee: TS.Expression): boolean {
+	const HOCS = new Set(["forwardRef", "memo"]);
+	if (ts.isIdentifier(callee)) return HOCS.has(callee.text);
+	return (
+		ts.isPropertyAccessExpression(callee) &&
+		ts.isIdentifier(callee.expression) &&
+		callee.expression.text === "React" &&
+		HOCS.has(callee.name.text)
+	);
 }
 
 /** A component is an exported declaration whose name is PascalCase. */
