@@ -44,9 +44,12 @@ describe("time-travel fixture: crewops-shaped (#530)", () => {
 		const { tree } = await runInFixture(dir, ["version"]);
 		const cfg = JSON.parse(tree[".claude-ds.json"]) as { packVersion: string };
 		// "Adopted at the previous published release, healed by this one": the pin
-		// is the latest registered pack version, yet the installed CLI is ahead —
-		// the empty-migration-range upgrade scenario the journey must exercise.
-		expect(cfg.packVersion).toBe(latestRegisteredPackVersion());
+		// sits at-or-after the latest registered pack version (so the upgrade's
+		// migration range is empty), yet the installed CLI is ahead — the
+		// empty-migration-range upgrade scenario the journey must exercise.
+		// At-or-after, not equality: the release-checklist refresh advances the
+		// pin to one-behind-latest every release; migrations register more rarely.
+		expect(semverLt(cfg.packVersion, latestRegisteredPackVersion())).toBe(false);
 		expect(semverLt(cfg.packVersion, cliVersion())).toBe(true);
 	});
 
@@ -86,7 +89,11 @@ describe("time-travel fixture: crewops-shaped (#530)", () => {
 		const run = await runInFixture(dir, ["version"]);
 		expect(run.code).toBe(0);
 		// Transcript surfaces both version axes — the cross-version relationship.
-		expect(run.transcript).toContain("pinned: v1.7.0");
+		// The pinned version comes from the fixture's own config, not a literal:
+		// the release-checklist refresh advances it every release.
+		const cfg = JSON.parse(run.tree[".claude-ds.json"]) as { packVersion: string };
+		expect(run.transcript).toContain(`pinned: ${cfg.packVersion}`);
+		expect(semverLt(cfg.packVersion, cliVersion())).toBe(true);
 		expect(run.transcript).toContain(`installed: ${cliVersion()}`);
 		// Tree is returned and a read-only command left the consumer files intact.
 		expect(run.tree["design-system/atoms/Button.tsx"]).toContain("export function Button");

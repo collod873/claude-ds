@@ -2,7 +2,13 @@
 // Re-adopt the committed time-travel fixture from the PREVIOUS npm tarball.
 //
 //   node scripts/refresh-time-travel-fixture.mjs              # refresh from npm
+//   node scripts/refresh-time-travel-fixture.mjs --prev X.Y.Z   # pin an explicit previous version
 //   node scripts/refresh-time-travel-fixture.mjs --check [dir]  # verify shape guarantees
+//
+// `--prev` exists because the no-arg form reads "previous" from npm's `latest`
+// dist-tag — correct only in the minutes between `npm run release` and the
+// publish workflow landing. Once the new version IS latest, the script can no
+// longer infer the one-behind pin and refuses; pass it explicitly.
 //
 // WHERE THIS RUNS: at release time, by hand (or a release step) — NOT in CI and
 // NOT in `npm test`. The refresh installs the previous published `claude-ds`
@@ -122,12 +128,15 @@ function check(dir) {
 }
 
 /** Re-adopt the fixture's consumer tree with the previous `claude-ds` and harvest the new pin. */
-function refresh() {
-	let prev;
-	try {
-		prev = execFileSync("npm", ["view", "claude-ds", "version"], { encoding: "utf8" }).trim();
-	} catch (e) {
-		die(`could not read the previous published version from npm: ${e.message}`);
+function refresh(prevOverride) {
+	let prev = prevOverride ?? null;
+	if (prev !== null && !/^\d+\.\d+\.\d+$/.test(prev)) die(`--prev wants X.Y.Z, got "${prev}"`);
+	if (prev === null) {
+		try {
+			prev = execFileSync("npm", ["view", "claude-ds", "version"], { encoding: "utf8" }).trim();
+		} catch (e) {
+			die(`could not read the previous published version from npm: ${e.message}`);
+		}
 	}
 	if (!semverLt(prev, CURRENT)) {
 		die(
@@ -187,6 +196,8 @@ const argv = process.argv.slice(2);
 if (argv[0] === "--check") {
 	const dir = argv[1] ? resolve(argv[1]) : FIXTURE_DIR;
 	process.exit(check(dir) ? 0 : 1);
+} else if (argv[0] === "--prev") {
+	refresh(argv[1]);
 } else {
 	refresh();
 }

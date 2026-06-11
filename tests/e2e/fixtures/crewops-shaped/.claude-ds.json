@@ -1,10 +1,13 @@
 {
-  "packVersion": "v1.7.0",
+  "packVersion": "v1.8.1",
   "pack": "next-react",
   "mode": "warn",
   "enforce_threshold": 10,
   "removed": [],
   "app_dir": "src/app",
   "claude_md_target": ".claude/CLAUDE.md",
-  "meta_kind_strict": true
+  "meta_kind_strict": true,
+  "lookalike_ignore": [
+    "design-system/atoms"
+  ]
 }

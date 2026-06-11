@@ -40,7 +40,7 @@ heal: converging until no drift — up to 3 passes.
 heal: planner-driven loop (max 3 iterations)
 heal: pass 1/3 — upgrade → sync → repair → reconform → audit --fix
 no registered migrations between <prev-version> and <cli-version>
-migration end-state drift detected: manage-force-state@v0.8.0, manage-manifest@v0.9.0, widen-tokens@v0.9.0, manage-portal-scope@v0.9.0, backfill-chart-tokens@<prev-version>
+migration end-state drift detected: manage-force-state@v0.8.0, manage-manifest@v0.9.0, widen-tokens@v0.9.0, manage-portal-scope@v0.9.0, backfill-chart-tokens@v1.7.0
 A design-system/utils/force-state.css
 A scripts/build-manifest.ts
 A design-system/utils/portal-scope.module.css
