@@ -287,13 +287,19 @@ export interface DriveOpts {
 
 /**
  * The driver's terminal verdict. The caller maps it to exit codes / UI:
- *   - `converged` — a plan came back empty, or an iteration changed zero bytes
- *     with no findings remaining. `iterations` is the count reached.
+ *   - `converged` — the plan came back empty at the top of an iteration, or a
+ *     pass changed zero bytes and the re-derived plan is empty with no
+ *     unresolvable findings. `iterations` is the count reached.
  *   - `pending` — bytes stable but new Pending decisions were collected this
  *     iteration (only reachable when `pendingSink` is supplied). heal writes the
  *     `--answers` scaffold and exits 3; the front door never sees this.
- *   - `exhausted` — the iteration ceiling was hit without convergence.
- *     `lastStep` is the phase that was running, for the failure message.
+ *   - `exhausted` — non-convergence, from one of two places: the iteration
+ *     ceiling was hit, or a pass changed zero bytes while its re-derived plan
+ *     stayed non-empty (#532). In the latter case the plan is a pure function of
+ *     the tree, so the next pass would be byte-for-byte identical — heal stops at
+ *     once naming the blocker rather than spin the same no-op to the ceiling.
+ *     `lastStep` is that blocker (the re-derived plan's first step, else the last
+ *     phase that ran), for the failure message.
  */
 export type DriveOutcome =
 	| { kind: "converged"; iterations: number }
