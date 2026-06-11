@@ -17,12 +17,14 @@ import { type CompileResult, compileEmitted } from "../../../../tests/helpers/co
  * the consumer's compiler accepts it.
  *
  * The fixture atom (`compile-what-you-emit/`) combines the five shapes that
- * broke Crewops. The generator's current output against it carries four
- * type-unsafe shapes — one per Crewops defect — that land here as `it.fails`
- * tripwires: each asserts the emitted showcase is free of that defect's
- * diagnostic, and is *expected to fail today*. When a later PRD #546 slice fixes
- * the generator/fixer, the tripwire passes — flipping the `it.fails` red — which
- * is the signal to drop the `.fails`.
+ * broke Crewops, exercising one tripwire per Crewops defect. The generator
+ * slice (PRD #546, issue #553) sources the cross-product from the attribution
+ * analyzer instead of the deleted file-wide regex parser, so the two
+ * generator-output defects (2 boolean-as-string, 4 multi-CVA boundary span)
+ * now pass as normal tests. The two remaining `it.fails` tripwires are poisoned
+ * *explicit examples* a buggy fixer wrote into `meta.examples` (1 sub-element
+ * axis, 3 dark:-leak residue); they stay expected-fail until the fixer slice
+ * lands and flips them green.
  */
 
 const SCRIPT = resolve("packs/next-react/files/scripts/generate-showcase-companion.ts");
@@ -89,11 +91,15 @@ describe("generator emits type-correct showcase for the Crewops-shape atom", () 
 		result = compileEmitted([{ path: SHOWCASE_REL, content: emitted }], FIXTURE_ROOT);
 	});
 
-	// ── Crewops defect tripwires (one per defect; expected-fail today) ──────────
+	// ── Crewops defect tripwires (one per defect) ───────────────────────────────
 	// Each asserts the emitted showcase is FREE of the defect's diagnostic.
-	// Today the generator emits the defect, the assertion throws, and `it.fails`
-	// records the expected failure. A later PRD #546 slice makes the assertion
-	// pass — flipping the tripwire red. That red is the prompt to remove `.fails`.
+	//
+	// Defects 2 and 4 are the generator-output defects fixed by the generator
+	// slice (PRD #546, issue #553 — the generator now sources its cross-product
+	// from the attribution analyzer, deleting the file-wide regex parser): they
+	// pass as normal tests. Defects 1 and 3 are poisoned *explicit examples* a
+	// buggy fixer wrote into `meta.examples`; the generator renders them
+	// faithfully, so they stay `it.fails` until the fixer slice lands.
 
 	it.fails("Defect 1 — no sub-element axis attributed to the exported component", () => {
 		// Fixer wrote `density` (a markerVariants axis) into a meta example;
@@ -101,9 +107,10 @@ describe("generator emits type-correct showcase for the Crewops-shape atom", () 
 		expect(messagesMatching(result, /Property 'density'/), result.messages.join("\n")).toEqual([]);
 	});
 
-	it.fails("Defect 2 — boolean axis not emitted as a string", () => {
-		// Emitted `<CrewopsAtom invalid="true" />` — a string where `boolean` is
-		// required.
+	it("Defect 2 — boolean axis not emitted as a string", () => {
+		// The analyzer types `invalid` as a boolean axis, so the emitter renders
+		// `{true}`/`{false}` — both in the Variants grid and after coercing the
+		// poisoned `invalid: "true"` example. No string-where-boolean diagnostic.
 		expect(messagesMatching(result, /not assignable to type 'boolean/), result.messages.join("\n")).toEqual(
 			[],
 		);
@@ -115,10 +122,10 @@ describe("generator emits type-correct showcase for the Crewops-shape atom", () 
 		expect(messagesMatching(result, /"dark"/), result.messages.join("\n")).toEqual([]);
 	});
 
-	it.fails("Defect 4 — multi-CVA latent bug masked by populated examples", () => {
-		// Populated examples make CVA auto-expansion run; the regex parser spans
-		// the cva() boundary into markerVariants, emitting phantom `variants` /
-		// `pressed` props on `<CrewopsAtom>`.
+	it("Defect 4 — multi-CVA latent bug masked by populated examples", () => {
+		// The analyzer attributes only `chipVariants` to CrewopsAtom; the
+		// non-exported Marker's `markerVariants` never reaches the cross-product,
+		// so no phantom `variants` / `pressed` props land on `<CrewopsAtom>`.
 		expect(
 			messagesMatching(result, /Property '(variants|pressed)'/),
 			result.messages.join("\n"),
