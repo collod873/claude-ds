@@ -24,9 +24,14 @@ jobs:
       # No max-parallel cap: the old flake it guarded against (5s vitest
       # timeouts under concurrent-job load) was addressed at the root —
       # in-process CLI runner + 30s testTimeout (see vitest.config.ts, #487).
+      #
+      # Agent PRs (agent/**) run node 24 only — they land via auto-merge within
+      # minutes, and the full matrix on the merge push to main catches any
+      # node-22-only break right after (#602, accepted tradeoff). head_ref is
+      # empty on push events, so main pushes always get the full matrix.
       fail-fast: false
       matrix:
-        node-version: [22, 24]
+        node-version: ${{ startsWith(github.head_ref, 'agent/') && fromJSON('[24]') || fromJSON('[22, 24]') }}
     name: ci (node ${{ matrix.node-version }})
     steps:
       - uses: actions/checkout@v5

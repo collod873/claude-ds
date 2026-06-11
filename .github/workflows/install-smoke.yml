@@ -17,6 +17,12 @@ concurrency:
 
 jobs:
   install-smoke:
+    # Skip on agent PRs — the merge push to main re-runs it minutes later, and
+    # the release path runs the identical smoke (#526), so consumers stay
+    # covered (#602). Job-level `if:` (not a trigger-level branches filter) so
+    # a skipped run still reports a check, which satisfies the ruleset; with no
+    # check run at all the PR would pend forever. head_ref is empty on push.
+    if: ${{ !startsWith(github.head_ref, 'agent/') }}
     runs-on: self-hosted
     timeout-minutes: 15
     steps:
