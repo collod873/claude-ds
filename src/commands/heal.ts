@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { checkCleanTree } from "../lib/clean-tree.js";
+import pkg from "../../package.json" with { type: "json" };
+import { type CleanTreeState, checkCleanTree } from "../lib/clean-tree.js";
 import type { PendingDecision } from "../lib/decision/index.js";
 import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
 import { err, info, setJsonMode } from "../lib/log.js";
@@ -14,7 +15,17 @@ import { driveRemediation } from "../lib/remediation-driver.js";
 import { planRemediation } from "../lib/remediation-planner.js";
 import { createProgress } from "../lib/render/tty-layer.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
+import type { RunLedger } from "../lib/run-ledger.js";
 import { run } from "../lib/runner.js";
+import { cliVersion } from "../lib/version-vocab.js";
+
+/**
+ * Where heal sends operators to report a claude-ds defect (PRD #575 / #580).
+ * Derived from `package.json`'s `repository` so there is one source of truth for
+ * the URL — the red-gate off-ramp names it alongside the CLI version + pack pin
+ * so a bug report carries the two coordinates that pin the regeneration.
+ */
+const BUG_REPORT_URL = `${pkg.repository.url.replace(/^git\+/, "").replace(/\.git$/, "")}/issues`;
 
 /**
  * `claude-ds heal` — drive a consumer tree to a fixed point in one command.
@@ -267,7 +278,13 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 			});
 			progress.stop();
 			if (!verify.ok) {
-				reportRedGate(verify);
+				// `guard` is narrowed to `ok: true` here — the `!guard.ok` arm at the top
+				// of the function exits the process, so `guard.state` is in scope.
+				reportRedGate(verify, {
+					ledger: outcome.ledger,
+					cleanState: guard.state,
+					packPin: ctx.cfg.packVersion,
+				});
 				if (opts.json) {
 					emitHeadless({
 						command: "heal",
@@ -275,7 +292,13 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 						verdict: "verify-failed",
 						exitCode: HEADLESS_EXIT.FINDINGS,
 						actions: { iterations: outcome.iterations, maxIterations },
-						remaining: { findingsCount: 0, pending: 0, verify: verifyJson(verify) },
+						remaining: {
+							findingsCount: 0,
+							pending: 0,
+							verify: verifyJson(verify),
+							cleanTreeState: guard.state,
+							ledger: outcome.ledger.entries(),
+						},
 					});
 				}
 				process.exit(1);
@@ -462,8 +485,33 @@ function reportHandVerifyAndExit(
 	process.exit(HEAL_EXIT_HAND_VERIFY);
 }
 
-/** Surface scaffold errors on stderr. Mirror of `audit.ts:reportRedGate`. */
-function reportRedGate(verify: VerifyResult): void {
+/**
+ * What the red-gate report needs beyond the verify result (PRD #575 / #580).
+ * The clean-tree guard's verdict (retained from the top of the run instead of
+ * discarded after the gate decision) drives the state statement; the run ledger
+ * is the blast-radius inventory; the pack pin is one of the two coordinates the
+ * off-ramp's bug report carries.
+ */
+interface RedGateContext {
+	ledger: RunLedger;
+	cleanState: CleanTreeState;
+	packPin: string;
+}
+
+/**
+ * Surface scaffold errors on stderr. Mirror of `audit.ts:reportRedGate`.
+ *
+ * On the plain `verify-failed` branch (scaffold errors present) the report gains,
+ * in order after the errors (PRD #575 / #580): a **state statement** (was the
+ * tree clean at start, and the exact revert command if so), the **run ledger**
+ * (what heal wrote, from the driver's accumulated reports — never re-scanned),
+ * and an **off-ramp** (determinism + where to file a bug + the version-pin
+ * escape). The circular "re-run `claude-ds heal`" advice is gone from this
+ * branch — a re-run is deterministic and reproduces the same red gate. It stays
+ * on the timeout/environment-failure branch below, where a re-run genuinely can
+ * change the outcome.
+ */
+function reportRedGate(verify: VerifyResult, ctx: RedGateContext): void {
 	if (verify.scaffoldErrors.length > 0) {
 		err(
 			`heal: verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
@@ -475,18 +523,18 @@ function reportRedGate(verify: VerifyResult): void {
 			err(`  …and ${verify.scaffoldErrors.length - 20} more`);
 		}
 		// Defect 7: these live in claude-ds-managed files — including `@generated`
-		// showcases whose header forbids editing. claude-ds owns the fix; the
-		// remedy is never to hand-edit them. Non-circular guidance: if a re-run
-		// reproduces them (regeneration is deterministic), it's a claude-ds bug.
+		// showcases whose header forbids editing. claude-ds owns the fix; the remedy
+		// is never to hand-edit them. (Determinism + bug-report routing now live in
+		// the off-ramp below, so this line stays a pure ownership statement.)
 		if (verify.consumerErrors.length > 0) {
 			err(
 				`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`,
 			);
 		}
-		err(
-			"These are claude-ds's to fix — do not hand-edit `@generated` files. " +
-				"If a re-run reproduces them, report a claude-ds bug (regeneration is deterministic, so re-running won't clear them).",
-		);
+		err("These are claude-ds's to fix — do not hand-edit `@generated` files.");
+		reportRevertState(ctx.cleanState);
+		reportLedger(ctx.ledger);
+		reportOffRamp(ctx.packPin);
 		return;
 	}
 	// No parseable TS errors — a timeout or a non-tsc failure (Biome/eslint/
@@ -510,6 +558,72 @@ function reportRedGate(verify: VerifyResult): void {
 		verify.timedOut
 			? "Re-run with a longer verify timeout or after warming the consumer's tsc/test cache, then `claude-ds heal`."
 			: "Address the failure above and re-run `claude-ds heal`.",
+	);
+}
+
+/**
+ * The state statement (#580): does heal have a transaction layer to undo from?
+ * The clean-tree guard's verdict — retained as run metadata, not discarded after
+ * the gate decision — selects the wording. Only the `clean` path can offer an
+ * automatic revert; heal prints the command but never runs it (git is the undo,
+ * per the clean-tree guard contract). The other two paths say revert is
+ * unavailable and why, and defer to the inventory.
+ */
+function reportRevertState(cleanState: CleanTreeState): void {
+	if (cleanState === "clean") {
+		err(
+			"Your tree was clean when heal started — git can undo everything heal wrote. " +
+				"To revert this run: `git stash --include-untracked` " +
+				"(heal never runs this for you; git is the transaction layer).",
+		);
+		return;
+	}
+	if (cleanState === "dirty-overridden") {
+		err(
+			"heal ran with --allow-dirty, so its writes are mixed with changes already in your " +
+				"working tree — git can't separate them, so there's no automatic revert. " +
+				"The inventory below is exactly what heal wrote.",
+		);
+		return;
+	}
+	err(
+		"This tree isn't a git repository, so heal has no transaction layer to revert from. " +
+			"The inventory below is exactly what heal wrote.",
+	);
+}
+
+/**
+ * The run ledger (#580): the deduplicated, grouped-by-step inventory of what heal
+ * wrote across every pass, accumulated by the driver from each step's RunReport
+ * (#579) — never reconstructed from `git status`. Empty when heal changed no
+ * bytes (the red gate is then on pre-existing managed-file errors).
+ */
+function reportLedger(ledger: RunLedger): void {
+	const inventory = ledger.render();
+	if (inventory === "") {
+		err("What heal wrote this run: nothing — the tree is byte-for-byte as heal found it.");
+		return;
+	}
+	err("What heal wrote this run (grouped by step):");
+	for (const line of inventory.split("\n")) err(`  ${line}`);
+}
+
+/**
+ * The off-ramp (#580): assert determinism so the operator doesn't loop, name the
+ * bug-report destination with the two coordinates that pin the regeneration (CLI
+ * version + pack pin), and name the version-pin escape for a bad release.
+ */
+function reportOffRamp(packPin: string): void {
+	err(
+		"This result is deterministic: a re-run reproduces it byte-for-byte — do not loop heal expecting it to clear.",
+	);
+	err(
+		`If this is a claude-ds defect, report it at ${BUG_REPORT_URL} — ` +
+			`include the CLI version (${cliVersion()}) and pack pin (${packPin}).`,
+	);
+	err(
+		`To escape a bad release, pin a previous one: \`npx claude-ds@<previous>\` ` +
+			`(the version before ${cliVersion()}).`,
 	);
 }
 

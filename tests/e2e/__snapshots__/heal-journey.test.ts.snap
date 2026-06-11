@@ -155,6 +155,14 @@ heal: verify gate failed — npm run verify reported 4 error(s) in claude-ds-man
   design-system/references/motion.tsx:22:35  TS2724: 'React' has no exported member named 'ReactElement'. Did you mean 'createElement'?
   design-system/references/tokens.tsx:17:35  TS2724: 'React' has no exported member named 'ReactElement'. Did you mean 'createElement'?
 (also 25 pre-existing consumer error(s) outside claude-ds's scope)
-These are claude-ds's to fix — do not hand-edit \`@generated\` files. If a re-run reproduces them, report a claude-ds bug (regeneration is deterministic, so re-running won't clear them).
+These are claude-ds's to fix — do not hand-edit \`@generated\` files.
+Your tree was clean when heal started — git can undo everything heal wrote. To revert this run: \`git stash --include-untracked\` (heal never runs this for you; git is the transaction layer).
+What heal wrote this run (grouped by step):
+  reconform:
+    write design-system/atoms/Button.showcase.tsx
+    write design-system/composites/SearchBox.showcase.tsx
+This result is deterministic: a re-run reproduces it byte-for-byte — do not loop heal expecting it to clear.
+If this is a claude-ds defect, report it at https://github.com/collod873/claude-ds/issues — include the CLI version (<cli-version>) and pack pin (<cli-version>).
+To escape a bad release, pin a previous one: \`npx claude-ds@<previous>\` (the version before <cli-version>).
 "
 `;
