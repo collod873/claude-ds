@@ -271,6 +271,33 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
 		expect(r.stdout).not.toMatch(/converged in \d+ iteration\(s\) — 0 changes, 0 findings/);
 	}, 30000);
 
+	// Issue #581 — the exhausted (ceiling) exit gains the same state-statement +
+	// run-ledger block the red-gate report renders, so the "did not converge"
+	// failure no longer ends silently on state: it answers "what did heal write,
+	// and how do I get back." The tmpdir is not a git repo, so the state
+	// statement renders the no-git variant; the ledger line renders regardless.
+	it("exhausted exit renders the state statement + run ledger (#581)", async () => {
+		await writeFile(
+			join(dir, ".claude-ds.json"),
+			JSON.stringify({ ...BASE_CFG, packVersion: `v${pkg.version}` }),
+		);
+		await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+		// DRIFT-PATTERN-NO-SLOTS (fixable:false) — heal can never clear it, so the
+		// loop hits the ceiling with no Pending: the exhausted exit (code 1).
+		await writeFile(
+			join(dir, "design-system/patterns/no-slots.tsx"),
+			`export function NoSlots() { return <div/>; }\nexport const meta = { kind: "pattern" as const, examples: [] };\n`,
+		);
+
+		const r = await runCli(["heal", "--max-iterations", "3"], { cwd: dir });
+		expect(r.code).toBe(1);
+		expect(r.stderr).toMatch(/did not converge/);
+		// State statement (no-git variant, since the fixture isn't a git repo).
+		expect(r.stderr).toMatch(/isn't a git repository/);
+		// Run ledger — the blast-radius inventory of what heal wrote this run.
+		expect(r.stderr).toMatch(/What heal wrote this run/);
+	}, 30000);
+
 	// Issue #463 — heal/front-door must deliver managed-file bug fixes to a
 	// consumer whose file is PRESENT but content-drifted, with no manual `sync`.
 	// Before the fix, `scaffoldGap` was presence-only, so a stale-but-present
@@ -522,6 +549,20 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
 			const r = await runCli(["heal"], { cwd: dir });
 			expect(r.code).toBe(PENDING_EXIT);
 			expect(r.stderr).not.toMatch(/did not converge/);
+		}, 30000);
+
+		// Issue #581 — the Pending exit gains the same state-statement + run-ledger
+		// block the red-gate report renders, so "needs Collin" no longer ends
+		// silently on state. Exit code 3 and the decision report are unchanged;
+		// the block is appended after the scaffold guidance.
+		it("renders the state statement + run ledger after the decision report (#581)", async () => {
+			await scaffoldEquidistantTokenFixture();
+			const r = await runCli(["heal"], { cwd: dir });
+			expect(r.code).toBe(PENDING_EXIT);
+			// State statement (no-git variant — the tmpdir isn't a git repo).
+			expect(r.stderr).toMatch(/isn't a git repository/);
+			// Run ledger — what heal wrote this run.
+			expect(r.stderr).toMatch(/What heal wrote this run/);
 		}, 30000);
 	});
 });
