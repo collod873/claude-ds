@@ -2245,6 +2245,38 @@ interface CvaDef {
 	defaultVariants: Record<string, string | boolean>;
 }
 
+// ── source-keyed parse memo ─────────────────────────────────────────────────────
+//
+// Every entry point parses the same atom with identical compiler settings, and
+// a single detect+fix cycle drives up to six of them per file — multiplied again
+// by each audit pass in a heal iteration. Memoizing the SourceFile by
+// (fileName, source) collapses those to one parse; a fix that rewrites the file
+// changes `source`, so the stale parse is correctly missed rather than reused.
+// The AST is read-only here (purely syntactic analysis), so sharing one instance
+// across calls is safe. Bounded by recency so a long heal over a large repo
+// cannot grow it without limit — the per-file calls are contiguous, so a small
+// window keeps every intended reuse a hit.
+const PARSE_MEMO_LIMIT = 64;
+const parseMemo = new Map<string, TS.SourceFile>();
+
+function parseSource(ts: typeof TS, source: string, fileName: string): TS.SourceFile {
+	const key = `${fileName} ${source}`;
+	const cached = parseMemo.get(key);
+	if (cached) {
+		// Refresh recency so the file under active iteration outlives eviction.
+		parseMemo.delete(key);
+		parseMemo.set(key, cached);
+		return cached;
+	}
+	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	parseMemo.set(key, sf);
+	if (parseMemo.size > PARSE_MEMO_LIMIT) {
+		const oldest = parseMemo.keys().next().value;
+		if (oldest !== undefined) parseMemo.delete(oldest);
+	}
+	return sf;
+}
+
 /**
  * Analyze one atom/composite source file and return, per exported component,
  * the variant axes it consumes (with typed values) and its default variants.
@@ -2270,7 +2302,7 @@ export function analyzeCvaComponents(
 ): CvaAttribution {
 	if (!source.includes("cva(")) return {};
 
-	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	const sf = parseSource(ts, source, fileName);
 
 	const cvaDefs = collectCvaDefs(ts, sf);
 	if (cvaDefs.size === 0) return {};
@@ -2693,12 +2725,75 @@ function addBindingNames(
 }
 
 /**
- * Prop names and cva spreads found in the props type, resolving local
- * interfaces/aliases. An `Omit<…, "k">` wrapper carries its excluded keys down
- * into the subtree it wraps. An indexed access `T["size"]` extracts one axis's
+ * One resolving type-walk underlies both prop-surface collectors — exposure
+ * (which axis names a component accepts as props) and required-prop collection.
+ * Both resolve local interfaces/aliases (seen-guarded against cyclic refs),
+ * carry an enclosing `Omit<…, "k">`'s excluded keys down into the subtree it
+ * wraps, and skip an indexed access `T["size"]` whole — it extracts one member's
  * VALUE type (the `type Size = NonNullable<VariantProps<typeof x>["size"]>`
- * alias idiom) — the `typeof x` inside it is not a props spread, so the whole
- * subtree is skipped; the prop itself surfaces via the member that uses the alias.
+ * idiom), not the props surface, so any `typeof x` inside it is not a spread.
+ * Heritage clauses (`extends Omit<…>` / `extends LocalBase`) reference types as
+ * expressions rather than TypeReferenceNodes — same resolution, same key
+ * propagation.
+ *
+ * A thin per-node `visit` handles what differs: it returns `true` to claim a
+ * node (the walk stops descending it) or `false` to fall through to the
+ * structural defaults above. `ctx` threads a per-subtree accumulator — the
+ * required-prop collector swaps it per union alternative — and `recurse` lets a
+ * visitor drive sub-walks with a fresh ctx; exposure ignores both.
+ */
+type TypeWalkVisit<C> = (
+	node: TS.Node,
+	omit: ReadonlySet<string>,
+	ctx: C,
+	recurse: (node: TS.Node, omit: ReadonlySet<string>, ctx: C) => void,
+) => boolean;
+
+function walkResolvedType<C>(
+	ts: typeof TS,
+	root: TS.TypeNode,
+	typeDecls: Map<string, TS.InterfaceDeclaration | TS.TypeAliasDeclaration>,
+	initialCtx: C,
+	visit: TypeWalkVisit<C>,
+): void {
+	const seen = new Set<string>();
+	const walk = (node: TS.Node, omit: ReadonlySet<string>, ctx: C): void => {
+		if (ts.isIndexedAccessTypeNode(node)) return;
+		if (visit(node, omit, ctx, walk)) return;
+		if (ts.isTypeReferenceNode(node)) {
+			const refName = leftmostIdentText(ts, node.typeName);
+			if (refName === "Omit" && node.typeArguments?.length === 2) {
+				const keys = literalStringKeys(ts, node.typeArguments[1]);
+				walk(node.typeArguments[0], new Set([...omit, ...keys]), ctx);
+				return;
+			}
+			if (refName && typeDecls.has(refName) && !seen.has(refName)) {
+				seen.add(refName);
+				typeDecls.get(refName)?.forEachChild((c) => walk(c, omit, ctx));
+			}
+		}
+		if (ts.isExpressionWithTypeArguments(node) && ts.isIdentifier(node.expression)) {
+			const refName = node.expression.text;
+			if (refName === "Omit" && node.typeArguments?.length === 2) {
+				const keys = literalStringKeys(ts, node.typeArguments[1]);
+				walk(node.typeArguments[0], new Set([...omit, ...keys]), ctx);
+				return;
+			}
+			if (typeDecls.has(refName) && !seen.has(refName)) {
+				seen.add(refName);
+				typeDecls.get(refName)?.forEachChild((c) => walk(c, omit, ctx));
+			}
+		}
+		node.forEachChild((c) => walk(c, omit, ctx));
+	};
+	walk(root, new Set(), initialCtx);
+}
+
+/**
+ * Prop names and cva spreads found in the props type. Each property signature is
+ * a prop name; a `typeof X` spread of a known cva exposes it wholesale, minus the
+ * keys an enclosing `Omit<>` excludes (two spreads of the same cva keep only the
+ * keys every spread omits).
  */
 function collectTypeExposure(
 	ts: typeof TS,
@@ -2707,58 +2802,26 @@ function collectTypeExposure(
 	typeDecls: Map<string, TS.InterfaceDeclaration | TS.TypeAliasDeclaration>,
 	exposure: Exposure,
 ): void {
-	const seen = new Set<string>();
-	const visit = (node: TS.Node, omit: ReadonlySet<string>): void => {
-		if (ts.isIndexedAccessTypeNode(node)) return;
+	walkResolvedType<undefined>(ts, typeNode, typeDecls, undefined, (node, omit) => {
 		if (ts.isPropertySignature(node)) {
 			const n = propName(ts, node.name);
 			if (n !== null) exposure.names.add(n);
 			// Stop at the member: descending into its own type would surface a
 			// nested object's members as top-level props.
-			return;
+			return true;
 		}
 		if (ts.isTypeQueryNode(node)) {
 			const name = leftmostIdentText(ts, node.exprName);
 			if (name && cvaNames.has(name)) {
 				const existing = exposure.wholesale.get(name);
-				// Two spreads of the same cva expose the union: keep only the keys
-				// every spread omits.
 				exposure.wholesale.set(
 					name,
 					existing ? new Set([...existing].filter((k) => omit.has(k))) : new Set(omit),
 				);
 			}
 		}
-		if (ts.isTypeReferenceNode(node)) {
-			const refName = leftmostIdentText(ts, node.typeName);
-			if (refName === "Omit" && node.typeArguments?.length === 2) {
-				const keys = literalStringKeys(ts, node.typeArguments[1]);
-				visit(node.typeArguments[0], new Set([...omit, ...keys]));
-				return;
-			}
-			if (refName && typeDecls.has(refName) && !seen.has(refName)) {
-				seen.add(refName);
-				typeDecls.get(refName)?.forEachChild((c) => visit(c, omit));
-			}
-		}
-		// Heritage clauses (`interface X extends Omit<…, "k">` / `extends LocalBase`)
-		// reference types as expressions, not TypeReferenceNodes — same resolution,
-		// same Omit key propagation.
-		if (ts.isExpressionWithTypeArguments(node) && ts.isIdentifier(node.expression)) {
-			const refName = node.expression.text;
-			if (refName === "Omit" && node.typeArguments?.length === 2) {
-				const keys = literalStringKeys(ts, node.typeArguments[1]);
-				visit(node.typeArguments[0], new Set([...omit, ...keys]));
-				return;
-			}
-			if (typeDecls.has(refName) && !seen.has(refName)) {
-				seen.add(refName);
-				typeDecls.get(refName)?.forEachChild((c) => visit(c, omit));
-			}
-		}
-		node.forEachChild((c) => visit(c, omit));
-	};
-	visit(typeNode, new Set());
+		return false;
+	});
 }
 
 /** String-literal keys of an `Omit` key type: `"a"` or `"a" | "b"`. */
@@ -2789,7 +2852,7 @@ export function collectFileCvaAxes(
 	fileName = "component.tsx",
 ): Record<string, CvaAxis> {
 	if (!source.includes("cva(")) return {};
-	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	const sf = parseSource(ts, source, fileName);
 	const axes: Record<string, CvaAxis> = {};
 	for (const config of collectCvaDefs(ts, sf).values()) {
 		Object.assign(axes, config.axes);
@@ -2809,7 +2872,7 @@ export function collectExportedComponentNames(
 	source: string,
 	fileName = "component.tsx",
 ): Set<string> {
-	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	const sf = parseSource(ts, source, fileName);
 	return new Set(collectComponents(ts, sf, collectExportedNames(ts, sf)).map((c) => c.name));
 }
 
@@ -2905,7 +2968,7 @@ export function cvaUnresolvedPropsDiagnostics(
 ): UnresolvablePropsDiagnostic[] {
 	if (!source.includes("cva(")) return [];
 
-	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	const sf = parseSource(ts, source, fileName);
 	const cvaDefs = collectCvaDefs(ts, sf);
 	if (cvaDefs.size === 0) return [];
 	const cvaNames = new Set(cvaDefs.keys());
@@ -2963,7 +3026,7 @@ export function collectRequiredPropNames(
 	fileName = "component.tsx",
 ): Set<string> {
 	const required = new Set<string>();
-	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	const sf = parseSource(ts, source, fileName);
 	const typeDecls = collectTypeDecls(ts, sf);
 	const exportedNames = collectExportedNames(ts, sf);
 	const components = collectComponents(ts, sf, exportedNames);
@@ -2972,61 +3035,42 @@ export function collectRequiredPropNames(
 		.find((c) => c !== undefined);
 	if (!component?.firstParamType) return required;
 
-	const seen = new Set<string>();
-	const visit = (node: TS.Node, omit: ReadonlySet<string>, sink: Set<string>): void => {
-		if (ts.isIndexedAccessTypeNode(node)) return;
-		if (ts.isPropertySignature(node)) {
-			if (!node.questionToken) {
-				const n = propName(ts, node.name);
-				if (n !== null && !omit.has(n)) sink.add(n);
-			}
-			return;
-		}
-		if (ts.isUnionTypeNode(node)) {
-			// A member required in only SOME alternatives of a union is not
-			// required (Crewops Badge's `{ status } | { tone? }` discriminated
-			// union): only names every alternative requires survive.
-			let common: Set<string> | null = null;
-			for (const alt of node.types) {
-				const altRequired = new Set<string>();
-				visit(alt, omit, altRequired);
-				if (common === null) {
-					common = altRequired;
-				} else {
-					const prev: Set<string> = common;
-					common = new Set([...prev].filter((n) => altRequired.has(n)));
+	walkResolvedType<Set<string>>(
+		ts,
+		component.firstParamType,
+		typeDecls,
+		required,
+		(node, omit, sink, recurse) => {
+			if (ts.isPropertySignature(node)) {
+				if (!node.questionToken) {
+					const n = propName(ts, node.name);
+					if (n !== null && !omit.has(n)) sink.add(n);
 				}
+				return true;
 			}
-			for (const n of common ?? []) sink.add(n);
-			return;
-		}
-		if (ts.isTypeReferenceNode(node)) {
-			const refName = leftmostIdentText(ts, node.typeName);
-			if (refName === "Omit" && node.typeArguments?.length === 2) {
-				const keys = literalStringKeys(ts, node.typeArguments[1]);
-				visit(node.typeArguments[0], new Set([...omit, ...keys]), sink);
-				return;
+			if (ts.isUnionTypeNode(node)) {
+				// A member required in only SOME alternatives of a union is not
+				// required (Crewops Badge's `{ status } | { tone? }` discriminated
+				// union): only names every alternative requires survive. Each
+				// alternative accumulates into a fresh sink, then the common subset
+				// merges up.
+				let common: Set<string> | null = null;
+				for (const alt of node.types) {
+					const altRequired = new Set<string>();
+					recurse(alt, omit, altRequired);
+					if (common === null) {
+						common = altRequired;
+					} else {
+						const prev: Set<string> = common;
+						common = new Set([...prev].filter((n) => altRequired.has(n)));
+					}
+				}
+				for (const n of common ?? []) sink.add(n);
+				return true;
 			}
-			if (refName && typeDecls.has(refName) && !seen.has(refName)) {
-				seen.add(refName);
-				typeDecls.get(refName)?.forEachChild((c) => visit(c, omit, sink));
-			}
-		}
-		if (ts.isExpressionWithTypeArguments(node) && ts.isIdentifier(node.expression)) {
-			const refName = node.expression.text;
-			if (refName === "Omit" && node.typeArguments?.length === 2) {
-				const keys = literalStringKeys(ts, node.typeArguments[1]);
-				visit(node.typeArguments[0], new Set([...omit, ...keys]), sink);
-				return;
-			}
-			if (typeDecls.has(refName) && !seen.has(refName)) {
-				seen.add(refName);
-				typeDecls.get(refName)?.forEachChild((c) => visit(c, omit, sink));
-			}
-		}
-		node.forEachChild((c) => visit(c, omit, sink));
-	};
-	visit(component.firstParamType, new Set(), required);
+			return false;
+		},
+	);
 	return required;
 }
 
