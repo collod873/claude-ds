@@ -149,6 +149,18 @@ function git(dir, args) {
 	return res.stdout ?? "";
 }
 
+/**
+ * The consumer's package manager, from its lockfile — the same signal adopt's
+ * own detection uses. Installing with npm in a pnpm consumer fails on peer-dep
+ * conflicts the consumer's real installs never see (npm resolves peers
+ * strictly; pnpm does not), so the canary must install the way the consumer does.
+ */
+function detectPackageManager(dir) {
+	if (existsSync(join(dir, "pnpm-lock.yaml"))) return "pnpm";
+	if (existsSync(join(dir, "yarn.lock"))) return "yarn";
+	return "npm";
+}
+
 /** Run `heal --json` via the installed bin and return its parsed envelope. */
 function runHeal(bin, dir) {
 	const { code, stdout } = capture(bin, ["heal", "--json"], { cwd: dir });
@@ -165,12 +177,10 @@ async function main(argv) {
 
 	// Pack the working tree exactly as it ships — the candidate tarball.
 	console.log("▶ packing the release-candidate tarball");
-	const version = JSON.parse(
-		execFileSync("node", ["-p", "require('./package.json').version"], {
-			cwd: REPO_ROOT,
-			encoding: "utf8",
-		}).trim(),
-	);
+	const version = execFileSync("node", ["-p", "require('./package.json').version"], {
+		cwd: REPO_ROOT,
+		encoding: "utf8",
+	}).trim();
 	execFileSync("npm", ["pack"], { cwd: REPO_ROOT, stdio: "inherit" });
 	const tarball = join(REPO_ROOT, `claude-ds-${version}.tgz`);
 	if (!existsSync(tarball)) die(`npm pack produced no ${basename(tarball)}`);
@@ -184,11 +194,20 @@ async function main(argv) {
 		console.log(`▶ cloning ${consumer} → fresh tmp dir`);
 		sh("git", ["clone", "--depth", "1", consumer, consumerDir]);
 
-		const npmEnv = { ...process.env, npm_config_cache: npmCache };
-		console.log("▶ installing the consumer's own deps");
-		sh("npm", ["install"], { cwd: consumerDir, env: npmEnv });
+		// npm_config_store_dir is pnpm's store (pnpm reads npm-style env config);
+		// npm ignores it. Both point inside the throwaway cache dir.
+		const npmEnv = {
+			...process.env,
+			npm_config_cache: npmCache,
+			npm_config_store_dir: join(npmCache, "pnpm-store"),
+		};
+		const pm = detectPackageManager(consumerDir);
+		console.log(`▶ installing the consumer's own deps (${pm})`);
+		sh(pm, ["install"], { cwd: consumerDir, env: npmEnv });
 		console.log("▶ installing the release-candidate tarball");
-		sh("npm", ["install", "--no-save", tarball], { cwd: consumerDir, env: npmEnv });
+		// pnpm/yarn have no --no-save; saving is harmless in a throwaway clone.
+		const addArgs = pm === "npm" ? ["install", "--no-save", tarball] : ["add", tarball];
+		sh(pm, addArgs, { cwd: consumerDir, env: npmEnv });
 
 		// Commit the install so heal's clean-tree guard sees real consumer conditions.
 		git(consumerDir, ["config", "user.email", "canary@claude-ds.test"]);
