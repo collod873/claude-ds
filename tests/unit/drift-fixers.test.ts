@@ -1906,4 +1906,105 @@ export const meta = {
 			expect(second.fixed).toBe(false);
 		});
 	});
+
+	describe("fixMetaExamplesInvalidProp", () => {
+		let dir: string;
+		beforeEach(async () => {
+			dir = await freshTmpDir();
+		});
+		afterEach(async () => {
+			await cleanup(dir);
+		});
+
+		const BADGE = `import { cva } from "class-variance-authority";
+const badge = cva("base", {
+  variants: { tone: { neutral: "n", danger: "d" }, size: { sm: "s", lg: "l" } },
+});
+export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm" | "lg" }) {
+  return <span className={badge({ tone, size })} />;
+}
+`;
+
+		const detect = (source: string): DriftFinding[] =>
+			evaluateDrift({
+				file: "design-system/atoms/badge.tsx",
+				locationTier: "atom",
+				metaKind: "atom",
+				classifierVerdict: { tier: "atom", signals: [] },
+				source,
+			}).filter((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP");
+
+		async function seed(source: string): Promise<void> {
+			await mkdir(join(dir, "design-system/atoms"), { recursive: true });
+			await writeFile(join(dir, "design-system/atoms/badge.tsx"), source);
+		}
+
+		it("drops the offending prop but keeps valid sibling props", async () => {
+			const source = `${BADGE}export const meta = {
+  kind: "atom" as const,
+  examples: [{ name: "leak", props: { tone: "neutral", density: "compact" } }],
+};
+`;
+			await seed(source);
+			const finding = detect(source)[0];
+			expect(finding).toBeDefined();
+
+			const fixer = getFixer("DRIFT-META-EXAMPLES-INVALID-PROP")!;
+			const result = await fixAndApply(fixer, finding, dir);
+			expect(result.fixed).toBe(true);
+
+			const content = await readFile(join(dir, "design-system/atoms/badge.tsx"), "utf8");
+			expect(content).not.toContain("density");
+			expect(content).toContain('tone: "neutral"');
+			// Round-trip: re-detect is clean.
+			expect(detect(content)).toHaveLength(0);
+		});
+
+		it('drops the whole example when its props go empty (the Crewops tone: "dark" shape)', async () => {
+			const source = `${BADGE}export const meta = {
+  kind: "atom" as const,
+  examples: [
+    { name: "neutral", props: { tone: "neutral" } },
+    { name: "dark", props: { tone: "dark" } },
+  ],
+};
+`;
+			await seed(source);
+			const finding = detect(source)[0];
+			expect(finding).toBeDefined();
+			expect(finding.message).toContain('tone="dark"');
+
+			const fixer = getFixer("DRIFT-META-EXAMPLES-INVALID-PROP")!;
+			const result = await fixAndApply(fixer, finding, dir);
+			expect(result.fixed).toBe(true);
+
+			const content = await readFile(join(dir, "design-system/atoms/badge.tsx"), "utf8");
+			// The poisoned example is gone entirely; the valid one survives.
+			expect(content).not.toContain('"dark"');
+			expect(content).toContain('{ name: "neutral", props: { tone: "neutral" } }');
+			// The output still parses and re-detects clean (idempotent).
+			expect(detect(content)).toHaveLength(0);
+			const second = await fixer(finding, makeFakeCtx(dir));
+			expect(second.fixed).toBe(false);
+		});
+
+		it("returns fixed=false on a clean file with no invalid props", async () => {
+			const source = `${BADGE}export const meta = {
+  kind: "atom" as const,
+  examples: [{ name: "neutral", props: { tone: "neutral", size: "sm" } }],
+};
+`;
+			await seed(source);
+			expect(detect(source)).toHaveLength(0);
+
+			const fixer = getFixer("DRIFT-META-EXAMPLES-INVALID-PROP")!;
+			const finding: DriftFinding = {
+				ruleId: "DRIFT-META-EXAMPLES-INVALID-PROP",
+				file: "design-system/atoms/badge.tsx",
+				message: "stub",
+			};
+			const result = await fixer(finding, makeFakeCtx(dir));
+			expect(result.fixed).toBe(false);
+		});
+	});
 });
