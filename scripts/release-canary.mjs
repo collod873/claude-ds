@@ -214,7 +214,12 @@ async function main(argv) {
 		const second = runHeal(bin, consumerDir);
 		const dirty = git(consumerDir, ["status", "--porcelain"]).trim().length > 0;
 
-		const { ok, failures } = evaluateCanary(first.json, { ...(second.json ?? {}), dirty });
+		// Keep run2 null when heal produced no envelope so describeBlockers names
+		// the parse failure instead of a generic "exited undefined" fallback.
+		const { ok, failures } = evaluateCanary(
+			first.json,
+			second.json ? { ...second.json, dirty } : null,
+		);
 		if (ok) {
 			console.log(
 				`\n✓ canary passed — heal converged green and the second run was a no-op (v${version})`,
@@ -247,7 +252,8 @@ function evaluateFromFiles(rest) {
 		die("usage: release-canary.mjs --evaluate <run1.json> [<run2.json>] [--dirty]");
 	const load = (f) => parseHealJson(readFileSync(resolve(f), "utf8"));
 	const run1 = load(files[0]);
-	const run2 = files[1] ? { ...(load(files[1]) ?? {}), dirty } : null;
+	const run2parsed = files[1] ? load(files[1]) : null;
+	const run2 = run2parsed ? { ...run2parsed, dirty } : null;
 
 	const { ok, failures } = evaluateCanary(run1, run2);
 	if (ok) {
