@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { frontDoorCmd } from "../../src/commands/front-door.js";
 import { cliVersion } from "../../src/lib/version-vocab.js";
 import { type FixtureRun, materializeFixture, runInFixture } from "../helpers/e2e-fixture.js";
+import { goldenTranscript } from "../helpers/golden-transcript.js";
 import { cleanup } from "../helpers/tmpdir.js";
 
 /**
@@ -175,5 +176,27 @@ describe("journey: heal end-to-end on the time-travel fixture (#538)", () => {
 		expect(dashAdvance).not.toBeNull();
 		expect(dashAdvance?.[1]).toBe(pinnedBefore);
 		expect(dashAdvance?.[2]).toBe(pinnedAfter);
+	});
+
+	// Golden transcripts (#539): the verbatim bytes of the journey, snapshotted
+	// as plain vitest snapshot files. The committed `.snap` is the artifact — any
+	// change to user-facing output becomes a reviewable diff; deliberate changes
+	// are re-goldened with `vitest -u` in the same PR. Normalized for the three
+	// machine-volatile token classes (paths, versions, durations) so the snapshot
+	// is identical on any machine and release; see `golden-transcript.ts`.
+	it("golden: the dashboard preview matches its committed snapshot", () => {
+		const golden = goldenTranscript("(front door — dashboard preview)", 0, dashboard, {
+			dir,
+			prevVersion: pinnedBefore,
+		});
+		expect(golden).toMatchSnapshot();
+	});
+
+	it("golden: the heal transcript matches its committed snapshot", () => {
+		const golden = goldenTranscript("heal", heal.code, heal.stdout + heal.stderr, {
+			dir,
+			prevVersion: pinnedBefore,
+		});
+		expect(golden).toMatchSnapshot();
 	});
 });

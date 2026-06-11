@@ -1,0 +1,160 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`journey: heal end-to-end on the time-travel fixture (#538) > golden: the dashboard preview matches its committed snapshot 1`] = `
+"# command: claude-ds (front door — dashboard preview)
+# exit: 0
+# --- transcript below; bytes are verbatim from the built CLI, normalized for paths/versions/durations ---
+Where you are: adopted (<fixture>)
+Managed files: 0/93
+What's wrong: scaffold incomplete + 2 findings + 1 hand-rolled DS infra finding + upgrade available
+Also checked: nothing stale or deprecated ✓
+
+I'll bring this tree to clean — 5 steps:
+  upgrade → sync → repair → reconform → audit --fix
+  Converging until no drift — up to 3 passes.
+
+upgrade — pin advance <prev-version> → <cli-version> (no migrations)
+    Substantive changes:
+    ! .claude-ds.json  (config flags flipped)
+        packVersion: "<prev-version>" -> "<cli-version>"
+        allowed_imports: undefined -> []
+sync — restore managed scaffold files
+    2 files modified — 2 scaffold files
+    91 files added — 1 atom, 1 composite, 89 scaffold files
+repair — restore drifted migration end-states
+    Added 3 scaffold files
+    
+    Skipped: 2 files (hand-edited or unsafe to overwrite)
+reconform
+audit --fix — auto-repair 2 findings
+
+  (re-run with --verbose for the full per-file change list)
+"
+`;
+
+exports[`journey: heal end-to-end on the time-travel fixture (#538) > golden: the heal transcript matches its committed snapshot 1`] = `
+"# command: claude-ds heal
+# exit: 1
+# --- transcript below; bytes are verbatim from the built CLI, normalized for paths/versions/durations ---
+heal: converging until no drift — up to 3 passes.
+heal: planner-driven loop (max 3 iterations)
+heal: pass 1/3 — upgrade → sync → repair → reconform → audit --fix
+no registered migrations between <prev-version> and <cli-version>
+migration end-state drift detected: manage-force-state@v0.8.0, manage-manifest@v0.9.0, widen-tokens@v0.9.0, manage-portal-scope@v0.9.0, backfill-chart-tokens@<prev-version>
+A design-system/utils/force-state.css
+A scripts/build-manifest.ts
+A design-system/utils/portal-scope.module.css
+
+Skipped: 2 files (hand-edited or unsafe to overwrite)
+restored 5 drifted migration end-state(s)
+pin advanced <prev-version> → <cli-version> (no migrations to apply)
+create: .claude/settings.json — new in this version — creating
+create: .claude/hooks/atom-imports.sh — new in this version — creating
+create: .claude/hooks/pre-write-ds-tokens.sh — new in this version — creating
+create: .claude/hooks/lib/log-failure.sh — new in this version — creating
+create: .claude/hooks/lib/read-hook-input.sh — new in this version — creating
+create: .claude/hooks/lib/read-enforcement.sh — new in this version — creating
+create: .claude/hooks/pre-write-tokens-app-wide.sh — new in this version — creating
+create: .claude/hooks/pre-write-base-ui.sh — new in this version — creating
+create: .claude/hooks/pre-write-tokens-app-wide.sh.verify-fixture.json — new in this version — creating
+create: .claude/hooks/pre-write-base-ui.sh.verify-fixture.json — new in this version — creating
+create: .claude/hooks/README.md — new in this version — creating
+create: .claude/hooks/pre-write-ds-manifest.sh — new in this version — creating
+create: .claude/hooks/pre-write-ds-similarity.sh — new in this version — creating
+create: .claude/hooks/pre-write-tsx.sh — new in this version — creating
+create: .claude/hooks/pre-commit-global.sh — new in this version — creating
+create: .claude/hooks/pre-write-ds-exceptions.sh — new in this version — creating
+create: .claude/hooks/pre-write-ds-tier-imports.sh — new in this version — creating
+create: .claude/hooks/atom-imports.sh.verify-fixture.json — new in this version — creating
+create: .claude/hooks/pre-write-ds-tokens.sh.verify-fixture.json — new in this version — creating
+create: .claude/hooks/pre-write-ds-manifest.sh.verify-fixture.json — new in this version — creating
+create: .claude/hooks/pre-write-tsx.sh.verify-fixture.json — new in this version — creating
+create: .claude/hooks/pre-write-ds-exceptions.sh.verify-fixture.json — new in this version — creating
+create: .claude/hooks/pre-write-ds-tier-imports.sh.verify-fixture.json — new in this version — creating
+create: .claude/hooks/pre-commit-global.sh.verify-fixture.json — new in this version — creating
+create: .claude/hooks/pre-write-ds-similarity.sh.verify-fixture.json — new in this version — creating
+create: .claude/hooks/regenerate-companions.sh.verify-fixture.json — new in this version — creating
+create: design-system/contracts.md — new in this version — creating
+create: design-system/tokens.json — new in this version — creating
+create: design-system/README.md — new in this version — creating
+create: design-system/CLAUDE.md — new in this version — creating
+create: design-system/atoms/.keep — new in this version — creating
+create: design-system/composites/.keep — new in this version — creating
+create: design-system/references/.keep — new in this version — creating
+rewrite: design-system/types/meta.ts — upstream changed
+create: design-system/charts/ramp.ts — new in this version — creating
+create: design-system/charts/tremor-preset.ts — new in this version — creating
+create: design-system/charts/index.ts — new in this version — creating
+create: design-system/icons/.keep — new in this version — creating
+create: design-system/hooks/.keep — new in this version — creating
+create: design-system/utils/.keep — new in this version — creating
+create: tailwind.config.cjs — new in this version — creating
+create: commitlint.config.js — new in this version — creating
+create: vitest.config.ts — new in this version — creating
+create: vitest.setup.ts — new in this version — creating
+create: CLAUDE.md → .claude/CLAUDE.md — new in this version — creating
+rewrite: package.json — hybrid json owned keys changed upstream
+create: design-system/exceptions.json — new in this version — creating
+create: design-system/enforcement.json — new in this version — creating
+create: design-system/failure-log.md — new in this version — creating
+create: scripts/check-tier-imports.ts — new in this version — creating
+create: scripts/similarity-check.ts — new in this version — creating
+create: scripts/a11y-scan.ts — new in this version — creating
+create: scripts/check-principles-freshness.ts — new in this version — creating
+create: scripts/update-tokens.ts — new in this version — creating
+create: scripts/run-a11y.sh — new in this version — creating
+create: scripts/check-hook-contract.sh — new in this version — creating
+create: scripts/consistency-probe.sh — new in this version — creating
+create: scripts/generate-showcase-companion.ts — new in this version — creating
+create: scripts/check-design-system.sh — new in this version — creating
+create: scripts/lib/ds-validators.sh — new in this version — creating
+create: .claude/hooks/regenerate-companions.sh — new in this version — creating
+create: design-system/_fixtures/.gitkeep — new in this version — creating
+create: design-system/_fixtures/README.md — new in this version — creating
+create: design-system/_fixtures/combobox-good.ts — new in this version — creating
+create: design-system/_fixtures/combobox-broken.ts — new in this version — creating
+create: design-system/contracts/roles/types.ts — new in this version — creating
+create: design-system/contracts/roles/combobox.ts — new in this version — creating
+create: design-system/contracts/roles/index.ts — new in this version — creating
+create: design-system/contracts/runner.ts — new in this version — creating
+create: design-system/contracts/role-contracts.test.tsx — new in this version — creating
+create: design-system/contracts/import-meta-glob.d.ts — new in this version — creating
+create: .claude/skills/aesthetic-principles/SKILL.md — new in this version — creating
+create: .claude/skills/design-system/SKILL.md — new in this version — creating
+create: .claude/skills/design-system/contracts.md — new in this version — creating
+create: .claude/skills/component/SKILL.md — new in this version — creating
+create: .claude/skills/pattern/SKILL.md — new in this version — creating
+create: design-system/design-system-scaffold.md — new in this version — creating
+create: tests/a11y/.keep — new in this version — creating
+create: tests/a11y/README.md — new in this version — creating
+create: app/design/page.tsx → src/app/design/page.tsx — new in this version — creating
+create: app/design/layout.tsx → src/app/design/layout.tsx — new in this version — creating
+create: app/design/_showcase-boundary.tsx → src/app/design/_showcase-boundary.tsx — new in this version — creating
+create: app/design/_filter.tsx → src/app/design/_filter.tsx — new in this version — creating
+create: app/design/_theme-toggle.tsx → src/app/design/_theme-toggle.tsx — new in this version — creating
+create: app/design/[...slug]/page.tsx → src/app/design/[...slug]/page.tsx — new in this version — creating
+create: app/design/[...slug]/resolve.ts → src/app/design/[...slug]/resolve.ts — new in this version — creating
+create: design-system/references/tokens.tsx — new in this version — creating
+create: design-system/references/motion.tsx — new in this version — creating
+create: .github/workflows/claude-ds-governance.yml — new in this version — creating
+create: .github/workflows/claude-ds-audit.yml — new in this version — creating
+skipped 3 files already in sync (3 in sync) — re-run with --verbose to list them
+config unchanged
+regenerated design-system/manifest.generated.ts
+sync complete → <cli-version>
+already at <cli-version>
+evaluated 7 file(s) across 3 tier directories (5 clean, 2 with findings)
+tracked 7 user extension(s) in consumer manifest
+fixed [DRIFT-META-KIND-MISSING]: added meta.kind to 2 files (atoms)
+fix summary: 2 fixed, 0 deferred
+Managed files: 93/93 ✓ | Fixed: 2
+No action required.
+heal: verify gate failed — npm run verify reported 4 error(s) in claude-ds-managed files
+  design-system/contracts/role-contracts.test.tsx:17:43  TS2307: Cannot find module 'vitest' or its corresponding type declarations.
+  design-system/contracts/role-contracts.test.tsx:18:33  TS2307: Cannot find module '@testing-library/react' or its corresponding type declarations.
+  design-system/references/motion.tsx:22:35  TS2724: 'React' has no exported member named 'ReactElement'. Did you mean 'createElement'?
+  design-system/references/tokens.tsx:17:35  TS2724: 'React' has no exported member named 'ReactElement'. Did you mean 'createElement'?
+(also 25 pre-existing consumer error(s) outside claude-ds's scope)
+These are claude-ds's to fix — do not hand-edit \`@generated\` files. If a re-run reproduces them, report a claude-ds bug (regeneration is deterministic, so re-running won't clear them).
+"
+`;
