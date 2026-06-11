@@ -88,9 +88,13 @@ advance is one `finalizeUpgrade` Change through the Runner, no new write path.
   `upgrade`/`repair` split (forward-only vs end-state restoration) stands. This
   ADR resolves what the *forward* verb does when the forward gap carries no
   migrations — it still moves the pin forward.
-- The front-door / heal commitment-gate header still reads `pin bump only —
-  pack stays vX` for an empty chain (ADR-0011 addendum / #412). That wording is
-  now literally accurate — it *is* a pin bump with the pack's managed files
-  unchanged. Reconciling the gate preview's remaining "pack stays vX"
-  phrasing with the executed pin advance is the plan/report-reconciliation
-  work (PRD #529 defects 2 & 3), out of scope here.
+- The front-door / heal commitment-gate header used to read `pin bump only —
+  pack stays vX` for an empty chain (ADR-0011 addendum / #412). Once the pin
+  actually advances, "pack stays vX" over a body that writes the bump is
+  self-contradictory — Crewops defect 3. Resolved by #536: the header now reads
+  `pin advance vX → vY (no migrations)` and the gate body shows the matching
+  `.claude-ds.json` write (the `packVersion: "vX" -> "vY"` flip), so preview and
+  execution agree. A plan/report-reconciliation invariant
+  (`tests/integration/plan-report-reconciliation.test.ts`) pins the preview's
+  declared `Change[]` to the apply path's — counts, files, and version claims —
+  so the divergence cannot recur as a class.

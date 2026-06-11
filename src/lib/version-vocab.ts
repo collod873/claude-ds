@@ -43,14 +43,17 @@ export function cliVersion(): string {
  *     Returned as `verify migration end-states` so the gate header reads
  *     `upgrade — verify migration end-states`.
  *   - `chainLength === 0` and `from !== to`: the CLI is ahead of the pack but
- *     no registered migrations span the gap. Returned as `pin bump only — pack
- *     stays vX`; never `pack vX → vY` (the phantom this module exists to
- *     prevent).
+ *     no registered migrations span the gap. Post-#540 (ADR-0029) the pin still
+ *     ADVANCES to `to` so "upgrade available" clears — so the headline names the
+ *     real transition: `pin advance vX → vY (no migrations)`. Never `pack vX →
+ *     vY` (the phantom-migration arrow this module exists to prevent), and never
+ *     the retired `pin bump only — pack stays vX` (which contradicted the body's
+ *     `.claude-ds.json` pin write — Crewops defect 3, #536).
  *   - `chainLength > 0`: a real migration set will apply. Returned as
  *     `pack vX → vY`, matching today's non-empty behaviour.
  */
 export function upgradeHeadline(input: { from: string; to: string; chainLength: number }): string {
 	if (input.from === input.to) return "verify migration end-states";
-	if (input.chainLength === 0) return `pin bump only — pack stays ${input.from}`;
+	if (input.chainLength === 0) return `pin advance ${input.from} → ${input.to} (no migrations)`;
 	return `${LABEL_PACK} ${input.from} → ${input.to}`;
 }

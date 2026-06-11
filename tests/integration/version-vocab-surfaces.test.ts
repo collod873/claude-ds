@@ -134,10 +134,14 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 	});
 
 	describe("front-door / heal commitment gate", () => {
-		it("empty chain (pinned at last applied migration): gate header is `pin bump only`, not `pack X → Y`", async () => {
+		it("empty chain (pinned at last applied migration): gate header names the pin advance, not `pack X → Y` and not a self-contradiction", async () => {
 			// Adopt and force a stale pin whose migration chain to the CLI is empty.
 			// The headline used to read `upgrade — pack vX → vY` (phantom); per #412
-			// it must read `upgrade — pin bump only — pack stays vX`.
+			// it became `upgrade — pin bump only — pack stays vX`. Post-#540 the
+			// empty range advances the pin, so "pack stays vX" over a body that
+			// writes the bump is Crewops defect 3 — the header must name the real
+			// `pin advance vX → vY` and the body must show the `.claude-ds.json`
+			// write, never "no file changes" (#536).
 			const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
 			expect(adopt.code).toBe(0);
 			const cfgPath = join(dir, ".claude-ds.json");
@@ -150,8 +154,20 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 			if (HAS_STALE_EMPTY_CHAIN) {
 				expect(out).toMatch(/upgrade available/);
 				expect(out).toMatch(
-					new RegExp(`upgrade — pin bump only — pack stays ${escapeRegex(EMPTY_CHAIN_PIN)}`),
+					new RegExp(
+						`upgrade — pin advance ${escapeRegex(EMPTY_CHAIN_PIN)} → ${escapeRegex(CLI_VERSION)} \\(no migrations\\)`,
+					),
 				);
+				// Defect 3 (#536): the body must reconcile with the header. The pin
+				// advance is a real `.claude-ds.json` write, surfaced as a substantive
+				// flag flip — never the contradictory "no file changes — version pin
+				// only" line under a header that just promised a bump.
+				expect(out).toMatch(
+					new RegExp(
+						`packVersion: "${escapeRegex(EMPTY_CHAIN_PIN)}" -> "${escapeRegex(CLI_VERSION)}"`,
+					),
+				);
+				expect(out).not.toMatch(/no file changes/);
 			} else {
 				// A migration is registered at the CLI version (pin === CLI): no
 				// stale-but-empty gap exists, so the gate reports up-to-date. The
