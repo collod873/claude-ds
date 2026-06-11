@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { runCli } from "../../../../tests/helpers/runcli";
+import { compileEmitted } from "../../../../tests/helpers/compile-emitted";
 
 const SCRIPT = resolve("packs/next-react/files/scripts/generate-showcase-companion.ts");
 
@@ -630,6 +631,20 @@ describe("generate-showcase-companion.ts [integration] — CVA fixture cluster",
 
   it("CVA-expanded .showcase.tsx does not contain @ts-nocheck", () => {
     expect(content).not.toContain("@ts-nocheck");
+  });
+
+  // Compile-what-you-emit (PRD #546, issue #551): string assertions only encode
+  // the generator's own beliefs. This typechecks the emitted showcase against
+  // the real, precisely-typed Badge through the fixture's own tsconfig — the
+  // ground truth the Crewops breakage slipped past. Single-CVA Badge is the
+  // clean case, so this is green; the multi-CVA Crewops-shape regressions live
+  // (red, as expected-fail tripwires) in compile-what-you-emit.integration.test.ts.
+  it("CVA-expanded .showcase.tsx typechecks against the real Badge component", () => {
+    const r = compileEmitted(
+      [{ path: "design-system/atoms/badge.showcase.tsx", content }],
+      FIXTURE_CVA,
+    );
+    expect(r.hasErrors, r.messages.join("\n")).toBe(false);
   });
 });
 
