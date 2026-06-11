@@ -63,6 +63,46 @@ export async function materializeFixture(name: string): Promise<string> {
 	return dir;
 }
 
+/**
+ * Commit the current working tree so a follow-up command sees a clean repo. The
+ * anti-circularity invariant (#583) re-runs heal after a red gate; heal's
+ * clean-tree guard aborts on a dirty tree, so the first run's writes must be
+ * committed before the second run — exactly how a consumer or CI proceeds.
+ */
+export function commitTree(dir: string, message: string): void {
+	git(dir, ["add", "-A"]);
+	git(dir, ["commit", "-q", "--allow-empty", "-m", message]);
+}
+
+/**
+ * The set of paths the working tree changed relative to its last commit —
+ * modified, added, and renamed (rename reports the destination, the path now on
+ * disk). Forward-slashed, sorted. This is the run's *actual* tree diff that the
+ * trusted-inventory invariant (#583) compares heal's reported `filesWritten`
+ * against: every write the ledger claims must be a real change on disk, and on a
+ * converged no-op re-run the two sets must match exactly. `-uall` lists individual
+ * untracked files, not directories.
+ */
+export function gitChangedPaths(dir: string): string[] {
+	const res = spawnSync("git", ["-c", "core.quotepath=false", "status", "--porcelain", "-uall"], {
+		cwd: dir,
+		encoding: "utf8",
+	});
+	if (res.status !== 0) {
+		throw new Error(`git status failed: ${res.stderr || res.stdout}`);
+	}
+	const paths = res.stdout
+		.split("\n")
+		.filter((line) => line.length > 0)
+		.map((line) => {
+			const rest = line.slice(3);
+			// A rename renders `orig -> dest`; the destination is the path on disk now.
+			const arrow = rest.indexOf(" -> ");
+			return arrow === -1 ? rest : rest.slice(arrow + 4);
+		});
+	return [...new Set(paths)].sort();
+}
+
 /** Recursively snapshot `dir` into a path→contents map, skipping `.git/`. */
 export async function readTree(dir: string): Promise<FixtureTree> {
 	const tree: FixtureTree = {};
