@@ -127,6 +127,36 @@ describe("heal verify gate — ownership partition + hand-verify fixed point (#5
 		expect(infoMsgs.some((m) => /converged in \d+ iteration\(s\) — 0 changes/.test(m))).toBe(false);
 	});
 
+	it("defect 8: the hand-verify exit gains the state statement + run ledger appended (#581)", async () => {
+		await cleanAdoptedTree(dir);
+		const handVerifyError = {
+			file: "design-system/atoms/card.stories.tsx",
+			line: 4,
+			col: 9,
+			code: "TS2322",
+			message: "JSX example does not type-check.",
+			raw: "",
+		};
+		vi.mocked(runConsumerVerify).mockResolvedValue(
+			greenVerify({ exitCode: 1, errors: [handVerifyError], handVerifyErrors: [handVerifyError] }),
+		);
+
+		await healCmd({ cwd: dir });
+
+		// Exit code 4 is unchanged — #581 changes what is said, not the verdict.
+		expect(exitSpy).toHaveBeenCalledWith(HEAL_EXIT_HAND_VERIFY);
+
+		const errMsgs = vi.mocked(err).mock.calls.map((c) => String(c[0]));
+		const idx = (re: RegExp) => errMsgs.findIndex((m) => re.test(m));
+		const guidance = idx(/yours to fix|by hand/);
+		const state = idx(/isn't a git repository|transaction layer/);
+		const ledger = idx(/What heal wrote this run/);
+		// All three present, and the block is APPENDED after the hand-verify guidance.
+		for (const i of [guidance, state, ledger]) expect(i).toBeGreaterThanOrEqual(0);
+		expect(guidance).toBeLessThan(state);
+		expect(state).toBeLessThan(ledger);
+	});
+
 	it("defect 7: an error in a @generated file red-gates as a claude-ds defect, not hand-verify", async () => {
 		await cleanAdoptedTree(dir);
 		const generatedError = {

@@ -311,7 +311,14 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 			// can't clear them, so — mirroring the Pending exit — name each blocker and
 			// exit on a distinct code instead of the circular "run audit, then re-run."
 			if (verify.handVerifyErrors.length > 0) {
-				reportHandVerifyAndExit(verify, outcome.iterations, maxIterations, opts.json);
+				reportHandVerifyAndExit(
+					verify,
+					outcome.iterations,
+					maxIterations,
+					guard.state,
+					outcome.ledger,
+					opts.json,
+				);
 				return;
 			}
 			const consumerNote =
@@ -338,14 +345,28 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 		// Pending. Surface the named PENDING exit with a scaffold rather than
 		// letting external automation conflate it with "did not converge."
 		if (outcome.kind === "pending") {
-			await reportPendingAndExit(cwd, pendingSink, progress, opts.json);
+			await reportPendingAndExit(
+				cwd,
+				pendingSink,
+				progress,
+				guard.state,
+				outcome.ledger,
+				opts.json,
+			);
 			return;
 		}
 
 		// Ceiling hit. If Pending accumulated, that still needs the operator — the
 		// named PENDING exit, not a hard failure. External automation routes on it either way.
 		if (pendingSink.length > 0) {
-			await reportPendingAndExit(cwd, pendingSink, progress, opts.json);
+			await reportPendingAndExit(
+				cwd,
+				pendingSink,
+				progress,
+				guard.state,
+				outcome.ledger,
+				opts.json,
+			);
 			return;
 		}
 
@@ -358,6 +379,10 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 		err(
 			`heal: did not converge after ${maxIterations} iterations — run \`claude-ds audit\` for the remaining findings`,
 		);
+		// #581: the ceiling exit no longer ends silently on state — render the same
+		// state-statement + run-ledger block the red-gate report carries. `guard` is
+		// narrowed to `ok: true` (the `!guard.ok` arm exits the process above).
+		reportExitState(guard.state, outcome.ledger);
 		if (opts.json) {
 			emitHeadless({
 				command: "heal",
@@ -365,7 +390,12 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 				verdict: "exhausted",
 				exitCode: HEADLESS_EXIT.FINDINGS,
 				actions: { maxIterations },
-				remaining: { lastStep: phase, pending: 0 },
+				remaining: {
+					lastStep: phase,
+					pending: 0,
+					cleanTreeState: guard.state,
+					ledger: outcome.ledger.entries(),
+				},
 			});
 		}
 		process.exit(1);
@@ -389,6 +419,8 @@ async function reportPendingAndExit(
 	cwd: string,
 	pending: PendingDecision[],
 	progress: ReturnType<typeof createProgress>,
+	cleanState: CleanTreeState,
+	ledger: RunLedger,
 	json?: boolean,
 ): Promise<void> {
 	const uniqueById = new Map<string, PendingDecision>();
@@ -424,6 +456,9 @@ async function reportPendingAndExit(
 			`"FILL: …" hint with the chosen option index), then re-run: ` +
 			`\`claude-ds heal --answers ${PENDING_ANSWERS_SCAFFOLD}\`.`,
 	);
+	// #581: append the state-statement + run-ledger block so the Pending exit names
+	// what heal wrote and how to revert — never ending silently on state.
+	reportExitState(cleanState, ledger);
 	if (json) {
 		emitHeadless({
 			command: "heal",
@@ -434,6 +469,8 @@ async function reportPendingAndExit(
 			remaining: {
 				pending: deduped.length,
 				decisions: deduped.map((d) => ({ id: d.id, question: d.question })),
+				cleanTreeState: cleanState,
+				ledger: ledger.entries(),
 			},
 		});
 	}
@@ -452,6 +489,8 @@ function reportHandVerifyAndExit(
 	verify: VerifyResult,
 	iterations: number,
 	maxIterations: number,
+	cleanState: CleanTreeState,
+	ledger: RunLedger,
 	json?: boolean,
 ): void {
 	const count = verify.handVerifyErrors.length;
@@ -467,6 +506,9 @@ function reportHandVerifyAndExit(
 		`These are yours to fix — claude-ds leaves JSX-bearing showcases untouched. ` +
 			`Re-running heal won't change them; edit each file above so it type-checks, then re-run \`claude-ds heal\`.`,
 	);
+	// #581: append the state-statement + run-ledger block without otherwise changing
+	// this exit — its exit code 4 and per-file guidance above are unchanged.
+	reportExitState(cleanState, ledger);
 	if (json) {
 		emitHeadless({
 			command: "heal",
@@ -479,6 +521,8 @@ function reportHandVerifyAndExit(
 				pending: 0,
 				handVerify: count,
 				verify: verifyJson(verify),
+				cleanTreeState: cleanState,
+				ledger: ledger.entries(),
 			},
 		});
 	}
@@ -532,8 +576,7 @@ function reportRedGate(verify: VerifyResult, ctx: RedGateContext): void {
 			);
 		}
 		err("These are claude-ds's to fix — do not hand-edit `@generated` files.");
-		reportRevertState(ctx.cleanState);
-		reportLedger(ctx.ledger);
+		reportExitState(ctx.cleanState, ctx.ledger);
 		reportOffRamp(ctx.packPin);
 		return;
 	}
@@ -559,6 +602,20 @@ function reportRedGate(verify: VerifyResult, ctx: RedGateContext): void {
 			? "Re-run with a longer verify timeout or after warming the consumer's tsc/test cache, then `claude-ds heal`."
 			: "Address the failure above and re-run `claude-ds heal`.",
 	);
+}
+
+/**
+ * The uniform exit-state block (#581): the state statement + run ledger the
+ * red-gate report renders, now shared across every non-zero heal exit — exhausted
+ * (ceiling), pending, and hand-verify. After this slice no heal failure path ends
+ * silently on state: every one answers "what did heal write, and how do I get
+ * back." The off-ramp stays red-gate-only — its "deterministic, file a defect"
+ * framing fits the red gate, but not the needs-Collin exits where a re-run (after
+ * filling the scaffold or fixing a JSX showcase) genuinely changes the outcome.
+ */
+function reportExitState(cleanState: CleanTreeState, ledger: RunLedger): void {
+	reportRevertState(cleanState);
+	reportLedger(ledger);
 }
 
 /**
