@@ -333,7 +333,8 @@ _Contrast_: Managed roots (what the pack overwrites); Owned concern (what counts
 as DS infra). Complaint ownership answers *"who clears this finding?"*
 
 ### Migration Op
-A versioned `Op` shipped in `pack/versions/<version>/migrations/` that
+A versioned `Op` shipped in `src/lib/ops/migrations/<version>/` (keyed by
+`src/lib/migration-registry.ts`) that
 transforms a consumer from one pack version to the next. Migrations emit
 `Change[]` like any Op and run through the Runner (`claude-ds upgrade`).
 Examples: `add-patterns-tier`, `retire-states`, `migrate-managed-manifest`.
