@@ -350,6 +350,9 @@ async function partitionErrors(
 	const scaffoldErrors: VerifyError[] = [];
 	const handVerifyErrors: VerifyError[] = [];
 	const consumerErrors: VerifyError[] = [];
+	// One verdict per file: the 79 Crewops errors concentrated into a handful of
+	// showcases, so cache the header probe rather than re-reading a file per error.
+	const handVerifyCache = new Map<string, boolean>();
 	for (const e of errors) {
 		if (!isScaffoldPath(e.file, opts)) {
 			consumerErrors.push(e);
@@ -358,7 +361,12 @@ async function partitionErrors(
 		// In claude-ds territory: split the consumer-authored JSX showcase
 		// (hand-verify) out of the claude-ds defect (scaffold). `@generated`
 		// showcases stay scaffold — the header forbids hand-editing (ADR-0030).
-		if (await isHandVerifyError(cwd, e.file)) {
+		let isHandVerify = handVerifyCache.get(e.file);
+		if (isHandVerify === undefined) {
+			isHandVerify = await isHandVerifyError(cwd, e.file);
+			handVerifyCache.set(e.file, isHandVerify);
+		}
+		if (isHandVerify) {
 			handVerifyErrors.push(e);
 		} else {
 			scaffoldErrors.push(e);
