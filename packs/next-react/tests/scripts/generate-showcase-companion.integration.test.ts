@@ -593,6 +593,17 @@ describe("generate-showcase-companion.ts [integration] — ATOM fixture cluster"
   it("header in .showcase.tsx includes the source filename", () => {
     expect(content).toContain("Source: button.tsx meta block.");
   });
+
+  // Compile-what-you-emit (PRD #546 #10, issue #551): the typecheck step is not
+  // CVA-only. The plain-atom emission gets the same oracle, against the real,
+  // precisely-typed Button through the fixture's own tsconfig.
+  it("emitted .showcase.tsx typechecks against the real Button component", () => {
+    const r = compileEmitted(
+      [{ path: "design-system/atoms/button.showcase.tsx", content }],
+      FIXTURE_ATOM,
+    );
+    expect(r.hasErrors, r.messages.join("\n")).toBe(false);
+  });
 });
 
 // ── CVA fixture cluster (shared spawn) ──────────────────────────────────────
@@ -673,6 +684,17 @@ describe("generate-showcase-companion.ts [integration] — REF fixture cluster",
     expect(content).toContain('import { meta } from "./tokens-page"');
     expect(content).toContain("meta.render()");
     expect(content).toContain("Design Tokens");
+  });
+
+  // Compile-what-you-emit (PRD #546 #10, issue #551): a reference showcase calls
+  // meta.render() rather than spreading example props, but it is still emitted
+  // .tsx — so it gets the same compiler oracle against the real fixture.
+  it("emitted reference .showcase.tsx typechecks against the real meta", () => {
+    const r = compileEmitted(
+      [{ path: "design-system/references/tokens-page.showcase.tsx", content }],
+      FIXTURE_REF,
+    );
+    expect(r.hasErrors, r.messages.join("\n")).toBe(false);
   });
 
   it("reference showcase wraps content in prose div", () => {
