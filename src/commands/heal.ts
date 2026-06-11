@@ -298,6 +298,12 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 							verify: verifyJson(verify),
 							cleanTreeState: guard.state,
 							ledger: outcome.ledger.entries(),
+							// #582: CI-routable projections of the two prose-block facts —
+							// can an automatic revert run (`cleanAtStart`), and which files
+							// to revert or quarantine (`filesWritten`) — so external
+							// automation routes without parsing the state/ledger prose.
+							cleanAtStart: isCleanAtStart(guard.state),
+							filesWritten: ledgerPaths(outcome.ledger),
 						},
 					});
 				}
@@ -395,6 +401,9 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 					pending: 0,
 					cleanTreeState: guard.state,
 					ledger: outcome.ledger.entries(),
+					// #582: same CI-routable projections as the verify-failed envelope.
+					cleanAtStart: isCleanAtStart(guard.state),
+					filesWritten: ledgerPaths(outcome.ledger),
 				},
 			});
 		}
@@ -602,6 +611,27 @@ function reportRedGate(verify: VerifyResult, ctx: RedGateContext): void {
 			? "Re-run with a longer verify timeout or after warming the consumer's tsc/test cache, then `claude-ds heal`."
 			: "Address the failure above and re-run `claude-ds heal`.",
 	);
+}
+
+/**
+ * The two machine-readable projections of the exit-state block (#582) the
+ * `verify-failed` and `exhausted` headless envelopes carry so CI routes on the
+ * blast radius without parsing the prose `reportExitState` renders.
+ *
+ * `cleanAtStart` is the revert-safety signal: true only when the clean-tree
+ * guard recorded `clean` — the one state where an automatic `git stash` revert
+ * is offered. `dirty-overridden` (--allow-dirty) and `no-git` both mean revert
+ * is unavailable, so both map to false. `filesWritten` is the flat list of paths
+ * heal touched, taken from the run ledger (a `rename`'s destination is the path
+ * now on disk, so it's the one CI would quarantine) — distinct from the richer
+ * `ledger` entries, which keep the step/verb audit detail.
+ */
+function isCleanAtStart(cleanState: CleanTreeState): boolean {
+	return cleanState === "clean";
+}
+
+function ledgerPaths(ledger: RunLedger): string[] {
+	return ledger.entries().map((e) => e.toPath ?? e.path);
 }
 
 /**

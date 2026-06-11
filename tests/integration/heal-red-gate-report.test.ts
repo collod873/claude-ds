@@ -207,4 +207,55 @@ describe("heal red-gate report — state statement, ledger, off-ramp (#580)", ()
 		expect(msgs.some((m) => /isn't a git repository/i.test(m))).toBe(true);
 		expect(msgs.some((m) => /What heal wrote this run/.test(m))).toBe(true);
 	});
+
+	// Issue #582 — the `verify-failed` headless envelope gains machine-readable
+	// `filesWritten` (the run-ledger paths) and `cleanAtStart` (revert-safety
+	// boolean) so CI can decide to revert or quarantine without parsing the prose
+	// block. Existing fields (`ledger`, `cleanTreeState`, exit code 1) are unchanged.
+	const stdoutEnvelope = async (opts: Parameters<typeof healCmd>[0]) => {
+		const writes: string[] = [];
+		const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+			writes.push(String(chunk));
+			return true;
+		}) as never);
+		try {
+			await healCmd(opts);
+		} finally {
+			writeSpy.mockRestore();
+		}
+		// `emitHeadless` writes the whole envelope as a single `{`-leading chunk;
+		// pick it out of any other stdout writes the run produced.
+		const envelope = writes.find((w) => w.trimStart().startsWith("{"));
+		return JSON.parse(String(envelope).trim());
+	};
+
+	it("verify-failed --json envelope carries filesWritten and cleanAtStart (#582)", async () => {
+		await cleanAdoptedTree(dir);
+		gitInitAndCommit(dir);
+
+		const env = await stdoutEnvelope({ cwd: dir, json: true });
+
+		expect(exitSpy).toHaveBeenCalledWith(1);
+		expect(env.verdict).toBe("verify-failed");
+		expect(env.exitCode).toBe(1);
+		// New CI-routable fields.
+		expect(env.remaining.cleanAtStart).toBe(true);
+		expect(Array.isArray(env.remaining.filesWritten)).toBe(true);
+		expect(env.remaining.filesWritten.every((p: unknown) => typeof p === "string")).toBe(true);
+		// Existing fields unchanged.
+		expect(env.remaining.cleanTreeState).toBe("clean");
+		expect(Array.isArray(env.remaining.ledger)).toBe(true);
+	});
+
+	it("verify-failed --json: cleanAtStart is false when the tree wasn't clean at start (#582)", async () => {
+		// no-git fixture: the clean-tree guard records `no-git`, so revert is
+		// unavailable and cleanAtStart is false.
+		await cleanAdoptedTree(dir);
+
+		const env = await stdoutEnvelope({ cwd: dir, json: true });
+
+		expect(env.verdict).toBe("verify-failed");
+		expect(env.remaining.cleanAtStart).toBe(false);
+		expect(env.remaining.cleanTreeState).toBe("no-git");
+	});
 });

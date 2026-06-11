@@ -65,3 +65,25 @@ changes; `doctor` / `audit` / `version` output is byte-stable.
 - Legacy commands (`migrate`, `enforce`) are resolved separately (retire /
   fold — #470); until then they remain billed. This ADR governs the loop-member
   and reserved-slot demotion only.
+
+## Amendment — heal headless envelope gains `filesWritten` + `cleanAtStart` (2026-06-11, #582)
+
+The `heal --json` envelope is part of the command surface this ADR governs (the
+machine-readable face of the `heal` driver). PRD #575 made heal's failure exits
+name what they wrote and how to get back; #580/#581 rendered that as a prose
+state-statement + run-ledger block and carried the raw `cleanTreeState` /
+`ledger` data on the `verify-failed` and `exhausted` envelopes.
+
+#582 adds two CI-routable projections to those two envelopes' `remaining` block
+so external automation decides **revert or quarantine** without parsing prose:
+
+- `cleanAtStart: boolean` — true only when the clean-tree guard recorded
+  `clean`, the one state where an automatic `git stash` revert is offered
+  (`dirty-overridden` and `no-git` both map to false).
+- `filesWritten: string[]` — the flat list of paths heal touched (a `rename`'s
+  destination, the path now on disk), projected from the run ledger.
+
+This is **additive**: `cleanTreeState`, `ledger`, every other envelope field, and
+all exit codes (0/1/3/4) are unchanged. The richer `ledger` entries keep their
+step/verb audit detail; `filesWritten` is the path-only projection CI iterates.
+No released consumer loses a field, so the never-break guarantee holds.
