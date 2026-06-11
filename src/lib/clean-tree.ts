@@ -29,23 +29,44 @@ export interface CleanTreeOptions {
 	cwd: string;
 }
 
-export type CleanTreeResult = { ok: true } | { ok: false; message: string };
+/**
+ * Why the guard let the command through — retained as run metadata so a later
+ * failure report can state whether an automatic revert is possible (PRD #575 /
+ * sub-issue #580). The gate decision used to collapse all three "ok" paths into
+ * a bare `true`; heal needs to tell them apart at exit:
+ *   - `clean` — the tree was clean at start, so every byte the command wrote is
+ *     uncommitted and `git` can undo all of it. The report prints the exact
+ *     revert command.
+ *   - `dirty-overridden` — `--allow-dirty` bypassed the gate, so the command's
+ *     writes are mixed with pre-existing uncommitted work `git` can't separate.
+ *     No automatic revert; the report falls back to the inventory.
+ *   - `no-git` — not a git repo (or `git status` failed), so there is no
+ *     transaction layer to undo from. Same fallback.
+ */
+export type CleanTreeState = "clean" | "dirty-overridden" | "no-git";
+
+export type CleanTreeResult = { ok: true; state: CleanTreeState } | { ok: false; message: string };
 
 export function checkCleanTree(opts: CleanTreeOptions): CleanTreeResult {
-	if (opts.allowDirty) return { ok: true };
+	// `--allow-dirty` bypasses the git probe entirely, so we can't know whether the
+	// tree was clean — treat it as dirty-overridden: the conservative state that
+	// withholds the automatic-revert offer.
+	if (opts.allowDirty) return { ok: true, state: "dirty-overridden" };
 
 	const isRepo = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
 		cwd: opts.cwd,
 		stdio: "ignore",
 	});
-	if (isRepo.status !== 0) return { ok: true };
+	if (isRepo.status !== 0) return { ok: true, state: "no-git" };
 
 	const status = spawnSync("git", ["status", "--porcelain"], {
 		cwd: opts.cwd,
 		encoding: "utf8",
 	});
-	if (status.status !== 0) return { ok: true };
-	if ((status.stdout ?? "").trim() === "") return { ok: true };
+	// A repo whose `git status` failed gives us no transaction layer to undo from —
+	// same fallback as no-git.
+	if (status.status !== 0) return { ok: true, state: "no-git" };
+	if ((status.stdout ?? "").trim() === "") return { ok: true, state: "clean" };
 
 	return {
 		ok: false,

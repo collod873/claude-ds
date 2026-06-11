@@ -43,15 +43,19 @@ async function gitInitAndCommit(d: string): Promise<void> {
  *   - `allowDirty: true` → ok (caller's authorized override).
  */
 describe("clean-tree guard (PRD #325 / #328)", () => {
-	it("non-git directory: returns ok (cannot check; nothing to refuse on)", () => {
+	it("non-git directory: returns ok with state=no-git (cannot check; nothing to refuse on)", () => {
 		const r = checkCleanTree({ command: "audit", cwd: dir });
 		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		expect(r.state).toBe("no-git");
 	});
 
-	it("clean git tree: returns ok", async () => {
+	it("clean git tree: returns ok with state=clean (revert is possible at exit)", async () => {
 		await gitInitAndCommit(dir);
 		const r = checkCleanTree({ command: "audit", cwd: dir });
 		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		expect(r.state).toBe("clean");
 	});
 
 	it("dirty git tree: returns ok=false with a named, actionable message", async () => {
@@ -82,6 +86,10 @@ describe("clean-tree guard (PRD #325 / #328)", () => {
 
 		const r = checkCleanTree({ command: "audit", cwd: dir, allowDirty: true });
 		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		// The override withholds the automatic-revert offer: heal's writes are now
+		// mixed with the pre-existing dirt git can't separate.
+		expect(r.state).toBe("dirty-overridden");
 	});
 
 	it("dirty includes staged-but-uncommitted changes (the migrate-layout/reconform contract)", async () => {
