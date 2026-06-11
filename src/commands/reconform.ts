@@ -15,6 +15,7 @@ import { migrateClaudeMd } from "../lib/ops/migrate-claude-md.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { rewriteImports } from "../lib/ops/rewrite-imports.js";
 import { loadProject } from "../lib/project.js";
+import { renderPerFileNotices } from "../lib/render/index.js";
 import { createProgress } from "../lib/render/tty-layer.js";
 import { findMissingMeta } from "../lib/reports/meta-audit.js";
 import { emitStubHint } from "../lib/reports/stub-warning.js";
@@ -280,12 +281,19 @@ export async function reconformCmd(opts: {
 		// comparison (a JSX-bearing example the regex regenerator can't reproduce),
 		// so the integrity check can't confirm they're current — without this line a
 		// subset of broken showcases could hide behind "all generated files clean."
-		for (const s of genSkipped) {
-			info(
-				c.cyan(
-					`integrity check: ${s} skipped (JSX-bearing example, ADR-0026) — not compared; verify by hand`,
-				),
-			);
+		// #534: route through the shared per-file notice path so a repo with many
+		// skipped companions collapses to one count + `--verbose` (defect 5) instead
+		// of a per-file wall of identical "verify by hand" lines.
+		const skipNotices = genSkipped.map((s) => ({
+			kind: "integrity-skipped-jsx",
+			line: `integrity check: ${s} skipped (JSX-bearing example, ADR-0026) — not compared; verify by hand`,
+		}));
+		for (const line of renderPerFileNotices(skipNotices, {
+			verbose,
+			summarize: (_kind, n) =>
+				`integrity check: ${n} files skipped (JSX-bearing examples, ADR-0026) — not compared; verify by hand`,
+		})) {
+			info(c.cyan(line));
 		}
 		for (const v of genViolations) info(`${c.red(v.ruleId)}: ${v.message}`);
 		if (genViolations.length > 0) {

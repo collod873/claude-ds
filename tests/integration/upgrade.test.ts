@@ -52,6 +52,38 @@ describe("upgrade", () => {
 		expect(r.stdout).toMatch(/no registered migrations/);
 	});
 
+	// Defect 1 (#531, ADR-0029) — the Crewops upgrade no-op loop. A consumer
+	// adopted at the prior pack version is healed by a newer CLI whose migration
+	// range is empty. Before the fix, upgrade printed ✔ but left the pin put, so
+	// "upgrade available" never cleared and heal could never converge. An empty
+	// migration range is informational, never a blocker: the step still advances
+	// the pin to the target so the originating complaint clears.
+	it("advances the pack pin when the migration range is empty (defect 1, #531)", async () => {
+		await writeFile(
+			join(dir, ".claude-ds.json"),
+			JSON.stringify({ ...BASE_CFG, packVersion: "v1.0.0" }),
+		);
+		const r = await runCli(["upgrade", "--to", "v1.1.0", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		expect(r.stdout).toMatch(/no registered migrations/);
+		// The pin must advance even though no migrations ran — this is the line
+		// that was RED before the fix (pin stayed at v1.0.0).
+		const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+		expect(cfg.packVersion).toBe("v1.1.0");
+	});
+
+	// The empty-range pin advance is a write — a dry-run must never perform it.
+	it("dry-run does not advance the pin on an empty migration range (#531)", async () => {
+		await writeFile(
+			join(dir, ".claude-ds.json"),
+			JSON.stringify({ ...BASE_CFG, packVersion: "v1.0.0" }),
+		);
+		const r = await runCli(["upgrade", "--to", "v1.1.0", "--dry-run"], { cwd: dir });
+		expect(r.code).toBe(0);
+		const cfg = JSON.parse(await readFile(join(dir, ".claude-ds.json"), "utf8"));
+		expect(cfg.packVersion).toBe("v1.0.0");
+	});
+
 	it("v0.9.0: installs build-manifest.ts and deletes hand-built manifest.generated.ts", async () => {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
