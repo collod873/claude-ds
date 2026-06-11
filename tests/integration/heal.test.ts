@@ -298,6 +298,37 @@ describe("claude-ds heal — self-converging brownfield loop (#265)", () => {
 		expect(r.stderr).toMatch(/What heal wrote this run/);
 	}, 30000);
 
+	// Issue #582 — the `exhausted` headless envelope gains machine-readable
+	// `filesWritten` (run-ledger paths) and `cleanAtStart` (revert-safety boolean)
+	// so CI can route on the blast radius without parsing the prose block. The
+	// no-git fixture makes cleanAtStart false; exit code 1 and verdict are unchanged.
+	it("exhausted --json envelope carries filesWritten and cleanAtStart (#582)", async () => {
+		await writeFile(
+			join(dir, ".claude-ds.json"),
+			JSON.stringify({ ...BASE_CFG, packVersion: `v${pkg.version}` }),
+		);
+		await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+		await writeFile(
+			join(dir, "design-system/patterns/no-slots.tsx"),
+			`export function NoSlots() { return <div/>; }\nexport const meta = { kind: "pattern" as const, examples: [] };\n`,
+		);
+
+		const r = await runCli(["heal", "--max-iterations", "3", "--json"], { cwd: dir });
+		expect(r.code).toBe(1);
+		// Slice the envelope from the first `{` — a sub-command's `Substantive
+		// changes:` line leaks to stdout (a pre-existing json-mode chatter defect
+		// unrelated to #582); the envelope itself is the trailing JSON object.
+		const env = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")).trim());
+		expect(env.verdict).toBe("exhausted");
+		// New CI-routable fields.
+		expect(Array.isArray(env.remaining.filesWritten)).toBe(true);
+		expect(env.remaining.filesWritten.every((p: unknown) => typeof p === "string")).toBe(true);
+		expect(env.remaining.cleanAtStart).toBe(false);
+		// Existing fields unchanged.
+		expect(env.remaining.cleanTreeState).toBe("no-git");
+		expect(Array.isArray(env.remaining.ledger)).toBe(true);
+	}, 30000);
+
 	// Issue #463 — heal/front-door must deliver managed-file bug fixes to a
 	// consumer whose file is PRESENT but content-drifted, with no manual `sync`.
 	// Before the fix, `scaffoldGap` was presence-only, so a stale-but-present
