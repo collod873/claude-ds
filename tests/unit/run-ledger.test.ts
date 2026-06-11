@@ -22,6 +22,13 @@ const write = (path: string): Change => ({
 	before: null,
 	after: Buffer.from("x"),
 });
+/** A no-op write — `after` matches `before` byte-for-byte, zero bytes moved on disk. */
+const noopWrite = (path: string): Change => ({
+	kind: "write",
+	path,
+	before: Buffer.from("x"),
+	after: Buffer.from("x"),
+});
 const del = (path: string): Change => ({ kind: "delete", path, before: Buffer.from("x") });
 const rename = (path: string, after: string): Change => ({ kind: "rename", path, after });
 const abort = (path: string): Change => ({ kind: "abort", path, reason: "hand-edited" });
@@ -43,6 +50,26 @@ describe("run ledger", () => {
 		ledger.record("sync", report(abort("managed.tsx"), write("real.tsx")));
 
 		expect(ledger.entries()).toEqual([{ step: "sync", verb: "write", path: "real.tsx" }]);
+	});
+
+	it("excludes a no-op write — re-emitting identical bytes changed nothing", () => {
+		const ledger = createRunLedger();
+		ledger.record("reconform", report(noopWrite("clean.tsx"), write("real.tsx")));
+
+		// `clean.tsx` was visited but its bytes were unchanged — it is not blast radius.
+		expect(ledger.entries()).toEqual([{ step: "reconform", verb: "write", path: "real.tsx" }]);
+	});
+
+	it("a no-op write does not relabel a path a prior pass really wrote", () => {
+		const ledger = createRunLedger();
+		// Pass 1: sync writes real content.
+		ledger.record("sync", report(write("design-system/atoms/button.tsx")));
+		// Pass 3: audit --fix re-emits identical bytes — the real change stays under sync.
+		ledger.record("audit --fix", report(noopWrite("design-system/atoms/button.tsx")));
+
+		expect(ledger.entries()).toEqual([
+			{ step: "sync", verb: "write", path: "design-system/atoms/button.tsx" },
+		]);
 	});
 
 	it("deduplicates by path across passes — last verb wins", () => {

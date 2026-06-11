@@ -66,6 +66,12 @@ export function createRunLedger(): RunLedger {
 	function recordChange(step: string, change: Change): void {
 		switch (change.kind) {
 			case "write":
+				// A `write` whose `after` matches its `before` byte-for-byte moved zero
+				// bytes on disk (the consumer-formatter re-emit case #532 — `git status`
+				// shows nothing). The blast radius is what heal *changed*, so a no-op
+				// write belongs in no inventory; recording it would be a false positive
+				// that contradicts this module's "byte-changing kinds" contract.
+				if (change.before?.equals(change.after)) return;
 				byPath.set(change.path, { step, verb: "write", path: change.path });
 				return;
 			case "delete":
