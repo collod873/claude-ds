@@ -315,6 +315,10 @@
       "category": "managed"
     },
     {
+      "path": "scripts/lib/cva-analyzer.ts",
+      "category": "managed"
+    },
+    {
       "path": ".claude/hooks/regenerate-companions.sh",
       "category": "managed"
     },
