@@ -80,13 +80,16 @@ No path moves. Two consumer-facing changes:
    ```
    Each declared state produces a labeled row in the showcase. Omitting `states` leaves the showcase unchanged from prior behavior.
 
-3. **Optional usage-analyzer hook.** If a consumer creates `scripts/analyze-component-usage.ts` exporting a default function with signature
+3. **Optional usage-analyzer hook.** ~~If a consumer creates `scripts/analyze-component-usage.ts` exporting a default function with signature~~
    ```ts
    (srcFiles: string[]) => Map<componentName, {
      literal: Map<prop, Map<value, count>>;
      dynamicProps: Set<prop>;
    }>
    ```
-   the generator will load it and render ✓ used / ⚠ dynamic-only / ✗ unused tags per CVA variant. If the file is absent, the tag column is omitted (no failure mode).
+   ~~the generator will load it and render ✓ used / ⚠ dynamic-only / ✗ unused tags per CVA variant.~~
+   **Retired in #568 (ADR-0031):** the CLI-canonical generator takes source text +
+   meta only — it no longer loads `scripts/analyze-component-usage.ts`, and the
+   ✓/⚠/✗ tag column is gone. The file is inert; consumers may delete it.
 
 Run `claude-ds sync` to pull the updated generator, then `claude-ds reconform` (or the `regenerate-companions` hook) to refresh showcases.

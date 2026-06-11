@@ -125,3 +125,79 @@ describe("regen-showcases command", () => {
 		expect(second).toBe(first);
 	});
 });
+
+// The two #568 latent-gap fixes (ADR-0031): both silently dropped emitted props
+// to `null` — a consumer-breaking regression with no regex fallback to mask it
+// (#567). These pin the shapes the golden fixtures had not exercised.
+describe("regen-showcases — #568 meta-shape regressions", () => {
+	let dir: string;
+	beforeAll(async () => {
+		dir = await mkdtemp(join(tmpdir(), "regen-showcases-568-"));
+		await writeFile(join(dir, "package.json"), JSON.stringify({ name: "consumer" }, null, 2));
+		await writeFile(
+			join(dir, "tsconfig.json"),
+			JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }),
+		);
+		const atoms = join(dir, "design-system", "atoms");
+		const composites = join(dir, "design-system", "composites");
+		const fixtures = join(dir, "design-system", "_fixtures");
+		await mkdir(atoms, { recursive: true });
+		await mkdir(composites, { recursive: true });
+		await mkdir(fixtures, { recursive: true });
+
+		// (1) `export const meta = {…} satisfies Meta` — the AST extractor must
+		// unwrap the satisfies/as assertion or the whole companion drops to a
+		// no-meta skip.
+		await writeFile(
+			join(atoms, "tag.tsx"),
+			[
+				`import React from "react";`,
+				`type Meta = { kind: "atom"; examples: { name: string; props: Record<string, unknown> }[]; skip: string[] };`,
+				`export function Tag(props: { label?: string }) { return <span>{props.label}</span>; }`,
+				`export const meta = { kind: "atom", examples: [{ name: "primary", props: { label: "Hi" } }], skip: [] } satisfies Meta;`,
+				``,
+			].join("\n"),
+		);
+
+		// (2) `@/`-aliased VALUE import referenced in a meta prop — must resolve
+		// through tsconfig paths and inline the value, not drop to `null`.
+		await writeFile(
+			join(fixtures, "rows.ts"),
+			`export const sampleRows = [{ id: 1 }, { id: 2 }];\n`,
+		);
+		await writeFile(
+			join(composites, "grid.tsx"),
+			[
+				`import React from "react";`,
+				`import { sampleRows } from "@/design-system/_fixtures/rows";`,
+				`export function Grid(props: { rows: { id: number }[] }) { return <div>{props.rows.length}</div>; }`,
+				`export const meta = { kind: "composite", examples: [{ name: "default", props: { rows: sampleRows } }], skip: [] };`,
+				``,
+			].join("\n"),
+		);
+
+		const r = await runCli(["regen-showcases"], { cwd: dir });
+		expect(r.code, r.stderr).toBe(0);
+	});
+
+	afterAll(async () => {
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("extracts a `satisfies Meta`-wrapped meta instead of skipping as no-meta", async () => {
+		const showcasePath = join(dir, "design-system", "atoms", "tag.showcase.tsx");
+		expect(existsSync(showcasePath)).toBe(true);
+		const written = await readFile(showcasePath, "utf8");
+		// The example survived extraction (would be a bare placeholder on a no-meta skip).
+		expect(written).toContain('label="Hi"');
+		expect(written).toContain(">primary<");
+	});
+
+	it("inlines an `@/`-aliased value import in a meta prop (not `null`)", async () => {
+		const showcasePath = join(dir, "design-system", "composites", "grid.showcase.tsx");
+		expect(existsSync(showcasePath)).toBe(true);
+		const written = await readFile(showcasePath, "utf8");
+		expect(written).toContain("rows={[{ id: 1 }, { id: 2 }]}");
+		expect(written).not.toContain("rows={null}");
+	});
+});
