@@ -16,18 +16,8 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { planGeneratedIntegrityFixes } from "./checks/generated-integrity.js";
-import {
-	type DriftRuleId,
-	isClassifyRelocatable,
-	isExtractionNeededFinding,
-	isFixable,
-} from "./drift/index.js";
+import { ownerForFinding } from "./complaint-ownership.js";
 import { type Exception, parseExceptions } from "./exceptions.js";
-import {
-	type IntegrityRuleId,
-	isIntegrityClassifyRelocatable,
-	isIntegrityFixable,
-} from "./integrity/index.js";
 import { computeVerificationChain } from "./migration-framework.js";
 import { MIGRATION_REGISTRY } from "./migration-registry.js";
 import { loadProject, type ProjectContext } from "./project.js";
@@ -152,43 +142,26 @@ async function deriveFromCtx(ctx: ProjectContext): Promise<ProjectState> {
 	// `classifyNeeded` is the "classify has work to do" signal that lands the
 	// step in the plan; `unresolvableFindings` is the "real findings remain
 	// but no loop step can clear them" signal the driver consults for
-	// convergence. Before #379 every unfixable finding folded into
-	// `classifyNeeded`, embedding the assumption *unfixable ⇒ classify can
-	// relocate it*. That holds for today's unfixable rules (MISPLACED,
-	// MISCLASSIFIED-*) but not for future ones (PATTERN-IMPORTS-PATTERN,
-	// ROLE-NO-CONTRACT) — heal could then declare convergence while real
-	// ERROR findings remain. The rule shape's `classifyRelocatable` field
-	// (compile-time required on unfixable rules) drives the split here.
+	// convergence. Every finding's remedy is resolved through the single
+	// complaint-ownership registry (#533): a finding whose owner is the
+	// `classify`/`audit --fix` Operation lands that step; a terminal owner
+	// (unfixable AND not classify-relocatable — PATTERN-IMPORTS-PATTERN,
+	// ROLE-NO-CONTRACT, …, whose remedy is hand-edit or exceptions.json) drives
+	// `unresolvableFindings` so heal cannot silently declare convergence with
+	// real ERROR findings outstanding (#379). The registry derives each owner
+	// from the rule shape's `fixable`/`classifyRelocatable` fields, so this
+	// split stays honest as new rules ship without duplicating the predicate
+	// fan-out the planner and front door once each carried.
 	let classifyNeeded = false;
 	let autoFixNeeded = false;
 	let unresolvableFindings = false;
 	for (const f of active) {
-		if (isExtractionNeededFinding(f)) {
-			// Extraction is classify's job, not audit's (ADR-0015).
+		const owner = ownerForFinding(f);
+		if (owner.kind === "operation" && owner.step === "classify") {
 			classifyNeeded = true;
-			continue;
-		}
-		if (f.ruleId.startsWith("INTEGRITY-")) {
-			const id = f.ruleId as IntegrityRuleId;
-			if (isIntegrityFixable(id)) {
-				autoFixNeeded = true;
-			} else if (isIntegrityClassifyRelocatable(id)) {
-				classifyNeeded = true;
-			} else {
-				unresolvableFindings = true;
-			}
-			continue;
-		}
-		const id = f.ruleId as DriftRuleId;
-		if (isFixable(id)) {
+		} else if (owner.kind === "operation" && owner.step === "audit --fix") {
 			autoFixNeeded = true;
-		} else if (isClassifyRelocatable(id)) {
-			classifyNeeded = true;
 		} else {
-			// Unfixable AND not classify-relocatable (PATTERN-IMPORTS-PATTERN,
-			// ROLE-NO-CONTRACT, …). The remedy lives outside the loop —
-			// hand-edit or exceptions.json — but the finding is real, so heal
-			// must NOT report convergence (#379).
 			unresolvableFindings = true;
 		}
 	}

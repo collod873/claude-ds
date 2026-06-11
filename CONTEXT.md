@@ -307,6 +307,29 @@ Crewops hand-rolls); grows on demand per ADR-0017.
 _Contrast_: Owned concern (hand-rolled DS *infrastructure*, blocking, recommends
 deletion); raw primitive (a `DRIFT-` hook on raw HTML elements).
 
+### Complaint ownership
+The registry (`src/lib/complaint-ownership.ts`, issue #533) mapping every
+**finding kind** `status`/`audit` can emit to exactly one **owner**: the
+canonical-order Operation that fixes it (a `LoopStep`) or a declared **terminal
+state**. The mechanical enforcement of the Completeness principle (ADR-0003) on
+the *output* surface — a finding with no owner is a defect (the Crewops dropped-
+findings failure: hand-rolled DS infra advertised by the dashboard yet absent
+from the plan). It **bridges the two complaint vocabularies**: the audit rule-id
+families (`DRIFT-`/`INTEGRITY-`/`OWNED-`/`BYPASS-`/`GEN-`) and the planner's
+project-state signals, into one `Owner` codomain — so a finding and a planner
+signal that share a remedy resolve to the same step. `deriveProjectState` folds
+its findings through it (`ownerForFinding`), so the front-door planner *composes
+its plan from the registry*: an Operation owner lands its step, a terminal owner
+is surfaced as terminal — never silently dropped. The four terminal states:
+`hand-verify` (ADR-0026 JSX showcase, verify-gate attribution builds on it),
+`completeness` (Owned-concern, remove by hand), `advisory` (structural-bypass
+triage), `manual` (unfixable + non-relocatable — hand-edit or `exceptions.json`,
+the planner's `unresolvableFindings`). Totality is enforced by
+`complaint-ownership.test.ts`, which enumerates every emitted kind and fails on
+any that resolves to no owner.
+_Contrast_: Managed roots (what the pack overwrites); Owned concern (what counts
+as DS infra). Complaint ownership answers *"who clears this finding?"*
+
 ### Migration Op
 A versioned `Op` shipped in `pack/versions/<version>/migrations/` that
 transforms a consumer from one pack version to the next. Migrations emit
