@@ -279,13 +279,25 @@ function listNodeRange(source: string, node: ts.Node): [number, number] {
 }
 
 function applyDeletes(source: string, nodes: ts.Node[]): string {
-	const ranges = nodes.map((n) => listNodeRange(source, n)).sort((a, b) => b[0] - a[0]);
-	let result = source;
-	let prevStart = Infinity;
+	// Two adjacent offenders share one separator: the earlier's trailing comma is
+	// the later's preceding comma, so their ranges overlap. Merge overlapping
+	// ranges (rather than dropping one whole) so every offender is removed — a
+	// skip would leave the earlier offender behind. An entry range that contains
+	// a prop range (claimed impossible upstream) likewise merges to the entry.
+	const ranges = nodes.map((n) => listNodeRange(source, n)).sort((a, b) => a[0] - b[0]);
+	const merged: [number, number][] = [];
 	for (const [start, end] of ranges) {
-		if (end > prevStart) continue; // overlapping (entry already removed) — skip
+		const last = merged[merged.length - 1];
+		if (last && start <= last[1]) {
+			last[1] = Math.max(last[1], end);
+		} else {
+			merged.push([start, end]);
+		}
+	}
+	let result = source;
+	for (let i = merged.length - 1; i >= 0; i--) {
+		const [start, end] = merged[i];
 		result = result.slice(0, start) + result.slice(end);
-		prevStart = start;
 	}
 	return result;
 }

@@ -1960,6 +1960,30 @@ export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm"
 			expect(detect(content)).toHaveLength(0);
 		});
 
+		it("drops two adjacent offending props in one pass (shared-comma splice)", async () => {
+			// Both `foo` and `bar` are unknown and adjacent, with `bar` last — its
+			// preceding comma is `foo`'s trailing comma. A naive splice removes only
+			// one; the fixer must clear both so a single pass re-detects clean.
+			const source = `${BADGE}export const meta = {
+  kind: "atom" as const,
+  examples: [{ name: "leak", props: { tone: "neutral", foo: "x", bar: "y" } }],
+};
+`;
+			await seed(source);
+			const finding = detect(source)[0];
+			expect(finding).toBeDefined();
+
+			const fixer = getFixer("DRIFT-META-EXAMPLES-INVALID-PROP")!;
+			const result = await fixAndApply(fixer, finding, dir);
+			expect(result.fixed).toBe(true);
+
+			const content = await readFile(join(dir, "design-system/atoms/badge.tsx"), "utf8");
+			expect(content).not.toContain("foo");
+			expect(content).not.toContain("bar");
+			expect(content).toContain('tone: "neutral"');
+			expect(detect(content)).toHaveLength(0);
+		});
+
 		it('drops the whole example when its props go empty (the Crewops tone: "dark" shape)', async () => {
 			const source = `${BADGE}export const meta = {
   kind: "atom" as const,
