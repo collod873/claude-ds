@@ -24,6 +24,8 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { type DriftRuleId, ruleSeverity } from "./drift/index.js";
+import { type IntegrityRuleId, integrityRuleSeverity } from "./integrity/index.js";
 import {
 	computeMigrationChain,
 	computeVerificationChain,
@@ -54,6 +56,59 @@ export interface GateFindingCounts {
 	classifyCount: number;
 	/** Auto-fixable drift/integrity findings `audit --fix` repairs. */
 	autoFixableCount: number;
+	/** The actual auto-fixable finding set the planner consumed, so the gate can
+	 *  render a per-rule grouped preview under the `audit --fix` step (#584). One
+	 *  entry per finding; grouped by `ruleId` at render time into rule × severity ×
+	 *  finding-count × affected-file-count. Optional — callers that only need the
+	 *  count-shaped header (the F11 / byte-deterministic tests) omit it and the
+	 *  preview block simply doesn't render. */
+	autoFixableFindings?: ReadonlyArray<GateFinding>;
+}
+
+/** A single auto-fixable finding the `audit --fix` preview groups (#584). */
+export interface GateFinding {
+	ruleId: string;
+	file: string;
+}
+
+/**
+ * Per-rule grouped preview of the auto-fixable finding set the planner consumed,
+ * rendered under the `audit --fix` step header (#584). Each line names the rule
+ * id, its severity, the finding count, and the affected-file count — so consent
+ * is informed (the operator sees the shape of what `audit --fix` will repair),
+ * not a bare total. Count-shaped by construction: finding-driven steps are not
+ * byte-deterministic, so this composes data the gate already holds rather than
+ * predicting bytes — the announced-⊇-executed contract is unchanged.
+ *
+ * Severity resolves through the same drift/integrity tables `audit` itself uses
+ * (`INTEGRITY-*` → integrity table, everything else → drift). Auto-fixable
+ * findings are drift/integrity only (their owner is `audit --fix`), so no other
+ * rule family reaches here.
+ */
+export function renderAuditFixPreview(findings: ReadonlyArray<GateFinding>): string[] {
+	const byRule = new Map<string, { count: number; files: Set<string> }>();
+	for (const f of findings) {
+		const group = byRule.get(f.ruleId);
+		if (group) {
+			group.count++;
+			group.files.add(f.file);
+		} else {
+			byRule.set(f.ruleId, { count: 1, files: new Set([f.file]) });
+		}
+	}
+
+	const lines: string[] = [];
+	for (const [ruleId, group] of byRule) {
+		const severity = ruleId.startsWith("INTEGRITY-")
+			? integrityRuleSeverity(ruleId as IntegrityRuleId)
+			: ruleSeverity(ruleId as DriftRuleId);
+		const findingNoun = group.count === 1 ? "finding" : "findings";
+		const fileNoun = group.files.size === 1 ? "file" : "files";
+		lines.push(
+			`[${ruleId}] ${severity} · ${group.count} ${findingNoun} · ${group.files.size} ${fileNoun}`,
+		);
+	}
+	return lines;
 }
 
 function summaryEntriesFromRun(
@@ -334,6 +389,17 @@ export async function buildCommitmentGate(
 
 	for (const step of projected) {
 		lines.push(stepHeader(step, ctx, effectiveCounts));
+		// Per-rule audit preview (#584): under the `audit --fix` header, group the
+		// consumed finding set by rule so the bare count is backed by rule × severity
+		// × file detail. The cascade-projected backfill (when present) is disclosed
+		// separately under its origin step, so this lists only what the scan saw.
+		if (
+			step === "audit --fix" &&
+			counts.autoFixableFindings &&
+			counts.autoFixableFindings.length > 0
+		) {
+			lines.push(...indent(renderAuditFixPreview(counts.autoFixableFindings)));
+		}
 		const entries = await previewStepChanges(ctx, step);
 		if (entries !== null) {
 			if (entries.length === 0) {

@@ -27,6 +27,7 @@ repair — restore drifted migration end-states
     Skipped: 2 files (hand-edited or unsafe to overwrite)
 reconform
 audit --fix — auto-repair 2 findings
+    [DRIFT-META-KIND-MISSING] error · 2 findings · 2 files
 
   (re-run with --verbose for the full per-file change list)
 "
