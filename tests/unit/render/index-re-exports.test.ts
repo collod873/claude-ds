@@ -31,4 +31,12 @@ describe("render barrel", () => {
 		expect(typeof render.renderChangeSummary).toBe("function");
 		expect(typeof render.renderChangesJson).toBe("function");
 	});
+
+	it("exposes the extracted front-door renderers and the unified glyph (#636)", () => {
+		expect(typeof render.renderClosingSummary).toBe("function");
+		expect(typeof render.renderExhaustedSummary).toBe("function");
+		expect(typeof render.renderHandRolledRouting).toBe("function");
+		expect(typeof render.renderRedGate).toBe("function");
+		expect(render.CHECK).toBe("✓");
+	});
 });

@@ -24,6 +24,7 @@
  */
 
 import type { ColorAdapter } from "./color.js";
+import { CHECK } from "./glyphs.js";
 
 export type DashboardMode = "pre-adopt" | "adopted" | "fresh";
 
@@ -62,7 +63,7 @@ export function renderDashboard(state: DashboardState, color: ColorAdapter): str
 	// The three-marker vocabulary (#620): ✓ good, ! the tool can act, ✗ a
 	// problem you must resolve. The glyph routes through the injected adapter so
 	// it's colored on a TTY and plain (identity) when piped or under test.
-	const good = (s: string): string => `${color.green("✓")} ${s}`;
+	const good = (s: string): string => `${color.green(CHECK)} ${s}`;
 	const action = (s: string): string => `${color.cyan("!")} ${s}`;
 	// The third marker, ✗ (a problem the tool can't resolve for you), is part of
 	// the agreed vocabulary but unused here: every dashboard signal today is

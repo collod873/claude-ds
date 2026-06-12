@@ -69,9 +69,10 @@ describe("heal progress UI (#332)", () => {
 			// ADR-0018): heal only dispatches loop members whose `ProjectState`
 			// signal fires, so a clean fixture won't necessarily exercise
 			// classify/audit. The integration contract this test pins is that
-			// *some* per-phase progress marker reaches stderr — the ora ✔ persist
-			// is the same line regardless of phase name.
-			expect(r.stderr).toMatch(/✔|✖/);
+			// *some* per-phase progress marker reaches stderr — the persisted glyph
+			// is the same line regardless of phase name. The success symbol is the
+			// unified ✓ (#636) the spinner now persists in place of ora's default ✔.
+			expect(r.stderr).toMatch(/✓|✖/);
 			// Pass counter (acceptance #1). C3 (#414) renamed `iteration N/M` to
 			// `pass N/M` so it reads as planned, not stuck; #591 collapsed it to a
 			// single labeled stdout line (`heal: pass 1/3 (max) — …`) and dropped
@@ -90,7 +91,7 @@ describe("heal progress UI (#332)", () => {
 			// No progress artifacts on stderr. The non-TTY contract is "unchanged
 			// from today" — and today, heal emits nothing to stderr on the happy
 			// path (no errors, info() is stdout).
-			expect(r.stderr).not.toMatch(/✔/);
+			expect(r.stderr).not.toMatch(/✓/);
 			expect(r.stderr).not.toMatch(/pass \d+\/\d+/);
 		});
 	}, 30000);
@@ -161,7 +162,7 @@ describe("adopt progress UI (#332)", () => {
 			expect(r.code).toBe(0);
 			// Today's adopt happy-path emits to stdout, not stderr. The non-TTY
 			// contract pins that — no spinner checkmarks, no phase symbols.
-			expect(r.stderr).not.toMatch(/✔/);
+			expect(r.stderr).not.toMatch(/✓/);
 		});
 	}, 30000);
 });

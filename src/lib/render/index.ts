@@ -26,6 +26,14 @@ export type { DiffEntry } from "./diff.js";
 export { colorizeDiffLines, renderCommitmentGateDiff } from "./diff.js";
 export type { RenderableFinding } from "./findings.js";
 export { renderFindings } from "./findings.js";
+export type { ClosingSummaryState, ExhaustedSummaryState } from "./front-door.js";
+export {
+	renderClosingSummary,
+	renderExhaustedSummary,
+	renderHandRolledRouting,
+	renderRedGate,
+} from "./front-door.js";
+export { CHECK } from "./glyphs.js";
 export type { NoticeRenderOptions, PerFileNotice } from "./notices.js";
 export { NOTICE_COLLAPSE_THRESHOLD, renderPerFileNotices } from "./notices.js";
 export type { SummaryEntry } from "./summary.js";

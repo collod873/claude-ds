@@ -113,7 +113,7 @@ interface DispatchOpts {
 /**
  * What a dispatched step did. `progress` is the explicit progress/no-op signal
  * (#532): `true` when the step changed bytes, `false` when it visited its work
- * and changed nothing (a skip-all reconform, a no-op pass). The loop renders ✔
+ * and changed nothing (a skip-all reconform, a no-op pass). The loop renders ✓
  * only on progress; a no-progress step reports "nothing to do" instead, so a
  * checkmark always means the step cleared real work (defect 6).
  *
@@ -132,7 +132,7 @@ interface StepResult {
 	 * How many files the step visited but could not act on (#588). A step that
 	 * made progress *and* skipped at least one file is the warn case: the work
 	 * advanced, but a skip may hide an unverified end-state, so the loop renders ⚠
-	 * with this count instead of ✔. Only `reconform` introspects its skips today
+	 * with this count instead of ✓. Only `reconform` introspects its skips today
 	 * (ADR-0026 JSX-bearing companions); command-wrapped members report `0`.
 	 */
 	skipped?: number;
@@ -234,7 +234,7 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
 			}
 			// #532: a reconform that regenerated nothing — every companion it
 			// visited was an ADR-0026 skip — made no progress. The loop must not
-			// stamp ✔ on it; reading the Runner's per-Op progress signal tells the
+			// stamp ✓ on it; reading the Runner's per-Op progress signal tells the
 			// loop to report "nothing to do" instead (defect 6).
 			const madeProgress = report.ops.some((o) => o.progress);
 			return {
@@ -409,15 +409,15 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 			// driver dispatches through `run()` directly (reconform) surface a report
 			// today; command-wrapped members are a follow-up slice.
 			if (result.report) ledger.record(step, result.report);
-			// ✔-requires-progress (#532): a checkmark may only render for a step
+			// ✓-requires-progress (#532): a checkmark may only render for a step
 			// whose report shows progress. A step that visited its work and changed
-			// nothing (a skip-all reconform) reports "nothing to do" — never a ✔ that
+			// nothing (a skip-all reconform) reports "nothing to do" — never a ✓ that
 			// would falsely read as the complaint cleared (defect 6).
 			//
 			// warn-on-progress+skips (#588): a step that made progress *and* reported
 			// skips lands on the third terminal state — ⚠ with the skip count — rather
-			// than ✔. The work advanced, but a skipped file may hide an unverified
-			// end-state, so ✔ stays reserved for no-skip completion.
+			// than ✓. The work advanced, but a skipped file may hide an unverified
+			// end-state, so ✓ stays reserved for no-skip completion.
 			if (result.progress) {
 				if (result.skipped && result.skipped > 0) {
 					progress.warn(step, `${result.skipped} skipped`);
