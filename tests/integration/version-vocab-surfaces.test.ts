@@ -152,7 +152,8 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 			const out = await captureFrontDoor({ cwd: dir });
 
 			if (HAS_STALE_EMPTY_CHAIN) {
-				expect(out).toMatch(/upgrade available/);
+				// #631's dashboard names the stale pack in consumer words.
+				expect(out).toMatch(/a newer design-system pack is available/);
 				// Post-#621 the gate action reads in plain words — `update vX → vY
 				// (your files don't change)` — never the internal "pin advance (no
 				// migrations)" jargon, but still carrying the real from→to.
