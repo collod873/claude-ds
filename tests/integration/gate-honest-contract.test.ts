@@ -18,9 +18,23 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildCommitmentGate } from "../../src/lib/gate-preview";
+import type { HandRolledSplit } from "../../src/lib/hand-rolled-split";
 import { loadProject } from "../../src/lib/project";
 import { runCli } from "../helpers/runcli";
 import { cleanup, freshTmpDir } from "../helpers/tmpdir";
+
+/** A `HandRolledSplit` for the gate won't-fix block tests (#639). */
+function split(over: Partial<HandRolledSplit> = {}): HandRolledSplit {
+	const retirable = over.retirable ?? 0;
+	const needsReview = over.needsReview ?? 0;
+	return {
+		retirable,
+		needsReview,
+		total: over.total ?? retirable + needsReview,
+		retirableNoun: over.retirableNoun ?? "file",
+		needsReviewNoun: over.needsReviewNoun ?? "file",
+	};
+}
 
 describe("commitment gate — honest three-block contract (#621)", () => {
 	let dir: string;
@@ -63,7 +77,7 @@ describe("commitment gate — honest three-block contract (#621)", () => {
 				ctx,
 				["sync"],
 				{ classifyCount: 0, autoFixableCount: 0 },
-				{ completenessCount: 3 },
+				{ handRolled: split({ retirable: 3 }) },
 			)
 		).join("\n");
 
@@ -75,6 +89,41 @@ describe("commitment gate — honest three-block contract (#621)", () => {
 		expect(gate).not.toMatch(/hand-rolled DS infra/);
 	});
 
+	it("block 2 splits retirable from needs-review — 'now provides' only for retirable (#639)", async () => {
+		const ctx = await loadProject(dir);
+		const gate = (
+			await buildCommitmentGate(
+				ctx,
+				["sync"],
+				{ classifyCount: 0, autoFixableCount: 0 },
+				{ handRolled: split({ retirable: 1, needsReview: 2 }) },
+			)
+		).join("\n");
+
+		expect(gate).toMatch(
+			/1 file you built by hand that the design-system pack now provides — run `npx claude-ds doctor --completeness` to retire those\./,
+		);
+		expect(gate).toMatch(
+			/2 possible hand-rolled DS files to review — run `npx claude-ds doctor --completeness`\./,
+		);
+	});
+
+	it("a zero-capability set never claims 'now provides' in the won't-fix block (#639)", async () => {
+		const ctx = await loadProject(dir);
+		const gate = (
+			await buildCommitmentGate(
+				ctx,
+				["sync"],
+				{ classifyCount: 0, autoFixableCount: 0 },
+				{ handRolled: split({ needsReview: 2 }) },
+			)
+		).join("\n");
+
+		expect(gate).toMatch(/won't fix/i);
+		expect(gate).toMatch(/2 possible hand-rolled DS files to review/);
+		expect(gate).not.toMatch(/now provides/);
+	});
+
 	it("omits the won't-fix block when there is nothing left for completeness", async () => {
 		const ctx = await loadProject(dir);
 		const gate = (
@@ -82,7 +131,7 @@ describe("commitment gate — honest three-block contract (#621)", () => {
 				ctx,
 				["sync"],
 				{ classifyCount: 0, autoFixableCount: 0 },
-				{ completenessCount: 0 },
+				{ handRolled: split() },
 			)
 		).join("\n");
 
@@ -97,7 +146,7 @@ describe("commitment gate — honest three-block contract (#621)", () => {
 				ctx,
 				["sync"],
 				{ classifyCount: 0, autoFixableCount: 0 },
-				{ completenessCount: 2 },
+				{ handRolled: split({ retirable: 2 }) },
 			)
 		).join("\n");
 

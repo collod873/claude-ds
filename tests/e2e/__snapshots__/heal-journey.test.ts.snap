@@ -6,7 +6,7 @@ exports[`journey: heal end-to-end on the time-travel fixture (#538) > golden: th
 # --- transcript below; bytes are verbatim from the built CLI, normalized for paths/versions/durations ---
 ✓ Design system in place — <fixture>
 ! Managed files: 0/93 (93 missing)
-! Needs attention: 93 missing files, 2 issues I can fix, 1 script you built by hand that the design-system pack now provides, a newer design-system pack is available
+! Needs attention: 93 missing files, 2 issues I can fix, 1 file you built by hand that the design-system pack now provides, a newer design-system pack is available
 ✓ Also checked: nothing stale or deprecated
 
 Pressing Enter will:
@@ -30,8 +30,7 @@ Pressing Enter will:
   (re-run with --verbose for the full per-file change list)
 
 Pressing Enter won't fix:
-  1 thing you built by hand that the design-system now provides —
-  run \`npx claude-ds doctor --completeness\` to retire those.
+  1 file you built by hand that the design-system pack now provides — run \`npx claude-ds doctor --completeness\` to retire those.
 "
 `;
 
@@ -152,12 +151,14 @@ fixed [DRIFT-META-KIND-MISSING]: added meta.kind to 2 files (atoms)
 fix summary: 2 fixed, 0 deferred
 Managed files: 93/93 ✓ | Fixed: 2
 No action required.
-heal: verify gate failed — npm run verify reported 4 error(s) in claude-ds-managed files
+
+✗ Verify gate failed — npm run verify reported 4 error(s) in claude-ds-managed files:
   2× TS2307 in design-system/contracts/role-contracts.test.tsx, e.g. design-system/contracts/role-contracts.test.tsx:17:43: Cannot find module 'vitest' or its corresponding type declarations.
   design-system/references/motion.tsx:22:35  TS2724: 'React' has no exported member named 'ReactElement'. Did you mean 'createElement'?
   design-system/references/tokens.tsx:17:35  TS2724: 'React' has no exported member named 'ReactElement'. Did you mean 'createElement'?
-(also 25 pre-existing consumer error(s) outside claude-ds's scope)
+  These errors are pre-existing — not caused by this update.
 These are claude-ds's to fix — do not hand-edit \`@generated\` files.
+(also 25 pre-existing consumer error(s) outside claude-ds's scope — not caused by this update)
 Your tree was clean when heal started — git can undo everything heal wrote. To revert this run: \`git stash --include-untracked\` (heal never runs this for you; git is the transaction layer).
 What heal wrote this run (grouped by step):
   reconform:

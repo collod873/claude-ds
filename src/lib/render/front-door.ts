@@ -11,6 +11,7 @@
  */
 
 import { adrUrl } from "../adr-citation.js";
+import type { HandRolledSplit } from "../hand-rolled-split.js";
 import { computeMigrationChain } from "../migration-framework.js";
 import { MIGRATION_REGISTRY } from "../migration-registry.js";
 import type { ExhaustedReason } from "../remediation-driver.js";
@@ -18,6 +19,9 @@ import type { LoopStep } from "../remediation-planner.js";
 import { formatVerifyErrors } from "../reports/findings-format.js";
 import type { VerifyResult } from "../run-consumer-verify.js";
 import { CHECK } from "./glyphs.js";
+import { needsReviewInfraClause, retirableClause } from "./hand-rolled.js";
+
+const COMPLETENESS_CMD = "`npx claude-ds doctor --completeness`";
 
 /**
  * The completeness routing line for hand-rolled DS infra (#590). The dashboard
@@ -27,10 +31,21 @@ import { CHECK } from "./glyphs.js";
  * emptiness**: it previously surfaced only on an empty plan, leaving a non-empty
  * plan's header count a dead end (a concern named but un-actionable). Pins the
  * invariant: every counted concern in the header maps to a plan or routing line.
+ *
+ * #639: renders from the retirable / needs-review split — retirable findings get
+ * the "now provides" promise and a retire instruction; needs-review findings get
+ * "possible … to review". Both route to the same command, so a finding set with
+ * no superseding capability never claims a retirement doctor can't deliver.
  */
-export function renderHandRolledRouting(count: number): string[] {
-	const noun = count === 1 ? "finding" : "findings";
-	return [`${count} hand-rolled DS infra ${noun} → \`npx claude-ds doctor --completeness\``];
+export function renderHandRolledRouting(split: HandRolledSplit): string[] {
+	const lines: string[] = [];
+	if (split.retirable > 0) {
+		lines.push(`${retirableClause(split)} → run ${COMPLETENESS_CMD} to retire them.`);
+	}
+	if (split.needsReview > 0) {
+		lines.push(`${needsReviewInfraClause(split)} → run ${COMPLETENESS_CMD}.`);
+	}
+	return lines;
 }
 
 export interface ExhaustedSummaryState {
@@ -93,7 +108,10 @@ export interface ClosingSummaryState {
 	version: string;
 	pinnedBefore?: string;
 	consumerErrorCount?: number;
-	handRolledInfra?: number;
+	/** The retirable / needs-review split of hand-rolled DS infra findings (#639).
+	 *  When its total is > 0 the go-ahead downgrades to the completeness command,
+	 *  phrasing retirable and needs-review findings truthfully. */
+	handRolled?: HandRolledSplit;
 	handVerifyCount?: number;
 }
 
@@ -113,13 +131,7 @@ export interface ClosingSummaryState {
  * the to-do framing.
  */
 export function renderClosingSummary(state: ClosingSummaryState): string[] {
-	const {
-		version,
-		pinnedBefore,
-		consumerErrorCount = 0,
-		handRolledInfra = 0,
-		handVerifyCount = 0,
-	} = state;
+	const { version, pinnedBefore, consumerErrorCount = 0, handRolled, handVerifyCount = 0 } = state;
 	const lines = ["", `${CHECK} Tree is clean — ${version}.`];
 	if (pinnedBefore && pinnedBefore !== version) {
 		const highlights = computeMigrationChain(pinnedBefore, version, MIGRATION_REGISTRY).flatMap(
@@ -149,51 +161,112 @@ export function renderClosingSummary(state: ClosingSummaryState): string[] {
 	// member — hand-rolled DS infra found before the run still stands. The
 	// "start working" go-ahead is only honest when nothing is left, so a gap
 	// downgrades it to the one command that resolves it (#504). A noted consumer
-	// error above is warn-only and does not block the go-ahead.
-	if (handRolledInfra > 0) {
-		const noun = handRolledInfra === 1 ? "finding" : "findings";
-		lines.push(
-			`  ${handRolledInfra} hand-rolled DS infra ${noun} remain — run \`npx claude-ds doctor --completeness\`.`,
-		);
+	// error above is warn-only and does not block the go-ahead. #639: retirable
+	// and needs-review findings are phrased apart — "now provides" only for the
+	// retirable ones, so the closing copy never promises a retirement that the
+	// dashboard/gate deny for the same set.
+	if (handRolled && handRolled.total > 0) {
+		if (handRolled.retirable > 0) {
+			lines.push(`  ${retirableClause(handRolled)} — run ${COMPLETENESS_CMD} to retire them.`);
+		}
+		if (handRolled.needsReview > 0) {
+			lines.push(`  ${needsReviewInfraClause(handRolled)} — run ${COMPLETENESS_CMD}.`);
+		}
 	} else {
 		lines.push("  Nothing needs your attention — start working.");
 	}
 	return lines;
 }
 
+export interface RedGateReportOptions {
+	/**
+	 * Paths claude-ds wrote this run — the run ledger's paths (#579/#580). When
+	 * provided and disjoint from the failing scaffold files, the report states the
+	 * breakage is **pre-existing — not caused by this update** (PRD #635 story 4),
+	 * so an upgrade isn't blamed for a defect a prior run's generation left behind.
+	 * Omitted ⇒ no attribution line (the caller can't say what this run touched).
+	 */
+	changedFiles?: Set<string>;
+}
+
 /**
- * The red-gate report the front door prints when the consumer-verify gate fails
- * after convergence (#510). Mirror of heal's `reportRedGate`, rendered to the
- * front door's stdout channel (`printLines`) instead of `err()` so it sits with
- * the dashboard the operator is already reading. Scaffold errors are listed
- * (capped at 20); a non-tsc / timeout failure surfaces the `reason` + output
- * tail so the failure is diagnosable from the report alone.
+ * The one shared, partitioned red-gate report (#638, PRD #635). heal and the
+ * front door both render through this — heal routing the lines to `err()` (then
+ * appending its state/ledger/off-ramp blocks), the front door to `printLines` so
+ * it sits with the dashboard the operator is already reading.
+ *
+ * It is driven by the verify result's three buckets plus this run's changed-file
+ * set, and frames each by **ownership**, never the retired circular "run audit,
+ * then re-run":
+ *   - **scaffold / `@generated`** (ADR-0030): a claude-ds defect — listed (capped
+ *     at 20), framed as claude-ds's to fix, never consumer homework. When the
+ *     changed-file set is disjoint from the failing files, the breakage is
+ *     attributed as pre-existing rather than blamed on this run.
+ *   - **hand-verify** (ADR-0026, narrowed by ADR-0030): consumer-authored
+ *     JSX-bearing showcases claude-ds can't regenerate — the operator's to fix.
+ *   - **consumer-scope**: pre-existing errors outside claude-ds's scope.
+ *
+ * A non-tsc / timeout failure (no parseable scaffold errors) surfaces the
+ * `reason` + output tail so it's diagnosable from the report alone, and its
+ * next step is a genuine re-run (a cold cache / env failure can change on the
+ * next run) — distinct from the deterministic scaffold defect, which never is.
  */
-export function renderRedGate(verify: VerifyResult): string[] {
+export function renderRedGate(verify: VerifyResult, opts: RedGateReportOptions = {}): string[] {
 	const lines = [""];
 	if (verify.scaffoldErrors.length > 0) {
 		lines.push(
 			`✗ Verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files:`,
 		);
 		lines.push(...formatVerifyErrors(verify.scaffoldErrors, { maxGroups: 20 }));
+		// Attribution (PRD #635 story 4): this run's writes vs the failing files. A
+		// disjoint set means the gate is red on a defect that predates this run.
+		if (opts.changedFiles && isDisjointFromChanges(verify.scaffoldErrors, opts.changedFiles)) {
+			lines.push("  These errors are pre-existing — not caused by this update.");
+		}
+		// Ownership (ADR-0030, defect 7): these live in claude-ds-managed files —
+		// including `@generated` showcases whose header forbids editing. claude-ds
+		// owns the fix; the consumer is never told to fix or audit them.
+		lines.push("These are claude-ds's to fix — do not hand-edit `@generated` files.");
 	} else {
 		lines.push(
 			`✗ Verify gate failed — ${verify.reason ?? `${verify.command} exited ${verify.exitCode}`}`,
 		);
+		if (verify.outputTail) {
+			lines.push("  ── verify output (tail) ──");
+			for (const line of verify.outputTail.split("\n")) lines.push(`  ${line}`);
+		}
 	}
-	if (verify.outputTail) {
-		lines.push("  ── verify output (tail) ──");
-		for (const line of verify.outputTail.split("\n")) lines.push(`  ${line}`);
+	// Hand-verify bucket: consumer-authored JSX showcases claude-ds can't
+	// regenerate (ADR-0026, narrowed by ADR-0030). The operator's to fix.
+	if (verify.handVerifyErrors.length > 0) {
+		const n = verify.handVerifyErrors.length;
+		lines.push(
+			`${n} hand-verify example(s) need your eye — JSX-bearing showcase(s) you authored that claude-ds can't regenerate (${adrUrl("composed-widget-rendering")}). These are yours to fix:`,
+		);
+		lines.push(...formatVerifyErrors(verify.handVerifyErrors, { maxGroups: 20 }));
 	}
+	// Consumer-scope bucket: pre-existing errors outside claude-ds's scope.
 	if (verify.consumerErrors.length > 0) {
 		lines.push(
-			`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`,
+			`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope — not caused by this update)`,
 		);
 	}
-	lines.push(
-		verify.timedOut
-			? "Re-run after warming the consumer's tsc/test cache, or raise the verify timeout via CLAUDE_DS_VERIFY_TIMEOUT."
-			: "Run `npx claude-ds audit` to see what remains, then re-run.",
-	);
+	// The scaffold branch's next step is its ownership line above (a deterministic
+	// defect — a re-run reproduces it byte-for-byte, so no re-run is offered). The
+	// timeout / non-tsc branch genuinely can change on re-run, so it gets one.
+	if (verify.scaffoldErrors.length === 0) {
+		lines.push(
+			verify.timedOut
+				? "Re-run after warming the consumer's tsc/test cache, or raise the verify timeout via CLAUDE_DS_VERIFY_TIMEOUT."
+				: "Address the failure above, then re-run.",
+		);
+	}
 	return lines;
+}
+
+/** True when none of the failing files were written by this run (the ledger). */
+function isDisjointFromChanges(errors: VerifyResult["errors"], changedFiles: Set<string>): boolean {
+	const normalize = (p: string): string => p.replace(/\\/g, "/").replace(/^\.\//, "");
+	const changed = new Set([...changedFiles].map(normalize));
+	return !errors.some((e) => changed.has(normalize(e.file)));
 }

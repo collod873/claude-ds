@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { adrUrl } from "../../../src/lib/adr-citation.js";
+import type { HandRolledSplit } from "../../../src/lib/hand-rolled-split.js";
 import {
 	CHECK,
 	renderClosingSummary,
@@ -17,6 +18,20 @@ import {
 	renderRedGate,
 } from "../../../src/lib/render/index.js";
 import type { VerifyResult } from "../../../src/lib/run-consumer-verify.js";
+
+/** Build a `HandRolledSplit` for the renderer tests — defaults to the "file"
+ *  noun and zero in each bucket; override per case. */
+function split(over: Partial<HandRolledSplit> = {}): HandRolledSplit {
+	const retirable = over.retirable ?? 0;
+	const needsReview = over.needsReview ?? 0;
+	return {
+		retirable,
+		needsReview,
+		total: over.total ?? retirable + needsReview,
+		retirableNoun: over.retirableNoun ?? "file",
+		needsReviewNoun: over.needsReviewNoun ?? "file",
+	};
+}
 
 function verifyResult(overrides: Partial<VerifyResult> = {}): VerifyResult {
 	return {
@@ -39,16 +54,31 @@ describe("CHECK glyph (#636)", () => {
 	});
 });
 
-describe("renderHandRolledRouting", () => {
-	it("renders the routing line with a plural noun for a representative count", () => {
-		expect(renderHandRolledRouting(2)).toEqual([
-			"2 hand-rolled DS infra findings → `npx claude-ds doctor --completeness`",
+describe("renderHandRolledRouting (#639)", () => {
+	it("retirable only: the 'now provides' promise + a retire instruction", () => {
+		expect(renderHandRolledRouting(split({ retirable: 2 }))).toEqual([
+			"2 files you built by hand that the design-system pack now provides → run `npx claude-ds doctor --completeness` to retire them.",
 		]);
 	});
 
-	it("uses the singular noun for one finding", () => {
-		expect(renderHandRolledRouting(1)).toEqual([
-			"1 hand-rolled DS infra finding → `npx claude-ds doctor --completeness`",
+	it("needs-review only: 'possible … to review', never 'now provides'", () => {
+		const lines = renderHandRolledRouting(split({ needsReview: 1 }));
+		expect(lines).toEqual([
+			"1 possible hand-rolled DS file to review → run `npx claude-ds doctor --completeness`.",
+		]);
+		expect(lines.join("\n")).not.toMatch(/now provides/);
+	});
+
+	it("mixed: both phrasings render, retirable first", () => {
+		expect(renderHandRolledRouting(split({ retirable: 1, needsReview: 2 }))).toEqual([
+			"1 file you built by hand that the design-system pack now provides → run `npx claude-ds doctor --completeness` to retire them.",
+			"2 possible hand-rolled DS files to review → run `npx claude-ds doctor --completeness`.",
+		]);
+	});
+
+	it("derives the 'finding' noun when findings cluster in a file", () => {
+		expect(renderHandRolledRouting(split({ needsReview: 2, needsReviewNoun: "finding" }))).toEqual([
+			"2 possible hand-rolled DS findings to review → run `npx claude-ds doctor --completeness`.",
 		]);
 	});
 });
@@ -106,11 +136,40 @@ describe("renderClosingSummary", () => {
 		expect(renderClosingSummary({ version: "v1.9.2" })[1]).toBe(`${CHECK} Tree is clean — v1.9.2.`);
 	});
 
-	it("hand-rolled infra downgrades the go-ahead to doctor --completeness", () => {
-		expect(renderClosingSummary({ version: "v1.9.2", handRolledInfra: 1 })).toEqual([
+	it("retirable infra downgrades the go-ahead with the 'now provides' promise (#639)", () => {
+		expect(
+			renderClosingSummary({ version: "v1.9.2", handRolled: split({ retirable: 1 }) }),
+		).toEqual([
 			"",
 			"✓ Tree is clean — v1.9.2.",
-			"  1 hand-rolled DS infra finding remain — run `npx claude-ds doctor --completeness`.",
+			"  1 file you built by hand that the design-system pack now provides — run `npx claude-ds doctor --completeness` to retire them.",
+		]);
+	});
+
+	it("needs-review infra downgrades to 'possible … to review', never 'now provides' (#639)", () => {
+		const lines = renderClosingSummary({
+			version: "v1.9.2",
+			handRolled: split({ needsReview: 2 }),
+		});
+		expect(lines).toEqual([
+			"",
+			"✓ Tree is clean — v1.9.2.",
+			"  2 possible hand-rolled DS files to review — run `npx claude-ds doctor --completeness`.",
+		]);
+		expect(lines.join("\n")).not.toMatch(/now provides/);
+	});
+
+	it("mixed infra renders both clauses, retirable first (#639)", () => {
+		expect(
+			renderClosingSummary({
+				version: "v1.9.2",
+				handRolled: split({ retirable: 1, needsReview: 1 }),
+			}),
+		).toEqual([
+			"",
+			"✓ Tree is clean — v1.9.2.",
+			"  1 file you built by hand that the design-system pack now provides — run `npx claude-ds doctor --completeness` to retire them.",
+			"  1 possible hand-rolled DS file to review — run `npx claude-ds doctor --completeness`.",
 		]);
 	});
 
@@ -127,37 +186,87 @@ describe("renderClosingSummary", () => {
 	});
 });
 
-describe("renderRedGate", () => {
-	it("non-tsc failure: surfaces the reason and the audit re-run next step", () => {
+/** A scaffold (claude-ds-managed) verify error against the given file. */
+function scaffoldError(file: string, code = "TS2304") {
+	return {
+		file,
+		line: 3,
+		col: 1,
+		code,
+		message: "Cannot find name 'X'.",
+		raw: `${file}(3,1): error ${code}: Cannot find name 'X'.`,
+	};
+}
+
+describe("renderRedGate (shared partitioned report, #638)", () => {
+	it("non-tsc failure: surfaces the reason and a non-circular re-run next step", () => {
 		expect(renderRedGate(verifyResult({ reason: "biome failed" }))).toEqual([
 			"",
 			"✗ Verify gate failed — biome failed",
-			"Run `npx claude-ds audit` to see what remains, then re-run.",
+			"Address the failure above, then re-run.",
 		]);
 	});
 
-	it("scaffold errors: header names the count and lists the errors", () => {
+	it("scaffold bucket: frames errors as claude-ds defects, never consumer homework", () => {
 		const lines = renderRedGate(
-			verifyResult({
-				scaffoldErrors: [
-					{
-						file: "design-system/atoms/button.tsx",
-						line: 3,
-						col: 1,
-						code: "TS2304",
-						message: "Cannot find name 'X'.",
-						raw: "design-system/atoms/button.tsx(3,1): error TS2304: Cannot find name 'X'.",
-					},
-				],
-			}),
+			verifyResult({ scaffoldErrors: [scaffoldError("design-system/atoms/button.tsx")] }),
 		);
+		// Gate outcome is the leading conclusion — no bare checkmark.
 		expect(lines[0]).toBe("");
 		expect(lines[1]).toBe(
 			"✗ Verify gate failed — npm run verify reported 1 error(s) in claude-ds-managed files:",
 		);
-		expect(lines[lines.length - 1]).toBe(
-			"Run `npx claude-ds audit` to see what remains, then re-run.",
+		// Ownership: claude-ds owns the fix; the consumer is never told to fix/audit.
+		expect(lines.some((l) => /claude-ds's to fix.*do not hand-edit `@generated`/.test(l))).toBe(
+			true,
 		);
+		const blob = lines.join("\n");
+		expect(blob).not.toMatch(/run audit/i);
+		expect(blob).not.toMatch(/claude-ds audit/);
+		expect(blob).not.toMatch(/then re-run/);
+	});
+
+	it("disjoint changed-file set: attributes the breakage as pre-existing", () => {
+		const lines = renderRedGate(
+			verifyResult({ scaffoldErrors: [scaffoldError("design-system/atoms/button.tsx")] }),
+			{ changedFiles: new Set(["design-system/atoms/badge.tsx"]) },
+		);
+		expect(lines.some((l) => /pre-existing — not caused by this update/.test(l))).toBe(true);
+	});
+
+	it("overlapping changed-file set: does not claim pre-existing", () => {
+		const lines = renderRedGate(
+			verifyResult({ scaffoldErrors: [scaffoldError("design-system/atoms/button.tsx")] }),
+			{ changedFiles: new Set(["design-system/atoms/button.tsx"]) },
+		);
+		expect(lines.some((l) => /pre-existing — not caused by this update/.test(l))).toBe(false);
+	});
+
+	it("hand-verify bucket: routes JSX showcases to the consumer's eye", () => {
+		const lines = renderRedGate(
+			verifyResult({
+				scaffoldErrors: [scaffoldError("design-system/atoms/button.tsx")],
+				handVerifyErrors: [scaffoldError("design-system/atoms/card.showcase.tsx", "TS2322")],
+			}),
+		);
+		expect(
+			lines.some((l) => /hand-verify example\(s\) need your eye/.test(l) && /yours to fix/.test(l)),
+		).toBe(true);
+		expect(lines.join("\n")).toContain(adrUrl("composed-widget-rendering"));
+	});
+
+	it("consumer bucket: notes pre-existing consumer errors outside claude-ds's scope", () => {
+		const lines = renderRedGate(
+			verifyResult({
+				scaffoldErrors: [scaffoldError("design-system/atoms/button.tsx")],
+				consumerErrors: [scaffoldError("src/app/page.tsx", "TS2304")],
+			}),
+		);
+		expect(
+			lines.some(
+				(l) => /pre-existing consumer error\(s\)/.test(l) && /outside claude-ds's scope/.test(l),
+			),
+		).toBe(true);
 	});
 
 	it("timeout failure: routes to the cache-warm / timeout-raise next step", () => {

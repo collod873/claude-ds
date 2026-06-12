@@ -17,6 +17,7 @@
  * orchestration code.
  */
 
+import type { HandRolledSplit } from "./hand-rolled-split.js";
 import type { DashboardFinding, DashboardState } from "./render/dashboard.js";
 
 export interface DashboardInput {
@@ -45,9 +46,10 @@ export interface DashboardInput {
 	 *  the signal in adopted mode. Defaults to `false` so callers not yet
 	 *  wired to version currency keep today's behavior. */
 	upgradeAvailable?: boolean;
-	/** Count of hand-rolled DS infra findings from the read-only owned-concern
-	 *  scan (ADR-0003 / #504). Surfaced as a "what's wrong" signal. */
-	handRolledInfra?: number;
+	/** The retirable / needs-review split of hand-rolled DS infra findings from
+	 *  the read-only owned-concern scan (ADR-0003 / #504 / #639). Surfaced as a
+	 *  "what's wrong" signal, phrased apart by supersession. */
+	handRolled?: HandRolledSplit;
 	/** Labels of the read-only completeness scans that ran clean (#504). */
 	alsoChecked?: string[];
 }
@@ -64,7 +66,7 @@ export function composeDashboardState(input: DashboardInput): DashboardState {
 		scaffold: input.scaffold,
 		findings,
 		upgradeAvailable: input.mode === "adopted" && input.upgradeAvailable === true,
-		handRolledInfra: input.mode === "adopted" ? (input.handRolledInfra ?? 0) : 0,
+		handRolled: input.mode === "adopted" ? input.handRolled : undefined,
 		alsoChecked: input.mode === "adopted" ? input.alsoChecked : undefined,
 	};
 }
