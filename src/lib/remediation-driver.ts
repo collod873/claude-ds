@@ -354,7 +354,9 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 
 	for (let iter = 1; iter <= maxIterations; iter++) {
 		opts.onIteration?.(iter, maxIterations);
-		progress.info(`pass ${iter}/${maxIterations}`);
+		// #591: no bare `pass N/M` here. It double-printed alongside the caller's
+		// labeled `onPassPlan` line ("heal: pass 2/3 (max) — …"), which is now the
+		// single pass line. An immediately-converging pass (empty plan) emits none.
 
 		// Plan from current state. Re-derived every iteration so steps the previous
 		// iteration completed drop out of the next plan.

@@ -141,7 +141,7 @@ describe("journey: heal end-to-end on the time-travel fixture (#538)", () => {
 		// (its plan string + everything that pass emitted). A no-op pass that changed
 		// and cleared nothing would emit a byte-identical body to the pass before it —
 		// the defect-2 signature. At least one pass must have run.
-		const segments = heal.stdout.split(/heal: pass \d+\/\d+ — /).slice(1);
+		const segments = heal.stdout.split(/heal: pass \d+\/\d+ \(max\) — /).slice(1);
 		expect(segments.length).toBeGreaterThanOrEqual(1);
 		for (let i = 1; i < segments.length; i++) {
 			expect(segments[i]).not.toBe(segments[i - 1]);
