@@ -9,13 +9,14 @@ import type { OwnedConcernId, SupersedingRuleId } from "./rule.js";
 /**
  * One Owned-concern scanner finding, the unit the doctor surfaces.
  *
- * Detectors return file-level findings (the action is "delete this file"),
- * so `line` defaults to 1 — present in every finding so downstream code can
- * format `file:line` uniformly with drift/integrity output.
+ * `line` is the detector's actual first-match line (#637) — the scanner no
+ * longer stamps a hardcoded 1. It is omitted entirely when no concrete line
+ * applies, so downstream renders `file:line` only when a real location exists
+ * and never a fabricated `:1`.
  */
 export interface OwnedConcernScannerFinding {
 	file: string;
-	line: number;
+	line?: number;
 	concernId: OwnedConcernId;
 	/**
 	 * The shipped capability that covers this concern's failure mode, or `null`
@@ -87,8 +88,8 @@ async function walkRepo(cwd: string): Promise<string[]> {
  *
  * Walks the consumer tree, excludes pack-managed paths and generated
  * artifacts, then runs every registered concern's `detect` over each
- * surviving file's content. Returns the union of findings, line=1 by
- * default (file-level findings: "delete this shadow infra").
+ * surviving file's content. Returns the union of findings, each carrying the
+ * detector's actual first-match line (or none when no concrete line applies).
  *
  * Returns an empty array on a tree with no shadow infrastructure — that
  * is the green path that backs the doctor's `✓ Completeness OK` claim.
@@ -135,13 +136,16 @@ export async function scanOwnedConcerns(
 			// Gate hook-backed supersessions on the hook actually being live.
 			const live = concern.supersededByLiveWhen;
 			const supersededBy = live && enforcement[live.key] !== live.value ? null : hit.supersededBy;
-			findings.push({
+			const finding: OwnedConcernScannerFinding = {
 				file: hit.file,
-				line: 1,
 				concernId: hit.concernId,
 				supersededBy,
 				message: hit.message,
-			});
+			};
+			// #637: carry the real first-match line through; omit it entirely
+			// when the detector found no concrete line (never a fake `:1`).
+			if (hit.line !== undefined) finding.line = hit.line;
+			findings.push(finding);
 		}
 	}
 
