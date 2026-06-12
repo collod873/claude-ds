@@ -11,6 +11,7 @@
  */
 
 import { adrUrl } from "../adr-citation.js";
+import type { HandRolledSplit } from "../hand-rolled-split.js";
 import { computeMigrationChain } from "../migration-framework.js";
 import { MIGRATION_REGISTRY } from "../migration-registry.js";
 import type { ExhaustedReason } from "../remediation-driver.js";
@@ -18,6 +19,9 @@ import type { LoopStep } from "../remediation-planner.js";
 import { formatVerifyErrors } from "../reports/findings-format.js";
 import type { VerifyResult } from "../run-consumer-verify.js";
 import { CHECK } from "./glyphs.js";
+import { needsReviewInfraClause, retirableClause } from "./hand-rolled.js";
+
+const COMPLETENESS_CMD = "`npx claude-ds doctor --completeness`";
 
 /**
  * The completeness routing line for hand-rolled DS infra (#590). The dashboard
@@ -27,10 +31,21 @@ import { CHECK } from "./glyphs.js";
  * emptiness**: it previously surfaced only on an empty plan, leaving a non-empty
  * plan's header count a dead end (a concern named but un-actionable). Pins the
  * invariant: every counted concern in the header maps to a plan or routing line.
+ *
+ * #639: renders from the retirable / needs-review split — retirable findings get
+ * the "now provides" promise and a retire instruction; needs-review findings get
+ * "possible … to review". Both route to the same command, so a finding set with
+ * no superseding capability never claims a retirement doctor can't deliver.
  */
-export function renderHandRolledRouting(count: number): string[] {
-	const noun = count === 1 ? "finding" : "findings";
-	return [`${count} hand-rolled DS infra ${noun} → \`npx claude-ds doctor --completeness\``];
+export function renderHandRolledRouting(split: HandRolledSplit): string[] {
+	const lines: string[] = [];
+	if (split.retirable > 0) {
+		lines.push(`${retirableClause(split)} → run ${COMPLETENESS_CMD} to retire them.`);
+	}
+	if (split.needsReview > 0) {
+		lines.push(`${needsReviewInfraClause(split)} → run ${COMPLETENESS_CMD}.`);
+	}
+	return lines;
 }
 
 export interface ExhaustedSummaryState {
@@ -93,7 +108,10 @@ export interface ClosingSummaryState {
 	version: string;
 	pinnedBefore?: string;
 	consumerErrorCount?: number;
-	handRolledInfra?: number;
+	/** The retirable / needs-review split of hand-rolled DS infra findings (#639).
+	 *  When its total is > 0 the go-ahead downgrades to the completeness command,
+	 *  phrasing retirable and needs-review findings truthfully. */
+	handRolled?: HandRolledSplit;
 	handVerifyCount?: number;
 }
 
@@ -113,13 +131,7 @@ export interface ClosingSummaryState {
  * the to-do framing.
  */
 export function renderClosingSummary(state: ClosingSummaryState): string[] {
-	const {
-		version,
-		pinnedBefore,
-		consumerErrorCount = 0,
-		handRolledInfra = 0,
-		handVerifyCount = 0,
-	} = state;
+	const { version, pinnedBefore, consumerErrorCount = 0, handRolled, handVerifyCount = 0 } = state;
 	const lines = ["", `${CHECK} Tree is clean — ${version}.`];
 	if (pinnedBefore && pinnedBefore !== version) {
 		const highlights = computeMigrationChain(pinnedBefore, version, MIGRATION_REGISTRY).flatMap(
@@ -149,12 +161,17 @@ export function renderClosingSummary(state: ClosingSummaryState): string[] {
 	// member — hand-rolled DS infra found before the run still stands. The
 	// "start working" go-ahead is only honest when nothing is left, so a gap
 	// downgrades it to the one command that resolves it (#504). A noted consumer
-	// error above is warn-only and does not block the go-ahead.
-	if (handRolledInfra > 0) {
-		const noun = handRolledInfra === 1 ? "finding" : "findings";
-		lines.push(
-			`  ${handRolledInfra} hand-rolled DS infra ${noun} remain — run \`npx claude-ds doctor --completeness\`.`,
-		);
+	// error above is warn-only and does not block the go-ahead. #639: retirable
+	// and needs-review findings are phrased apart — "now provides" only for the
+	// retirable ones, so the closing copy never promises a retirement that the
+	// dashboard/gate deny for the same set.
+	if (handRolled && handRolled.total > 0) {
+		if (handRolled.retirable > 0) {
+			lines.push(`  ${retirableClause(handRolled)} — run ${COMPLETENESS_CMD} to retire them.`);
+		}
+		if (handRolled.needsReview > 0) {
+			lines.push(`  ${needsReviewInfraClause(handRolled)} — run ${COMPLETENESS_CMD}.`);
+		}
 	} else {
 		lines.push("  Nothing needs your attention — start working.");
 	}

@@ -34,6 +34,7 @@ import { composeDashboardState } from "../lib/dashboard.js";
 import { isExtractionNeededFinding } from "../lib/drift/index.js";
 import { type Exception, parseExceptions } from "../lib/exceptions.js";
 import { awaitCommitment, buildCommitmentGate, projectFullPlan } from "../lib/gate-preview.js";
+import { type HandRolledSplit, splitHandRolled } from "../lib/hand-rolled-split.js";
 import { detectBuildCommand } from "../lib/log.js";
 import { parseManifest } from "../lib/manifest.js";
 import { type OwnedConcernScannerFinding, scanOwnedConcerns } from "../lib/owned-concerns/index.js";
@@ -191,7 +192,13 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		// the clean ones in the dashboard. `handRolledInfra` is a "what's wrong"
 		// signal when non-zero; the labels below are only claimed when the scan
 		// genuinely returned zero — never asserting a false negative.
-		let handRolledInfra = 0;
+		let handRolled: HandRolledSplit = {
+			retirable: 0,
+			needsReview: 0,
+			total: 0,
+			retirableNoun: "file",
+			needsReviewNoun: "file",
+		};
 		const alsoChecked: string[] = [];
 		if (ctx.kind === "adopted") {
 			const exceptionsPath = join(cwd, "design-system/exceptions.json");
@@ -239,10 +246,16 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 				manifestPaths: new Set(manifest.files.map((f) => f.path)),
 				generatedPatterns: manifest.generated_patterns,
 			});
-			handRolledInfra = rawOwned.filter((f) => !suppressed.has(`${f.concernId}:${f.file}`)).length;
+			// #639: split the surviving findings into retirable (a live shipped
+			// capability supersedes — `supersededBy` non-null after the hook-liveness
+			// downgrade) vs needs-review (null). Every surface renders from this one
+			// split, so the dashboard headline can't promise a retirement the gate or
+			// closing copy deny for the same set.
+			const activeOwned = rawOwned.filter((f) => !suppressed.has(`${f.concernId}:${f.file}`));
+			handRolled = splitHandRolled(activeOwned);
 			// Consumer phrasing on the dashboard (#620) — the internal "hand-rolled DS
 			// infra" term names the scan in code/docs but never prints to the consumer.
-			if (handRolledInfra === 0) alsoChecked.push("no hand-built design-system scripts");
+			if (handRolled.total === 0) alsoChecked.push("no hand-built design-system scripts");
 
 			// Deprecated/stale root-level dupes (#23): a canonical design-system/ file
 			// left shadowed by a pre-adopt root copy. `rootDupes` was already scanned
@@ -278,7 +291,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			unfixableCount,
 			buildCmd,
 			upgradeAvailable,
-			handRolledInfra,
+			handRolled,
 			alsoChecked,
 		});
 
@@ -314,11 +327,11 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			// plan does NOT imply the owned-concern scan was clean. If it flagged
 			// hand-rolled DS infra, route to the command that resolves it rather than
 			// asserting clean — the dashboard already named it under "What's wrong".
-			if (handRolledInfra > 0) {
+			if (handRolled.total > 0) {
 				printLines([
 					"",
 					"Loop is clean, but completeness work remains:",
-					...renderHandRolledRouting(handRolledInfra),
+					...renderHandRolledRouting(handRolled),
 				]);
 				return;
 			}
@@ -347,7 +360,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			// never fixes it. The gate's "won't fix" block (block 2) names it and the
 			// follow-up command so the header count is never a dead end and the operator
 			// sees what Enter leaves behind before they consent.
-			{ verbose: opts.verbose, completenessCount: handRolledInfra },
+			{ verbose: opts.verbose, handRolled },
 		);
 		printLines(gateLines);
 
@@ -421,7 +434,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 						version: cliVersion(),
 						pinnedBefore: parsedCfg?.packVersion,
 						consumerErrorCount: verify.consumerErrors.length,
-						handRolledInfra,
+						handRolled,
 						handVerifyCount: verify.handVerifyErrors.length,
 					}),
 				);

@@ -23,8 +23,10 @@
  * under test.
  */
 
+import type { HandRolledSplit } from "../hand-rolled-split.js";
 import type { ColorAdapter } from "./color.js";
 import { CHECK } from "./glyphs.js";
+import { needsReviewPlainClause, retirableClause } from "./hand-rolled.js";
 
 export type DashboardMode = "pre-adopt" | "adopted" | "fresh";
 
@@ -45,11 +47,13 @@ export interface DashboardState {
 	 *  Optional so callers not yet wired to version currency keep today's
 	 *  behavior. */
 	upgradeAvailable?: boolean;
-	/** Count of hand-rolled DS infrastructure findings from the read-only
-	 *  owned-concern scan (ADR-0003 / #504). A "what's wrong" signal: a found
-	 *  defect must never read as clean. The scan that produced this is, by
-	 *  definition, NOT one of `alsoChecked`. Defaults to 0/undefined. */
-	handRolledInfra?: number;
+	/** The retirable / needs-review split of hand-rolled DS infrastructure
+	 *  findings from the read-only owned-concern scan (ADR-0003 / #504 / #639). A
+	 *  "what's wrong" signal: a found defect must never read as clean. The scan
+	 *  that produced this is, by definition, NOT one of `alsoChecked`. Retirable
+	 *  findings render "the pack now provides"; needs-review findings render
+	 *  "possible … to review" — never "now provides". Defaults to undefined. */
+	handRolled?: HandRolledSplit;
 	/** Labels of the read-only completeness scans that ran and came back clean
 	 *  (#504). A check that passes silently is indistinguishable from one that
 	 *  never ran — naming the clean scans makes the ADR-0003 completeness
@@ -96,9 +100,10 @@ export function renderDashboard(state: DashboardState, color: ColorAdapter): str
 		state.scaffold !== undefined && state.scaffold.present !== state.scaffold.total;
 	const findingsCount = state.findings.length;
 	const upgradeAvailable = state.upgradeAvailable === true;
-	const handRolledInfra = state.handRolledInfra ?? 0;
+	const handRolled = state.handRolled;
+	const handRolledTotal = handRolled?.total ?? 0;
 
-	if (!scaffoldIncomplete && findingsCount === 0 && !upgradeAvailable && handRolledInfra === 0) {
+	if (!scaffoldIncomplete && findingsCount === 0 && !upgradeAvailable && handRolledTotal === 0) {
 		lines.push(good("Everything's up to date — nothing to fix"));
 	} else {
 		// Missing files, fixable issues, a stale pack, and scripts the consumer
@@ -114,11 +119,16 @@ export function renderDashboard(state: DashboardState, color: ColorAdapter): str
 		if (findingsCount > 0) {
 			parts.push(`${findingsCount} ${findingsCount === 1 ? "issue" : "issues"} I can fix`);
 		}
-		if (handRolledInfra > 0) {
-			const noun = handRolledInfra === 1 ? "script" : "scripts";
-			parts.push(
-				`${handRolledInfra} ${noun} you built by hand that the design-system pack now provides`,
-			);
+		// #639: the single "scripts the pack now provides" line splits in two.
+		// "Now provides" is honest only for retirable findings (a live capability
+		// supersedes them); needs-review findings are flagged "to review", never
+		// promised a retirement. The noun derives from the set (file/finding),
+		// never the hardcoded "script". Plain dialect (#620) — no "hand-rolled".
+		if (handRolled && handRolled.retirable > 0) {
+			parts.push(retirableClause(handRolled));
+		}
+		if (handRolled && handRolled.needsReview > 0) {
+			parts.push(needsReviewPlainClause(handRolled));
 		}
 		if (upgradeAvailable) parts.push("a newer design-system pack is available");
 		lines.push(action(`Needs attention: ${parts.join(", ")}`));

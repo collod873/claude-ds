@@ -6,7 +6,7 @@ exports[`journey: heal end-to-end on the time-travel fixture (#538) > golden: th
 # --- transcript below; bytes are verbatim from the built CLI, normalized for paths/versions/durations ---
 ✓ Design system in place — <fixture>
 ! Managed files: 0/93 (93 missing)
-! Needs attention: 93 missing files, 2 issues I can fix, 1 script you built by hand that the design-system pack now provides, a newer design-system pack is available
+! Needs attention: 93 missing files, 2 issues I can fix, 1 file you built by hand that the design-system pack now provides, a newer design-system pack is available
 ✓ Also checked: nothing stale or deprecated
 
 Pressing Enter will:
@@ -30,8 +30,7 @@ Pressing Enter will:
   (re-run with --verbose for the full per-file change list)
 
 Pressing Enter won't fix:
-  1 thing you built by hand that the design-system now provides —
-  run \`npx claude-ds doctor --completeness\` to retire those.
+  1 file you built by hand that the design-system pack now provides — run \`npx claude-ds doctor --completeness\` to retire those.
 "
 `;
 
