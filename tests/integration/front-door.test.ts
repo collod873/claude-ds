@@ -640,6 +640,124 @@ export function SoloLabel() { return <span />; }
 	}, 60000);
 });
 
+describe("front-door generator-warning channel (#619)", () => {
+	let dir: string;
+	beforeEach(async () => {
+		dir = await freshTmpDir();
+	});
+	afterEach(async () => {
+		await cleanup(dir);
+	});
+
+	// A composite whose four meta.examples each spread an unresolvable call —
+	// the AST generator can't expand `...row()`, so each emits the internal
+	// "spread in object — skipping" warning. Mirrors the Crewops payment-summary
+	// case (#623): four unresolvable spreads in one file.
+	const PAYMENT_SUMMARY = `export const meta = {
+  kind: 'composite' as const,
+  examples: [
+    { name: 'paid', props: { ...row() } },
+    { name: 'pending', props: { ...row() } },
+    { name: 'failed', props: { ...row() } },
+    { name: 'refunded', props: { ...row() } },
+  ],
+};
+function row() { return { status: 'x' }; }
+export function PaymentSummary() { return <div />; }
+`;
+
+	async function setupWarningSource(): Promise<void> {
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		await mkdir(join(dir, "design-system/composites"), { recursive: true });
+		await writeFile(join(dir, "design-system/composites/payment-summary.tsx"), PAYMENT_SUMMARY);
+		// Generate the companion so the front door's generated-integrity sweep has
+		// a file to regenerate (and thus re-emit the warnings) on every pass.
+		const regen = await runCli(["regen-showcases"], { cwd: dir });
+		expect(regen.code).toBe(0);
+	}
+
+	/** Capture both stdout and stderr from a non-interactive front-door run. */
+	async function captureBoth(verbose: boolean): Promise<{ stdout: string; stderr: string }> {
+		const origOut = process.stdout.write.bind(process.stdout);
+		const origErr = process.stderr.write.bind(process.stderr);
+		const origLog = console.log;
+		const origInfo = console.info;
+		const origErrLog = console.error;
+		let stdout = "";
+		let stderr = "";
+		const fmt = (args: unknown[]) =>
+			`${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
+		process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
+			stdout += typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8");
+			const cb = rest.find((x) => typeof x === "function") as ((e?: Error) => void) | undefined;
+			cb?.();
+			return true;
+		}) as typeof process.stdout.write;
+		process.stderr.write = ((chunk: unknown, ...rest: unknown[]) => {
+			stderr += typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8");
+			const cb = rest.find((x) => typeof x === "function") as ((e?: Error) => void) | undefined;
+			cb?.();
+			return true;
+		}) as typeof process.stderr.write;
+		console.log = (...args: unknown[]) => {
+			stdout += fmt(args);
+		};
+		console.info = (...args: unknown[]) => {
+			stdout += fmt(args);
+		};
+		console.error = (...args: unknown[]) => {
+			stderr += fmt(args);
+		};
+		try {
+			await frontDoorCmd({ cwd: dir, interactive: false, verbose, maxIterations: 5 });
+		} finally {
+			process.stdout.write = origOut as typeof process.stdout.write;
+			process.stderr.write = origErr as typeof process.stderr.write;
+			console.log = origLog;
+			console.info = origInfo;
+			console.error = origErrLog;
+		}
+		return { stdout, stderr };
+	}
+
+	it("summarizes skipped examples in one line and never prints raw [AST] (criteria 1)", async () => {
+		await setupWarningSource();
+		const { stdout, stderr } = await captureBoth(false);
+
+		// One plain-language summary line naming the count.
+		expect(stdout).toMatch(
+			/4 component examples couldn't be parsed and were skipped — re-run with --verbose for details/,
+		);
+		// The internal AST text never reaches either stream un-summarized.
+		expect(stdout).not.toContain("[AST]");
+		expect(stdout).not.toContain("spread in object");
+		expect(stderr).not.toContain("[AST]");
+		expect(stderr).not.toContain("spread in object");
+	});
+
+	it("--verbose itemizes the full list naming the source file (criteria 2)", async () => {
+		await setupWarningSource();
+		const { stdout } = await captureBoth(true);
+
+		// The itemized list names the source file and the per-example detail, and
+		// drops the collapsing summary line.
+		expect(stdout).toContain("payment-summary.tsx");
+		expect(stdout).toMatch(/payment-summary\.tsx:.*spread in object/);
+		expect(stdout).not.toMatch(/re-run with --verbose for details/);
+	});
+
+	it("prints no warning line when there are zero generator warnings (criteria 3)", async () => {
+		// A clean adopted tree with no unresolvable examples → the collector is
+		// empty and renders nothing.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		const { stdout } = await captureBoth(false);
+
+		expect(stdout).not.toMatch(/couldn't be parsed and (was|were) skipped/);
+	});
+});
+
 /**
  * Drive the front door through its interactive `[Enter]` gate, feeding `stdin`
  * to the readline prompt. Unlike `captureFrontDoor` (which forces

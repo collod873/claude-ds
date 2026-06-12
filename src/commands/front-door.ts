@@ -53,6 +53,8 @@ import { scanScaffoldDrift } from "../lib/reports/scaffold-drift.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import { scanRootDupes } from "../lib/root-dupes.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
+import { setGeneratorWarningCollector } from "../lib/showcase/generator.js";
+import { GeneratorWarningCollector } from "../lib/showcase/warning-collector.js";
 import { checkVersionCurrency } from "../lib/version-currency.js";
 import { cliVersion } from "../lib/version-vocab.js";
 
@@ -96,313 +98,335 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 	const cwd = opts.cwd ?? process.cwd();
 	const interactive = opts.interactive ?? true;
 
-	// Mode detection mirrors `audit` / `doctor`: presence of `.claude-ds.json`
-	// discriminates the boot path. A malformed config falls back to pre-adopt
-	// so the dashboard never crashes on a broken project — the user can still
-	// read the recommendation and recover.
-	const cfgPath = join(cwd, ".claude-ds.json");
-	const hasCfg = await exists(cfgPath);
-	let pack = DEFAULT_PACK;
-	let parsedCfg: Config | null = null;
-	if (hasCfg) {
-		try {
-			parsedCfg = parseConfig(await readFile(cfgPath, "utf8"));
-			pack = parsedCfg.pack;
-		} catch {
-			// Fall back to default pack; the brain will recommend adopt anyway.
+	// Capture the showcase generator's internal AST skip warnings for the whole
+	// run (every sweep through deriveProjectState and the drive loop) instead of
+	// letting them spam the dashboard as raw `[AST]: …` stderr (#619 / #618).
+	// Rendered as one plain-language line — or the full list under --verbose —
+	// once state is derived. Restored in `finally` so the collector never leaks
+	// past this command (e.g. into the per-save regen hook's stderr path).
+	const generatorWarnings = new GeneratorWarningCollector();
+	const prevCollector = setGeneratorWarningCollector(generatorWarnings);
+	try {
+		// Mode detection mirrors `audit` / `doctor`: presence of `.claude-ds.json`
+		// discriminates the boot path. A malformed config falls back to pre-adopt
+		// so the dashboard never crashes on a broken project — the user can still
+		// read the recommendation and recover.
+		const cfgPath = join(cwd, ".claude-ds.json");
+		const hasCfg = await exists(cfgPath);
+		let pack = DEFAULT_PACK;
+		let parsedCfg: Config | null = null;
+		if (hasCfg) {
+			try {
+				parsedCfg = parseConfig(await readFile(cfgPath, "utf8"));
+				pack = parsedCfg.pack;
+			} catch {
+				// Fall back to default pack; the brain will recommend adopt anyway.
+			}
 		}
-	}
 
-	const here = dirname(fileURLToPath(import.meta.url));
-	const repoRoot = resolve(here, "..", "..");
-	const packDir = join(repoRoot, "packs", pack);
-	const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
+		const here = dirname(fileURLToPath(import.meta.url));
+		const repoRoot = resolve(here, "..", "..");
+		const packDir = join(repoRoot, "packs", pack);
+		const manifest = parseManifest(await readFile(join(packDir, "manifest.json"), "utf8"));
 
-	let ctx: ProjectContext;
-	if (hasCfg) {
-		try {
-			ctx = await loadProject(cwd);
-		} catch {
+		let ctx: ProjectContext;
+		if (hasCfg) {
+			try {
+				ctx = await loadProject(cwd);
+			} catch {
+				ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
+			}
+		} else {
 			ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
 		}
-	} else {
-		ctx = await loadPreAdoptProject(cwd, { pack, packDir, manifest });
-	}
 
-	const { appDir, claudeMdTarget } = ctx.auditConfig;
+		const { appDir, claudeMdTarget } = ctx.auditConfig;
 
-	// Scaffold presence — same scan `audit` runs, but verbose:false so the
-	// returned `lines` are suppressed in favor of the dashboard's "Scaffold: N/M"
-	// summary line. We only consume the structured `present`/`total`.
-	const scaffold = await scanScaffoldPresence(ctx, {
-		manifest,
-		appDir,
-		claudeMdTarget,
-		verbose: false,
-	});
-
-	// Content-aware health (#463): presence alone reported "N/N ✓" while `sync`
-	// would still rewrite a stale-but-present managed file. Subtract the files
-	// the sync op plans to rewrite (drift, not missing-file creates — those
-	// already lower `present`) so the dashboard never claims clean when sync has
-	// work. Only meaningful once adopted; pre-adopt has no scaffold to drift.
-	let scaffoldPresentClean = scaffold.present;
-	if (ctx.kind === "adopted") {
-		const drift = await scanScaffoldDrift(ctx);
-		scaffoldPresentClean -= drift.driftedPresent;
-	}
-
-	// Missing managed files — same shape doctor's adopted branch computes (#58
-	// honors app_dir when resolving manifest paths).
-	const managedFiles = manifest.files.filter((f) => f.category === "managed");
-	let missingManaged = 0;
-	for (const f of managedFiles) {
-		const resolvedPath = resolveManifestPath(f.path, appDir);
-		if (!(await exists(join(cwd, resolvedPath)))) missingManaged++;
-	}
-
-	// Root-level dupes of canonical design-system/ files (#23).
-	const rootDupes = await scanRootDupes(cwd, manifest.deprecated_paths);
-
-	// Read-only audit: skip the drift scan entirely in pre-adopt (no scaffold
-	// means design-system/ likely isn't there). In adopted mode, run the same
-	// drift+integrity scan `audit` uses and apply exceptions so the dashboard
-	// counts match what the user would see from `audit` itself.
-	let findings: Array<{ ruleId: string; file: string; message: string }> = [];
-	let autoFixableFindings: Array<{ ruleId: string; file: string }> = [];
-	let extractionCount = 0;
-	let unfixableCount = 0;
-	// Read-only completeness scans (ADR-0003 / #504). A check that passes
-	// silently reads as a check that never ran, so the front door runs the
-	// owned-concern (hand-rolled DS infra) and deprecated-dupe scans and names
-	// the clean ones in the dashboard. `handRolledInfra` is a "what's wrong"
-	// signal when non-zero; the labels below are only claimed when the scan
-	// genuinely returned zero — never asserting a false negative.
-	let handRolledInfra = 0;
-	const alsoChecked: string[] = [];
-	if (ctx.kind === "adopted") {
-		const exceptionsPath = join(cwd, "design-system/exceptions.json");
-		let exceptions: Exception[] = [];
-		if (await exists(exceptionsPath)) {
-			try {
-				exceptions = parseExceptions(await readFile(exceptionsPath, "utf8"));
-			} catch {
-				// Malformed exceptions.json — audit catches the parse error elsewhere.
-			}
-		}
-		const suppressed = new Set(exceptions.map((e) => `${e.rule}:${e.path}`));
-
-		const driftIntegrity = await scanDriftAndIntegrity(ctx);
-		const active = driftIntegrity.findings.filter((f) => !suppressed.has(`${f.ruleId}:${f.file}`));
-		findings = active.map((f) => ({ ruleId: f.ruleId, file: f.file, message: f.message }));
-		extractionCount = active.filter(isExtractionNeededFinding).length;
-		// "Unfixable" for the gate's classify/auto-fix split is "owner is not
-		// `audit --fix`" — classify-relocatable, extraction, and terminal-manual
-		// findings all fall here. Resolved through the same complaint-ownership
-		// registry the planner composes from (#533), so the front-door's status
-		// numbers cannot diverge from the steps the plan dispatches.
-		const isAutoFixable = (f: { ruleId: string; file: string; message: string }): boolean => {
-			const owner = ownerForFinding(f);
-			return owner.kind === "operation" && owner.step === "audit --fix";
-		};
-		unfixableCount = active.filter((f) => !isAutoFixable(f)).length;
-		// The concrete auto-fixable set the planner consumed — fed to the gate so
-		// the `audit --fix` step previews a per-rule grouped list, not a bare count
-		// (#584). Same predicate as `unfixableCount`'s complement, so the preview's
-		// rows can never diverge from the header total they sit under.
-		autoFixableFindings = active
-			.filter((f) => isAutoFixable(f))
-			.map((f) => ({ ruleId: f.ruleId, file: f.file }));
-
-		// Owned-concern scan (ADR-0017 / #514): repo-wide, signature-as-identity.
-		// Catches hand-rolled DS infrastructure (the Crewops `ui-token-validator.sh`
-		// / `base-ui-aschild-validator.sh` class) the drift scan above is blind to.
-		// This is the scan #504's blocker required to land before any "clean ✓"
-		// claim ships — without it, "no hand-rolled DS infra" would be a lie.
-		const rawOwned: OwnedConcernScannerFinding[] = await scanOwnedConcerns({
-			cwd,
-			manifestPaths: new Set(manifest.files.map((f) => f.path)),
-			generatedPatterns: manifest.generated_patterns,
+		// Scaffold presence — same scan `audit` runs, but verbose:false so the
+		// returned `lines` are suppressed in favor of the dashboard's "Scaffold: N/M"
+		// summary line. We only consume the structured `present`/`total`.
+		const scaffold = await scanScaffoldPresence(ctx, {
+			manifest,
+			appDir,
+			claudeMdTarget,
+			verbose: false,
 		});
-		handRolledInfra = rawOwned.filter((f) => !suppressed.has(`${f.concernId}:${f.file}`)).length;
-		// Consumer phrasing on the dashboard (#620) — the internal "hand-rolled DS
-		// infra" term names the scan in code/docs but never prints to the consumer.
-		if (handRolledInfra === 0) alsoChecked.push("no hand-built design-system scripts");
 
-		// Deprecated/stale root-level dupes (#23): a canonical design-system/ file
-		// left shadowed by a pre-adopt root copy. `rootDupes` was already scanned
-		// above; name it clean here so the deprecated-file check is visible too.
-		if (rootDupes.length === 0) alsoChecked.push("nothing stale or deprecated");
-	}
+		// Content-aware health (#463): presence alone reported "N/N ✓" while `sync`
+		// would still rewrite a stale-but-present managed file. Subtract the files
+		// the sync op plans to rewrite (drift, not missing-file creates — those
+		// already lower `present`) so the dashboard never claims clean when sync has
+		// work. Only meaningful once adopted; pre-adopt has no scaffold to drift.
+		let scaffoldPresentClean = scaffold.present;
+		if (ctx.kind === "adopted") {
+			const drift = await scanScaffoldDrift(ctx);
+			scaffoldPresentClean -= drift.driftedPresent;
+		}
 
-	const buildCmd = await detectBuildCommand(cwd);
+		// Missing managed files — same shape doctor's adopted branch computes (#58
+		// honors app_dir when resolving manifest paths).
+		const managedFiles = manifest.files.filter((f) => f.category === "managed");
+		let missingManaged = 0;
+		for (const f of managedFiles) {
+			const resolvedPath = resolveManifestPath(f.path, appDir);
+			if (!(await exists(join(cwd, resolvedPath)))) missingManaged++;
+		}
 
-	// Version currency: pinned packVersion (from .claude-ds.json) vs the
-	// installed CLI version (from this package's package.json). The check
-	// only matters in adopted mode — pre-adopt has no pinned version, and
-	// the brain's adopt recommendation wins regardless. We consume the
-	// extracted pure helper rather than shelling out to `version --check`
-	// (#336 acceptance).
-	let upgradeAvailable = false;
-	if (ctx.kind === "adopted" && parsedCfg) {
-		upgradeAvailable = checkVersionCurrency({
-			pinned: parsedCfg.packVersion,
-			installed: cliVersion(),
-		}).upgradeAvailable;
-	}
+		// Root-level dupes of canonical design-system/ files (#23).
+		const rootDupes = await scanRootDupes(cwd, manifest.deprecated_paths);
 
-	const state = composeDashboardState({
-		cwd,
-		mode: ctx.kind === "adopted" ? "adopted" : "pre-adopt",
-		pack,
-		scaffold: { present: scaffoldPresentClean, total: scaffold.total },
-		missingManaged,
-		rootDupes: rootDupes.length,
-		findings,
-		extractionCount,
-		unfixableCount,
-		buildCmd,
-		upgradeAvailable,
-		handRolledInfra,
-		alsoChecked,
-	});
+		// Read-only audit: skip the drift scan entirely in pre-adopt (no scaffold
+		// means design-system/ likely isn't there). In adopted mode, run the same
+		// drift+integrity scan `audit` uses and apply exceptions so the dashboard
+		// counts match what the user would see from `audit` itself.
+		let findings: Array<{ ruleId: string; file: string; message: string }> = [];
+		let autoFixableFindings: Array<{ ruleId: string; file: string }> = [];
+		let extractionCount = 0;
+		let unfixableCount = 0;
+		// Read-only completeness scans (ADR-0003 / #504). A check that passes
+		// silently reads as a check that never ran, so the front door runs the
+		// owned-concern (hand-rolled DS infra) and deprecated-dupe scans and names
+		// the clean ones in the dashboard. `handRolledInfra` is a "what's wrong"
+		// signal when non-zero; the labels below are only claimed when the scan
+		// genuinely returned zero — never asserting a false negative.
+		let handRolledInfra = 0;
+		const alsoChecked: string[] = [];
+		if (ctx.kind === "adopted") {
+			const exceptionsPath = join(cwd, "design-system/exceptions.json");
+			let exceptions: Exception[] = [];
+			if (await exists(exceptionsPath)) {
+				try {
+					exceptions = parseExceptions(await readFile(exceptionsPath, "utf8"));
+				} catch {
+					// Malformed exceptions.json — audit catches the parse error elsewhere.
+				}
+			}
+			const suppressed = new Set(exceptions.map((e) => `${e.rule}:${e.path}`));
 
-	printLines(renderDashboard(state, loadColorAdapter()));
+			const driftIntegrity = await scanDriftAndIntegrity(ctx);
+			const active = driftIntegrity.findings.filter(
+				(f) => !suppressed.has(`${f.ruleId}:${f.file}`),
+			);
+			findings = active.map((f) => ({ ruleId: f.ruleId, file: f.file, message: f.message }));
+			extractionCount = active.filter(isExtractionNeededFinding).length;
+			// "Unfixable" for the gate's classify/auto-fix split is "owner is not
+			// `audit --fix`" — classify-relocatable, extraction, and terminal-manual
+			// findings all fall here. Resolved through the same complaint-ownership
+			// registry the planner composes from (#533), so the front-door's status
+			// numbers cannot diverge from the steps the plan dispatches.
+			const isAutoFixable = (f: { ruleId: string; file: string; message: string }): boolean => {
+				const owner = ownerForFinding(f);
+				return owner.kind === "operation" && owner.step === "audit --fix";
+			};
+			unfixableCount = active.filter((f) => !isAutoFixable(f)).length;
+			// The concrete auto-fixable set the planner consumed — fed to the gate so
+			// the `audit --fix` step previews a per-rule grouped list, not a bare count
+			// (#584). Same predicate as `unfixableCount`'s complement, so the preview's
+			// rows can never diverge from the header total they sit under.
+			autoFixableFindings = active
+				.filter((f) => isAutoFixable(f))
+				.map((f) => ({ ruleId: f.ruleId, file: f.file }));
 
-	// Pre-adopt is an Entry point, not a planner state (ADR-0018): `adopt` hands
-	// the project *into* the loop, it isn't a loop member, and `deriveProjectState`
-	// needs a loaded config the project doesn't have yet. Surface the one command
-	// that gets them in and stop — there is no plan to drive.
-	if (ctx.kind !== "adopted") {
-		printLines([`→ Run \`claude-ds adopt --pack ${pack}\` to install the design-system scaffold.`]);
-		return;
-	}
+			// Owned-concern scan (ADR-0017 / #514): repo-wide, signature-as-identity.
+			// Catches hand-rolled DS infrastructure (the Crewops `ui-token-validator.sh`
+			// / `base-ui-aschild-validator.sh` class) the drift scan above is blind to.
+			// This is the scan #504's blocker required to land before any "clean ✓"
+			// claim ships — without it, "no hand-rolled DS infra" would be a lie.
+			const rawOwned: OwnedConcernScannerFinding[] = await scanOwnedConcerns({
+				cwd,
+				manifestPaths: new Set(manifest.files.map((f) => f.path)),
+				generatedPatterns: manifest.generated_patterns,
+			});
+			handRolledInfra = rawOwned.filter((f) => !suppressed.has(`${f.concernId}:${f.file}`)).length;
+			// Consumer phrasing on the dashboard (#620) — the internal "hand-rolled DS
+			// infra" term names the scan in code/docs but never prints to the consumer.
+			if (handRolledInfra === 0) alsoChecked.push("no hand-built design-system scripts");
 
-	// The interactive driver of the shared planner (ADR-0018). Same brain heal
-	// runs headlessly: derive state → plan. An empty plan means a fixed point.
-	const projectState = await deriveProjectState(cwd);
-	const plan = planRemediation(projectState);
+			// Deprecated/stale root-level dupes (#23): a canonical design-system/ file
+			// left shadowed by a pre-adopt root copy. `rootDupes` was already scanned
+			// above; name it clean here so the deprecated-file check is visible too.
+			if (rootDupes.length === 0) alsoChecked.push("nothing stale or deprecated");
+		}
 
-	if (plan.length === 0) {
-		// Completeness (ADR-0003) is not a remediation-loop member, so an empty
-		// plan does NOT imply the owned-concern scan was clean. If it flagged
-		// hand-rolled DS infra, route to the command that resolves it rather than
-		// asserting clean — the dashboard already named it under "What's wrong".
-		if (handRolledInfra > 0) {
+		const buildCmd = await detectBuildCommand(cwd);
+
+		// Version currency: pinned packVersion (from .claude-ds.json) vs the
+		// installed CLI version (from this package's package.json). The check
+		// only matters in adopted mode — pre-adopt has no pinned version, and
+		// the brain's adopt recommendation wins regardless. We consume the
+		// extracted pure helper rather than shelling out to `version --check`
+		// (#336 acceptance).
+		let upgradeAvailable = false;
+		if (ctx.kind === "adopted" && parsedCfg) {
+			upgradeAvailable = checkVersionCurrency({
+				pinned: parsedCfg.packVersion,
+				installed: cliVersion(),
+			}).upgradeAvailable;
+		}
+
+		const state = composeDashboardState({
+			cwd,
+			mode: ctx.kind === "adopted" ? "adopted" : "pre-adopt",
+			pack,
+			scaffold: { present: scaffoldPresentClean, total: scaffold.total },
+			missingManaged,
+			rootDupes: rootDupes.length,
+			findings,
+			extractionCount,
+			unfixableCount,
+			buildCmd,
+			upgradeAvailable,
+			handRolledInfra,
+			alsoChecked,
+		});
+
+		printLines(renderDashboard(state, loadColorAdapter()));
+
+		// Pre-adopt is an Entry point, not a planner state (ADR-0018): `adopt` hands
+		// the project *into* the loop, it isn't a loop member, and `deriveProjectState`
+		// needs a loaded config the project doesn't have yet. Surface the one command
+		// that gets them in and stop — there is no plan to drive.
+		if (ctx.kind !== "adopted") {
 			printLines([
-				"",
-				"Loop is clean, but completeness work remains:",
-				...renderHandRolledRouting(handRolledInfra),
+				`→ Run \`claude-ds adopt --pack ${pack}\` to install the design-system scaffold.`,
 			]);
 			return;
 		}
-		printLines([
-			"",
-			"Nothing to remediate — the tree is clean.",
-			`→ Run \`${buildCmd}\` to verify everything compiles.`,
-		]);
-		return;
-	}
 
-	// Commitment gate: a preview rendered from the real planned Change[] (so the
-	// counts the operator approves equal what runs — F11), then a single [Enter].
-	// `unfixableCount` already subsumes extraction, so it is classify's whole
-	// non-overlapping share; the remainder is audit --fix's auto-fixable set.
-	const gateLines = await buildCommitmentGate(
-		ctx,
-		plan,
-		{
-			classifyCount: unfixableCount,
-			autoFixableCount: findings.length - unfixableCount,
-			autoFixableFindings,
-		},
-		{ verbose: opts.verbose },
-	);
-	printLines(gateLines);
+		// The interactive driver of the shared planner (ADR-0018). Same brain heal
+		// runs headlessly: derive state → plan. An empty plan means a fixed point.
+		const projectState = await deriveProjectState(cwd);
+		const plan = planRemediation(projectState);
 
-	// Completeness routing (#590): hand-rolled DS infra is counted in the dashboard
-	// header but is not a remediation-loop member, so the gate plan above never
-	// lists it. Render the routing line here too — independent of plan emptiness —
-	// so the header count is never a dead end. The operator sees it while the gate
-	// awaits [Enter], so the completeness work is in view before they consent.
-	if (handRolledInfra > 0) {
-		printLines(["", ...renderHandRolledRouting(handRolledInfra)]);
-	}
+		// Generator warnings, summarized (#619). Deriving state ran a full generator
+		// sweep, so any skipped examples are now collected. Rendered here — between
+		// the dashboard and the plan/gate — as one consumer-language line, or the
+		// full itemized list under --verbose. Zero warnings → nothing prints.
+		printLines(generatorWarnings.render({ verbose: opts.verbose }));
 
-	if (interactive) {
-		const approved = await awaitCommitment();
-		if (!approved) {
-			printLines(["", "Cancelled — nothing changed."]);
-			return;
-		}
-	} else if (!opts.yes) {
-		// Non-interactive without explicit authorization: the gate preview above is
-		// the whole output. Driving would mutate the tree behind the operator's
-		// back, so stop — `yes: true` opts into the headless drive.
-		return;
-	}
-
-	// Auto-advance to clean. No `pendingSink` → the Decision resolver prompts
-	// inline on a TTY for genuine Ambiguities, resolves silently when `--answers`
-	// is supplied, and fails loud non-TTY otherwise (ADR-0023). Live progress on
-	// stderr; the loop never pauses for mechanical work.
-	const progress = createProgress();
-	try {
-		const outcome = await driveRemediation({
-			cwd,
-			maxIterations: opts.maxIterations ?? DEFAULT_MAX_ITERATIONS,
-			answers: opts.answers,
-			progress,
-		});
-		if (outcome.kind === "converged") {
-			// Issue #510 — the same consumer-verify gate heal runs at convergence
-			// (#410 / PRD #407). The front door mutated the tree via driveRemediation;
-			// "Tree is clean" must mean the consumer's own verify is green on
-			// claude-ds-owned files, not merely that the planner reached a fixed
-			// point. Same attribution as heal (managedFiles + managedRoots): a
-			// scaffold-attributed error flips the verdict red and routes to repair;
-			// pre-existing consumer errors are noted but do not block. Without this
-			// the front door's verdict diverged from heal's — "Tree is clean" could
-			// coexist with a red typecheck heal would have caught.
-			// Reload the context after the loop, as heal does: an upgrade inside
-			// driveRemediation can change the managed-file set, so attribution must
-			// run against the post-remediation manifest, not the pre-loop one.
-			const settledCtx = await loadProject(cwd);
-			const verify = await runConsumerVerify(cwd, {
-				managedFiles: new Set(settledCtx.manifest.files.map((f) => f.path)),
-				managedRoots: ["design-system/"],
-			});
-			// Stop progress only after the gate returns, as heal does (heal.ts): the
-			// spinner stays live through the verify subprocess so a multi-second run
-			// (the timeout ceiling is 300s) reads as "still working," not a freeze.
-			progress.stop();
-			if (!verify.ok) {
-				printLines(renderRedGate(verify));
-				process.exit(1);
+		if (plan.length === 0) {
+			// Completeness (ADR-0003) is not a remediation-loop member, so an empty
+			// plan does NOT imply the owned-concern scan was clean. If it flagged
+			// hand-rolled DS infra, route to the command that resolves it rather than
+			// asserting clean — the dashboard already named it under "What's wrong".
+			if (handRolledInfra > 0) {
+				printLines([
+					"",
+					"Loop is clean, but completeness work remains:",
+					...renderHandRolledRouting(handRolledInfra),
+				]);
 				return;
 			}
-			// Two independent closing signals reconciled here (#504 + #510):
-			// `consumerErrorCount` notes pre-existing consumer errors the verify
-			// gate let pass (warn-only); `handRolledInfra` — the completeness scan
-			// run before the loop (ADR-0003, not a loop member) — downgrades the
-			// "start working" go-ahead to `doctor --completeness` when infra remains.
-			printLines(
-				renderClosingSummary(
-					cliVersion(),
-					parsedCfg?.packVersion,
-					verify.consumerErrors.length,
-					handRolledInfra,
-					verify.handVerifyErrors.length,
-				),
-			);
-		} else if (outcome.kind === "exhausted") {
 			printLines([
 				"",
-				"Some findings still need attention — run `claude-ds audit` to see what remains.",
+				"Nothing to remediate — the tree is clean.",
+				`→ Run \`${buildCmd}\` to verify everything compiles.`,
 			]);
+			return;
+		}
+
+		// Commitment gate: a preview rendered from the real planned Change[] (so the
+		// counts the operator approves equal what runs — F11), then a single [Enter].
+		// `unfixableCount` already subsumes extraction, so it is classify's whole
+		// non-overlapping share; the remainder is audit --fix's auto-fixable set.
+		const gateLines = await buildCommitmentGate(
+			ctx,
+			plan,
+			{
+				classifyCount: unfixableCount,
+				autoFixableCount: findings.length - unfixableCount,
+				autoFixableFindings,
+			},
+			{ verbose: opts.verbose },
+		);
+		printLines(gateLines);
+
+		// Completeness routing (#590): hand-rolled DS infra is counted in the dashboard
+		// header but is not a remediation-loop member, so the gate plan above never
+		// lists it. Render the routing line here too — independent of plan emptiness —
+		// so the header count is never a dead end. The operator sees it while the gate
+		// awaits [Enter], so the completeness work is in view before they consent.
+		if (handRolledInfra > 0) {
+			printLines(["", ...renderHandRolledRouting(handRolledInfra)]);
+		}
+
+		if (interactive) {
+			const approved = await awaitCommitment();
+			if (!approved) {
+				printLines(["", "Cancelled — nothing changed."]);
+				return;
+			}
+		} else if (!opts.yes) {
+			// Non-interactive without explicit authorization: the gate preview above is
+			// the whole output. Driving would mutate the tree behind the operator's
+			// back, so stop — `yes: true` opts into the headless drive.
+			return;
+		}
+
+		// Auto-advance to clean. No `pendingSink` → the Decision resolver prompts
+		// inline on a TTY for genuine Ambiguities, resolves silently when `--answers`
+		// is supplied, and fails loud non-TTY otherwise (ADR-0023). Live progress on
+		// stderr; the loop never pauses for mechanical work.
+		const progress = createProgress();
+		try {
+			const outcome = await driveRemediation({
+				cwd,
+				maxIterations: opts.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+				answers: opts.answers,
+				progress,
+			});
+			if (outcome.kind === "converged") {
+				// Issue #510 — the same consumer-verify gate heal runs at convergence
+				// (#410 / PRD #407). The front door mutated the tree via driveRemediation;
+				// "Tree is clean" must mean the consumer's own verify is green on
+				// claude-ds-owned files, not merely that the planner reached a fixed
+				// point. Same attribution as heal (managedFiles + managedRoots): a
+				// scaffold-attributed error flips the verdict red and routes to repair;
+				// pre-existing consumer errors are noted but do not block. Without this
+				// the front door's verdict diverged from heal's — "Tree is clean" could
+				// coexist with a red typecheck heal would have caught.
+				// Reload the context after the loop, as heal does: an upgrade inside
+				// driveRemediation can change the managed-file set, so attribution must
+				// run against the post-remediation manifest, not the pre-loop one.
+				const settledCtx = await loadProject(cwd);
+				const verify = await runConsumerVerify(cwd, {
+					managedFiles: new Set(settledCtx.manifest.files.map((f) => f.path)),
+					managedRoots: ["design-system/"],
+				});
+				// Stop progress only after the gate returns, as heal does (heal.ts): the
+				// spinner stays live through the verify subprocess so a multi-second run
+				// (the timeout ceiling is 300s) reads as "still working," not a freeze.
+				progress.stop();
+				if (!verify.ok) {
+					printLines(renderRedGate(verify));
+					process.exit(1);
+					return;
+				}
+				// Two independent closing signals reconciled here (#504 + #510):
+				// `consumerErrorCount` notes pre-existing consumer errors the verify
+				// gate let pass (warn-only); `handRolledInfra` — the completeness scan
+				// run before the loop (ADR-0003, not a loop member) — downgrades the
+				// "start working" go-ahead to `doctor --completeness` when infra remains.
+				printLines(
+					renderClosingSummary(
+						cliVersion(),
+						parsedCfg?.packVersion,
+						verify.consumerErrors.length,
+						handRolledInfra,
+						verify.handVerifyErrors.length,
+					),
+				);
+			} else if (outcome.kind === "exhausted") {
+				printLines([
+					"",
+					"Some findings still need attention — run `claude-ds audit` to see what remains.",
+				]);
+			}
+		} finally {
+			progress.stop();
 		}
 	} finally {
-		progress.stop();
+		setGeneratorWarningCollector(prevCollector);
 	}
 }
 
