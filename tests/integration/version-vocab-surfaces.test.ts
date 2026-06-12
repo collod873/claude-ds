@@ -152,7 +152,7 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 			const out = await captureFrontDoor({ cwd: dir });
 
 			if (HAS_STALE_EMPTY_CHAIN) {
-				expect(out).toMatch(/upgrade available/);
+				expect(out).toMatch(/a newer design-system pack is available/);
 				expect(out).toMatch(
 					new RegExp(
 						`upgrade — pin advance ${escapeRegex(EMPTY_CHAIN_PIN)} → ${escapeRegex(CLI_VERSION)} \\(no migrations\\)`,
