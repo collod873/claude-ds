@@ -290,6 +290,12 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 		)
 		.option("--json", "emit machine output (suppresses the human markdown checklist)")
 		.option("--verbose", "list every managed file present (default: per-tier count)")
+		.option(
+			"--answers <file>",
+			"JSON bag of pre-supplied Decision answers (ADR-0023) — drives --completeness triage",
+		)
+		.option("--reason <text>", "reason recorded on a --completeness dismiss / mark-permanent")
+		.option("--issue <ref>", "tracking issue (#N or URL) recorded on a --completeness dismiss")
 		.action(
 			async (opts: {
 				pack?: string;
@@ -298,6 +304,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 				completeness?: boolean;
 				json?: boolean;
 				verbose?: boolean;
+				answers?: string;
+				reason?: string;
+				issue?: string;
 			}) => {
 				await doctorCmd({
 					pack: opts.pack,
@@ -306,6 +315,9 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 					completeness: opts.completeness,
 					json: opts.json,
 					verbose: opts.verbose,
+					answers: opts.answers,
+					reason: opts.reason,
+					issue: opts.issue,
 					cwd: defaults.cwd,
 				});
 			},
