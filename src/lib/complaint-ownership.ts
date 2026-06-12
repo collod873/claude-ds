@@ -135,6 +135,52 @@ const TERMINAL_MANUAL: Owner = {
 };
 
 /**
+ * The showcase generator's skipped-example warning (#643 / PRD #635 module 7).
+ *
+ * The third complaint vocabulary, after the audit rule-id families and the
+ * planner signals: a warning the generator emits when it skips an example it
+ * can't parse (`warning-collector.ts` is the source). Before this it was a
+ * floating line that counted toward nothing (#635). Its owner is ADR-0026
+ * **hand-verify** — claude-ds can't regenerate the example, so the consumer
+ * verifies it by hand. Registered here so the totality enumeration covers it and
+ * a skipped example is never silently dropped across runs.
+ *
+ * The reason carries the consumer-facing consequence the dashboard renders: a
+ * skipped example is excluded from audit but still compiled by the consumer's
+ * verify, so it can hide type errors.
+ */
+export const SKIPPED_EXAMPLE_KIND = "skipped-example";
+
+/**
+ * The consumer-facing consequence a skipped example creates, stated once. Shared
+ * by the warning's owner reason (below) and the dashboard section that renders
+ * it (`warning-collector.ts`), so the audit blind spot is described in one voice
+ * wherever it surfaces.
+ */
+export const SKIPPED_EXAMPLE_CONSEQUENCE =
+	"A skipped example is excluded from audit but still compiled by your verify, so it can hide type errors.";
+
+export const SKIPPED_EXAMPLE_OWNER: Owner = {
+	kind: "terminal",
+	state: "hand-verify",
+	reason: `${SKIPPED_EXAMPLE_CONSEQUENCE} claude-ds can't regenerate it, so verify it by hand (${adrUrl(
+		"composed-widget-rendering",
+	)})`,
+};
+
+/**
+ * Generator-warning complaint kinds mapped to their owner. Enumerated by the
+ * totality test alongside the rule-id families and the planner signals, so a
+ * generator warning kind can never resolve to "no owner".
+ */
+export const GENERATOR_WARNING_OWNERS: Record<string, Owner> = {
+	[SKIPPED_EXAMPLE_KIND]: SKIPPED_EXAMPLE_OWNER,
+};
+
+/** The generator-warning complaint kinds, for the invariant enumeration. */
+export const GENERATOR_WARNING_KINDS = Object.keys(GENERATOR_WARNING_OWNERS);
+
+/**
  * Resolve the owner of a finding by its rule id alone (kind-level). The
  * registry's spine: a totality-checked mapping from every emitted rule id to
  * an owner, derived from the family prefix plus each family's existing
