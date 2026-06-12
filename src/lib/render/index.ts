@@ -16,6 +16,8 @@ export { renderDecision } from "../decision/render.js";
 
 export type { ColorAdapter } from "./color.js";
 export { identityColor } from "./color.js";
+export type { CompletenessRenderState } from "./completeness.js";
+export { renderCompleteness } from "./completeness.js";
 export type {
 	DashboardFinding,
 	DashboardMode,

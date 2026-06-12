@@ -16,10 +16,10 @@ import { isManifestOrKeepfile, type ManagedRoot, parseManifest } from "../manife
 import {
 	allOwnedConcernIds,
 	countOwnedConcernFindings,
-	formatOwnedConcernFinding,
 	type OwnedConcernScannerFinding,
 	scanOwnedConcerns,
 } from "../owned-concerns/index.js";
+import { renderCompleteness } from "../render/completeness.js";
 
 async function exists(p: string): Promise<boolean> {
 	try {
@@ -222,66 +222,31 @@ export async function runCompletenessCheck(opts: { pack?: string; cwd?: string }
 		(f) => !suppressedSet.has(`${f.concernId}:${f.file}`),
 	);
 	const ownedConcernsChecked = allOwnedConcernIds();
-
-	const lines: string[] = ["## claude-ds doctor --completeness\n"];
-
-	if (orphans.length > 0) {
-		lines.push(
-			`### Orphan files (${orphans.length} found — under DS scope but not pack-managed)\n`,
-		);
-		for (const o of orphans) lines.push(`- \`${o}\``);
-		lines.push("");
-	}
-
-	if (exceptionWarnings.length > 0) {
-		lines.push(`### Exception lint warnings (${exceptionWarnings.length} found)\n`);
-		for (const w of exceptionWarnings) lines.push(`- ${w.warning}`);
-		lines.push("");
-	}
-
-	if (workarounds.length > 0) {
-		lines.push(`### Workaround comments without removal triggers (${workarounds.length} found)\n`);
-		for (const w of workarounds) lines.push(`- \`${w.file}:${w.line}\`: ${w.text}`);
-		lines.push("");
-	}
-
-	if (ownedFindings.length > 0) {
-		lines.push(`### Shadow DS infrastructure (${ownedFindings.length} found — Owned concerns)\n`);
-		for (const f of ownedFindings) {
-			lines.push(formatOwnedConcernFinding(f));
-		}
-		lines.push("");
-	}
-
-	if (permanentExceptions.length > 0) {
-		lines.push(`### Permanent exceptions (${permanentExceptions.length} — informational)\n`);
-		for (const e of permanentExceptions)
-			lines.push(`- \`${e.path}\` (${e.rule}): ${e.reason ?? "no reason given"}`);
-		lines.push("");
-	}
+	const ownedCounts = countOwnedConcernFindings(ownedFindings);
 
 	const totalFindings =
 		orphans.length + exceptionWarnings.length + workarounds.length + ownedFindings.length;
-	if (totalFindings === 0) {
-		lines.push("✓ Completeness OK — no local DS infrastructure outside pack-managed scaffold\n");
-	} else {
-		lines.push(`✗ Completeness check failed: ${totalFindings} finding(s)\n`);
-	}
 
-	// Coverage footer (ADR-0017): print which Owned concerns were checked so the
-	// verdict is honest about scope. A clean `✓` then tells the truth about what
-	// was evaluated — the residual blind spot is precisely "a concern not yet in
-	// the registry." Each concern carries its finding count (#637) so the
-	// coverage line reconciles with the shadow-infra findings shown above — the
-	// per-concern counts sum to that section's total.
-	const ownedCounts = countOwnedConcernFindings(ownedFindings);
-	lines.push(
-		`Owned concerns checked: ${ownedConcernsChecked
-			.map((id) => `${id} (${ownedCounts[id]})`)
-			.join(", ")}\n`,
-	);
+	// #640 (PRD #635 Module 6): route the output through the shared render layer
+	// so doctor speaks the dashboard's plain consumer dialect — no raw markdown
+	// headings, the internal taxonomy demoted out of the headlines, concern IDs
+	// kept only as parenthetical `exceptions.json` keys, and a findings-pending
+	// verdict that says "need your review" rather than "failed".
+	const lines = renderCompleteness({
+		orphans,
+		exceptionWarnings: exceptionWarnings.map((w) => w.warning),
+		workarounds,
+		ownedFindings,
+		permanentExceptions: permanentExceptions.map((e) => ({
+			path: e.path,
+			rule: e.rule,
+			reason: e.reason,
+		})),
+		ownedConcernsChecked,
+		ownedCounts,
+	});
 
-	process.stdout.write(lines.join("\n"));
+	process.stdout.write(`${lines.join("\n")}\n`);
 
 	// #349 F21: every command — including doctor's completeness mode —
 	// ends with a → Next breadcrumb. Findings route to the per-finding
