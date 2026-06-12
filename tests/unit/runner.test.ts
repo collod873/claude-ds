@@ -646,10 +646,11 @@ describe("runner — OpReport.progress signal (#532, ✔-requires-progress)", ()
  * #625: a `write` Change whose `before` is byte-equal to its `after` is an
  * empty-diff smell — it can never make progress, wastes preview space (the 80
  * identical before/after hunk pairs #623 surfaced), and can drive heal into
- * exhausted loops. The Runner drops it at plan assembly so it never reaches the
- * preview (dry-run stdout) or the writer (apply phase). The Op's report still
- * records it in `changes` (so `progress` stays an honest no-op signal), but it
- * is never previewed and never applied.
+ * exhausted loops. The Runner drops it at plan assembly — out of the OpReport's
+ * `changes` record itself — so it reaches no preview (dry-run stdout, the
+ * consent gate, the doctor/upgrade change counts) and no writer (apply phase).
+ * `progress` stays an honest no-op (an empty-diff write could never make
+ * progress), and `changes` stays reconciled with what applies (#536).
  */
 describe("runner — empty-diff write guard (#625)", () => {
 	it("dry-run never previews an empty-diff write", async () => {
@@ -680,11 +681,15 @@ describe("runner — empty-diff write guard (#625)", () => {
 			written.push(String(chunk));
 			return true;
 		});
-		await run(ctx, [op], "dry-run");
+		const report = await run(ctx, [op], "dry-run");
 		spy.mockRestore();
 		const out = written.join("");
 		expect(out).toContain("[mixed] real.txt");
 		expect(out).not.toContain("noop.txt");
+		// The real write survives in `changes`; the empty-diff one is gone — so the
+		// op still reports progress and downstream counts see exactly one change.
+		expect(report.ops[0].changes).toHaveLength(1);
+		expect(report.ops[0].progress).toBe(true);
 	});
 
 	it("apply never writes an empty-diff write (not in report.applied)", async () => {
@@ -701,6 +706,10 @@ describe("runner — empty-diff write guard (#625)", () => {
 		const report = await run(ctx, [op], "apply");
 		expect(report.applied).toEqual([]);
 		expect(report.ops[0].progress).toBe(false);
+		// Dropped from the report's `changes` record too, so the doctor/upgrade
+		// change counts and the consent-gate preview (all read from `changes`)
+		// never see a no-op masquerading as drift (#625, #536-reconciled).
+		expect(report.ops[0].changes).toEqual([]);
 	});
 
 	it("a create (before === null) is not an empty-diff write — it still applies", async () => {
