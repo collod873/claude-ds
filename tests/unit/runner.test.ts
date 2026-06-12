@@ -643,6 +643,87 @@ describe("runner — OpReport.progress signal (#532, ✔-requires-progress)", ()
 });
 
 /**
+ * #625: a `write` Change whose `before` is byte-equal to its `after` is an
+ * empty-diff smell — it can never make progress, wastes preview space (the 80
+ * identical before/after hunk pairs #623 surfaced), and can drive heal into
+ * exhausted loops. The Runner drops it at plan assembly — out of the OpReport's
+ * `changes` record itself — so it reaches no preview (dry-run stdout, the
+ * consent gate, the doctor/upgrade change counts) and no writer (apply phase).
+ * `progress` stays an honest no-op (an empty-diff write could never make
+ * progress), and `changes` stays reconciled with what applies (#536).
+ */
+describe("runner — empty-diff write guard (#625)", () => {
+	it("dry-run never previews an empty-diff write", async () => {
+		const ctx = makeCtx(dir);
+		const same = Buffer.from("identical");
+		const op = writeOp("noop-write", [
+			{ kind: "write", path: "f.txt", before: same, after: Buffer.from("identical") },
+		]);
+		const written: string[] = [];
+		const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+			written.push(String(chunk));
+			return true;
+		});
+		await run(ctx, [op], "dry-run");
+		spy.mockRestore();
+		expect(written.join("")).toBe("");
+	});
+
+	it("dry-run still previews the real writes alongside a dropped empty-diff write", async () => {
+		const ctx = makeCtx(dir);
+		const same = Buffer.from("identical");
+		const op = writeOp("mixed", [
+			{ kind: "write", path: "noop.txt", before: same, after: Buffer.from("identical") },
+			{ kind: "write", path: "real.txt", before: Buffer.from("old"), after: Buffer.from("new") },
+		]);
+		const written: string[] = [];
+		const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+			written.push(String(chunk));
+			return true;
+		});
+		const report = await run(ctx, [op], "dry-run");
+		spy.mockRestore();
+		const out = written.join("");
+		expect(out).toContain("[mixed] real.txt");
+		expect(out).not.toContain("noop.txt");
+		// The real write survives in `changes`; the empty-diff one is gone — so the
+		// op still reports progress and downstream counts see exactly one change.
+		expect(report.ops[0].changes).toHaveLength(1);
+		expect(report.ops[0].progress).toBe(true);
+	});
+
+	it("apply never writes an empty-diff write (not in report.applied)", async () => {
+		const ctx = makeCtx(dir);
+		await writeFile(join(dir, "f.txt"), "identical");
+		const op = writeOp("noop-write", [
+			{
+				kind: "write",
+				path: "f.txt",
+				before: Buffer.from("identical"),
+				after: Buffer.from("identical"),
+			},
+		]);
+		const report = await run(ctx, [op], "apply");
+		expect(report.applied).toEqual([]);
+		expect(report.ops[0].progress).toBe(false);
+		// Dropped from the report's `changes` record too, so the doctor/upgrade
+		// change counts and the consent-gate preview (all read from `changes`)
+		// never see a no-op masquerading as drift (#625, #536-reconciled).
+		expect(report.ops[0].changes).toEqual([]);
+	});
+
+	it("a create (before === null) is not an empty-diff write — it still applies", async () => {
+		const ctx = makeCtx(dir);
+		const op = writeOp("create", [
+			{ kind: "write", path: "new.txt", before: null, after: Buffer.from("") },
+		]);
+		const report = await run(ctx, [op], "apply");
+		expect(report.applied).toHaveLength(1);
+		expect(await readFile(join(dir, "new.txt"), "utf8")).toBe("");
+	});
+});
+
+/**
  * PRD #266 capstone: `plan(ctx)` is a pure function of ctx.
  *
  * This is the literal statement the whole effort exists to enable. After

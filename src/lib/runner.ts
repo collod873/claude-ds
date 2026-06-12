@@ -80,6 +80,26 @@ function changeIsProgress(c: Change): boolean {
 	}
 }
 
+/**
+ * An empty-diff write (#625): a `write` Change whose `before` is byte-equal to
+ * its `after`. A "change" that changes nothing is a Change-construction smell —
+ * it can never make progress, wastes preview space (the 80 identical
+ * before/after hunk pairs #623 surfaced), and can drive heal into exhausted
+ * loops. The Runner drops it at plan assembly — out of the OpReport's `changes`
+ * record itself, so it reaches neither any preview (the Runner's dry-run dump,
+ * the consent gate's `summaryEntriesFromRun`, the doctor/upgrade change counts)
+ * nor the writer. A create (`before === null`) is never empty-diff — it always
+ * moves bytes onto disk, even when `after` is empty. Pure; dropping is the
+ * consumer-safe arm of the issue's drop-or-throw choice ("never break a
+ * consumer"). `progress` is unaffected: an empty-diff write can never make
+ * progress, so filtering it before the `some(changeIsProgress)` fold leaves the
+ * no-op signal identical while keeping `changes` reconciled with what applies
+ * (the #536 declared-equals-applied invariant).
+ */
+function isEmptyDiffWrite(c: Change): boolean {
+	return c.kind === "write" && c.before !== null && c.before.equals(c.after);
+}
+
 function isBinary(buf: Buffer): boolean {
 	const len = Math.min(buf.length, 8192);
 	for (let i = 0; i < len; i++) if (buf[i] === 0) return true;
@@ -261,7 +281,13 @@ export async function run(
 	for (const op of ops) {
 		try {
 			const result = await op.plan(ctx);
-			const changes = Array.isArray(result) ? result : result.changes;
+			const rawChanges = Array.isArray(result) ? result : result.changes;
+			// #625: drop empty-diff writes (before byte-equal to after) at plan
+			// assembly so the smell reaches no preview, no change count, and no
+			// writer. Filtering here — rather than only at the writer — keeps the
+			// single `changes` record reconciled with what applies (#536) and stops
+			// a no-op masquerading as drift in the doctor/upgrade change counts.
+			const changes = rawChanges.filter((c) => !isEmptyDiffWrite(c));
 			const entry: OpReport = {
 				name: op.name,
 				changes,
