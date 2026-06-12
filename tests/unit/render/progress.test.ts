@@ -96,6 +96,20 @@ describe("createProgress (PRD #325 / sub-issue #332)", () => {
 			expect(out).toMatch(/sync/);
 		});
 
+		it("warn writes a line with the ⚠ glyph and a reason suffix (#588)", () => {
+			const p = createProgress();
+			try {
+				p.start("reconform");
+				p.warn("reconform", "2 skipped");
+			} finally {
+				p.stop();
+			}
+			const out = captured.join("");
+			expect(out).toMatch(/⚠/);
+			expect(out).toMatch(/reconform/);
+			expect(out).toMatch(/2 skipped/);
+		});
+
 		it("fail writes a line containing the phase text", () => {
 			const p = createProgress();
 			try {
