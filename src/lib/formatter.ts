@@ -6,6 +6,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { info } from "./log.js";
@@ -113,6 +114,19 @@ export async function resolveConsumerFormatter(cwd: string): Promise<ResolvedFor
 }
 
 /**
+ * Per-run memo for `formatContent`. The front door re-derives full project state
+ * ~6-7× per invocation (#624) and each sweep's generated-integrity scan formats
+ * every showcase companion — so the *same* (formatter, content, filePath, cwd)
+ * tuple spawns biome/prettier synchronously over and over (~800 spawns on a
+ * Crewops-sized tree). `formatContent` is a pure function of that tuple, so the
+ * cache only suppresses redundant respawns — same input always yields the same
+ * canonical bytes. Process-lifetime scope: a CLI run exits, and every key is
+ * fully qualified (formatter identity + cwd + path + content hash) so distinct
+ * inputs — and distinct test cases — never collide.
+ */
+const formatCache = new Map<string, string>();
+
+/**
  * Format a single file's content **in memory** via the consumer's formatter,
  * using its stdin filter (`biome check --write --stdin-file-path=…` /
  * `prettier --stdin-filepath …`). No file on disk is read or written — the bytes
@@ -123,6 +137,11 @@ export async function resolveConsumerFormatter(cwd: string): Promise<ResolvedFor
  * Best-effort: returns the original `content` unchanged on any failure (non-zero
  * exit, empty output, a formatter that doesn't support stdin), so a hostile or
  * unexpected formatter can never blank out a file claude-ds is about to write.
+ *
+ * Memoized per run (#624): a repeated (formatter, content, filePath, cwd) tuple
+ * returns the cached bytes without respawning. Failures fall through to the
+ * `content` return below and are NOT cached, so a transient spawn failure can't
+ * pin a stale fallback for the rest of the run.
  */
 export function formatContent(
 	rf: ResolvedFormatter,
@@ -130,6 +149,12 @@ export function formatContent(
 	filePath: string,
 	cwd: string,
 ): string {
+	const key = `${rf.kind}\0${rf.bin}\0${cwd}\0${filePath}\0${createHash("sha256")
+		.update(content)
+		.digest("hex")}`;
+	const cached = formatCache.get(key);
+	if (cached !== undefined) return cached;
+
 	const args =
 		rf.kind === "biome"
 			? ["check", "--write", `--stdin-file-path=${filePath}`]
@@ -142,7 +167,9 @@ export function formatContent(
 	}
 	if (r.status !== 0) return content;
 	const out = typeof r.stdout === "string" ? r.stdout : "";
-	return out.length > 0 ? out : content;
+	const formatted = out.length > 0 ? out : content;
+	formatCache.set(key, formatted);
+	return formatted;
 }
 
 /**
