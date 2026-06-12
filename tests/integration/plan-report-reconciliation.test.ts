@@ -128,9 +128,10 @@ describe.runIf(HAS_STALE_EMPTY_CHAIN)(
 			expect(gate).not.toMatch(/pack stays/);
 			expect(gate).not.toMatch(/no file changes/);
 
-			// Body shows the matching `.claude-ds.json` pin write (surfaced as a
-			// substantive flag flip), so header and body agree.
-			expect(gate).toContain(`packVersion: "${EMPTY_CHAIN_PIN}" -> "${CLI_VERSION}"`);
+			// Body shows the matching `.claude-ds.json` pin write — surfaced (per
+			// #591) as `pack pinned <from> → <to>`, not a generic flag flip — so
+			// header and body agree.
+			expect(gate).toContain(`pack pinned ${EMPTY_CHAIN_PIN} → ${CLI_VERSION}`);
 		});
 	},
 );
