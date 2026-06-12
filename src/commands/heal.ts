@@ -261,7 +261,9 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 			// self-explanatory. The pre-plan `onIteration` log is dropped — the
 			// labeled `onPassPlan` line below subsumes it and the bare counter was
 			// exactly the "stuck loop" reading C3 was filed to fix.
-			onPassPlan: (iter, max, plan) => info(`heal: pass ${iter}/${max} — ${plan.join(" → ")}`),
+			// #591: `(max)` states the literal — N/M is the ceiling, not a target.
+			onPassPlan: (iter, max, plan) =>
+				info(`heal: pass ${iter}/${max} (max) — ${plan.join(" → ")}`),
 		});
 
 		if (outcome.kind === "converged") {

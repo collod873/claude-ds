@@ -85,12 +85,28 @@ describe("renderChangeSummary", () => {
 		];
 		const lines = renderChangeSummary(entries);
 		expect(lines[0]).toBe("Substantive changes:");
-		expect(lines).toContain("! .claude-ds.json  (config flags flipped)");
-		expect(lines.some((l) => l.includes('packVersion: "v1.0.0" -> "v1.1.0"'))).toBe(true);
+		// #591: the version pin reads as a pin, not a generic flag flip; the
+		// remaining key keeps the flag-flip label.
+		expect(lines).toContain("! .claude-ds.json  pack pinned v1.0.0 → v1.1.0");
+		expect(lines).toContain("! .claude-ds.json  (config flag flipped)");
 		expect(lines.some((l) => l.includes("meta_kind_strict: false -> true"))).toBe(true);
 		expect(lines).toContain("Other changes:");
 		// The import-only file is condensed:
 		expect(lines).toContain("M design-system/atoms/button.tsx  (1 import rewritten)");
+	});
+
+	it("renders a lone packVersion flip as a pin, never a flag flip (#591)", () => {
+		const before = JSON.stringify({ pack: "next-react", packVersion: "v1.0.0" }, null, 2);
+		const after = JSON.stringify({ pack: "next-react", packVersion: "v2.0.0" }, null, 2);
+		const entries: SummaryEntry[] = [
+			{ opName: "finalizeUpgrade", change: write(".claude-ds.json", before, after) },
+		];
+		const lines = renderChangeSummary(entries);
+		expect(lines[0]).toBe("Substantive changes:");
+		expect(lines).toContain("! .claude-ds.json  pack pinned v1.0.0 → v2.0.0");
+		// No generic flag-flip label and no quoted before/after callout for the pin.
+		expect(lines.some((l) => l.includes("config flag"))).toBe(false);
+		expect(lines.some((l) => l.includes("packVersion:"))).toBe(false);
 	});
 
 	it("calls out import-only rewrites with rewrite count", () => {

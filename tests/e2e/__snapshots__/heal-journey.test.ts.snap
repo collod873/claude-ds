@@ -15,8 +15,8 @@ I'll bring this tree to clean — 5 steps:
 
 upgrade — pin advance <prev-version> → <cli-version> (no migrations)
     Substantive changes:
-    ! .claude-ds.json  (config flags flipped)
-        packVersion: "<prev-version>" -> "<cli-version>"
+    ! .claude-ds.json  pack pinned <prev-version> → <cli-version>
+    ! .claude-ds.json  (config flag flipped)
         allowed_imports: undefined -> []
 sync — restore managed scaffold files
     2 files modified — 2 scaffold files
@@ -41,7 +41,7 @@ exports[`journey: heal end-to-end on the time-travel fixture (#538) > golden: th
 # --- transcript below; bytes are verbatim from the built CLI, normalized for paths/versions/durations ---
 heal: converging until no drift — up to 3 passes.
 heal: planner-driven loop (max 3 iterations)
-heal: pass 1/3 — upgrade → sync → repair → reconform → audit --fix
+heal: pass 1/3 (max) — upgrade → sync → repair → reconform → audit --fix
 no registered migrations between <prev-version> and <cli-version>
 migration end-state drift detected: manage-force-state@v0.8.0, manage-manifest@v0.9.0, widen-tokens@v0.9.0, manage-portal-scope@v0.9.0, backfill-chart-tokens@v1.7.0
 A design-system/utils/force-state.css

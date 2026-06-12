@@ -65,6 +65,24 @@ describe("driveRemediation (shared loop)", () => {
 		expect(iterations).toEqual([1]);
 	});
 
+	it("never emits a bare `pass N/M` line — the labeled callback owns it (#591)", async () => {
+		const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(adopt.code).toBe(0);
+		const healed = await runCli(["heal"], { cwd: dir });
+		expect(healed.code).toBe(0);
+
+		const infoLines: string[] = [];
+		await driveRemediation({
+			cwd: dir,
+			maxIterations: 3,
+			progress: { ...NOOP_PROGRESS, info: (t: string) => infoLines.push(t) },
+		});
+
+		// The driver stays UI-neutral: no bare `pass N/M`. Labeling (with `(max)`) is
+		// the caller's `onPassPlan` line.
+		expect(infoLines.some((l) => /^pass \d+\/\d+$/.test(l))).toBe(false);
+	});
+
 	// #470: the retired `enforce` command is folded into the driver. At
 	// convergence the brain promotes the hook mode WARN → BLOCK once the tree is
 	// clean and the open-exception count is within `enforce_threshold` — the
