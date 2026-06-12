@@ -16,11 +16,14 @@
 import { describe, expect, it } from "vitest";
 import {
 	GEN_RULE_IDS,
+	GENERATOR_WARNING_KINDS,
+	GENERATOR_WARNING_OWNERS,
 	type Owner,
 	ownerForRuleId,
 	PROJECT_STATE_SIGNALS,
 	type RuleFindingId,
 	SIGNAL_OWNERS,
+	SKIPPED_EXAMPLE_KIND,
 } from "../../src/lib/complaint-ownership.js";
 import { allRuleIds } from "../../src/lib/drift/index.js";
 import { allIntegrityRuleIds } from "../../src/lib/integrity/index.js";
@@ -56,6 +59,31 @@ describe("complaint-ownership registry", () => {
 			if (!isWellFormed(owner)) unowned.push(id);
 		}
 		expect(unowned).toEqual([]);
+	});
+
+	it("maps every generator-warning complaint kind to a well-formed owner (totality)", () => {
+		expect(GENERATOR_WARNING_KINDS.length).toBeGreaterThan(0);
+		const unowned: string[] = [];
+		for (const kind of GENERATOR_WARNING_KINDS) {
+			if (!isWellFormed(GENERATOR_WARNING_OWNERS[kind])) unowned.push(kind);
+		}
+		expect(unowned).toEqual([]);
+	});
+
+	// #643 / PRD #635 module 7: the skipped-example generator warning gets an
+	// owner instead of being an orphaned floating line. Its owner is the ADR-0026
+	// hand-verify terminal, and its reason carries the consumer-facing
+	// consequence — a skipped example is excluded from audit but still compiled by
+	// verify, so it can hide type errors.
+	it("resolves the skipped-example warning to a hand-verify terminal whose reason names the audit blind spot", () => {
+		const owner = GENERATOR_WARNING_OWNERS[SKIPPED_EXAMPLE_KIND];
+		expect(owner.kind).toBe("terminal");
+		if (owner.kind === "terminal") {
+			expect(owner.state).toBe("hand-verify");
+			expect(owner.reason).toContain("excluded from audit");
+			expect(owner.reason).toContain("still compiled by your verify");
+			expect(owner.reason).toContain("hide type errors");
+		}
 	});
 
 	it("maps every planner project-state signal to a well-formed owner", () => {
