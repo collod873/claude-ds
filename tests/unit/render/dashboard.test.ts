@@ -149,6 +149,29 @@ const HAND_ROLLED_MIXED: DashboardState = {
 	},
 };
 
+// A state carrying BOTH a hand-rolled finding and an available update — the
+// #644 regression target: the two facts must land on two lines, never spliced.
+const HAND_ROLLED_AND_UPGRADE: DashboardState = {
+	cwd: "/repo/example-app",
+	mode: "adopted",
+	scaffold: { present: 12, total: 12 },
+	findings: [
+		{
+			ruleId: "DRIFT-RAW-PRIMITIVE",
+			file: "design-system/atoms/button.tsx",
+			message: "color #336699 has no token equivalent",
+		},
+	],
+	upgradeAvailable: true,
+	handRolled: {
+		retirable: 1,
+		needsReview: 0,
+		total: 1,
+		retirableNoun: "file",
+		needsReviewNoun: "file",
+	},
+};
+
 // A marker-tagging adapter: wraps each band so a test can prove the renderer
 // routes the glyph (and the path) through the injected color seam, not raw.
 const TAG: ColorAdapter = {
@@ -204,12 +227,15 @@ describe("renderDashboard (pure)", () => {
     `);
 	});
 
-	it("surfaces an available pack update on an otherwise clean tree (#336)", () => {
+	it("surfaces an available pack update on its own line, not a roll-up (#336/#644)", () => {
+		// #644: when an update is the only signal there is nothing to "need
+		// attention" about beyond the update — so the upgrade carries its own line
+		// and the roll-up header is suppressed entirely.
 		expect(renderDashboard(UPGRADE_AVAILABLE, identityColor)).toMatchInlineSnapshot(`
       [
         "✓ Design system in place — /repo/example-app",
         "✓ Managed files: 12/12",
-        "! Needs attention: a newer design-system pack is available",
+        "! A newer design-system pack is available",
       ]
     `);
 	});
@@ -237,12 +263,15 @@ describe("renderDashboard (pure)", () => {
     `);
 	});
 
-	it("names clean scans even when other things are wrong (#504)", () => {
+	it("names clean scans even when other things are wrong (#504); upgrade on its own line (#644)", () => {
+		// #644: the upgrade fact is no longer comma-spliced onto the missing-files
+		// roll-up — the missing files are one line, the available update another.
 		expect(renderDashboard(INCOMPLETE_WITH_ALSO_CHECKED, identityColor)).toMatchInlineSnapshot(`
       [
         "✓ Design system in place — /repo/example-app",
         "! Managed files: 9/12 (3 missing)",
-        "! Needs attention: 3 missing files, a newer design-system pack is available",
+        "! Needs attention: 3 missing files",
+        "! A newer design-system pack is available",
         "✓ Also checked: no hand-built design-system scripts, nothing stale or deprecated",
       ]
     `);
@@ -285,6 +314,22 @@ describe("renderDashboard (pure)", () => {
     `);
 	});
 
+	it("renders upgrade availability on its own line, never spliced onto findings (#644)", () => {
+		const lines = renderDashboard(HAND_ROLLED_AND_UPGRADE, identityColor);
+		expect(lines).toMatchInlineSnapshot(`
+      [
+        "✓ Design system in place — /repo/example-app",
+        "✓ Managed files: 12/12",
+        "! Needs attention: 1 issue I can fix, 1 file you built by hand that the design-system pack now provides",
+        "! A newer design-system pack is available",
+      ]
+    `);
+		// The roll-up line carries the findings/hand-rolled facts and stops there —
+		// the upgrade fact is never comma-spliced onto its tail.
+		const rollUp = lines.find((l) => l.includes("Needs attention:"));
+		expect(rollUp).not.toMatch(/newer design-system pack/);
+	});
+
 	it("routes markers and the path through the injected color adapter", () => {
 		// On a TTY the printer passes a picocolors-backed adapter; here a tagging
 		// adapter proves the glyph (✓ / !) and the cwd reach the seam rather than
@@ -319,6 +364,7 @@ describe("renderDashboard (pure)", () => {
 			HAND_ROLLED_RETIRABLE,
 			HAND_ROLLED_NEEDS_REVIEW,
 			HAND_ROLLED_MIXED,
+			HAND_ROLLED_AND_UPGRADE,
 		];
 		for (const state of states) {
 			for (const line of renderDashboard(state, identityColor)) {

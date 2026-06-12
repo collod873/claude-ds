@@ -95,18 +95,40 @@ describe("renderChangeSummary", () => {
 		expect(lines).toContain("M design-system/atoms/button.tsx  (1 import rewritten)");
 	});
 
-	it("renders a lone packVersion flip as a pin, never a flag flip (#591)", () => {
+	it("renders a lone packVersion flip as a bare pin — no 'Substantive changes' label (#591/#644)", () => {
 		const before = JSON.stringify({ pack: "next-react", packVersion: "v1.0.0" }, null, 2);
 		const after = JSON.stringify({ pack: "next-react", packVersion: "v2.0.0" }, null, 2);
 		const entries: SummaryEntry[] = [
 			{ opName: "finalizeUpgrade", change: write(".claude-ds.json", before, after) },
 		];
 		const lines = renderChangeSummary(entries);
-		expect(lines[0]).toBe("Substantive changes:");
-		expect(lines).toContain("! .claude-ds.json  pack pinned v1.0.0 → v2.0.0");
+		// #644: a pin-only advance (no migrations, no other file changes) is a
+		// metadata bump — it renders the pin line bare, without the "Substantive
+		// changes:" label that would oversell it.
+		expect(lines).not.toContain("Substantive changes:");
+		expect(lines[0]).toBe("! .claude-ds.json  pack pinned v1.0.0 → v2.0.0");
 		// No generic flag-flip label and no quoted before/after callout for the pin.
 		expect(lines.some((l) => l.includes("config flag"))).toBe(false);
 		expect(lines.some((l) => l.includes("packVersion:"))).toBe(false);
+	});
+
+	it("a pin alongside a non-pin flip is a substantive upgrade — keeps the label (#644)", () => {
+		// The contrast case: an `allowed_imports` flip rides with the pin (the
+		// non-empty-chain / first-allowed-imports upgrade). That's a real operator-
+		// facing change, so the "Substantive changes:" label stays.
+		const before = JSON.stringify({ pack: "next-react", packVersion: "v1.0.0" }, null, 2);
+		const after = JSON.stringify(
+			{ pack: "next-react", packVersion: "v2.0.0", allowed_imports: [] },
+			null,
+			2,
+		);
+		const entries: SummaryEntry[] = [
+			{ opName: "finalizeUpgrade", change: write(".claude-ds.json", before, after) },
+		];
+		const lines = renderChangeSummary(entries);
+		expect(lines[0]).toBe("Substantive changes:");
+		expect(lines).toContain("! .claude-ds.json  pack pinned v1.0.0 → v2.0.0");
+		expect(lines).toContain("! .claude-ds.json  (config flag flipped)");
 	});
 
 	it("calls out import-only rewrites with rewrite count", () => {
