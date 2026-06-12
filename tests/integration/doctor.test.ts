@@ -739,3 +739,206 @@ describe("doctor --completeness", () => {
 		expect(r.stdout).toMatch(/Concerns checked/i);
 	});
 });
+
+// #642 (PRD #635 Module 5): interactive per-finding triage. The Owned-concern
+// findings doctor surfaces are resolved through the Decision model + Runner —
+// retire / dismiss / mark-permanent / skip — so the tool never dead-ends in a
+// hand-edited exceptions.json. Driven via `--answers` so the flow is exercised
+// without a TTY.
+describe("doctor --completeness triage (#642)", () => {
+	let dir: string;
+	beforeEach(async () => {
+		dir = await freshTmpDir();
+	});
+	afterEach(async () => {
+		await cleanup(dir);
+	});
+
+	// A retirable Owned finding: a shadow token-linter (OWNED-TOKEN-LINT) whose
+	// failure mode the pack's DRIFT-TOKEN-PARITY genuinely supersedes.
+	const LINT_TOKENS_SRC = [
+		"#!/usr/bin/env node",
+		"/**",
+		" * lint-tokens.ts — flags raw color and spacing values in component files.",
+		" */",
+		"import { readFileSync } from 'node:fs';",
+		"",
+		"const RAW_HEX_COLOR_RE = /#[0-9a-fA-F]{3,8}\\b/g;",
+		"const RAW_SPACING_RE = /\\b\\d+(?:px|rem)\\b/g;",
+		"",
+		"export function lintFile(path: string): string[] {",
+		"  const src = readFileSync(path, 'utf8');",
+		"  const violations: string[] = [];",
+		"  src.split('\\n').forEach((line, i) => {",
+		"    if (line.includes('design-system-ignore:')) return;",
+		"    if (RAW_HEX_COLOR_RE.test(line) || RAW_SPACING_RE.test(line)) {",
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: fixture emits a real template literal
+		"      violations.push(`${path}:${i + 1}: raw color/spacing — use a token`);",
+		"    }",
+		"  });",
+		"  return violations;",
+		"}",
+	].join("\n");
+
+	// A needs-review Owned finding: a hand-rolled base-ui asChild gate. Its
+	// superseder is a hook gated on enforcement.json (componentLib=base-ui); with
+	// no enforcement.json the supersession downgrades to null, so retire is NOT
+	// offered for it (ADR-0017 addendum — never delete the only live guard).
+	const ASCHILD_VALIDATOR_SRC = [
+		"#!/usr/bin/env bash",
+		"# base-ui asChild guard — asChild is Radix-only; base-ui composes via render prop.",
+		"if grep -rn 'asChild' src/; then",
+		"  echo 'asChild is not allowed on base-ui components — use the render prop'",
+		"  exit 1",
+		"fi",
+	].join("\n");
+
+	const TOKEN_LINT_ID = "completeness-triage:OWNED-TOKEN-LINT:scripts/lint-tokens.ts";
+	const ASCHILD_ID =
+		"completeness-triage:OWNED-BASE-UI-ASCHILD-VALIDATOR:scripts/aschild-validator.sh";
+
+	async function adoptWithShadowLinter(): Promise<void> {
+		const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(adopt.code).toBe(0);
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await writeFile(join(dir, "scripts/lint-tokens.ts"), LINT_TOKENS_SRC);
+	}
+
+	async function writeAnswers(bag: Record<string, number | "defer">): Promise<string> {
+		const p = join(dir, "answers.json");
+		await writeFile(p, JSON.stringify(bag, null, 2));
+		return p;
+	}
+
+	async function exists(p: string): Promise<boolean> {
+		try {
+			await readFile(p);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	/** Owned-concern exception entries currently in exceptions.json ([] if none). */
+	async function ownedEntries(): Promise<Array<{ rule: string; path: string }>> {
+		try {
+			const ex = JSON.parse(await readFile(join(dir, "design-system/exceptions.json"), "utf8"));
+			return (ex.exceptions as Array<{ rule: string; path: string }>).filter((e) =>
+				e.rule.startsWith("OWNED-"),
+			);
+		} catch {
+			return [];
+		}
+	}
+
+	it("retire deletes the superseded file via a Runner Change, exits 0", async () => {
+		await adoptWithShadowLinter();
+		const answers = await writeAnswers({ [TOKEN_LINT_ID]: 0 });
+
+		const r = await runCli(["doctor", "--completeness", "--answers", answers], { cwd: dir });
+		expect(r.code).toBe(0);
+		expect(await exists(join(dir, "scripts/lint-tokens.ts"))).toBe(false);
+		expect(r.stdout).toMatch(/retired scripts\/lint-tokens\.ts/);
+	});
+
+	it("dismiss writes an exceptions.json entry with reason and linked issue", async () => {
+		await adoptWithShadowLinter();
+		const answers = await writeAnswers({ [TOKEN_LINT_ID]: 1 });
+
+		const r = await runCli(
+			[
+				"doctor",
+				"--completeness",
+				"--answers",
+				answers,
+				"--reason",
+				"keeping during migration",
+				"--issue",
+				"#642",
+			],
+			{ cwd: dir },
+		);
+		expect(r.code).toBe(0);
+		// File is preserved on dismiss — only retire deletes.
+		expect(await exists(join(dir, "scripts/lint-tokens.ts"))).toBe(true);
+		const ex = JSON.parse(await readFile(join(dir, "design-system/exceptions.json"), "utf8"));
+		const entry = ex.exceptions.find(
+			(e: { rule: string; path: string }) =>
+				e.rule === "OWNED-TOKEN-LINT" && e.path === "scripts/lint-tokens.ts",
+		);
+		expect(entry).toBeDefined();
+		expect(entry.issue).toBe("#642");
+		expect(entry.reason).toBe("keeping during migration");
+		expect(entry.permanent).toBeUndefined();
+	});
+
+	it("mark permanent writes a permanent entry without requiring an issue link", async () => {
+		await adoptWithShadowLinter();
+		const answers = await writeAnswers({ [TOKEN_LINT_ID]: 2 });
+
+		const r = await runCli(["doctor", "--completeness", "--answers", answers], { cwd: dir });
+		expect(r.code).toBe(0);
+		const ex = JSON.parse(await readFile(join(dir, "design-system/exceptions.json"), "utf8"));
+		const entry = ex.exceptions.find(
+			(e: { rule: string; path: string }) =>
+				e.rule === "OWNED-TOKEN-LINT" && e.path === "scripts/lint-tokens.ts",
+		);
+		expect(entry).toBeDefined();
+		expect(entry.permanent).toBe(true);
+		expect(entry.issue).toBeUndefined();
+	});
+
+	it("dismiss without an issue link is rejected, writes nothing", async () => {
+		await adoptWithShadowLinter();
+		const answers = await writeAnswers({ [TOKEN_LINT_ID]: 1 });
+
+		const r = await runCli(["doctor", "--completeness", "--answers", answers], { cwd: dir });
+		expect(r.code).not.toBe(0);
+		expect(r.stderr).toMatch(/issue/i);
+		// Nothing written: file still present, no exception entry recorded (adopt
+		// seeds an empty exceptions.json — the contract reject must not add to it).
+		expect(await exists(join(dir, "scripts/lint-tokens.ts"))).toBe(true);
+		expect(await ownedEntries()).toHaveLength(0);
+	});
+
+	it("non-TTY run with no supplied answer fails loud (named, non-zero) and writes nothing", async () => {
+		await adoptWithShadowLinter();
+		// Engage triage (answers file present) but leave the finding unanswered.
+		const answers = await writeAnswers({});
+
+		const r = await runCli(["doctor", "--completeness", "--answers", answers], { cwd: dir });
+		expect(r.code).toBe(2);
+		expect(r.stderr).toContain(TOKEN_LINT_ID);
+		expect(await exists(join(dir, "scripts/lint-tokens.ts"))).toBe(true);
+		expect(await ownedEntries()).toHaveLength(0);
+	});
+
+	it("retire is offered only for superseded findings; needs-review files are never deleted", async () => {
+		const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(adopt.code).toBe(0);
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		// One retirable (OWNED-TOKEN-LINT) and one needs-review (base-ui asChild).
+		await writeFile(join(dir, "scripts/lint-tokens.ts"), LINT_TOKENS_SRC);
+		await writeFile(join(dir, "scripts/aschild-validator.sh"), ASCHILD_VALIDATOR_SRC);
+
+		// Answer index 0 for both. For the retirable finding index 0 is RETIRE;
+		// for the needs-review finding index 0 is DISMISS (retire absent) — proving
+		// retire shifts in only when a capability supersedes.
+		const answers = await writeAnswers({ [TOKEN_LINT_ID]: 0, [ASCHILD_ID]: 0 });
+
+		const r = await runCli(["doctor", "--completeness", "--answers", answers, "--issue", "#642"], {
+			cwd: dir,
+		});
+		// Both findings resolved (retire + dismiss) → nothing left to review.
+		expect(r.code).toBe(0);
+		// Retirable file deleted; needs-review file preserved (dismissed, not retired).
+		expect(await exists(join(dir, "scripts/lint-tokens.ts"))).toBe(false);
+		expect(await exists(join(dir, "scripts/aschild-validator.sh"))).toBe(true);
+		const ex = JSON.parse(await readFile(join(dir, "design-system/exceptions.json"), "utf8"));
+		const aschild = ex.exceptions.find(
+			(e: { rule: string }) => e.rule === "OWNED-BASE-UI-ASCHILD-VALIDATOR",
+		);
+		expect(aschild).toBeDefined();
+		expect(aschild.path).toBe("scripts/aschild-validator.sh");
+	});
+});
