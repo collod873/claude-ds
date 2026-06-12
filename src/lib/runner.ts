@@ -80,6 +80,22 @@ function changeIsProgress(c: Change): boolean {
 	}
 }
 
+/**
+ * An empty-diff write (#625): a `write` Change whose `before` is byte-equal to
+ * its `after`. A "change" that changes nothing is a Change-construction smell —
+ * it can never make progress, wastes preview space (the 80 identical
+ * before/after hunk pairs #623 surfaced), and can drive heal into exhausted
+ * loops. The Runner drops it at plan assembly so it never reaches the preview or
+ * the writer. A create (`before === null`) is never empty-diff — it always moves
+ * bytes onto disk, even when `after` is empty. Pure; dropping is the
+ * consumer-safe arm of the issue's drop-or-throw choice ("never break a
+ * consumer"): the Op's report still records the Change so `progress` stays
+ * honest, but no identical hunk is ever shown or written.
+ */
+function isEmptyDiffWrite(c: Change): boolean {
+	return c.kind === "write" && c.before !== null && c.before.equals(c.after);
+}
+
 function isBinary(buf: Buffer): boolean {
 	const len = Math.min(buf.length, 8192);
 	for (let i = 0; i < len; i++) if (buf[i] === 0) return true;
@@ -269,7 +285,13 @@ export async function run(
 			};
 			if (!Array.isArray(result)) entry.outcome = result.outcome;
 			report.ops.push(entry);
-			for (const change of changes) planned.push({ opName: op.name, change });
+			// #625: an empty-diff write (before byte-equal to after) is dropped here
+			// so it never reaches the preview or the writer. It stays in the Op's
+			// `changes` above, so `progress` is still derived honestly as a no-op.
+			for (const change of changes) {
+				if (isEmptyDiffWrite(change)) continue;
+				planned.push({ opName: op.name, change });
+			}
 		} catch (e) {
 			report.ops.push({ name: op.name, changes: [], progress: false, error: (e as Error).message });
 		}
