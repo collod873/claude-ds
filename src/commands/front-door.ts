@@ -287,11 +287,10 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		// hand-rolled DS infra, route to the command that resolves it rather than
 		// asserting clean — the dashboard already named it under "What's wrong".
 		if (handRolledInfra > 0) {
-			const noun = handRolledInfra === 1 ? "finding" : "findings";
 			printLines([
 				"",
-				`Loop is clean, but ${handRolledInfra} hand-rolled DS infra ${noun} need attention.`,
-				"→ Run `claude-ds doctor --completeness` to see what to remove.",
+				"Loop is clean, but completeness work remains:",
+				...renderHandRolledRouting(handRolledInfra),
 			]);
 			return;
 		}
@@ -318,6 +317,15 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		{ verbose: opts.verbose },
 	);
 	printLines(gateLines);
+
+	// Completeness routing (#590): hand-rolled DS infra is counted in the dashboard
+	// header but is not a remediation-loop member, so the gate plan above never
+	// lists it. Render the routing line here too — independent of plan emptiness —
+	// so the header count is never a dead end. The operator sees it while the gate
+	// awaits [Enter], so the completeness work is in view before they consent.
+	if (handRolledInfra > 0) {
+		printLines(["", ...renderHandRolledRouting(handRolledInfra)]);
+	}
 
 	if (interactive) {
 		const approved = await awaitCommitment();
@@ -394,6 +402,20 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 	} finally {
 		progress.stop();
 	}
+}
+
+/**
+ * The completeness routing line for hand-rolled DS infra (#590). The dashboard
+ * header counts these findings under "What's wrong", but completeness (ADR-0003)
+ * is not a remediation-loop member — the gate plan never lists them. So the count
+ * needs its own routing line, rendered whenever it is > 0 **independent of plan
+ * emptiness**: it previously surfaced only on an empty plan, leaving a non-empty
+ * plan's header count a dead end (a concern named but un-actionable). Pins the
+ * invariant: every counted concern in the header maps to a plan or routing line.
+ */
+function renderHandRolledRouting(count: number): string[] {
+	const noun = count === 1 ? "finding" : "findings";
+	return [`${count} hand-rolled DS infra ${noun} → \`claude-ds doctor --completeness\``];
 }
 
 /**
