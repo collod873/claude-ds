@@ -187,6 +187,60 @@ export function ${name === "solo-label" ? "SoloLabel" : "DuoLabel"}() { return <
 		expect(out).toMatch(/\[DRIFT-STALE-META-STATES\] error · 2 findings · 2 files/);
 	});
 
+	it("non-empty plan still routes hand-rolled infra: every header count has a plan or routing line (#590)", async () => {
+		// The header-counts-have-plan-lines invariant. Hand-rolled DS infra is
+		// counted in the dashboard header but is NOT a remediation-loop member
+		// (completeness, ADR-0003), so the gate plan never lists it. Its routing
+		// line used to render ONLY when the plan was empty — so a non-empty plan
+		// left the counted hand-rolled findings a dead end. Every concern named in
+		// the header must map to a plan line OR a routing line.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		// Auto-fixable drift → non-empty plan; the finding count maps to audit --fix.
+		await writeFile(
+			join(dir, "design-system/atoms/solo-label.tsx"),
+			`export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function SoloLabel() { return <span />; }
+`,
+		);
+		// A hand-rolled validator the loop never touches — found only by the
+		// owned-concern scan, so its count has no plan step to sit under.
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await writeFile(
+			join(dir, "scripts/base-ui-aschild-validator.sh"),
+			`#!/bin/bash
+# base-ui-aschild-validator.sh — asChild is Radix-only; base-ui uses the render prop
+if grep -q "asChild" "$1"; then exit 1; fi
+`,
+		);
+
+		const out = await captureFrontDoor({ cwd: dir });
+
+		// Both concerns are counted in the header.
+		expect(out).toMatch(/What's wrong:.*finding.*hand-rolled DS infra/);
+		// The drift finding maps to a plan line (audit --fix)...
+		expect(out).toMatch(/audit --fix — auto-repair \d+ finding/);
+		// ...and the hand-rolled count maps to a routing line even though the plan
+		// is NON-empty — the gap #590 closes.
+		expect(out).toMatch(/hand-rolled DS infra finding.*→.*claude-ds doctor --completeness/);
+	});
+
+	it("reconform plan entry carries the explainer line, not a bare header (#590)", async () => {
+		// The reconform step is finding-driven (no faithful dry-run), so the gate
+		// renders no Change[] block under it. Without an explainer it was a bare
+		// "reconform" header — a counted plan step with no line saying what it does.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		const ctx = await loadProject(dir);
+		const gateLines = await buildCommitmentGate(ctx, ["reconform"], {
+			classifyCount: 0,
+			autoFixableCount: 0,
+		});
+		const gate = gateLines.join("\n");
+
+		expect(gate).toMatch(/reconform — regenerates companions post-sync; nothing to preview/);
+	});
+
 	it("adopted + MISPLACED finding: the gate plans classify (#245)", async () => {
 		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
 		expect(r.code).toBe(0);

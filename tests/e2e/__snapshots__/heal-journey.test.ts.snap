@@ -25,11 +25,13 @@ repair — restore drifted migration end-states
     Added 3 scaffold files
     
     Skipped: 2 files (hand-edited or unsafe to overwrite)
-reconform
+reconform — regenerates companions post-sync; nothing to preview
 audit --fix — auto-repair 2 findings
     [DRIFT-META-KIND-MISSING] error · 2 findings · 2 files
 
   (re-run with --verbose for the full per-file change list)
+
+1 hand-rolled DS infra finding → \`claude-ds doctor --completeness\`
 "
 `;
 

@@ -210,9 +210,16 @@ function stepHeader(step: LoopStep, ctx: ProjectContext, counts: GateFindingCoun
 			const noun = n === 1 ? "finding" : "findings";
 			return `audit --fix — auto-repair ${n} ${noun}`;
 		}
+		case "reconform":
+			// #590: reconform regenerates generated-integrity companions
+			// (GEN-001/GEN-002) after sync. It is finding-driven — no faithful
+			// up-front dry-run — so unlike sync/upgrade it renders no Change[] block
+			// (`previewStepChanges` returns null). Without an explainer the entry was
+			// a bare "reconform" header: a counted plan step with no line saying what
+			// it does or why nothing previews under it.
+			return "reconform — regenerates companions post-sync; nothing to preview";
 		case "migrate-layout":
 		case "reconcile":
-		case "reconform":
 			return step;
 	}
 }
