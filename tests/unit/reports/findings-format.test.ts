@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatFindings, formatScorecard } from "../../../src/lib/reports/findings-format";
+import {
+	formatFindings,
+	formatScorecard,
+	formatVerifyErrors,
+} from "../../../src/lib/reports/findings-format";
 
 describe("formatFindings", () => {
 	it("groups findings by rule ID and emits a single header per rule", () => {
@@ -110,6 +114,70 @@ describe("formatFindings", () => {
 			const cardHeader = lines.find((l) => l.includes("[BYPASS-CARD]"));
 			expect(cardHeader).toMatch(/\[BYPASS-CARD\] \(1 finding\) — review: import the Card atom/);
 		});
+	});
+});
+
+describe("formatVerifyErrors (#587)", () => {
+	const err = (file: string, code: string, line: number, message: string) => ({
+		file,
+		line,
+		col: 5,
+		code,
+		message,
+		raw: "",
+	});
+
+	it("returns no lines when there are no errors", () => {
+		expect(formatVerifyErrors([])).toEqual([]);
+	});
+
+	it("renders a lone diagnostic verbatim with its location", () => {
+		const lines = formatVerifyErrors([
+			err("design-system/atoms/button.tsx", "TS2300", 2, "Duplicate identifier 'meta'."),
+		]);
+		expect(lines).toEqual([
+			"  design-system/atoms/button.tsx:2:5  TS2300: Duplicate identifier 'meta'.",
+		]);
+	});
+
+	it("collapses repeats of the same file × code into one counted exemplar line", () => {
+		const lines = formatVerifyErrors([
+			err("design-system/a.tsx", "TS2322", 10, "Type 'X' is not assignable."),
+			err("design-system/a.tsx", "TS2322", 20, "Type 'Y' is not assignable."),
+			err("design-system/a.tsx", "TS2322", 30, "Type 'Z' is not assignable."),
+			err("design-system/a.tsx", "TS2322", 40, "Type 'W' is not assignable."),
+		]);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("4× TS2322 in design-system/a.tsx");
+		expect(lines[0]).toContain("e.g.");
+		// One exemplar (the first occurrence) carries the location + message.
+		expect(lines[0]).toContain("design-system/a.tsx:10:5");
+		expect(lines[0]).toContain("Type 'X' is not assignable.");
+	});
+
+	it("does not collapse across different codes in the same file", () => {
+		const lines = formatVerifyErrors([
+			err("design-system/a.tsx", "TS2322", 10, "x"),
+			err("design-system/a.tsx", "TS2304", 11, "y"),
+		]);
+		expect(lines).toHaveLength(2);
+	});
+
+	it("does not collapse the same code across different files", () => {
+		const lines = formatVerifyErrors([
+			err("design-system/a.tsx", "TS2322", 10, "x"),
+			err("design-system/b.tsx", "TS2322", 11, "y"),
+		]);
+		expect(lines).toHaveLength(2);
+	});
+
+	it("caps the number of groups and notes the remainder", () => {
+		const errors = Array.from({ length: 25 }, (_, i) =>
+			err(`design-system/f${i}.tsx`, "TS2322", i + 1, "x"),
+		);
+		const lines = formatVerifyErrors(errors, { maxGroups: 20 });
+		expect(lines).toHaveLength(21);
+		expect(lines[20]).toBe("  …and 5 more");
 	});
 });
 

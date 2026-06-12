@@ -48,6 +48,7 @@ import { planRemediation } from "../lib/remediation-planner.js";
 import { renderDashboard } from "../lib/render/index.js";
 import { createProgress, printLines } from "../lib/render/tty-layer.js";
 import { scanDriftAndIntegrity } from "../lib/reports/drift-integrity-scan.js";
+import { formatVerifyErrors } from "../lib/reports/findings-format.js";
 import { scanScaffoldDrift } from "../lib/reports/scaffold-drift.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import { scanRootDupes } from "../lib/root-dupes.js";
@@ -168,6 +169,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 	// drift+integrity scan `audit` uses and apply exceptions so the dashboard
 	// counts match what the user would see from `audit` itself.
 	let findings: Array<{ ruleId: string; file: string; message: string }> = [];
+	let autoFixableFindings: Array<{ ruleId: string; file: string }> = [];
 	let extractionCount = 0;
 	let unfixableCount = 0;
 	// Read-only completeness scans (ADR-0003 / #504). A check that passes
@@ -199,10 +201,18 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		// findings all fall here. Resolved through the same complaint-ownership
 		// registry the planner composes from (#533), so the front-door's status
 		// numbers cannot diverge from the steps the plan dispatches.
-		unfixableCount = active.filter((f) => {
+		const isAutoFixable = (f: { ruleId: string; file: string; message: string }): boolean => {
 			const owner = ownerForFinding(f);
-			return !(owner.kind === "operation" && owner.step === "audit --fix");
-		}).length;
+			return owner.kind === "operation" && owner.step === "audit --fix";
+		};
+		unfixableCount = active.filter((f) => !isAutoFixable(f)).length;
+		// The concrete auto-fixable set the planner consumed — fed to the gate so
+		// the `audit --fix` step previews a per-rule grouped list, not a bare count
+		// (#584). Same predicate as `unfixableCount`'s complement, so the preview's
+		// rows can never diverge from the header total they sit under.
+		autoFixableFindings = active
+			.filter((f) => isAutoFixable(f))
+			.map((f) => ({ ruleId: f.ruleId, file: f.file }));
 
 		// Owned-concern scan (ADR-0017 / #514): repo-wide, signature-as-identity.
 		// Catches hand-rolled DS infrastructure (the Crewops `ui-token-validator.sh`
@@ -277,11 +287,10 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		// hand-rolled DS infra, route to the command that resolves it rather than
 		// asserting clean — the dashboard already named it under "What's wrong".
 		if (handRolledInfra > 0) {
-			const noun = handRolledInfra === 1 ? "finding" : "findings";
 			printLines([
 				"",
-				`Loop is clean, but ${handRolledInfra} hand-rolled DS infra ${noun} need attention.`,
-				"→ Run `claude-ds doctor --completeness` to see what to remove.",
+				"Loop is clean, but completeness work remains:",
+				...renderHandRolledRouting(handRolledInfra),
 			]);
 			return;
 		}
@@ -303,10 +312,20 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		{
 			classifyCount: unfixableCount,
 			autoFixableCount: findings.length - unfixableCount,
+			autoFixableFindings,
 		},
 		{ verbose: opts.verbose },
 	);
 	printLines(gateLines);
+
+	// Completeness routing (#590): hand-rolled DS infra is counted in the dashboard
+	// header but is not a remediation-loop member, so the gate plan above never
+	// lists it. Render the routing line here too — independent of plan emptiness —
+	// so the header count is never a dead end. The operator sees it while the gate
+	// awaits [Enter], so the completeness work is in view before they consent.
+	if (handRolledInfra > 0) {
+		printLines(["", ...renderHandRolledRouting(handRolledInfra)]);
+	}
 
 	if (interactive) {
 		const approved = await awaitCommitment();
@@ -386,6 +405,20 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 }
 
 /**
+ * The completeness routing line for hand-rolled DS infra (#590). The dashboard
+ * header counts these findings under "What's wrong", but completeness (ADR-0003)
+ * is not a remediation-loop member — the gate plan never lists them. So the count
+ * needs its own routing line, rendered whenever it is > 0 **independent of plan
+ * emptiness**: it previously surfaced only on an empty plan, leaving a non-empty
+ * plan's header count a dead end (a concern named but un-actionable). Pins the
+ * invariant: every counted concern in the header maps to a plan or routing line.
+ */
+function renderHandRolledRouting(count: number): string[] {
+	const noun = count === 1 ? "finding" : "findings";
+	return [`${count} hand-rolled DS infra ${noun} → \`claude-ds doctor --completeness\``];
+}
+
+/**
  * The closing summary the front door prints once the loop reaches a fixed point
  * (#503). The bare "✓ Tree is clean" was correct but told the operator nothing
  * about what the run delivered — the field-report user's whole goal was to "hop
@@ -462,12 +495,7 @@ function renderRedGate(verify: VerifyResult): string[] {
 		lines.push(
 			`✗ Verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files:`,
 		);
-		for (const e of verify.scaffoldErrors.slice(0, 20)) {
-			lines.push(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
-		}
-		if (verify.scaffoldErrors.length > 20) {
-			lines.push(`  …and ${verify.scaffoldErrors.length - 20} more`);
-		}
+		lines.push(...formatVerifyErrors(verify.scaffoldErrors, { maxGroups: 20 }));
 	} else {
 		lines.push(
 			`✗ Verify gate failed — ${verify.reason ?? `${verify.command} exited ${verify.exitCode}`}`,

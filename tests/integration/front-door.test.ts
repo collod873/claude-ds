@@ -17,6 +17,7 @@
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import pkg from "../../package.json" with { type: "json" };
 import { frontDoorCmd } from "../../src/commands/front-door";
@@ -158,6 +159,86 @@ export function SoloLabel() { return <span />; }
 		expect(out).toMatch(/Where you are: adopted/);
 		expect(out).toMatch(/I'll bring this tree to clean/);
 		expect(out).toMatch(/audit --fix — auto-repair \d+ finding/);
+	});
+
+	it("adopted + auto-fixable drift: the audit --fix step previews the finding set per rule (#584)", async () => {
+		// The bare "auto-repair N findings" count gives the operator nothing to
+		// consent to. Under the step header the gate must group the consumed finding
+		// set by rule id, naming severity, finding count, and affected-file count —
+		// composed from the same scan the planner used, not a new prediction.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		// Two atoms each carrying the retired meta.states field → two
+		// DRIFT-STALE-META-STATES findings across two files, all auto-fixable.
+		for (const name of ["solo-label", "duo-label"]) {
+			await writeFile(
+				join(dir, `design-system/atoms/${name}.tsx`),
+				`export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function ${name === "solo-label" ? "SoloLabel" : "DuoLabel"}() { return <span />; }
+`,
+			);
+		}
+
+		const out = await captureFrontDoor({ cwd: dir });
+
+		// The per-rule line sits under the audit --fix header, before the prompt:
+		// rule id · severity · finding count · affected-file count.
+		expect(out).toMatch(/audit --fix — auto-repair 2 findings/);
+		expect(out).toMatch(/\[DRIFT-STALE-META-STATES\] error · 2 findings · 2 files/);
+	});
+
+	it("non-empty plan still routes hand-rolled infra: every header count has a plan or routing line (#590)", async () => {
+		// The header-counts-have-plan-lines invariant. Hand-rolled DS infra is
+		// counted in the dashboard header but is NOT a remediation-loop member
+		// (completeness, ADR-0003), so the gate plan never lists it. Its routing
+		// line used to render ONLY when the plan was empty — so a non-empty plan
+		// left the counted hand-rolled findings a dead end. Every concern named in
+		// the header must map to a plan line OR a routing line.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		// Auto-fixable drift → non-empty plan; the finding count maps to audit --fix.
+		await writeFile(
+			join(dir, "design-system/atoms/solo-label.tsx"),
+			`export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function SoloLabel() { return <span />; }
+`,
+		);
+		// A hand-rolled validator the loop never touches — found only by the
+		// owned-concern scan, so its count has no plan step to sit under.
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await writeFile(
+			join(dir, "scripts/base-ui-aschild-validator.sh"),
+			`#!/bin/bash
+# base-ui-aschild-validator.sh — asChild is Radix-only; base-ui uses the render prop
+if grep -q "asChild" "$1"; then exit 1; fi
+`,
+		);
+
+		const out = await captureFrontDoor({ cwd: dir });
+
+		// Both concerns are counted in the header.
+		expect(out).toMatch(/What's wrong:.*finding.*hand-rolled DS infra/);
+		// The drift finding maps to a plan line (audit --fix)...
+		expect(out).toMatch(/audit --fix — auto-repair \d+ finding/);
+		// ...and the hand-rolled count maps to a routing line even though the plan
+		// is NON-empty — the gap #590 closes.
+		expect(out).toMatch(/hand-rolled DS infra finding.*→.*claude-ds doctor --completeness/);
+	});
+
+	it("reconform plan entry carries the explainer line, not a bare header (#590)", async () => {
+		// The reconform step is finding-driven (no faithful dry-run), so the gate
+		// renders no Change[] block under it. Without an explainer it was a bare
+		// "reconform" header — a counted plan step with no line saying what it does.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		const ctx = await loadProject(dir);
+		const gateLines = await buildCommitmentGate(ctx, ["reconform"], {
+			classifyCount: 0,
+			autoFixableCount: 0,
+		});
+		const gate = gateLines.join("\n");
+
+		expect(gate).toMatch(/reconform — regenerates companions post-sync; nothing to preview/);
 	});
 
 	it("adopted + MISPLACED finding: the gate plans classify (#245)", async () => {
@@ -501,6 +582,101 @@ if grep -q "asChild" "$1"; then exit 1; fi
 		expect(out).toMatch(/claude-ds doctor --completeness/);
 	}, 60000);
 });
+
+describe("front-door commitment-gate prompt contract (#584 / G3)", () => {
+	let dir: string;
+	beforeEach(async () => {
+		dir = await freshTmpDir();
+	});
+	afterEach(async () => {
+		await cleanup(dir);
+	});
+
+	/** Seed an adopted tree with one auto-fixable finding so the plan is
+	 *  non-empty and the gate prompts. */
+	async function seedFixableTree(): Promise<void> {
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		await writeFile(
+			join(dir, "design-system/atoms/solo-label.tsx"),
+			`export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function SoloLabel() { return <span />; }
+`,
+		);
+	}
+
+	it("any-other-input cancels: the exact prompt is shown and nothing changes", async () => {
+		await seedFixableTree();
+		const before = await readFile(join(dir, "design-system/atoms/solo-label.tsx"), "utf8");
+
+		const out = await captureFrontDoorInteractive(dir, "nope\n");
+
+		// The prompt string is pinned — the [Enter]-approves affordance is the
+		// consent contract this gate exists to honor.
+		expect(out).toContain("[Enter] to run all, anything else to cancel:");
+		// Non-empty input cancels; the tree is untouched.
+		expect(out).toMatch(/Cancelled — nothing changed\./);
+		expect(out).not.toMatch(/Tree is clean/);
+		expect(await readFile(join(dir, "design-system/atoms/solo-label.tsx"), "utf8")).toBe(before);
+	});
+
+	it("empty input ([Enter]) approves: the loop drives to clean", async () => {
+		await seedFixableTree();
+
+		const out = await captureFrontDoorInteractive(dir, "\n");
+
+		// Empty input is approval — the gate does not cancel and the loop converges.
+		expect(out).toContain("[Enter] to run all, anything else to cancel:");
+		expect(out).not.toMatch(/Cancelled — nothing changed\./);
+		expect(out).toMatch(/Tree is clean/);
+		// The fixer ran: the retired meta.states field is gone.
+		expect(await readFile(join(dir, "design-system/atoms/solo-label.tsx"), "utf8")).not.toContain(
+			"states:",
+		);
+	}, 60000);
+});
+
+/**
+ * Drive the front door through its interactive `[Enter]` gate, feeding `stdin`
+ * to the readline prompt. Unlike `captureFrontDoor` (which forces
+ * `interactive: false`), this exercises the real `awaitCommitment` path so the
+ * prompt string and the empty-approves / other-cancels contract are pinned.
+ */
+async function captureFrontDoorInteractive(cwd: string, stdin: string): Promise<string> {
+	const origStdoutWrite = process.stdout.write.bind(process.stdout);
+	const origConsoleLog = console.log;
+	const origConsoleInfo = console.info;
+	const origStdinDesc = Object.getOwnPropertyDescriptor(process, "stdin");
+	let stdout = "";
+	const fmt = (args: unknown[]) =>
+		`${args
+			.map((a) => (typeof a === "string" ? a : a instanceof Error ? a.message : JSON.stringify(a)))
+			.join(" ")}\n`;
+	process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
+		stdout += typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8");
+		const cb = rest.find((r) => typeof r === "function") as ((err?: Error) => void) | undefined;
+		if (cb) cb();
+		return true;
+	}) as typeof process.stdout.write;
+	console.log = (...args: unknown[]) => {
+		stdout += fmt(args);
+	};
+	console.info = (...args: unknown[]) => {
+		stdout += fmt(args);
+	};
+	const fakeStdin = Readable.from(stdin) as Readable & { isTTY?: boolean };
+	fakeStdin.isTTY = false;
+	Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
+	try {
+		await frontDoorCmd({ cwd, interactive: true, maxIterations: 5 });
+	} finally {
+		process.stdout.write = origStdoutWrite as typeof process.stdout.write;
+		console.log = origConsoleLog;
+		console.info = origConsoleInfo;
+		if (origStdinDesc) Object.defineProperty(process, "stdin", origStdinDesc);
+	}
+	return stdout;
+}
 
 /**
  * Drive the orchestrator directly, capturing stdout. Defaults to
