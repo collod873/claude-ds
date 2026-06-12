@@ -116,7 +116,7 @@ export function renderDashboard(state: DashboardState, color: ColorAdapter): str
 		if (handRolledInfra > 0) {
 			const noun = handRolledInfra === 1 ? "script" : "scripts";
 			parts.push(
-				`${handRolledInfra} ${noun} you built by hand the design-system pack now provides`,
+				`${handRolledInfra} ${noun} you built by hand that the design-system pack now provides`,
 			);
 		}
 		if (upgradeAvailable) parts.push("a newer design-system pack is available");

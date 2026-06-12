@@ -220,7 +220,7 @@ describe("renderDashboard (pure)", () => {
       [
         "✓ Design system in place — /repo/example-app",
         "✓ Managed files: 12/12",
-        "! Needs attention: 2 scripts you built by hand the design-system pack now provides",
+        "! Needs attention: 2 scripts you built by hand that the design-system pack now provides",
         "✓ Also checked: nothing stale or deprecated",
       ]
     `);
