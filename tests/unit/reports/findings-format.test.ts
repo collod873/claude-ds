@@ -71,6 +71,46 @@ describe("formatFindings", () => {
 	it("returns no lines when there are no findings", () => {
 		expect(formatFindings([])).toEqual([]);
 	});
+
+	describe("advisory grouping (#586)", () => {
+		const advisory = [
+			{ ruleId: "BYPASS-CARD", file: "app/a.tsx:18", message: "hand-rolled card" },
+			{ ruleId: "BYPASS-BADGE", file: "app/b.tsx:3", message: "hand-rolled badge" },
+			{ ruleId: "BYPASS-BADGE", file: "app/c.tsx:5", message: "hand-rolled badge" },
+		];
+		const opts = {
+			severityFor: () => "info" as const,
+			noteFor: (ruleId: string) =>
+				`review: import the ${ruleId === "BYPASS-CARD" ? "Card" : "Badge/Tag"} atom, or dismiss via design-system/exceptions.json if a legitimate non-atom use`,
+		};
+
+		it("resolves a severity prefix for ids outside the drift/integrity tables", () => {
+			const lines = formatFindings(advisory, opts);
+			const headers = lines.filter((l) => /^[A-Z]+\s+\[/.test(l));
+			expect(headers.every((l) => l.startsWith("INFO"))).toBe(true);
+		});
+
+		it("renders the mechanism sentence once per rule, not once per finding", () => {
+			const lines = formatFindings(advisory, opts);
+			const badgeMechanism = lines.filter((l) => l.includes("import the Badge/Tag atom"));
+			// Two BYPASS-BADGE findings, but the dismiss sentence appears once.
+			expect(badgeMechanism).toHaveLength(1);
+			expect(badgeMechanism[0]).toContain("[BYPASS-BADGE] (2 findings)");
+		});
+
+		it("renders each finding's path once, under its rule header", () => {
+			const lines = formatFindings(advisory, opts);
+			expect(lines).toContain("  app/b.tsx:3: hand-rolled badge");
+			expect(lines).toContain("  app/c.tsx:5: hand-rolled badge");
+			expect(lines.filter((l) => l.includes("app/b.tsx:3"))).toHaveLength(1);
+		});
+
+		it("appends the note to the header line when noteFor is given", () => {
+			const lines = formatFindings(advisory, opts);
+			const cardHeader = lines.find((l) => l.includes("[BYPASS-CARD]"));
+			expect(cardHeader).toMatch(/\[BYPASS-CARD\] \(1 finding\) — review: import the Card atom/);
+		});
+	});
 });
 
 describe("formatScorecard", () => {

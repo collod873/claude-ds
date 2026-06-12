@@ -7,15 +7,38 @@ export interface FindingForFormat {
 	message: string;
 }
 
+export interface FormatFindingsOptions {
+	/**
+	 * Resolve the severity prefix for rule ids that live outside the
+	 * drift/integrity tables — advisory `BYPASS-` ids resolve to `"info"`
+	 * (issue #586). When absent (the drift/integrity callers), the tables
+	 * decide, so those paths are unchanged.
+	 */
+	severityFor?: (ruleId: string) => "error" | "warning" | "info";
+	/**
+	 * A per-rule note appended to the header line — the mechanism/dismiss
+	 * sentence stated *once per rule* for advisory blocks (issue #586), so the
+	 * ~40-word remediation no longer repeats once per finding.
+	 */
+	noteFor?: (ruleId: string) => string | undefined;
+}
+
 /**
  * Group findings by ruleId and render them as the audit's grouped output:
  * one header line per rule (with a severity prefix and finding count) and
  * one indented line per finding. Pure — no I/O.
  *
  * Header severity uses the integrity severity table for INTEGRITY-* rules
- * and the drift severity table for everything else.
+ * and the drift severity table for everything else, unless `severityFor`
+ * overrides it. This is the *single* rendering path for grouped findings —
+ * drift/integrity blocks and the advisory structural-bypass block both flow
+ * through it (issue #586); advisory callers pass `severityFor`/`noteFor` to
+ * supply their INFO prefix and once-per-rule mechanism sentence.
  */
-export function formatFindings(findings: FindingForFormat[]): string[] {
+export function formatFindings(
+	findings: FindingForFormat[],
+	options: FormatFindingsOptions = {},
+): string[] {
 	const byRule = new Map<string, FindingForFormat[]>();
 	for (const f of findings) {
 		const group = byRule.get(f.ruleId);
@@ -25,12 +48,17 @@ export function formatFindings(findings: FindingForFormat[]): string[] {
 
 	const lines: string[] = [];
 	for (const [ruleId, ruleFindings] of byRule) {
-		const severity = ruleId.startsWith("INTEGRITY-")
-			? integrityRuleSeverity(ruleId as IntegrityRuleId)
-			: ruleSeverity(ruleId as DriftRuleId);
+		const severity =
+			options.severityFor?.(ruleId) ??
+			(ruleId.startsWith("INTEGRITY-")
+				? integrityRuleSeverity(ruleId as IntegrityRuleId)
+				: ruleSeverity(ruleId as DriftRuleId));
 		const prefix = severity === "error" ? "ERROR" : severity === "warning" ? "WARNING" : "INFO";
 		const noun = ruleFindings.length === 1 ? "finding" : "findings";
-		lines.push(`${prefix}  [${ruleId}] (${ruleFindings.length} ${noun})`);
+		const note = options.noteFor?.(ruleId);
+		lines.push(
+			`${prefix}  [${ruleId}] (${ruleFindings.length} ${noun})${note ? ` — ${note}` : ""}`,
+		);
 		for (const f of ruleFindings) {
 			lines.push(`  ${f.file}: ${f.message}`);
 		}
