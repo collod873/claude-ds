@@ -4,6 +4,8 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseConfig } from "../config.js";
+import { type AnswerBag, loadAnswersFile } from "../decision/index.js";
+import { type FixerPrompt, makeTtyPrompt } from "../drift/index.js";
 import {
 	type Exception,
 	type ExceptionLint,
@@ -20,6 +22,7 @@ import {
 	scanOwnedConcerns,
 } from "../owned-concerns/index.js";
 import { renderCompleteness } from "../render/completeness.js";
+import { runCompletenessTriage } from "./completeness-triage.js";
 
 async function exists(p: string): Promise<boolean> {
 	try {
@@ -168,7 +171,18 @@ function makeGhIssueChecker(): IssueChecker {
 	};
 }
 
-export async function runCompletenessCheck(opts: { pack?: string; cwd?: string }): Promise<void> {
+export async function runCompletenessCheck(opts: {
+	pack?: string;
+	cwd?: string;
+	/** Path to a `--answers` JSON bag (ADR-0023) — drives per-finding triage. */
+	answers?: string;
+	/** Reason recorded on dismiss / mark-permanent exceptions. */
+	reason?: string;
+	/** Issue link recorded on dismiss exceptions; required by the contract. */
+	issue?: string;
+	/** Test-injected triage prompt; the CLI builds a TTY prompt when interactive. */
+	prompt?: FixerPrompt;
+}): Promise<void> {
 	const cwd = opts.cwd ?? process.cwd();
 	let pack = opts.pack;
 	if (!pack) {
@@ -247,6 +261,55 @@ export async function runCompletenessCheck(opts: { pack?: string; cwd?: string }
 	});
 
 	process.stdout.write(`${lines.join("\n")}\n`);
+
+	// #642 (PRD #635 Module 5): interactive per-finding triage. Engages over the
+	// Owned-concern findings when the consumer can answer — a TTY prompts, or
+	// `--answers` supplies the choices for a scriptable / non-TTY run. A non-TTY
+	// run with neither keeps today's report-and-exit-1 behaviour (no silent
+	// writes); the triage's own fail-loud only fires once it is engaged.
+	// "TTY" per ADR-0023 means stdout AND stdin are both terminals — otherwise a
+	// prompt has nowhere to read from. Requiring both also keeps a piped test/CI
+	// run (stdin not a TTY) off the interactive arm even on a TTY stdout.
+	const isTTY = process.stdout.isTTY === true && process.stdin.isTTY === true;
+	const triageEngaged =
+		ownedFindings.length > 0 && (opts.answers !== undefined || isTTY || opts.prompt !== undefined);
+	if (triageEngaged) {
+		let answers: AnswerBag | undefined;
+		if (opts.answers !== undefined) {
+			try {
+				answers = await loadAnswersFile(opts.answers);
+			} catch (e) {
+				process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
+				process.exit(2);
+			}
+		}
+		const prompt = opts.prompt ?? (isTTY ? makeTtyPrompt() : undefined);
+		const outcome = await runCompletenessTriage({
+			cwd,
+			ownedFindings,
+			answers,
+			reason: opts.reason,
+			issue: opts.issue,
+			prompt,
+			isTTY,
+		});
+		if (outcome.status === "error") {
+			process.stderr.write(`${outcome.lines.join("\n")}\n`);
+			process.exit(outcome.exitCode);
+		}
+		if (outcome.lines.length > 0) process.stdout.write(`${outcome.lines.join("\n")}\n`);
+		// Remaining = non-owned findings (orphans, workarounds, exception lint) plus
+		// any Owned finding the consumer skipped. The CI exit contract (non-zero when
+		// anything is unresolved) is preserved.
+		const remaining = totalFindings - ownedFindings.length + outcome.skipped.length;
+		const buildCmd = await detectBuildCommand(cwd);
+		printNextStep("doctor", {
+			doctorVerdict: remaining > 0 ? "completeness-findings" : "clean",
+			buildCmd,
+		});
+		if (remaining > 0) process.exit(1);
+		return;
+	}
 
 	// #349 F21: every command — including doctor's completeness mode —
 	// ends with a → Next breadcrumb. Findings route to the per-finding
