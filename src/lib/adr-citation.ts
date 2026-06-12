@@ -23,6 +23,7 @@ const ADR_BASE = "https://github.com/collod873/claude-ds/blob/main/docs/adr";
  */
 const ADR_FILE = {
 	"completeness-principle": "0003-completeness-principle.md",
+	"ds-vs-features-boundary": "0005-ds-vs-features-boundary.md",
 	"states-contract-retired": "0007-states-contract-retired.md",
 	"structural-bypass-advisory": "0026-structural-bypass-is-an-advisory-sibling-layer.md",
 	"composed-widget-rendering": "0026-unify-composed-widget-rendering.md",

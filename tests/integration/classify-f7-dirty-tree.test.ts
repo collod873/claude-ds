@@ -131,5 +131,11 @@ export const meta = { kind: "atom", examples: [{ name: "default", props: {} }] }
 		// operator can relocate it to features/.
 		expect(r.stdout).toMatch(/invoice-badge\.tsx/);
 		expect(r.stdout).toMatch(/candidate feature|relocate to features\//i);
+		// #592: the ADR-0005 citation is reachable — a resolvable GitHub URL, not a
+		// bare "(ADR-0005)" the pack ships no copy of.
+		expect(r.stdout).toMatch(
+			/https:\/\/github\.com\/collod873\/claude-ds\/blob\/main\/docs\/adr\/0005-/,
+		);
+		expect(r.stdout).not.toMatch(/\(ADR-\d{4}\)/);
 	});
 });

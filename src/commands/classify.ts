@@ -480,7 +480,7 @@ export async function classifyCmd(opts: {
 			// relocate-to-features/ hand-off is grounded in real evidence.
 			info(
 				`classify: ${p.file} — smart part imports from a domain root and no shipped role contract matches. ` +
-					`Candidate feature: relocate to features/, or mark presentational (ADR-0005).`,
+					`Candidate feature: relocate to features/, or mark presentational (${adrUrl("ds-vs-features-boundary")}).`,
 			);
 			continue;
 		}
