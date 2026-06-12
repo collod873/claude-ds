@@ -1,4 +1,5 @@
 name: Agent Close Completed PRD
+run-name: "Close PRD: cascade after #${{ github.event.issue.number }}"
 
 # In the parallel fan-out model, each PRD sub-issue closes via its own merged
 # PR. The parent PRD has no "Closes #" reference of its own, so it would linger

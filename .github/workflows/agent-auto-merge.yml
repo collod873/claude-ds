@@ -1,4 +1,5 @@
 name: Agent Auto-Merge
+run-name: "${{ github.event.action == 'labeled' && format('Auto-merge: arm PR #{0}', github.event.pull_request.number) || format('Auto-merge: cascade after #{0}', github.event.pull_request.number) }}"
 
 # When agent review passes and adds `ready-to-merge`, arm GitHub auto-merge so
 # the PR lands only after the repo's required status checks go green (ADR-0006).
@@ -28,6 +29,15 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      # checks + statuses + actions: read are what let `gh pr view --json
+      # statusCheckRollup` see the merge-ref CI gate below. actions: read is
+      # required because gh resolves each check's workflowName (used by the
+      # gate's self-exclusion filter) via checkSuite.workflowRun. Without all
+      # three the rollup comes back as "Resource not accessible by integration"
+      # and gh exits 1, killing the job before it can arm.
+      checks: read
+      statuses: read
+      actions: read
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -72,8 +82,9 @@ jobs:
           fi
           merged=false
           rebase=false
+          ci_failed=false
           for attempt in 1 2 3 4 5 6; do
-            data=$(gh pr view "$PR_NUMBER" --json state,mergeable,mergeStateStatus,autoMergeRequest)
+            data=$(gh pr view "$PR_NUMBER" --json state,mergeable,mergeStateStatus,autoMergeRequest,statusCheckRollup)
             st=$(echo "$data" | jq -r '.state')
             m=$(echo "$data" | jq -r '.mergeable')
             s=$(echo "$data" | jq -r '.mergeStateStatus')
@@ -95,6 +106,35 @@ jobs:
             if [ "$m" = "CONFLICTING" ] || [ "$s" = "DIRTY" ] || [ "$s" = "BEHIND" ]; then
               echo "PR #$PR_NUMBER is stale/conflicting (mergeable=$m state=$s)."
               rebase=true; break
+            fi
+            # Merge-ref CI gate (ADR-0006/ADR-0007): a COMPLETED failing check →
+            # never arm, never direct-merge. PENDING/IN_PROGRESS checks are
+            # ignored (arming defers to them, exactly as before); this job's own
+            # in-progress check run is excluded by workflow name so the gate
+            # never trips on itself. Checked AFTER staleness (a BEHIND PR rebases
+            # first; its checks re-run against the new ref) but BEFORE the
+            # armed/arm paths, so a failure surfaced by a re-kick on an
+            # already-armed PR is caught too — GitHub silently holds an armed PR
+            # on a red required check with no event to catch otherwise. Routing
+            # happens after the loop.
+            fail=$(echo "$data" | jq -r --arg self "${GITHUB_WORKFLOW:-Agent Auto-Merge}" '
+              [ .statusCheckRollup[]?
+                | select(
+                    ( .__typename == "CheckRun"
+                      and .status == "COMPLETED"
+                      and ( .conclusion == "FAILURE" or .conclusion == "TIMED_OUT" or .conclusion == "STARTUP_FAILURE" )
+                      and .workflowName != $self )
+                    or
+                    ( .__typename == "StatusContext"
+                      and ( .state == "FAILURE" or .state == "ERROR" ) )
+                  )
+                | "- " + (.name // .context // "check") + " -> " + (.conclusion // .state)
+                  + ( ( .detailsUrl // .targetUrl // "" ) as $u | if $u == "" then "" else " (" + $u + ")" end )
+              ] | join("\n")')
+            if [ -n "$fail" ]; then
+              echo "PR #$PR_NUMBER has completed failing merge-ref check(s):"
+              printf '%s\n' "$fail"
+              ci_failed=true; break
             fi
             # Already armed (a re-kick from the closed job, or a duplicate
             # labeled event) — GitHub lands it when the checks pass; done here.
@@ -129,6 +169,45 @@ jobs:
           if [ "$merged" != "false" ]; then
             exit 0
           fi
+          # Red merge-ref CI: a post-work failure (ADR-0007). Never arm, never
+          # direct-merge — spend one self-triage slot to re-route to
+          # agent:implement with the failing checks quoted; block + notify only
+          # once the slot is spent. Disable any auto-merge already armed so
+          # GitHub can't land the PR behind the fix, and drop ready-to-merge so
+          # the PR list and kick-next-armed stop treating it as approved-and-
+          # waiting (kick-next-armed would otherwise re-pick this very PR).
+          if [ "$ci_failed" = "true" ]; then
+            GH_TOKEN="$MERGE_TOKEN" gh pr merge "$PR_NUMBER" --disable-auto || true
+            npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts remove-trigger-label pr "$PR_NUMBER" ready-to-merge
+            # Build the context body via printf so the embedded blank lines and
+            # `$fail` list never break this run: block scalar — each line stays a
+            # single shell statement, the newlines live inside the file.
+            body_file="${RUNNER_TEMP:-/tmp}/auto-merge-ci-${PR_NUMBER}.md"
+            {
+              printf '%s\n\n' "Auto-merge found completed failing merge-ref check(s) on #${PR_NUMBER} — not arming, not merging (ADR-0006/ADR-0007):"
+              printf '%s\n\n' "$fail"
+              printf '%s\n' "Re-routing to \`agent:implement\` to fix the failing check(s)."
+            } > "$body_file"
+            decision=$(npx -y tsx _shared/.sandcastle/agent-workflows/shared/retry-slot.ts spend pr "$PR_NUMBER" self-triage 1 --body-file "$body_file" | jq -r '.decision')
+            if [ "$decision" = "retry" ]; then
+              # spendSlot already posted the body as the PR comment the re-routed
+              # agent:implement run reads as its failing context.
+              npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" implement
+              echo "Self-triage slot spent — re-routed #$PR_NUMBER to agent:implement with the failing checks."
+            else
+              # Slot spent (or the spend failed and jq read empty) → terminal:
+              # mark-blocked notifies the owner, mirrors to the PRD, and hands
+              # the drain turn to the next sibling.
+              blocked_file="${RUNNER_TEMP:-/tmp}/auto-merge-blocked-${PR_NUMBER}.md"
+              {
+                printf '%s\n\n' "Auto-merge found failing merge-ref check(s) but the self-triage slot is already spent — blocking for a human (ADR-0007)."
+                printf '%s\n' "$fail"
+              } > "$blocked_file"
+              npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts mark-blocked pr "$PR_NUMBER" --body-file "$blocked_file"
+              echo "Self-triage slot exhausted — #$PR_NUMBER marked agent:blocked."
+            fi
+            exit 0
+          fi
           # Either a real conflict, or mergeability never settled. Hand to the
           # rebase robot. Park the approval as merge-pending-update so the PR
           # never reads ready-to-merge while it's stale/conflicting — on a real
@@ -139,7 +218,10 @@ jobs:
             echo "Mergeability never settled — handing to rebase robot to recompute."
           fi
           npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts remove-trigger-label pr "$PR_NUMBER" ready-to-merge
-          npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" merge-pending-update
+          # Park the approval as a NON-trigger add (GITHUB_TOKEN): a PAT-authored
+          # merge-pending-update add fires phantom update-branch runs (3 per
+          # rebase, 1 real). Only the update-branch add below should trigger.
+          npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-label pr "$PR_NUMBER" merge-pending-update
           npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$PR_NUMBER" update-branch
           gh pr comment "$PR_NUMBER" --body "Auto-merge couldn't fast-forward (a sibling PR likely landed first) — handed to \`agent:update-branch\` to rebase. The approval is parked as \`merge-pending-update\` and flips back to \`ready-to-merge\` once the branch is current."
 
@@ -172,25 +254,18 @@ jobs:
           sparse-checkout: .sandcastle/agent-workflows/shared
           sparse-checkout-cone-mode: false
 
-      - name: Re-kick armed sibling PRs
+      - name: Re-kick the next armed sibling PR
         run: |
           set -euo pipefail
           # This merge moved main, so every other approved-and-waiting PR is now
           # BEHIND — or newly CONFLICTING, in which case GitHub silently disarms
-          # its auto-merge with no event to catch. Cycling ready-to-merge (via
-          # AGENT_PAT, so the labeled event fires) re-runs the merge job's
-          # decision tree against the new main: stale siblings hand off to the
-          # rebase robot exactly as the old synchronous poll did. This keeps the
-          # wave draining serially instead of stalling on a disarmed PR.
-          siblings=$(gh pr list --state open --label ready-to-merge --json number --jq '.[].number')
-          if [ -z "$siblings" ]; then
-            echo "No armed siblings to re-evaluate."
-          fi
-          for n in $siblings; do
-            echo "Re-evaluating sibling PR #$n against the new main"
-            npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts remove-trigger-label pr "$n" ready-to-merge
-            npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts add-trigger-label pr "$n" ready-to-merge
-          done
+          # its auto-merge with no event to catch. Cycle ready-to-merge on the
+          # OLDEST armed sibling only (lowest PR number): re-arming all of them
+          # at once kicked off N simultaneous rebases per merge, N−1 of them
+          # wasted when the first to land invalidated the rest (ADR-0008). The
+          # next sibling's turn arrives with the next merge's cascade; a blocked
+          # sibling hands its turn on via mark-blocked's own kick-next-armed.
+          npx -y tsx _shared/.sandcastle/agent-workflows/shared/labels.ts kick-next-armed
 
       - name: Close linked issues and cascade-close the parent PRD
         run: |

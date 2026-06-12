@@ -14,8 +14,11 @@ import { execFileSync } from "node:child_process";
 // Matched against stderr ONLY — the thrown message embeds the full argv, and
 // a comment body that happens to mention "rate limit" must not trigger a
 // retry of a genuinely failed call.
+// The GraphQL form ("non-200 OK status code: NNN") retries the whole 4xx/5xx
+// range, not the narrow HTTP set: a bad query returns 200 with an errors body,
+// so a non-200 from the GraphQL endpoint is always transport/auth/rate-limit.
 const TRANSIENT_STDERR =
-  /HTTP (401|408|429|5\d\d)|rate limit|connection (reset|refused|timed out)|could not resolve|i\/o timeout|unexpected EOF|TLS handshake/i;
+  /HTTP (401|408|429|5\d\d)|non-200 OK status code: [45]\d\d|rate limit|connection (reset|refused|timed out)|could not resolve|i\/o timeout|unexpected EOF|TLS handshake/i;
 
 const DEFAULT_RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
 

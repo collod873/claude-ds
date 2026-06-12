@@ -5,6 +5,7 @@ import * as sandcastle from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { runWithRetry } from "../shared/run-with-retry";
 import { required, outputDir, claudeAgent } from "../shared/common";
+import { linearChainWarning } from "../shared/publish-sub-issues";
 
 const PRD_NUMBER = required("PRD_NUMBER");
 const PRD_TITLE = required("PRD_TITLE");
@@ -56,6 +57,27 @@ for (let i = 0; i < slices.length; i++) {
       );
       process.exit(1);
     }
+  }
+}
+
+// Mechanical chain-shape check (PRD #36): compute the wave structure from the
+// emitted dependsOn graph and, if it is a strictly linear chain of three or
+// more slices, post a non-blocking warning on the PRD at the existing human
+// checkpoint — before anyone labels it agent:implement. Warn-only by decision:
+// publishing proceeds regardless, since the cost of re-running outweighs the
+// cost of a ten-second read.
+const warning = linearChainWarning(slices);
+if (warning) {
+  try {
+    execFileSync("gh", ["issue", "comment", PRD_NUMBER, "--body", warning], {
+      encoding: "utf8",
+    });
+    console.log(`Posted linear-chain warning comment on PRD #${PRD_NUMBER}.`);
+  } catch (err) {
+    // A failed warning must not block publishing — it is advisory only.
+    console.error(
+      `Could not post linear-chain warning on PRD #${PRD_NUMBER} (continuing): ${err}`,
+    );
   }
 }
 

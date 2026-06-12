@@ -113,6 +113,81 @@ export const validatePlan = (plan: ResolvedPlan): void => {
 };
 
 // ---------------------------------------------------------------------------
+// Chain-shape detection — mechanical, plan-only (no schema change, no agent
+// self-report). Depth serializes waves: a strictly linear chain runs one
+// sub-issue at a time, the most expensive shape (PRD #36). We compute the wave
+// structure from the dependsOn graph and warn — never block — when it is
+// strictly linear, so the human can break a removable edge at the existing
+// checkpoint before labeling the PRD agent:implement. Warn-only is a decision:
+// the cost asymmetry is ten seconds of reading vs a burned session.
+// ---------------------------------------------------------------------------
+
+// The minimum a slice must expose to be laid out into waves: a title (for
+// quoting edges) and its 1-based blocker positions. PlannedSlice satisfies it,
+// and so does the headless op's own slice shape — so the op can call the
+// detector without depending on the full publish pipeline.
+export interface ChainSlice {
+  readonly title: string;
+  readonly dependsOn: readonly number[];
+}
+
+// Topological levels via longest-path layering: a slice sits one wave past its
+// latest blocker; unblocked slices are wave 0. The result is grouped by wave,
+// each inner array holding 1-based slice positions in ascending order. Assumes
+// a validated DAG (validatePlan / the op's earlier-only check rule out cycles).
+export const computeWaves = (slices: readonly ChainSlice[]): number[][] => {
+  const level = new Array<number>(slices.length).fill(-1);
+  const compute = (i: number): number => {
+    if (level[i]! >= 0) return level[i]!;
+    let lvl = 0;
+    for (const dep of slices[i]!.dependsOn) {
+      lvl = Math.max(lvl, compute(dep - 1) + 1);
+    }
+    level[i] = lvl;
+    return lvl;
+  };
+  const waves: number[][] = [];
+  for (let i = 0; i < slices.length; i++) {
+    (waves[compute(i)] ??= []).push(i + 1);
+  }
+  return waves;
+};
+
+// Returns the PRD warning comment body when the plan is a strictly linear
+// chain of three or more slices, else null. Strictly linear means every wave
+// has width one; the ≥3 threshold keeps the signal crisp (a 2-slice chain is
+// genuinely sequential, not a slicing failure worth flagging).
+export const linearChainWarning = (
+  slices: readonly ChainSlice[],
+): string | null => {
+  if (slices.length < 3) return null;
+  if (!computeWaves(slices).every((wave) => wave.length === 1)) return null;
+
+  const edges: string[] = [];
+  for (let i = 0; i < slices.length; i++) {
+    for (const dep of slices[i]!.dependsOn) {
+      edges.push(
+        `- slice ${i + 1} ("${slices[i]!.title}") blocked-by ` +
+          `slice ${dep} ("${slices[dep - 1]!.title}")`,
+      );
+    }
+  }
+
+  return (
+    `⚠️ **Strictly linear chain detected** — this plan's ${slices.length} ` +
+    `slices form a single dependency chain.\n\n` +
+    `Every wave is width one, so the ${slices.length} slices will run one at ` +
+    `a time (${slices.length} sequential waves), not in parallel. A strictly ` +
+    `linear chain is the most expensive shape: it signals the slicing failed, ` +
+    `not that the file-overlap rule worked.\n\n` +
+    `Dependency edges:\n${edges.join("\n")}\n\n` +
+    `Before labeling this PRD \`agent:implement\`, consider breaking any ` +
+    `removable edge or extracting a prefactor slice so the slices can run in ` +
+    `a wider wave. Publishing was **not** blocked — this is a warning only.`
+  );
+};
+
+// ---------------------------------------------------------------------------
 // gh-exec boundary — every call goes through these thin wrappers so the argv
 // is in one place (and asserted by tests). The blocked-by / sub-issues APIs
 // key on the integer database `id`, not the issue number, so ids are always

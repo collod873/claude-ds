@@ -1,4 +1,5 @@
 name: Agent Update Branch
+run-name: "Update branch: PR #${{ github.event.pull_request.number }}"
 
 on:
   # pull_request_target rather than pull_request: the standard pull_request

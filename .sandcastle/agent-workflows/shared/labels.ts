@@ -66,6 +66,55 @@ const safeGh = (args: string[]): void => {
   }
 };
 
+// The repo owner, parsed from GH_REPO (`owner/repo`, set by every workflow to
+// `${{ github.repository }}`). Used for the blocked-comment @mention. Returns
+// null when GH_REPO is unset/malformed so the mention is simply omitted rather
+// than producing a broken `@`.
+const repoOwner = (): string | null => {
+  const repo = process.env.GH_REPO;
+  if (!repo || !repo.includes("/")) return null;
+  return repo.split("/")[0] || null;
+};
+
+// Find the parent PRD of a blocked target, or null when there is none.
+//   - issue target: the sub-issue's own parent.
+//   - pr target:    the PR's first closing issue, then that issue's parent.
+// Best-effort: any failure (no GH_REPO, API error, no parent) yields null and
+// the caller skips the mirror. One graphql round-trip, graft-safe via GH_REPO.
+const findParentPrd = (target: Target): string | null => {
+  const repo = process.env.GH_REPO;
+  if (!repo || !repo.includes("/")) return null;
+  const [owner, name] = repo.split("/");
+  const query =
+    target.kind === "issue"
+      ? "query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){issue(number:$num){parent{number}}}}"
+      : "query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$num){closingIssuesReferences(first:1){nodes{parent{number}}}}}}";
+  const jq =
+    target.kind === "issue"
+      ? ".data.repository.issue.parent.number // empty"
+      : ".data.repository.pullRequest.closingIssuesReferences.nodes[0].parent.number // empty";
+  try {
+    const out = gh([
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-f",
+      `owner=${owner}`,
+      "-f",
+      `repo=${name}`,
+      "-F",
+      `num=${target.number}`,
+      "--jq",
+      jq,
+    ]);
+    const n = out.trim();
+    return /^\d+$/.test(n) ? n : null;
+  } catch {
+    return null;
+  }
+};
+
 // ---------------------------------------------------------------------------
 // Entry points
 // ---------------------------------------------------------------------------
@@ -79,10 +128,88 @@ export const startWork = (target: Target, trigger: TriggerLabel): void => {
   gh([...editArgs(target), "--add-label", LIFECYCLE_LABELS.inProgress]);
 };
 
-// Add `agent:blocked` and post the failure comment.
+// Add `agent:blocked`, post the terminal failure comment, mirror a one-liner
+// onto the parent PRD when one exists, and — for a PR — hand the drain turn to
+// the next-oldest armed sibling. The terminal state of ADR-0007 (notify) and
+// ADR-0008 (kick-next-on-block) both live here.
+//
+// The comment is authored by the default token (GITHUB_TOKEN — this function
+// never passes AGENT_PAT): GitHub suppresses notifications for self-authored
+// mentions, and AGENT_PAT is the owner's own account, so a PAT-authored
+// @mention would notify nobody (ADR-0007).
 export const markBlocked = (target: Target, body: string): void => {
   safeGh([...editArgs(target), "--add-label", LIFECYCLE_LABELS.blocked]);
-  gh([...commentArgs(target), "--body", body]);
+
+  const owner = repoOwner();
+  const ownedBody = owner ? `${body}\n\ncc @${owner}` : body;
+  gh([...commentArgs(target), "--body", ownedBody]);
+
+  // The PRD is the surface a human actually watches; a sub-issue/PR blocked
+  // comment is invisible there. Mirror a one-liner up when a parent exists.
+  const parent = findParentPrd(target);
+  if (parent) {
+    const what = target.kind === "pr" ? "PR" : "Issue";
+    safeGh([
+      "issue",
+      "comment",
+      parent,
+      "--body",
+      `${what} #${target.number} hit \`agent:blocked\` and needs a look${owner ? ` — cc @${owner}` : ""}.`,
+    ]);
+  }
+
+  // A blocked PR hands its drain turn to the next-oldest armed sibling so the
+  // serial drain never waits on a corpse (ADR-0008). Issues have no drain turn.
+  if (target.kind === "pr") kickNextArmed();
+};
+
+// Find the oldest open PR carrying the armed merge label (`ready-to-merge`,
+// lowest PR number) and cycle that label off-then-on to re-fire the merge
+// decision against the current default branch. A clean no-op when none is
+// armed. This is ADR-0008's serial drain: one sibling re-evaluated per merge /
+// per block, never the kick-all that wasted N−1 rebases.
+//
+// The re-add goes through addTriggerLabel (AGENT_PAT-first) so the `labeled`
+// event actually fires auto-merge again; the scan itself is best-effort so a
+// transient list failure never aborts the blocked/drain path that called it.
+export const kickNextArmed = (): void => {
+  let out: string;
+  try {
+    out = gh([
+      "pr",
+      "list",
+      "--state",
+      "open",
+      "--label",
+      MERGE_GATE_LABELS.readyToMerge,
+      "--json",
+      "number",
+      "--jq",
+      ".[].number",
+    ]);
+  } catch {
+    return;
+  }
+  const numbers = out
+    .trim()
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (numbers.length === 0) return;
+  const next: Target = { kind: "pr", number: String(Math.min(...numbers)) };
+  removeTriggerLabel(next, MERGE_GATE_LABELS.readyToMerge);
+  addTriggerLabel(next, MERGE_GATE_LABELS.readyToMerge);
+};
+
+// Add a label WITHOUT the AGENT_PAT path, so the resulting `labeled` event does
+// NOT trigger a downstream workflow. Used to park a label that must never fire
+// one — `merge-pending-update` above all: a PAT-authored parking add was the
+// proven source of phantom runs (3 update-branch runs per rebase, 1 real).
+// Best-effort, like markQueued's park.
+export const addLabel = (target: Target, label: string): void => {
+  safeGh([...editArgs(target), "--add-label", label]);
 };
 
 // Park a sub-issue in `agent:queued` (best-effort). Used by the PRD fan-out
@@ -156,6 +283,8 @@ export const CLI_COMMANDS = [
   "finish",
   "add-trigger-label",
   "remove-trigger-label",
+  "add-label",
+  "kick-next-armed",
 ] as const;
 
 export const parseTarget = (kind: string, number: string): Target => {
@@ -223,6 +352,8 @@ const usage = (): never => {
       "  labels.ts finish               <issue|pr> <number>",
       "  labels.ts add-trigger-label    <issue|pr> <number> <trigger-key>",
       "  labels.ts remove-trigger-label <issue|pr> <number> <trigger-key>",
+      "  labels.ts add-label            <issue|pr> <number> <label-key>",
+      "  labels.ts kick-next-armed",
       "",
       `  <trigger-key> is one of: ${Object.keys(SHORT_KEY_TO_LABEL).join(", ")}`,
     ].join("\n"),
@@ -232,6 +363,14 @@ const usage = (): never => {
 
 export const main = (argv: string[]): void => {
   const [cmd, kind, number, ...rest] = argv;
+
+  // kick-next-armed scans for its own target (the lowest armed PR) — it takes
+  // no <issue|pr> <number>, so it dispatches before the target guard.
+  if (cmd === "kick-next-armed") {
+    kickNextArmed();
+    return;
+  }
+
   if (!cmd || !kind || !number) return usage();
 
   const target = parseTarget(kind, number);
@@ -270,6 +409,12 @@ export const main = (argv: string[]): void => {
       const [label] = rest;
       if (!label) return usage();
       removeTriggerLabel(target, parseTrigger(label));
+      return;
+    }
+    case "add-label": {
+      const [label] = rest;
+      if (!label) return usage();
+      addLabel(target, parseTrigger(label));
       return;
     }
     default:

@@ -1,4 +1,5 @@
 name: Agent Implement PRD
+run-name: "Implement PRD: fan-out #${{ github.event.issue.number }}"
 
 # Dependency-aware fan-out dispatcher. When a PRD (an issue that has sub-issues)
 # is labeled `agent:implement`, this promotes every open sub-issue that has zero
