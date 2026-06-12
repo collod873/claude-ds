@@ -65,7 +65,7 @@ export function renderCompleteness(state: CompletenessRenderState): string[] {
 
 	if (orphans.length > 0) {
 		const noun = orphans.length === 1 ? "file" : "files";
-		lines.push(`! ${orphans.length} ${noun} under design-system the pack doesn't manage:`);
+		lines.push(`! ${orphans.length} ${noun} under design-system that the pack doesn't manage:`);
 		for (const o of orphans) lines.push(`  - ${o}`);
 		lines.push("");
 	}
