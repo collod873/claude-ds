@@ -6,7 +6,8 @@ exports[`journey: heal end-to-end on the time-travel fixture (#538) > golden: th
 # --- transcript below; bytes are verbatim from the built CLI, normalized for paths/versions/durations ---
 ✓ Design system in place — <fixture>
 ! Managed files: 0/93 (93 missing)
-! Needs attention: 93 missing files, 2 issues I can fix, 1 file you built by hand that the design-system pack now provides, a newer design-system pack is available
+! Needs attention: 93 missing files, 2 issues I can fix, 1 file you built by hand that the design-system pack now provides
+! A newer design-system pack is available
 ✓ Also checked: nothing stale or deprecated
 
 Pressing Enter will:
@@ -151,6 +152,7 @@ fixed [DRIFT-META-KIND-MISSING]: added meta.kind to 2 files (atoms)
 fix summary: 2 fixed, 0 deferred
 Managed files: 93/93 ✓ | Fixed: 2
 No action required.
+heal: stopped after pass 2 of up to 3 — verify gate failed
 
 ✗ Verify gate failed — npm run verify reported 4 error(s) in claude-ds-managed files:
   2× TS2307 in design-system/contracts/role-contracts.test.tsx, e.g. design-system/contracts/role-contracts.test.tsx:17:43: Cannot find module 'vitest' or its corresponding type declarations.

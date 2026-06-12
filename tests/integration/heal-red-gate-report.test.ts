@@ -144,6 +144,21 @@ describe("heal red-gate report — state statement, ledger, off-ramp (#580)", ()
 		expect(ledger).toBeLessThan(offRamp);
 	});
 
+	it("early-stop: states it stopped before the pass ceiling and why (#644)", async () => {
+		// The loop converged early (a clean tree needs few passes), then the verify
+		// gate failed — so it stopped before exhausting the "up to 3 passes" promise.
+		// The output reconciles that promise instead of reading as a broken one.
+		await cleanAdoptedTree(dir);
+		gitInitAndCommit(dir);
+
+		await healCmd({ cwd: dir });
+
+		const msgs = errLines();
+		expect(
+			msgs.some((m) => /stopped after pass \d+ of up to 3 — verify gate failed/i.test(m)),
+		).toBe(true);
+	});
+
 	it("clean-at-start: state statement prints the exact git revert command", async () => {
 		await cleanAdoptedTree(dir);
 		gitInitAndCommit(dir);

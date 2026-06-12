@@ -130,8 +130,17 @@ export function renderDashboard(state: DashboardState, color: ColorAdapter): str
 		if (handRolled && handRolled.needsReview > 0) {
 			parts.push(needsReviewPlainClause(handRolled));
 		}
-		if (upgradeAvailable) parts.push("a newer design-system pack is available");
-		lines.push(action(`Needs attention: ${parts.join(", ")}`));
+		// #644: pack-currency is its own fact, never comma-spliced onto the
+		// findings/hand-rolled roll-up. "3 missing files, …, a newer pack is
+		// available" read as one run-on claim; the upgrade now carries its own
+		// line so each line carries one message. The roll-up line is suppressed
+		// when an available update is the *only* signal (`parts` empty).
+		if (parts.length > 0) {
+			lines.push(action(`Needs attention: ${parts.join(", ")}`));
+		}
+		if (upgradeAvailable) {
+			lines.push(action("A newer design-system pack is available"));
+		}
 	}
 
 	// Name the read-only completeness scans that ran clean (#504). A check that
