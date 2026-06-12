@@ -119,6 +119,16 @@ describe("audit — structural-bypass advisory (#457)", () => {
 		expect(second.stdout).toContain("StatusBadge.tsx");
 	});
 
+	it("clean-branch footer is advisory-aware: names advisories, not 'No action required' (#589)", async () => {
+		const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+		// Zero blocking findings but four advisories rode along (BYPASS-CARD,
+		// BYPASS-BADGE ×2, BYPASS-TOAST). "No action required." would contradict
+		// the advisory triage block just printed above the verdict.
+		expect(r.code).toBe(0);
+		expect(r.stdout).toContain("0 blocking findings — 4 advisory to review.");
+		expect(r.stdout).not.toContain("No action required");
+	});
+
 	it("emits advisory candidates on the headless contract under remaining.advisory", async () => {
 		const r = await runCli(["audit", "--pack", "next-react", "--json"], { cwd: dir });
 		const doc = JSON.parse(r.stdout);
