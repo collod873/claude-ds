@@ -1,8 +1,8 @@
 {
   "templateRepo": "collod873/sandcastle",
-  "templateCommit": "393f6a9022cbebdf42f9c1612087d64cb501f027",
+  "templateCommit": "1950467119fa16f94c48c4022d98335685daa69e",
   "templateTreeClean": true,
-  "stampedAt": "2026-06-12T02:25:29.746Z",
+  "stampedAt": "2026-06-12T03:23:04.013Z",
   "files": {
     ".claude/skills/sequence/SKILL.md": "efad4a1714fd2b11d2eb3af2953130dc1fba87b73ed83be0aa3715470b368e8c",
     ".claude/skills/to-issues-project/SKILL.md": "87d14ba73a2dd31a4ac6ecf92a6d9221aa33e20069915b8fc41adfbf0ad701c1",
@@ -47,7 +47,7 @@
     ".sandcastle/agent-workflows/to-issues-prd/to-issues-prd.ts": "a2fbccc957cb04509f909ebdde670778fde86c7f4c54420258ce25e4100dd156",
     ".sandcastle/agent-workflows/update-branch/extraction.md": "81495b57d0c3192d07ffd81ec530141d8fed0101a562b2b0dce2091c25d40a0e",
     ".sandcastle/agent-workflows/update-branch/prompt.md": "472bea023995eccde5773226c294c34eb7b1ef6f5920bddc8c55c6ea065d2d2b",
-    ".sandcastle/agent-workflows/update-branch/update-branch.ts": "a0b7ecf562d97b854b6e118a49957789d6672298559e3b459ae3c7ca9ef5bcf6",
+    ".sandcastle/agent-workflows/update-branch/update-branch.ts": "d473f796c50331d552d9e68a9faaa154c012e401eee27672436f73ea3bf73013",
     ".sandcastle/register-runner.sh": "6dad78b97f945f2204af9fa265da23481a41dd614708b7ba2abceb1d8809bca2",
     ".sandcastle/runner-job-started-hook.sh": "2503a8bb76bf572e89d466a20f9cc44e09d81b61e261fae26b9cfe2754ad3c82",
     ".sandcastle/tsconfig.json": "3d12f5e799ce5acd98088d25a09904670328dc7824addd90c9530bce4434dea1",

@@ -45,6 +45,12 @@ try {
     process.exit(0);
   }
 
+  // Setup-runner's `npm install` can rewrite package-lock.json in this
+  // checkout, and `git merge` aborts (without conflicts) if the incoming
+  // merge touches a dirty file. Nothing uncommitted here is meaningful —
+  // the branch's real state is its commits — so discard before merging.
+  execFileSync("git", ["checkout", "--", "."], { stdio: "inherit" });
+
   const mergeResult = tryMerge();
 
   if (mergeResult.status === "clean") {
