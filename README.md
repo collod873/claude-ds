@@ -15,7 +15,7 @@ npx claude-ds@^1
 It routes itself:
 
 - **First run** (no `.claude-ds.json` yet) → the **greet**: detects your framework and whether you have existing components, asks one question, and dispatches to `init` (greenfield) or `adopt` (brownfield) for you. You don't have to know which onramp you need.
-- **Already adopted** (config exists) → the **dashboard**: a read-only health view (`doctor` structural state + drift/integrity scan), then a single commitment gate that names exactly what `[Enter]` will run before auto-advancing the tree to a clean fixed point.
+- **Already adopted** (config exists) → the **dashboard**: a read-only health view (`doctor` structural state + drift/integrity scan), then a single commitment gate that names exactly what `[Enter]` will run before auto-advancing the tree to a clean fixed point. If the previous run ended on a red verify gate, the bare command re-runs that gate before printing any "clean" verdict — a known-red build is never papered over with "Loop is clean."
 - **Non-interactive** (agent/CI, no TTY) → prints help. The dashboard is a human surface; an adopted project's automation contract stays byte-stable.
 
 Adopted, the front door reads as four stacked sections — status, then any skipped-example warnings, then the plan, then your decision — each separated by a blank line:

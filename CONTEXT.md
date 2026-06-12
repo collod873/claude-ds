@@ -557,6 +557,19 @@ which block, exit 1), **hand-verify** (the consumer's to fix, this fixed point),
 and **consumer-scope** (pre-existing, warn-only). The `@generated` header is the
 discriminator: claude-ds wrote it ⇒ defect; the consumer did ⇒ hand-verify.
 
+### Verify-state ledger
+A single record persisted to `.claude-ds-verify-state.json` (a root bookkeeping
+dotfile, sibling to `.claude-ds.json`) holding the **last** verify-gate outcome:
+`verdict` (green/red), a `failingFiles` summary, and a `runId`. Both heal and the
+front door write it at their convergence-time gate, through the Runner like every
+other artifact (#641 / PRD #635 Module 1). Its job: a bare `claude-ds` on the
+empty-plan fast path consults it and, when the last gate was **red with no green
+since** (one record, last-write-wins), re-runs the consumer-verify gate before
+printing any clean verdict — so "Loop is clean" can never coexist with a build
+the tool itself reported red. Green or absent ⇒ today's fast path. The write is
+**outcome-idempotent**: an unchanged verdict keeps the existing record (and its
+`runId`) so the bookkeeping file never churns the tree across runs (#583).
+
 ### First-run greet
 The bare-`claude-ds` action's pre-config branch. When no `.claude-ds.json`
 exists, the CLI detects framework (`next-react` today) + whether the
