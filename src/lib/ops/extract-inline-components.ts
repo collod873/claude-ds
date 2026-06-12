@@ -176,9 +176,9 @@ function addImport(source: string, line: string): string {
 	if (source.includes(line)) return source;
 	const m = source.match(/^import\s/m);
 	if (m && m.index !== undefined) {
-		return source.slice(0, m.index) + line + "\n" + source.slice(m.index);
+		return `${source.slice(0, m.index) + line}\n${source.slice(m.index)}`;
 	}
-	return line + "\n" + source;
+	return `${line}\n${source}`;
 }
 
 function metaStub(): string {
@@ -511,8 +511,7 @@ function planFile(
 		const head = [...new Set([...neededImports, ...crossAtomImports])].join("\n");
 		const body = carried.map((d) => d.text).join("\n\n");
 		const exported = `export ${comp.text}`;
-		const atomContent =
-			(head ? head + "\n\n" : "") + (body ? body + "\n\n" : "") + exported + "\n" + metaStub();
+		const atomContent = `${(head ? `${head}\n\n` : "") + (body ? `${body}\n\n` : "") + exported}\n${metaStub()}`;
 
 		const atomRel = atomRelFor(comp.name);
 		atomChanges.push({

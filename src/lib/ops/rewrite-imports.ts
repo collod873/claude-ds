@@ -213,7 +213,7 @@ export const rewriteImports: Operation = {
 						// Splitting on the literal substring with a lookahead-style guard
 						// keeps this stable against substring collisions (e.g. `atoms/foo`
 						// vs `atoms/foo-bar`).
-						const re = new RegExp(escapeRegex(wrong) + `(?=["'\\\\/])`, "g");
+						const re = new RegExp(`${escapeRegex(wrong)}(?=["'\\\\/])`, "g");
 						updated = updated.replace(re, right);
 					}
 				}

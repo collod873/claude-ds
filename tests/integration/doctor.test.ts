@@ -140,7 +140,7 @@ describe("doctor", () => {
 		// Post-adopt state: .claude-ds.json present, canonicals present, AND root orphans present
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.2.1",
 					pack: "next-react",
@@ -149,7 +149,7 @@ describe("doctor", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 
 		await mkdir(join(dir, "design-system"), { recursive: true });
@@ -176,7 +176,7 @@ describe("doctor", () => {
 	it("flags root dupes with content-differs note when root content differs from canonical (#23)", async () => {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.2.1",
 					pack: "next-react",
@@ -185,7 +185,7 @@ describe("doctor", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 
 		await mkdir(join(dir, "design-system"), { recursive: true });
@@ -217,7 +217,7 @@ describe("doctor", () => {
 		// Simulate a Next.js project using src/app/ convention, post-adopt with app_dir=src/app
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.6.0",
 					pack: "next-react",
@@ -227,7 +227,7 @@ describe("doctor", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 
 		// Seed the app/design/* files at their src/app/ resolved locations

@@ -119,7 +119,7 @@ export async function scanOwnedConcerns(
 
 	for (const file of files) {
 		if (isManifestOrKeepfile(file, manifestPaths)) continue;
-		if (isGenerated && isGenerated(file)) continue;
+		if (isGenerated?.(file)) continue;
 		if (!SCANNABLE_EXTS.has(extname(file))) continue;
 
 		let source: string;

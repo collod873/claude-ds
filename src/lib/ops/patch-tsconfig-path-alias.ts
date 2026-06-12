@@ -52,9 +52,9 @@ export function patchTsconfigPathAlias(
 			parsed.compilerOptions = compilerOptions;
 
 			const firstIndented = raw.split("\n").find((l) => l.startsWith(" ") || l.startsWith("\t"));
-			const indent = firstIndented && firstIndented.startsWith("\t") ? "\t" : 2;
+			const indent = firstIndented?.startsWith("\t") ? "\t" : 2;
 			const before = Buffer.from(raw, "utf8");
-			const after = Buffer.from(JSON.stringify(parsed, null, indent) + "\n", "utf8");
+			const after = Buffer.from(`${JSON.stringify(parsed, null, indent)}\n`, "utf8");
 			if (before.equals(after)) return [];
 			return [{ kind: "write", path: tsconfigRel, before, after }];
 		},

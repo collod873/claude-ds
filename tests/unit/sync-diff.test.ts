@@ -60,7 +60,7 @@ describe("sync-diff (hybrid json)", () => {
 	};
 
 	const makeSettings = (hooks: unknown, extra?: Record<string, unknown>) =>
-		JSON.stringify({ hooks, ...extra }, null, 2) + "\n";
+		`${JSON.stringify({ hooks, ...extra }, null, 2)}\n`;
 
 	it("returns rewrite when pack adds new hooks not yet in current", () => {
 		const upstream = makeSettings({ PostToolUse: [packHookEntry] });
@@ -92,9 +92,8 @@ describe("sync-diff (hybrid json)", () => {
 	});
 
 	it("uses owned_keys from EntryInfo — scripts key merged, not hooks", () => {
-		const upstream = JSON.stringify({ scripts: { build: "tsc", test: "vitest" } }, null, 2) + "\n";
-		const current =
-			JSON.stringify({ scripts: {}, devDependencies: { typescript: "^5" } }, null, 2) + "\n";
+		const upstream = `${JSON.stringify({ scripts: { build: "tsc", test: "vitest" } }, null, 2)}\n`;
+		const current = `${JSON.stringify({ scripts: {}, devDependencies: { typescript: "^5" } }, null, 2)}\n`;
 		const v = diffFile(
 			{ category: "hybrid", format: "json", owned_keys: ["scripts"] },
 			{ prev: null, upstream, current },
@@ -115,24 +114,22 @@ describe("sync-diff (hybrid json)", () => {
 	});
 
 	it("user-owned permissions preserved even if upstream has different permissions value", () => {
-		const upstream =
-			JSON.stringify(
-				{
-					hooks: { PostToolUse: [packHookEntry] },
-					permissions: ["upstream-only"],
-				},
-				null,
-				2,
-			) + "\n";
-		const current =
-			JSON.stringify(
-				{
-					hooks: { PostToolUse: [packHookEntry] },
-					permissions: ["current-perm"],
-				},
-				null,
-				2,
-			) + "\n";
+		const upstream = `${JSON.stringify(
+			{
+				hooks: { PostToolUse: [packHookEntry] },
+				permissions: ["upstream-only"],
+			},
+			null,
+			2,
+		)}\n`;
+		const current = `${JSON.stringify(
+			{
+				hooks: { PostToolUse: [packHookEntry] },
+				permissions: ["current-perm"],
+			},
+			null,
+			2,
+		)}\n`;
 		const v = diffFile({ category: "hybrid", format: "json" }, { prev: null, upstream, current });
 		// hooks identical — skip
 		expect(v.action).toBe("skip");

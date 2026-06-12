@@ -198,7 +198,7 @@ describe("reconform", () => {
 		);
 		await writeFile(
 			join(dir, "design-system", "contracts.md"),
-			seedContracts + "\n## My team's overrides\n- foo\n",
+			`${seedContracts}\n## My team's overrides\n- foo\n`,
 		);
 		await writeFile(join(dir, "design-system", "tokens.json"), seedTokens); // tokens still seeded
 
@@ -666,8 +666,8 @@ describe("reconform", () => {
 		const dry = await runCli(["reconform", "--backfill-meta", "--dry-run"], { cwd: dir });
 		expect(dry.code).toBe(0);
 		const dryMatch = dry.stdout.match(/(\d+) meta export\(s\) missing/);
-		expect(dryMatch).not.toBeNull();
-		const dryCount = parseInt(dryMatch![1], 10);
+		if (!dryMatch) throw new Error(`dry-run output missing count: ${dry.stdout}`);
+		const dryCount = parseInt(dryMatch[1], 10);
 		expect(dryCount).toBe(3);
 
 		// Verify dry-run did not mutate the files

@@ -36,7 +36,7 @@ export function appendExceptions(entries: Exception[]): Operation {
 			if (before === null && entries.length === 0) return [];
 
 			const after = Buffer.from(serializeExceptions(entries), "utf8");
-			if (before && before.equals(after)) return [];
+			if (before?.equals(after)) return [];
 
 			return [{ kind: "write", path: EXCEPTIONS_PATH, before, after }];
 		},

@@ -368,7 +368,7 @@ export async function doctorCmd(opts: {
 			},
 			...result,
 		};
-		process.stdout.write(JSON.stringify(headlessEnvelope, null, 2) + "\n");
+		process.stdout.write(`${JSON.stringify(headlessEnvelope, null, 2)}\n`);
 		process.exit(exitCode);
 	}
 

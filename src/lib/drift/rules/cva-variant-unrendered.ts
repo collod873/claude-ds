@@ -35,13 +35,13 @@ function parseExercisedVariants(
 			const re = new RegExp(`${name}\\s*:\\s*(true|false)\\b`, "g");
 			let m: RegExpExecArray | null;
 			while ((m = re.exec(examplesContent)) !== null) {
-				exercised.get(name)!.add(m[1] === "true");
+				exercised.get(name)?.add(m[1] === "true");
 			}
 		} else {
 			const re = new RegExp(`${name}\\s*:\\s*["']([^"']+)["']`, "g");
 			let m: RegExpExecArray | null;
 			while ((m = re.exec(examplesContent)) !== null) {
-				exercised.get(name)!.add(m[1]);
+				exercised.get(name)?.add(m[1]);
 			}
 		}
 	}

@@ -16,7 +16,7 @@ export function mergeMarkers(current: string, desiredInner: string, fmt: Format)
 	const openEnd = opens[0].index! + open.length;
 	const closeStart = closes[0].index!;
 	if (closeStart < openEnd) throw new MarkerError("close before open");
-	return current.slice(0, openEnd) + `\n${desiredInner}\n` + current.slice(closeStart);
+	return `${current.slice(0, openEnd)}\n${desiredInner}\n${current.slice(closeStart)}`;
 }
 export function extractMarkerInner(current: string, fmt: Format): string {
 	const [open, close] = PAIRS[fmt];

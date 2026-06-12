@@ -278,7 +278,7 @@ export async function run(
 	if (mode === "dry-run") {
 		if (!options.quiet) {
 			for (const { opName, change } of planned) {
-				process.stdout.write(renderDiff(opName, change) + "\n");
+				process.stdout.write(`${renderDiff(opName, change)}\n`);
 			}
 		}
 		return report;

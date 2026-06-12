@@ -77,13 +77,12 @@ describe("repairUnresolvedSymbols", () => {
 	describe("type-only symbol repair (#262 / #260)", () => {
 		it("emits `import type { X }` for a symbol that appears ONLY in type position", () => {
 			// LucideIcon is used only as a type annotation — never as a value.
-			const source =
-				[
-					`type NavItem = { icon: LucideIcon; label: string; };`,
-					`export function NavRow({ item }: { item: NavItem }) {`,
-					`  return <span>{item.label}</span>;`,
-					`}`,
-				].join("\n") + "\n";
+			const source = `${[
+				`type NavItem = { icon: LucideIcon; label: string; };`,
+				`export function NavRow({ item }: { item: NavItem }) {`,
+				`  return <span>{item.label}</span>;`,
+				`}`,
+			].join("\n")}\n`;
 			const env = envFrom({ LucideIcon: { specifier: "lucide-react" } });
 
 			const result = repairUnresolvedSymbols(source, "design-system/atoms/nav-row.tsx", env);
@@ -103,13 +102,12 @@ describe("repairUnresolvedSymbols", () => {
 		it("emits `import { X }` (value import) for a symbol used in value position, even if also used in type position", () => {
 			// CalendarEvent used both as a type annotation and as a runtime value (e.g. array element type
 			// derived from a value-position expression) — when in doubt, value import is safer.
-			const source =
-				[
-					`type Props = { events: CalendarEvent[] };`,
-					`export function DayList({ events }: Props) {`,
-					`  return <ul>{events.map((e: CalendarEvent) => <li key={e.id}>{e.title}</li>)}</ul>;`,
-					`}`,
-				].join("\n") + "\n";
+			const source = `${[
+				`type Props = { events: CalendarEvent[] };`,
+				`export function DayList({ events }: Props) {`,
+				`  return <ul>{events.map((e: CalendarEvent) => <li key={e.id}>{e.title}</li>)}</ul>;`,
+				`}`,
+			].join("\n")}\n`;
 			const env = envFrom({ CalendarEvent: { specifier: "@/types/calendar" } });
 
 			const result = repairUnresolvedSymbols(source, "design-system/atoms/day-list.tsx", env);
@@ -126,13 +124,12 @@ describe("repairUnresolvedSymbols", () => {
 
 		it("CONTROL: a type-only symbol with NO provable source stays flagged, not silently resolved (#259 invariant)", () => {
 			// LucideIcon is type-only but nothing in the env proves where it comes from.
-			const source =
-				[
-					`type NavItem = { icon: LucideIcon; label: string; };`,
-					`export function NavRow({ item }: { item: NavItem }) {`,
-					`  return <span>{item.label}</span>;`,
-					`}`,
-				].join("\n") + "\n";
+			const source = `${[
+				`type NavItem = { icon: LucideIcon; label: string; };`,
+				`export function NavRow({ item }: { item: NavItem }) {`,
+				`  return <span>{item.label}</span>;`,
+				`}`,
+			].join("\n")}\n`;
 
 			const result = repairUnresolvedSymbols(source, "design-system/atoms/nav-row.tsx", NEVER);
 

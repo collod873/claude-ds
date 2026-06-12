@@ -16,8 +16,7 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 	return {
 		ruleId: "DRIFT-DS-IMPORTS-FEATURE",
 		file,
-		message:
-			`design-system file imports from domain root` + ` (${classifierVerdict.signals.join("; ")})`,
+		message: `design-system file imports from domain root (${classifierVerdict.signals.join("; ")})`,
 	};
 }
 
@@ -316,7 +315,7 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 					kind: "write",
 					path: utilsRelPath,
 					before: null,
-					after: Buffer.from(definition.trimEnd() + "\n"),
+					after: Buffer.from(`${definition.trimEnd()}\n`),
 				});
 
 				const newPath = `@/design-system/utils/${utilsFileName}`;

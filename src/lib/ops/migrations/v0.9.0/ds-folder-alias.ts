@@ -52,14 +52,14 @@ export const dsFolderAlias: Operation = {
 		const tsconfigDir = join(ctx.cwd, dirname(tsconfigRel));
 		const dsDir = join(ctx.cwd, "design-system");
 		const relPath = relative(tsconfigDir, dsDir);
-		const mapping = (relPath.startsWith(".") ? relPath : "./" + relPath) + "/*";
+		const mapping = `${relPath.startsWith(".") ? relPath : `./${relPath}`}/*`;
 
 		paths["@ds/*"] = [mapping];
 		compilerOptions.paths = paths;
 		parsed.compilerOptions = compilerOptions;
 
 		const indent = detectIndent(raw);
-		const after = JSON.stringify(parsed, null, indent) + "\n";
+		const after = `${JSON.stringify(parsed, null, indent)}\n`;
 
 		return [
 			{
@@ -74,5 +74,5 @@ export const dsFolderAlias: Operation = {
 
 function detectIndent(raw: string): number | string {
 	const firstIndented = raw.split("\n").find((l) => l.startsWith(" ") || l.startsWith("\t"));
-	return firstIndented && firstIndented.startsWith("\t") ? "\t" : 2;
+	return firstIndented?.startsWith("\t") ? "\t" : 2;
 }

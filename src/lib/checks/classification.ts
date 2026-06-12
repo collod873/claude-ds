@@ -66,7 +66,7 @@ export async function findMisclassified(
 			if (shouldBe === currentTier) continue;
 
 			if (currentTier === "composite" && shouldBe === "atom" && !demoteComposites) {
-				const relPath = entryPath.startsWith(cwd + "/")
+				const relPath = entryPath.startsWith(`${cwd}/`)
 					? entryPath.slice(cwd.length + 1)
 					: entryPath;
 				info(

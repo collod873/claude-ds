@@ -20,7 +20,7 @@ afterEach(async () => {
 async function loadConfig(tokens: object): Promise<Record<string, unknown>> {
 	const tokensPath = join(tmpDir, "design-system/tokens.json");
 	const configDest = join(tmpDir, "tailwind.config.cjs");
-	await writeFile(tokensPath, JSON.stringify(tokens, null, 2) + "\n");
+	await writeFile(tokensPath, `${JSON.stringify(tokens, null, 2)}\n`);
 	await copyFile(PACK_CONFIG_PATH, configDest);
 	// Bust require cache so each test sees fresh tokens
 	const req = createRequire(configDest);
@@ -67,8 +67,8 @@ describe("tailwind.config.cjs — ds theme extension", () => {
 		const config = await loadConfig(defaultTokens);
 		const extend = (config.theme as Record<string, unknown>).extend as Record<string, unknown>;
 		const ease = extend.transitionTimingFunction as Record<string, string>;
-		expect(ease["out"]).toBe("cubic-bezier(0, 0, 0.2, 1)");
-		expect(ease["in"]).toBe("cubic-bezier(0.4, 0, 1, 1)");
+		expect(ease.out).toBe("cubic-bezier(0, 0, 0.2, 1)");
+		expect(ease.in).toBe("cubic-bezier(0.4, 0, 1, 1)");
 		expect(ease["in-out"]).toBe("cubic-bezier(0.4, 0, 0.2, 1)");
 	});
 

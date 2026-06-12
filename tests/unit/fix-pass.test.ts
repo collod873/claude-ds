@@ -218,13 +218,12 @@ describe("fix-pass", () => {
 			);
 
 			// File that triggers DRIFT-RAW-PRIMITIVE (Path A: raw <input> → <Input>)
-			const compositeSource =
-				[
-					`export function SearchBar() {`,
-					`  return <div><input placeholder="search" /></div>;`,
-					`}`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const compositeSource = `${[
+				`export function SearchBar() {`,
+				`  return <div><input placeholder="search" /></div>;`,
+				`}`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/search-bar.tsx"), compositeSource);
 
 			// File that triggers DRIFT-MISPLACED (atom in composites/)
@@ -290,8 +289,8 @@ describe("fix-pass", () => {
 			const result = await runFixPass(makeFakeCtx(dir), findings, {});
 			const fixed = result.results.find((r) => r.fixed);
 			expect(fixed).toBeDefined();
-			expect(fixed!.changes.length).toBeGreaterThan(0);
-			expect(fixed!.changes[0].kind).toBe("write");
+			expect(fixed?.changes.length).toBeGreaterThan(0);
+			expect(fixed?.changes[0].kind).toBe("write");
 		});
 
 		it("regenerates barrel exports after fixes apply", async () => {

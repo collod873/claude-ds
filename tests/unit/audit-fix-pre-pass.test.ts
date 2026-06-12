@@ -337,10 +337,10 @@ describe("audit-fix command-level pre-pass (PRD #266 Phase C step 2)", () => {
 				);
 				await writeFile(
 					join(cwd, "design-system/atoms/card.tsx"),
-					[
+					`${[
 						`export function Card() { return <div style={{ padding: 12 }}>x</div>; }`,
 						`export const meta = { kind: "atom" as const, examples: [] };`,
-					].join("\n") + "\n",
+					].join("\n")}\n`,
 				);
 
 				const finding: DriftFinding = {

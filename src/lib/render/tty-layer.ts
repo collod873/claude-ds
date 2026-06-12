@@ -42,7 +42,7 @@ export function loadColorAdapter(): ColorAdapter {
  */
 export function printLines(lines: string[]): void {
 	if (lines.length === 0) return;
-	process.stdout.write(lines.join("\n") + "\n");
+	process.stdout.write(`${lines.join("\n")}\n`);
 }
 
 /**

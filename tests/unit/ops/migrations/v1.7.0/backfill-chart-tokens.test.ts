@@ -65,7 +65,7 @@ function consumeViaRamp(chart: {
 
 async function writeTokens(tokens: object): Promise<void> {
 	await mkdir(join(cwd, "design-system"), { recursive: true });
-	await writeFile(join(cwd, "design-system/tokens.json"), JSON.stringify(tokens, null, 2) + "\n");
+	await writeFile(join(cwd, "design-system/tokens.json"), `${JSON.stringify(tokens, null, 2)}\n`);
 }
 
 function afterOf(

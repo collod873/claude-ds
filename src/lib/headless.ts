@@ -88,7 +88,7 @@ export interface HeadlessResult {
  * test (running the CLI in-process via `runCli`) sees a clean state.
  */
 export function emitHeadless(result: HeadlessResult): never {
-	process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+	process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 	setJsonMode(false);
 	process.exit(result.exitCode);
 }

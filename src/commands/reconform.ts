@@ -209,7 +209,7 @@ export async function reconformCmd(opts: {
 			} else {
 				info(c.cyan(`classification audit: ${findings.length} misclassified file(s)`));
 				for (const f of findings) {
-					const relPath = f.file.startsWith(cwd + "/") ? f.file.slice(cwd.length + 1) : f.file;
+					const relPath = f.file.startsWith(`${cwd}/`) ? f.file.slice(cwd.length + 1) : f.file;
 					info(
 						`  ${c.red("CLASS-001")}: ${relPath} — is ${f.currentTier}, should be ${f.shouldBe}`,
 					);

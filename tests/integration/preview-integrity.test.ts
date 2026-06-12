@@ -45,10 +45,9 @@ async function seedCascadeFixture(dir: string): Promise<void> {
 
 	await mkdir(join(dir, "design-system/atoms"), { recursive: true });
 	for (const rel of FILES_NEEDING_BACKFILL) {
-		const Name = rel
-			.split("/")
-			.pop()!
-			.replace(/\.tsx$/, "");
+		const base = rel.split("/").pop();
+		if (!base) throw new Error(`unexpected empty path: ${rel}`);
+		const Name = base.replace(/\.tsx$/, "");
 		const Cap = Name[0].toUpperCase() + Name.slice(1);
 		await writeFile(
 			join(dir, rel),

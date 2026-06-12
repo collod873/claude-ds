@@ -66,8 +66,7 @@ describe("extract guard — non-resolving parent (#259)", () => {
 	});
 
 	it("refuses extraction when the parent duplicates a top-level function", () => {
-		const source =
-			HEALTHY_IMPORTS + INLINE_BODY + "\n" + INLINE_BODY.split("\nexport function Row")[0];
+		const source = `${HEALTHY_IMPORTS + INLINE_BODY}\n${INLINE_BODY.split("\nexport function Row")[0]}`;
 		const plan = planFile(source, "design-system/atoms/row.tsx", "@/design-system", new Set());
 		expect(plan.extractions).toEqual([]);
 		expect(plan.changes).toEqual([]);

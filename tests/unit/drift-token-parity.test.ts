@@ -129,9 +129,9 @@ describe("DRIFT-TOKEN-PARITY detect", () => {
 		);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-TOKEN-PARITY");
 		expect(hit).toBeDefined();
-		expect(hit!.file).toBe(TOKENS_PATH);
-		expect(hit!.message).toContain("color-primary");
-		expect(hit!.message).toContain("missing");
+		expect(hit?.file).toBe(TOKENS_PATH);
+		expect(hit?.message).toContain("color-primary");
+		expect(hit?.message).toContain("missing");
 	});
 
 	it("fires when CSS has a variable missing from JSON", () => {
@@ -149,7 +149,7 @@ describe("DRIFT-TOKEN-PARITY detect", () => {
 		);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-TOKEN-PARITY");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("color-stale");
+		expect(hit?.message).toContain("color-stale");
 	});
 
 	it("fires when a token value differs between JSON and CSS", () => {
@@ -166,8 +166,8 @@ describe("DRIFT-TOKEN-PARITY detect", () => {
 		);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-TOKEN-PARITY");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("color-primary");
-		expect(hit!.message).toMatch(/#0070f3|#999999|value/i);
+		expect(hit?.message).toContain("color-primary");
+		expect(hit?.message).toMatch(/#0070f3|#999999|value/i);
 	});
 
 	it("does not fire on invalid JSON source (leaves it for integrity / sync)", () => {

@@ -36,10 +36,10 @@ export interface Manifest {
 export function isManifestOrKeepfile(path: string, manifestPaths: Set<string>): boolean {
 	if (manifestPaths.has(path)) return true;
 	if (path.endsWith("/.gitkeep")) {
-		return manifestPaths.has(path.slice(0, -".gitkeep".length) + ".keep");
+		return manifestPaths.has(`${path.slice(0, -".gitkeep".length)}.keep`);
 	}
 	if (path.endsWith("/.keep")) {
-		return manifestPaths.has(path.slice(0, -".keep".length) + ".gitkeep");
+		return manifestPaths.has(`${path.slice(0, -".keep".length)}.gitkeep`);
 	}
 	return false;
 }

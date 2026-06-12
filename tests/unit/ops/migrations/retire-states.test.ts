@@ -79,7 +79,7 @@ describe("retireStates migration op", () => {
 		await scaffoldTiers();
 		await writeFile(
 			join(cwd, "design-system", "exceptions.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					exceptions: [
 						{
@@ -104,7 +104,7 @@ describe("retireStates migration op", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 			"utf8",
 		);
 
@@ -113,8 +113,8 @@ describe("retireStates migration op", () => {
 			(c): c is Extract<Change, { kind: "write" }> => c.kind === "write",
 		);
 		const excWrite = writes.find((c) => c.path === "design-system/exceptions.json");
-		expect(excWrite).toBeDefined();
-		const after = JSON.parse(excWrite!.after.toString("utf8")) as { exceptions: unknown[] };
+		if (!excWrite) throw new Error("exceptions.json write missing");
+		const after = JSON.parse(excWrite.after.toString("utf8")) as { exceptions: unknown[] };
 		expect(after.exceptions).toHaveLength(1);
 		const remaining = after.exceptions[0] as Record<string, unknown>;
 		expect(remaining.rule_id).toBe("DRIFT-MISPLACED");
@@ -124,11 +124,11 @@ describe("retireStates migration op", () => {
 		await scaffoldTiers();
 		await writeFile(
 			join(cwd, "design-system", "exceptions.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{ exceptions: [{ rule_id: "DRIFT-MISPLACED", path: "x.tsx", reason: "r", issue: "#1" }] },
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 			"utf8",
 		);
 
@@ -163,7 +163,7 @@ describe("retireStates migration op", () => {
 		);
 		const txWrite = writes.find((c) => c.path === "design-system/atoms/Button.tsx");
 		expect(txWrite).toBeDefined();
-		const after = txWrite!.after.toString("utf8");
+		const after = txWrite?.after.toString("utf8");
 		expect(after).not.toContain("states:");
 		expect(after).not.toContain("hover:");
 		expect(after).toContain(`examples: [{ name: "default", props: {} }]`);
@@ -232,7 +232,7 @@ describe("retireStates migration op", () => {
 		);
 		const patternWrite = writes.find((c) => c.path === "design-system/patterns/app-shell.tsx");
 		expect(patternWrite).toBeDefined();
-		const after = patternWrite!.after.toString("utf8");
+		const after = patternWrite?.after.toString("utf8");
 		expect(after).not.toContain("states:");
 	});
 

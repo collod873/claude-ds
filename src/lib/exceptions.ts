@@ -95,7 +95,7 @@ export function gate(ex: Exception[], threshold: number): void {
 
 /** Serialize exceptions array to the canonical JSON format. */
 export function serializeExceptions(exceptions: Exception[]): string {
-	return JSON.stringify({ exceptions }, null, 2) + "\n";
+	return `${JSON.stringify({ exceptions }, null, 2)}\n`;
 }
 
 /**

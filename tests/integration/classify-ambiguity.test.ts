@@ -16,24 +16,22 @@ const BASE_CFG = {
 
 // A confident composite: imports >= 3 design-system components, so classifySource returns
 // tier=composite without ambiguous. Auto-moved by classify unconditionally (issue #251).
-const CONFIDENT_COMPOSITE_ATOM =
-	[
-		`import { Button } from "@/design-system/atoms/button";`,
-		`import { Input } from "@/design-system/atoms/input";`,
-		`import { Badge } from "@/design-system/atoms/badge";`,
-		`export function Combo() { return <div><Button /><Input /><Badge /></div>; }`,
-		`export const meta = { kind: "atom" as const, examples: [] };`,
-	].join("\n") + "\n";
+const CONFIDENT_COMPOSITE_ATOM = `${[
+	`import { Button } from "@/design-system/atoms/button";`,
+	`import { Input } from "@/design-system/atoms/input";`,
+	`import { Badge } from "@/design-system/atoms/badge";`,
+	`export function Combo() { return <div><Button /><Input /><Badge /></div>; }`,
+	`export const meta = { kind: "atom" as const, examples: [] };`,
+].join("\n")}\n`;
 
 // A genuinely ambiguous atom: imports exactly 2 DS components, so classifySource returns
 // tier=composite with ambiguous=true. Only prompted when interactive.
-const AMBIGUOUS_ATOM =
-	[
-		`import { Button } from "@/design-system/atoms/button";`,
-		`import { Input } from "@/design-system/atoms/input";`,
-		`export function TwoComponent() { return <div><Button /><Input /></div>; }`,
-		`export const meta = { kind: "atom" as const, examples: [] };`,
-	].join("\n") + "\n";
+const AMBIGUOUS_ATOM = `${[
+	`import { Button } from "@/design-system/atoms/button";`,
+	`import { Input } from "@/design-system/atoms/input";`,
+	`export function TwoComponent() { return <div><Button /><Input /></div>; }`,
+	`export const meta = { kind: "atom" as const, examples: [] };`,
+].join("\n")}\n`;
 
 describe("classify ambiguity pass (issue #203)", () => {
 	let dir: string;
@@ -326,14 +324,14 @@ describe("classify brownfield convergence (issue #251)", () => {
 		await writeFile(join(dir, "design-system/atoms/card.tsx"), CONFIDENT_COMPOSITE_ATOM);
 		await writeFile(
 			join(dir, "design-system/atoms/dialog.tsx"),
-			[
+			`${[
 				`import { Button } from "@/design-system/atoms/button";`,
 				`import { Input } from "@/design-system/atoms/input";`,
 				`import { Badge } from "@/design-system/atoms/badge";`,
 				`import { Spinner } from "@/design-system/atoms/spinner";`,
 				`export function Dialog() { return <div><Button /><Input /><Badge /><Spinner /></div>; }`,
 				`export const meta = { kind: "atom" as const, examples: [] };`,
-			].join("\n") + "\n",
+			].join("\n")}\n`,
 		);
 
 		// No TTY (test runner), no injected prompt — must still converge.
@@ -395,14 +393,13 @@ describe("classify brownfield convergence (issue #251)", () => {
 		// 3. Second classify pass: now correctly scored as confident composite → auto-relocated
 		//
 		// The file as placed by the first classify: 0 DS imports → atom tier, meta.kind=atom.
-		const atomSrc =
-			[
-				`// was corrupt at first classify-time — 0 imports, scored as atom`,
-				`export function SidebarContent({ collapsed }: { collapsed: boolean }) {`,
-				`  return <div>{collapsed ? "collapsed" : "expanded"}</div>;`,
-				`}`,
-				`export const meta = { kind: "atom" as const, examples: [] };`,
-			].join("\n") + "\n";
+		const atomSrc = `${[
+			`// was corrupt at first classify-time — 0 imports, scored as atom`,
+			`export function SidebarContent({ collapsed }: { collapsed: boolean }) {`,
+			`  return <div>{collapsed ? "collapsed" : "expanded"}</div>;`,
+			`}`,
+			`export const meta = { kind: "atom" as const, examples: [] };`,
+		].join("\n")}\n`;
 		await writeFile(join(dir, "design-system/atoms/sidebar-content.tsx"), atomSrc);
 
 		// First classify pass: file has 0 DS imports, placed (or stays) in atoms/ as atom.
@@ -413,16 +410,15 @@ describe("classify brownfield convergence (issue #251)", () => {
 		).resolves.toBeUndefined();
 
 		// Simulate audit --fix restoring the import closure (3 DS imports → confident composite).
-		const afterAuditFix =
-			[
-				`import { Button } from "@/design-system/atoms/button";`,
-				`import { Avatar } from "@/design-system/atoms/avatar";`,
-				`import { NavRow } from "@/design-system/atoms/nav-row";`,
-				`export function SidebarContent({ collapsed }: { collapsed: boolean }) {`,
-				`  return <div><Button /><Avatar /><NavRow /></div>;`,
-				`}`,
-				`export const meta = { kind: "atom" as const, examples: [] };`,
-			].join("\n") + "\n";
+		const afterAuditFix = `${[
+			`import { Button } from "@/design-system/atoms/button";`,
+			`import { Avatar } from "@/design-system/atoms/avatar";`,
+			`import { NavRow } from "@/design-system/atoms/nav-row";`,
+			`export function SidebarContent({ collapsed }: { collapsed: boolean }) {`,
+			`  return <div><Button /><Avatar /><NavRow /></div>;`,
+			`}`,
+			`export const meta = { kind: "atom" as const, examples: [] };`,
+		].join("\n")}\n`;
 		await writeFile(join(dir, "design-system/atoms/sidebar-content.tsx"), afterAuditFix);
 
 		// Second classify pass: 3 DS imports → confident composite → auto-relocated.

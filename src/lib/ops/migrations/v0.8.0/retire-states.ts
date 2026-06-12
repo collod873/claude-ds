@@ -143,7 +143,7 @@ export const retireStates: Operation = {
 					kind: "write",
 					path: EXCEPTIONS_PATH,
 					before: Buffer.from(exceptionsRaw, "utf8"),
-					after: Buffer.from(JSON.stringify(updated, null, 2) + "\n", "utf8"),
+					after: Buffer.from(`${JSON.stringify(updated, null, 2)}\n`, "utf8"),
 				});
 			}
 		}

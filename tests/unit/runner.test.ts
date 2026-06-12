@@ -222,8 +222,8 @@ describe("runner — apply failure handling", () => {
 		]);
 		const report = await run(ctx, [op], "apply");
 		expect(report.failed).toBeDefined();
-		expect(report.failed!.change.kind).toBe("write");
-		expect((report.failed!.change as Extract<Change, { kind: "write" }>).path).toBe(
+		expect(report.failed?.change.kind).toBe("write");
+		expect((report.failed?.change as Extract<Change, { kind: "write" }>).path).toBe(
 			"blocker/child.txt",
 		);
 		expect(report.applied).toHaveLength(0);

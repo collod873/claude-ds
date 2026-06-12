@@ -530,12 +530,11 @@ describe("drift-fixers", () => {
 				`export function formatDate(d: Date): string {\n  return d.toISOString();\n}\n`,
 			);
 
-			const dsSource =
-				[
-					`import { formatDate } from "../../lib/utils/format";`,
-					`export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const dsSource = `${[
+				`import { formatDate } from "../../lib/utils/format";`,
+				`export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
 			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
@@ -564,12 +563,11 @@ describe("drift-fixers", () => {
 				`export function formatDate(d: Date): string {\n  return d.toISOString();\n}\n`,
 			);
 
-			const dsSource =
-				[
-					`import { formatDate } from "../../lib/utils/format";`,
-					`export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const dsSource = `${[
+				`import { formatDate } from "../../lib/utils/format";`,
+				`export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
 			await writeFile(
@@ -594,12 +592,11 @@ describe("drift-fixers", () => {
 				`export function complexFn(a: string, b: number, c: boolean): string { return a + b + c; }\n`,
 			);
 
-			const dsSource =
-				[
-					`import { complexFn } from "../../lib/utils/complex";`,
-					`export function Widget() { return <div>{complexFn("a", 1, true)}</div>; }`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const dsSource = `${[
+				`import { complexFn } from "../../lib/utils/complex";`,
+				`export function Widget() { return <div>{complexFn("a", 1, true)}</div>; }`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
 
 			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
@@ -623,12 +620,11 @@ describe("drift-fixers", () => {
 				`export const PRIMARY_COLOR = "#0070f3";\n`,
 			);
 
-			const dsSource =
-				[
-					`import { PRIMARY_COLOR } from "../../lib/config/theme";`,
-					`export function Badge() { return <span style={{ color: PRIMARY_COLOR }}>badge</span>; }`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const dsSource = `${[
+				`import { PRIMARY_COLOR } from "../../lib/config/theme";`,
+				`export function Badge() { return <span style={{ color: PRIMARY_COLOR }}>badge</span>; }`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
 
 			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
@@ -658,14 +654,13 @@ describe("drift-fixers", () => {
 				`import { getSession } from "../../features/auth/session";\nexport function apiClient() { return getSession(); }\n`,
 			);
 
-			const dsSource =
-				[
-					`import { apiClient } from "../../lib/api/client";`,
-					`export function EventCard({ title }: { title: string }) {`,
-					`  return <div>{title}: {apiClient()}</div>;`,
-					`}`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const dsSource = `${[
+				`import { apiClient } from "../../lib/api/client";`,
+				`export function EventCard({ title }: { title: string }) {`,
+				`  return <div>{title}: {apiClient()}</div>;`,
+				`}`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
 			const finding = makeFinding();
@@ -699,12 +694,11 @@ describe("drift-fixers", () => {
 				`import { getSession } from "../../features/auth/session";\nexport function apiClient() { return getSession(); }\n`,
 			);
 
-			const dsSource =
-				[
-					`import { apiClient } from "../../lib/api/client";`,
-					`export function UserBadge() { return <div>{apiClient()}</div>; }`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const dsSource = `${[
+				`import { apiClient } from "../../lib/api/client";`,
+				`export function UserBadge() { return <div>{apiClient()}</div>; }`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
 			const finding = makeFinding();
@@ -734,12 +728,11 @@ describe("drift-fixers", () => {
 				`export function formatDate(d: Date): string { return d.toISOString(); }\n`,
 			);
 
-			const dsSource =
-				[
-					`import { formatDate } from "../../lib/utils/format";`,
-					`export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const dsSource = `${[
+				`import { formatDate } from "../../lib/utils/format";`,
+				`export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
 			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
@@ -759,12 +752,11 @@ describe("drift-fixers", () => {
 				`export function formatDate(d: Date): string { return d.toISOString(); }\n`,
 			);
 
-			const dsSource =
-				[
-					`import { formatDate } from "@/lib/utils/format";`,
-					`export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const dsSource = `${[
+				`import { formatDate } from "@/lib/utils/format";`,
+				`export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
 			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
@@ -788,12 +780,11 @@ describe("drift-fixers", () => {
 				`export const PRIMARY_COLOR = "#0070f3";\n`,
 			);
 
-			const dsSource =
-				[
-					`import { PRIMARY_COLOR } from "../../lib/config/theme";`,
-					`export function Badge() { return <span style={{ color: PRIMARY_COLOR }}>badge</span>; }`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const dsSource = `${[
+				`import { PRIMARY_COLOR } from "../../lib/config/theme";`,
+				`export function Badge() { return <span style={{ color: PRIMARY_COLOR }}>badge</span>; }`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
 
 			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
@@ -819,12 +810,11 @@ describe("drift-fixers", () => {
 				`export function complexFn(a: string, b: number, c: boolean): string { return a + b + c; }\n`,
 			);
 
-			const dsSource =
-				[
-					`import { complexFn } from "../../lib/utils/complex";`,
-					`export function Widget() { return <div>{complexFn("a", 1, true)}</div>; }`,
-					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n";
+			const dsSource = `${[
+				`import { complexFn } from "../../lib/utils/complex";`,
+				`export function Widget() { return <div>{complexFn("a", 1, true)}</div>; }`,
+				`export const meta = { kind: "composite" as const, examples: [] };`,
+			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
 
 			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
@@ -950,34 +940,32 @@ describe("drift-fixers", () => {
 				await mkdir(join(dir, "design-system/atoms"), { recursive: true });
 				await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-				const atomSource =
-					[
-						`import { cva } from "class-variance-authority";`,
-						`const buttonVariants = cva("btn", {`,
-						`  variants: {`,
-						`    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline" },`,
-						`    size: { default: "btn-md", sm: "btn-sm", icon: "btn-icon" },`,
-						`  },`,
-						`  defaultVariants: { variant: "default", size: "default" },`,
-						`});`,
-						`export function Button({ variant, size, ...props }) {`,
-						`  return <button className={buttonVariants({ variant, size })} {...props} />;`,
-						`}`,
-						`export const meta = { kind: "atom" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const atomSource = `${[
+					`import { cva } from "class-variance-authority";`,
+					`const buttonVariants = cva("btn", {`,
+					`  variants: {`,
+					`    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline" },`,
+					`    size: { default: "btn-md", sm: "btn-sm", icon: "btn-icon" },`,
+					`  },`,
+					`  defaultVariants: { variant: "default", size: "default" },`,
+					`});`,
+					`export function Button({ variant, size, ...props }) {`,
+					`  return <button className={buttonVariants({ variant, size })} {...props} />;`,
+					`}`,
+					`export const meta = { kind: "atom" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/atoms/button.tsx"), atomSource);
 
-				const compositeSource =
-					[
-						`export function Toolbar() {`,
-						`  return (`,
-						`    <div>`,
-						`      <button className="ghost" onClick={handleClick}>Click</button>`,
-						`    </div>`,
-						`  );`,
-						`}`,
-						`export const meta = { kind: "composite" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					`export function Toolbar() {`,
+					`  return (`,
+					`    <div>`,
+					`      <button className="ghost" onClick={handleClick}>Click</button>`,
+					`    </div>`,
+					`  );`,
+					`}`,
+					`export const meta = { kind: "composite" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
 				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
@@ -995,20 +983,18 @@ describe("drift-fixers", () => {
 				await mkdir(join(dir, "design-system/atoms"), { recursive: true });
 				await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-				const atomSource =
-					[
-						`export function Button(props) { return <button {...props} />; }`,
-						`export const meta = { kind: "atom" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const atomSource = `${[
+					`export function Button(props) { return <button {...props} />; }`,
+					`export const meta = { kind: "atom" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/atoms/button.tsx"), atomSource);
 
-				const compositeSource =
-					[
-						`export function Toolbar() {`,
-						`  return <div><button onClick={fn}>Go</button></div>;`,
-						`}`,
-						`export const meta = { kind: "composite" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					`export function Toolbar() {`,
+					`  return <div><button onClick={fn}>Go</button></div>;`,
+					`}`,
+					`export const meta = { kind: "composite" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
 				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
@@ -1025,31 +1011,30 @@ describe("drift-fixers", () => {
 
 				await writeFile(
 					join(dir, "design-system/atoms/button.tsx"),
-					[
+					`${[
 						`export function Button(props) { return <button {...props} />; }`,
 						`export const meta = { kind: "atom" as const, examples: [] };`,
-					].join("\n") + "\n",
+					].join("\n")}\n`,
 				);
 				await writeFile(
 					join(dir, "design-system/atoms/input.tsx"),
-					[
+					`${[
 						`export function Input(props) { return <input {...props} />; }`,
 						`export const meta = { kind: "atom" as const, examples: [] };`,
-					].join("\n") + "\n",
+					].join("\n")}\n`,
 				);
 
-				const compositeSource =
-					[
-						`export function SearchForm() {`,
-						`  return (`,
-						`    <form>`,
-						`      <input type="text" placeholder="Search..." />`,
-						`      <button type="submit">Go</button>`,
-						`    </form>`,
-						`  );`,
-						`}`,
-						`export const meta = { kind: "composite" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					`export function SearchForm() {`,
+					`  return (`,
+					`    <form>`,
+					`      <input type="text" placeholder="Search..." />`,
+					`      <button type="submit">Go</button>`,
+					`    </form>`,
+					`  );`,
+					`}`,
+					`export const meta = { kind: "composite" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/search-form.tsx"), compositeSource);
 
 				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
@@ -1078,7 +1063,7 @@ describe("drift-fixers", () => {
 
 				await writeFile(
 					join(dir, "design-system/atoms/button.tsx"),
-					[
+					`${[
 						`import { cva } from "class-variance-authority";`,
 						`const buttonVariants = cva("btn", {`,
 						`  variants: {`,
@@ -1088,14 +1073,14 @@ describe("drift-fixers", () => {
 						`});`,
 						`export function Button(props) { return <button {...props} />; }`,
 						`export const meta = { kind: "atom" as const, examples: [] };`,
-					].join("\n") + "\n",
+					].join("\n")}\n`,
 				);
 				await writeFile(
 					join(dir, "design-system/composites/toolbar.tsx"),
-					[
+					`${[
 						`export function Toolbar() { return <div><button className="ghost outline">X</button></div>; }`,
 						`export const meta = { kind: "composite" as const, examples: [] };`,
-					].join("\n") + "\n",
+					].join("\n")}\n`,
 				);
 
 				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
@@ -1113,18 +1098,17 @@ describe("drift-fixers", () => {
 
 				await writeFile(
 					join(dir, "design-system/atoms/button.tsx"),
-					[
+					`${[
 						`export function Button(props) { return <button {...props} />; }`,
 						`export const meta = { kind: "atom" as const, examples: [] };`,
-					].join("\n") + "\n",
+					].join("\n")}\n`,
 				);
-				const compositeSource =
-					[
-						`export function Toolbar() {`,
-						`  return <div><button onClick={handleClick} disabled aria-label="save">Save</button></div>;`,
-						`}`,
-						`export const meta = { kind: "composite" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					`export function Toolbar() {`,
+					`  return <div><button onClick={handleClick} disabled aria-label="save">Save</button></div>;`,
+					`}`,
+					`export const meta = { kind: "composite" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
 				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
@@ -1147,27 +1131,26 @@ describe("drift-fixers", () => {
 				await mkdir(join(dir, "design-system/atoms"), { recursive: true });
 				await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-				const compositeSource =
-					[
-						`function FilterBarChip({ label, onRemove }) {`,
-						internalLines,
-						`  return (`,
-						`    <span className="chip">`,
-						`      {label}`,
-						`      <button onClick={onRemove}>×</button>`,
-						`    </span>`,
-						`  );`,
-						`}`,
-						``,
-						`export function FilterBar() {`,
-						`  return (`,
-						`    <div>`,
-						`      <FilterBarChip label="status" onRemove={() => {}} />`,
-						`    </div>`,
-						`  );`,
-						`}`,
-						`export const meta = { kind: "composite" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					`function FilterBarChip({ label, onRemove }) {`,
+					internalLines,
+					`  return (`,
+					`    <span className="chip">`,
+					`      {label}`,
+					`      <button onClick={onRemove}>×</button>`,
+					`    </span>`,
+					`  );`,
+					`}`,
+					``,
+					`export function FilterBar() {`,
+					`  return (`,
+					`    <div>`,
+					`      <FilterBarChip label="status" onRemove={() => {}} />`,
+					`    </div>`,
+					`  );`,
+					`}`,
+					`export const meta = { kind: "composite" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
 				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
@@ -1198,23 +1181,22 @@ describe("drift-fixers", () => {
 			it("names every inline component in the deferral message", async () => {
 				await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-				const compositeSource =
-					[
-						`function FilterBarChip({ label }) {`,
-						internalLines,
-						`  return <span>{label}</span>;`,
-						`}`,
-						``,
-						`function FilterBarMenu({ items }) {`,
-						internalLines,
-						`  return <ul>{items}</ul>;`,
-						`}`,
-						``,
-						`export function FilterBar() {`,
-						`  return <div><FilterBarChip label="hi" /><FilterBarMenu items={[]} /></div>;`,
-						`}`,
-						`export const meta = { kind: "composite" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					`function FilterBarChip({ label }) {`,
+					internalLines,
+					`  return <span>{label}</span>;`,
+					`}`,
+					``,
+					`function FilterBarMenu({ items }) {`,
+					internalLines,
+					`  return <ul>{items}</ul>;`,
+					`}`,
+					``,
+					`export function FilterBar() {`,
+					`  return <div><FilterBarChip label="hi" /><FilterBarMenu items={[]} /></div>;`,
+					`}`,
+					`export const meta = { kind: "composite" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
 				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
@@ -1236,23 +1218,22 @@ describe("drift-fixers", () => {
 
 				await writeFile(
 					join(dir, "design-system/atoms/button.tsx"),
-					[
+					`${[
 						`export function Button(props) { return <button {...props} />; }`,
 						`export const meta = { kind: "atom" as const, examples: [] };`,
-					].join("\n") + "\n",
+					].join("\n")}\n`,
 				);
 
-				const compositeSource =
-					[
-						`function FilterBarChip({ label }) {`,
-						`  return <span>{label}</span>;`,
-						`}`,
-						``,
-						`export function FilterBar() {`,
-						`  return <div><FilterBarChip label="hi" /><button>X</button></div>;`,
-						`}`,
-						`export const meta = { kind: "composite" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					`function FilterBarChip({ label }) {`,
+					`  return <span>{label}</span>;`,
+					`}`,
+					``,
+					`export function FilterBar() {`,
+					`  return <div><FilterBarChip label="hi" /><button>X</button></div>;`,
+					`}`,
+					`export const meta = { kind: "composite" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
 				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
@@ -1282,10 +1263,10 @@ describe("drift-fixers", () => {
 			await mkdir(join(dir, "design-system/composites"), { recursive: true });
 			await writeFile(
 				join(dir, "design-system/composites/toolbar.tsx"),
-				[
+				`${[
 					`export function Toolbar() { return <div><button>X</button></div>; }`,
 					`export const meta = { kind: "composite" as const, examples: [] };`,
-				].join("\n") + "\n",
+				].join("\n")}\n`,
 			);
 
 			const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
@@ -1334,35 +1315,33 @@ describe("drift-fixers", () => {
 				await mkdir(join(dir, "design-system/atoms"), { recursive: true });
 				await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-				const atomSource =
-					[
-						'import { cva } from "class-variance-authority";',
-						'const buttonVariants = cva("btn", {',
-						"  variants: {",
-						'    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline", destructive: "btn-destructive" },',
-						"  },",
-						'  defaultVariants: { variant: "default" },',
-						"});",
-						"export function Button({ variant, ...props }: any) {",
-						"  return <button className={buttonVariants({ variant })} {...props} />;",
-						"}",
-						'export const meta = { kind: "atom" as const, examples: [] };',
-					].join("\n") + "\n";
+				const atomSource = `${[
+					'import { cva } from "class-variance-authority";',
+					'const buttonVariants = cva("btn", {',
+					"  variants: {",
+					'    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline", destructive: "btn-destructive" },',
+					"  },",
+					'  defaultVariants: { variant: "default" },',
+					"});",
+					"export function Button({ variant, ...props }: any) {",
+					"  return <button className={buttonVariants({ variant })} {...props} />;",
+					"}",
+					'export const meta = { kind: "atom" as const, examples: [] };',
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/atoms/button.tsx"), atomSource);
 
-				const compositeSource =
-					[
-						'import { Input } from "@/design-system/atoms/input";',
-						"",
-						"export function Toolbar() {",
-						"  return (",
-						"    <div>",
-						'      <button className="ghost action" onClick={handleClick}>Click</button>',
-						"    </div>",
-						"  );",
-						"}",
-						'export const meta = { kind: "composite" as const, examples: [] };',
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					'import { Input } from "@/design-system/atoms/input";',
+					"",
+					"export function Toolbar() {",
+					"  return (",
+					"    <div>",
+					'      <button className="ghost action" onClick={handleClick}>Click</button>',
+					"    </div>",
+					"  );",
+					"}",
+					'export const meta = { kind: "composite" as const, examples: [] };',
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
 				const finding: DriftFinding = {
@@ -1383,31 +1362,29 @@ describe("drift-fixers", () => {
 				await mkdir(join(dir, "design-system/atoms"), { recursive: true });
 				await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-				const atomSource =
-					[
-						'import { cva } from "class-variance-authority";',
-						'const buttonVariants = cva("btn", {',
-						"  variants: {",
-						'    variant: { default: "btn-default", ghost: "btn-ghost" },',
-						"  },",
-						'  defaultVariants: { variant: "default" },',
-						"});",
-						"export function Button({ variant, ...props }: any) {",
-						"  return <button className={buttonVariants({ variant })} {...props} />;",
-						"}",
-						'export const meta = { kind: "atom" as const, examples: [] };',
-					].join("\n") + "\n";
+				const atomSource = `${[
+					'import { cva } from "class-variance-authority";',
+					'const buttonVariants = cva("btn", {',
+					"  variants: {",
+					'    variant: { default: "btn-default", ghost: "btn-ghost" },',
+					"  },",
+					'  defaultVariants: { variant: "default" },',
+					"});",
+					"export function Button({ variant, ...props }: any) {",
+					"  return <button className={buttonVariants({ variant })} {...props} />;",
+					"}",
+					'export const meta = { kind: "atom" as const, examples: [] };',
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/atoms/button.tsx"), atomSource);
 
-				const compositeSource =
-					[
-						'import { Input } from "@/design-system/atoms/input";',
-						"",
-						"export function Form() {",
-						'  return <div><button type="submit">Go</button></div>;',
-						"}",
-						'export const meta = { kind: "composite" as const, examples: [] };',
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					'import { Input } from "@/design-system/atoms/input";',
+					"",
+					"export function Form() {",
+					'  return <div><button type="submit">Go</button></div>;',
+					"}",
+					'export const meta = { kind: "composite" as const, examples: [] };',
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/form.tsx"), compositeSource);
 
 				const finding: DriftFinding = {
@@ -1427,31 +1404,29 @@ describe("drift-fixers", () => {
 				await mkdir(join(dir, "design-system/atoms"), { recursive: true });
 				await mkdir(join(dir, "design-system/composites"), { recursive: true });
 
-				const atomSource =
-					[
-						'import { cva } from "class-variance-authority";',
-						'const buttonVariants = cva("btn", {',
-						"  variants: {",
-						'    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline" },',
-						"  },",
-						'  defaultVariants: { variant: "default" },',
-						"});",
-						"export function Button({ variant, ...props }: any) {",
-						"  return <button className={buttonVariants({ variant })} {...props} />;",
-						"}",
-						'export const meta = { kind: "atom" as const, examples: [] };',
-					].join("\n") + "\n";
+				const atomSource = `${[
+					'import { cva } from "class-variance-authority";',
+					'const buttonVariants = cva("btn", {',
+					"  variants: {",
+					'    variant: { default: "btn-default", ghost: "btn-ghost", outline: "btn-outline" },',
+					"  },",
+					'  defaultVariants: { variant: "default" },',
+					"});",
+					"export function Button({ variant, ...props }: any) {",
+					"  return <button className={buttonVariants({ variant })} {...props} />;",
+					"}",
+					'export const meta = { kind: "atom" as const, examples: [] };',
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/atoms/button.tsx"), atomSource);
 
-				const compositeSource =
-					[
-						'import { Input } from "@/design-system/atoms/input";',
-						"",
-						"export function Actions() {",
-						'  return <div><button className="ghost outline">Go</button></div>;',
-						"}",
-						'export const meta = { kind: "composite" as const, examples: [] };',
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					'import { Input } from "@/design-system/atoms/input";',
+					"",
+					"export function Actions() {",
+					'  return <div><button className="ghost outline">Go</button></div>;',
+					"}",
+					'export const meta = { kind: "composite" as const, examples: [] };',
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/actions.tsx"), compositeSource);
 
 				const finding: DriftFinding = {
@@ -1478,18 +1453,17 @@ describe("drift-fixers", () => {
 				const internalLines = Array.from({ length: 20 }, (_, i) => `  const x${i} = ${i};`).join(
 					"\n",
 				);
-				const compositeSource =
-					[
-						`function FilterBarChip({ label }: { label: string }) {`,
-						internalLines,
-						`  return <span className="chip">{label}</span>;`,
-						`}`,
-						``,
-						`export function FilterBar() {`,
-						`  return <div><FilterBarChip label="hi" /></div>;`,
-						`}`,
-						`export const meta = { kind: "composite" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const compositeSource = `${[
+					`function FilterBarChip({ label }: { label: string }) {`,
+					internalLines,
+					`  return <span className="chip">{label}</span>;`,
+					`}`,
+					``,
+					`export function FilterBar() {`,
+					`  return <div><FilterBarChip label="hi" /></div>;`,
+					`}`,
+					`export const meta = { kind: "composite" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
 				const finding: DriftFinding = {
@@ -1517,12 +1491,11 @@ describe("drift-fixers", () => {
 					`export function formatDate(d: Date): string {\n  return d.toISOString();\n}\n`,
 				);
 
-				const dsSource =
-					[
-						`import { formatDate } from "../../lib/utils/format";`,
-						`export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
-						`export const meta = { kind: "composite" as const, examples: [] };`,
-					].join("\n") + "\n";
+				const dsSource = `${[
+					`import { formatDate } from "../../lib/utils/format";`,
+					`export function EventCard() { return <div>{formatDate(new Date())}</div>; }`,
+					`export const meta = { kind: "composite" as const, examples: [] };`,
+				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
 				const finding: DriftFinding = {

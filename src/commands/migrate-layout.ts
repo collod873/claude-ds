@@ -41,7 +41,7 @@ export async function migrateLayoutCmd(opts: {
 	try {
 		await execFile("git", ["rev-parse", "--is-inside-work-tree"], { cwd });
 	} catch {
-		process.stderr.write(c.red("migrate-layout: not inside a git repo") + "\n");
+		process.stderr.write(`${c.red("migrate-layout: not inside a git repo")}\n`);
 		process.exit(2);
 	}
 
@@ -49,7 +49,7 @@ export async function migrateLayoutCmd(opts: {
 	// hand-rolled `git status --porcelain` check this command used to carry.
 	const guard = checkCleanTree({ command: "migrate-layout", cwd, allowDirty: opts.allowDirty });
 	if (!guard.ok) {
-		process.stderr.write(c.red(guard.message) + "\n");
+		process.stderr.write(`${c.red(guard.message)}\n`);
 		process.exit(2);
 	}
 
@@ -124,7 +124,7 @@ export async function migrateLayoutCmd(opts: {
 
 	// Print plan. Bold heading + dim arrows so the canonical destination is
 	// visually distinct from the source on a TTY; bytes off-TTY are unchanged.
-	process.stdout.write(c.bold("Rename plan:") + "\n");
+	process.stdout.write(`${c.bold("Rename plan:")}\n`);
 	for (const r of renames) {
 		process.stdout.write(`  ${r.from} ${c.dim("→")} ${c.cyan(r.to)}\n`);
 	}

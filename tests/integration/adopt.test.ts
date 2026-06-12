@@ -259,7 +259,7 @@ describe("adopt", () => {
 			expect(pkg.scripts[s]).toBeDefined();
 		}
 
-		expect(pkg.scripts["test"]).toBe("vitest");
+		expect(pkg.scripts.test).toBe("vitest");
 		expect(pkg.name).toBe("my-app");
 		expect(pkg.version).toBe("1.2.3");
 	});

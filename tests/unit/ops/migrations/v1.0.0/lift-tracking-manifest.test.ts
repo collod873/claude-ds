@@ -65,7 +65,7 @@ describe("liftTrackingManifest.plan()", () => {
 		await mkdir(join(cwd, "design-system"), { recursive: true });
 		await writeFile(
 			join(cwd, SHOWCASE_PATH),
-			JSON.stringify({ generated: "2024-01-01T00:00:00.000Z", components: [] }, null, 2) + "\n",
+			`${JSON.stringify({ generated: "2024-01-01T00:00:00.000Z", components: [] }, null, 2)}\n`,
 		);
 		const changes = await liftTrackingManifest.plan(makeCtx());
 		expect(changes).toHaveLength(0);
@@ -88,7 +88,7 @@ describe("liftTrackingManifest.plan()", () => {
 			],
 			files: [{ path: "design-system/atoms/Button.tsx", category: "seeded" }],
 		};
-		await writeFile(join(cwd, SHOWCASE_PATH), JSON.stringify(polluted, null, 2) + "\n");
+		await writeFile(join(cwd, SHOWCASE_PATH), `${JSON.stringify(polluted, null, 2)}\n`);
 
 		const changes = await liftTrackingManifest.plan(makeCtx());
 		expect(changes).toHaveLength(2);
@@ -122,11 +122,11 @@ describe("liftTrackingManifest.plan()", () => {
 		// Pre-existing tracking manifest with one file
 		await writeFile(
 			join(cwd, TRACKING_PATH),
-			JSON.stringify(
+			`${JSON.stringify(
 				{ files: [{ path: "design-system/atoms/Button.tsx", category: "seeded" }] },
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 
 		// Polluted showcase with two entries — one overlapping, one new
@@ -138,7 +138,7 @@ describe("liftTrackingManifest.plan()", () => {
 				{ path: "design-system/atoms/Input.tsx", category: "seeded" },
 			],
 		};
-		await writeFile(join(cwd, SHOWCASE_PATH), JSON.stringify(polluted, null, 2) + "\n");
+		await writeFile(join(cwd, SHOWCASE_PATH), `${JSON.stringify(polluted, null, 2)}\n`);
 
 		const changes = await liftTrackingManifest.plan(makeCtx());
 
@@ -161,7 +161,7 @@ describe("liftTrackingManifest.plan()", () => {
 			components: [],
 			files: [{ path: "design-system/atoms/Button.tsx", category: "seeded" }],
 		};
-		await writeFile(join(cwd, SHOWCASE_PATH), JSON.stringify(polluted, null, 2) + "\n");
+		await writeFile(join(cwd, SHOWCASE_PATH), `${JSON.stringify(polluted, null, 2)}\n`);
 
 		// First plan + simulate apply
 		const changes1 = await liftTrackingManifest.plan(makeCtx());

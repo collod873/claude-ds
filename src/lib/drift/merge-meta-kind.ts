@@ -43,7 +43,7 @@ export function mergeMetaKind(source: string, tier: Tier): string {
 
 	// Empty object → render the kind compactly inside the existing `{}`.
 	if (body.trim() === "") {
-		return before + ` kind: "${tier}" as const ` + after;
+		return `${before} kind: "${tier}" as const ${after}`;
 	}
 
 	if (body.includes("\n")) {
@@ -57,12 +57,12 @@ export function mergeMetaKind(source: string, tier: Tier): string {
 	// the gap between `{` and the first field to a single space so the output
 	// reads cleanly regardless of the input's leading whitespace.
 	const trimmedBody = body.replace(/^[ \t]+/, "");
-	return before + ` kind: "${tier}" as const, ` + trimmedBody + after;
+	return `${before} kind: "${tier}" as const, ${trimmedBody}${after}`;
 }
 
 function appendFreshMeta(source: string, tier: Tier): string {
 	const metaExport = `\nexport const meta = { kind: "${tier}" as const, examples: [] };\n`;
-	return source.trimEnd() + "\n" + metaExport;
+	return `${source.trimEnd()}\n${metaExport}`;
 }
 
 /**

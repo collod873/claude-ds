@@ -52,8 +52,8 @@ export function writePendingAnswersScaffold(pending: PendingDecision[]): Operati
 				before = null;
 			}
 			const scaffold = buildPendingAnswersScaffold(pending);
-			const after = Buffer.from(JSON.stringify(scaffold, null, 2) + "\n", "utf8");
-			if (before && before.equals(after)) return [];
+			const after = Buffer.from(`${JSON.stringify(scaffold, null, 2)}\n`, "utf8");
+			if (before?.equals(after)) return [];
 			return [{ kind: "write", path: PENDING_ANSWERS_SCAFFOLD, before, after }];
 		},
 	};

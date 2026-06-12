@@ -54,7 +54,7 @@ async function resolveImportPath(
 	}
 
 	for (const alias of dsAliases) {
-		const prefix = alias + "/";
+		const prefix = `${alias}/`;
 		if (importPath.startsWith(prefix)) {
 			candidate = join(cwd, "design-system", importPath.slice(prefix.length));
 			return tryResolve(candidate);

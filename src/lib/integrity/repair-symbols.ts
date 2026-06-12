@@ -107,7 +107,7 @@ export function repairUnresolvedSymbols(
  * stay the first statement). Idempotent ordering is the caller's concern.
  */
 function insertImports(source: string, importLines: string[]): string {
-	const block = importLines.join("\n") + "\n";
+	const block = `${importLines.join("\n")}\n`;
 	const directive = /^(\s*(?:"use (?:client|server)"|'use (?:client|server)');?[ \t]*\r?\n)/;
 	const m = source.match(directive);
 	if (m) {

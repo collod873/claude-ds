@@ -102,7 +102,7 @@ export const migrateExceptions: Operation = {
 			migrated.push(out);
 		}
 
-		const after = Buffer.from(JSON.stringify({ exceptions: migrated }, null, 2) + "\n", "utf8");
+		const after = Buffer.from(`${JSON.stringify({ exceptions: migrated }, null, 2)}\n`, "utf8");
 		const before = Buffer.from(raw, "utf8");
 
 		return [{ kind: "write", path: EXCEPTIONS_PATH, before, after }];

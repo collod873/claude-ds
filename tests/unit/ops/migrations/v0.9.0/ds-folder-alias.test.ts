@@ -40,7 +40,7 @@ function fakeCtx(srcRoot = "src"): ProjectContext {
 describe("dsFolderAlias op", () => {
 	it("adds @ds/* to root tsconfig.json when srcRoot=. and only root tsconfig exists", async () => {
 		const tsconfig = { compilerOptions: { strict: true, paths: { "@/*": ["./src/*"] } } };
-		await writeFile(join(cwd, "tsconfig.json"), JSON.stringify(tsconfig, null, 2) + "\n", "utf8");
+		await writeFile(join(cwd, "tsconfig.json"), `${JSON.stringify(tsconfig, null, 2)}\n`, "utf8");
 
 		const changes = await dsFolderAlias.plan(fakeCtx("."));
 		expect(changes).toHaveLength(1);
@@ -57,7 +57,7 @@ describe("dsFolderAlias op", () => {
 		const tsconfig = { compilerOptions: { strict: true } };
 		await writeFile(
 			join(cwd, "src", "tsconfig.json"),
-			JSON.stringify(tsconfig, null, 2) + "\n",
+			`${JSON.stringify(tsconfig, null, 2)}\n`,
 			"utf8",
 		);
 
@@ -71,7 +71,7 @@ describe("dsFolderAlias op", () => {
 
 	it("falls back to root tsconfig.json when srcRoot=src but no src/tsconfig.json", async () => {
 		const tsconfig = { compilerOptions: { target: "es2020" } };
-		await writeFile(join(cwd, "tsconfig.json"), JSON.stringify(tsconfig, null, 2) + "\n", "utf8");
+		await writeFile(join(cwd, "tsconfig.json"), `${JSON.stringify(tsconfig, null, 2)}\n`, "utf8");
 
 		const changes = await dsFolderAlias.plan(fakeCtx("src"));
 		expect(changes).toHaveLength(1);
@@ -83,7 +83,7 @@ describe("dsFolderAlias op", () => {
 
 	it("is idempotent: returns [] if @ds/* already present", async () => {
 		const tsconfig = { compilerOptions: { paths: { "@ds/*": ["./design-system/*"] } } };
-		await writeFile(join(cwd, "tsconfig.json"), JSON.stringify(tsconfig, null, 2) + "\n", "utf8");
+		await writeFile(join(cwd, "tsconfig.json"), `${JSON.stringify(tsconfig, null, 2)}\n`, "utf8");
 
 		const changes = await dsFolderAlias.plan(fakeCtx("."));
 		expect(changes).toEqual([]);
@@ -102,7 +102,7 @@ describe("dsFolderAlias op", () => {
 
 	it("creates compilerOptions.paths when tsconfig has no paths section", async () => {
 		const tsconfig = { compilerOptions: { strict: true } };
-		await writeFile(join(cwd, "tsconfig.json"), JSON.stringify(tsconfig, null, 2) + "\n", "utf8");
+		await writeFile(join(cwd, "tsconfig.json"), `${JSON.stringify(tsconfig, null, 2)}\n`, "utf8");
 
 		const changes = await dsFolderAlias.plan(fakeCtx("."));
 		expect(changes).toHaveLength(1);
@@ -113,7 +113,7 @@ describe("dsFolderAlias op", () => {
 
 	it("is idempotent: applying then re-planning returns []", async () => {
 		const tsconfig = { compilerOptions: { paths: {} } };
-		await writeFile(join(cwd, "tsconfig.json"), JSON.stringify(tsconfig, null, 2) + "\n", "utf8");
+		await writeFile(join(cwd, "tsconfig.json"), `${JSON.stringify(tsconfig, null, 2)}\n`, "utf8");
 
 		const ctx = fakeCtx(".");
 		const report = await run(ctx, [dsFolderAlias], "apply");

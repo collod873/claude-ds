@@ -81,8 +81,8 @@ describe("moveTierFile Op", () => {
 		});
 		const w = findWrite(changes, "design-system/atoms/button.tsx");
 		expect(w).toBeDefined();
-		expect(w!.before?.toString("utf8")).toBe(src);
-		const after = w!.after.toString("utf8");
+		expect(w?.before?.toString("utf8")).toBe(src);
+		const after = w?.after.toString("utf8");
 		expect(after).toContain(src.trim());
 		expect(after).toMatch(/export const meta = \{ kind: "atom",/);
 		expect(after).toMatch(/examples: \[\{ name: "default", props: \{\} \}\]/);
@@ -105,8 +105,8 @@ describe("moveTierFile Op", () => {
 		const changes = await op.plan(fakeCtx());
 		const w = findWrite(changes, "design-system/atoms/badge.tsx");
 		expect(w).toBeDefined();
-		expect(w!.after.toString("utf8")).toMatch(/skip: \[\]/);
-		expect(w!.after.toString("utf8")).toMatch(/examples: \[\]/);
+		expect(w?.after.toString("utf8")).toMatch(/skip: \[\]/);
+		expect(w?.after.toString("utf8")).toMatch(/examples: \[\]/);
 	});
 
 	it("ensureMeta when file already has matching meta: emits rename only (no write)", async () => {
@@ -143,7 +143,7 @@ describe("moveTierFile Op", () => {
 		expect(changes[0].kind).toBe("rename");
 		const w = findWrite(changes, "design-system/composites/combo.tsx");
 		expect(w).toBeDefined();
-		const after = w!.after.toString("utf8");
+		const after = w?.after.toString("utf8");
 		expect(after).toMatch(/kind:\s*["']composite["']/);
 		expect(after).not.toMatch(/kind:\s*["']atom["']/);
 	});

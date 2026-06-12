@@ -86,7 +86,7 @@ export const liftTrackingManifest: Operation = {
 			trackingJson = { files: liftedFiles };
 		}
 
-		const trackingAfter = Buffer.from(JSON.stringify(trackingJson, null, 2) + "\n", "utf8");
+		const trackingAfter = Buffer.from(`${JSON.stringify(trackingJson, null, 2)}\n`, "utf8");
 		const trackingBefore =
 			existingTrackingRaw !== null ? Buffer.from(existingTrackingRaw, "utf8") : null;
 		if (trackingBefore === null || !trackingBefore.equals(trackingAfter)) {
@@ -101,7 +101,7 @@ export const liftTrackingManifest: Operation = {
 		// ----- 2. Remove files[] from design-system/manifest.json -----
 		const { files: _removed, ...showcaseWithoutFiles } = showcaseJson;
 		void _removed;
-		const showcaseAfter = Buffer.from(JSON.stringify(showcaseWithoutFiles, null, 2) + "\n", "utf8");
+		const showcaseAfter = Buffer.from(`${JSON.stringify(showcaseWithoutFiles, null, 2)}\n`, "utf8");
 		const showcaseBefore = Buffer.from(showcaseRaw, "utf8");
 		if (!showcaseBefore.equals(showcaseAfter)) {
 			changes.push({

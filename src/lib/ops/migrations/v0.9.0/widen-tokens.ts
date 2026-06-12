@@ -51,7 +51,7 @@ export const widenTokensMigration: Operation = {
 
 		if (!changed) return [];
 
-		const after = Buffer.from(JSON.stringify(tokens, null, 2) + "\n", "utf8");
+		const after = Buffer.from(`${JSON.stringify(tokens, null, 2)}\n`, "utf8");
 		const before = Buffer.from(raw, "utf8");
 		return [{ kind: "write", path: TOKENS_PATH, before, after }];
 	},

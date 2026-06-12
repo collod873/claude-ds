@@ -38,8 +38,8 @@ describe("INTEGRITY-UNPARSEABLE rule", () => {
 		const findings = evaluateIntegrity("design-system/composites/card.tsx", source);
 		const hit = findings.find((f) => f.ruleId === "INTEGRITY-UNPARSEABLE");
 		expect(hit).toBeDefined();
-		expect(hit!.file).toBe("design-system/composites/card.tsx");
-		expect(hit!.message).toMatch(/parse|syntax/i);
+		expect(hit?.file).toBe("design-system/composites/card.tsx");
+		expect(hit?.message).toMatch(/parse|syntax/i);
 	});
 
 	it("fires for a file with orphaned closing import", () => {
@@ -97,8 +97,8 @@ export const Card = () => <div />;
 		const findings = evaluateIntegrity("design-system/composites/card.tsx", source);
 		const hit = findings.find((f) => f.ruleId === "INTEGRITY-ORPHANED-FROM");
 		expect(hit).toBeDefined();
-		expect(hit!.file).toBe("design-system/composites/card.tsx");
-		expect(hit!.message).toMatch(/orphan/i);
+		expect(hit?.file).toBe("design-system/composites/card.tsx");
+		expect(hit?.message).toMatch(/orphan/i);
 	});
 
 	it("fires when only the closing part of a multi-line import remains", () => {
@@ -182,7 +182,7 @@ export const Card = () => <div />;
 		);
 		const hit = findings.find((f) => f.ruleId === "INTEGRITY-UNRESOLVABLE-IMPORT");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toMatch(/missing/i);
+		expect(hit?.message).toMatch(/missing/i);
 	});
 
 	it("does not fire when the import resolves to an existing file", async () => {
@@ -283,8 +283,8 @@ export function WeekGrid() {
 		const findings = evaluateIntegrity("design-system/atoms/week-grid.tsx", source);
 		const hit = findings.find((f) => f.ruleId === "INTEGRITY-UNRESOLVED-SYMBOL");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toMatch(/Button/);
-		expect(hit!.message).toMatch(/cn/);
+		expect(hit?.message).toMatch(/Button/);
+		expect(hit?.message).toMatch(/cn/);
 	});
 
 	it("does not fire for a healthy atom (regression guard #4 — sync overload)", () => {
@@ -313,7 +313,7 @@ function WeekGrid() { return <Button>b</Button>; }
 		const findings = evaluateIntegrity("design-system/atoms/week-grid.tsx", source);
 		const hit = findings.find((f) => f.ruleId === "INTEGRITY-DUPLICATE-DECL");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toMatch(/WeekGrid/);
+		expect(hit?.message).toMatch(/WeekGrid/);
 	});
 
 	it("does not fire for overload signatures", () => {

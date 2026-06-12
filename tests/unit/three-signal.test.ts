@@ -130,7 +130,7 @@ export const meta = { kind: "atom" };`;
 		expect(result.signals.classifierVerdict.tier).toBe("feature");
 		const hit = result.findings.find((f) => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("features/");
+		expect(hit?.message).toContain("features/");
 	});
 
 	it("fires when DS composite imports from lib/ (default domain roots)", () => {
@@ -143,7 +143,7 @@ export const meta = { kind: "composite" };`;
 		expect(result.signals.classifierVerdict.tier).toBe("feature");
 		const hit = result.findings.find((f) => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("lib/");
+		expect(hit?.message).toContain("lib/");
 	});
 
 	it("does not fire when DS file imports only atoms (fixture: DS file importing only atoms)", () => {

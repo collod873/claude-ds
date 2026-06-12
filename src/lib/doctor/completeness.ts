@@ -101,7 +101,7 @@ async function findOrphanFiles(
 		for (const f of files) {
 			if (openPrefixes.some((prefix) => f.startsWith(prefix))) continue;
 			if (isManifestOrKeepfile(f, manifestPaths)) continue;
-			if (isGenerated && isGenerated(f)) continue;
+			if (isGenerated?.(f)) continue;
 			// .claude/skills/ is a shared namespace: only treat files under pack-shipped
 			// skill subdirectories as DS-owned. Consumer skill dirs are not orphans (#257).
 			if (f.startsWith(".claude/skills/")) {

@@ -73,7 +73,7 @@ export async function reviewExceptions(
 		ask = async (prompt: string) => {
 			process.stdout.write(prompt);
 			const v = cursor < lines.length ? lines[cursor++] : "";
-			process.stdout.write(v + "\n");
+			process.stdout.write(`${v}\n`);
 			return v;
 		};
 		closeAsker = () => {};
@@ -90,7 +90,7 @@ export async function reviewExceptions(
 				continue;
 			}
 			const issue = (await ask("Issue link (URL or #N, leave blank to add later): ")).trim();
-			const relPath = v.file.startsWith(cwd + "/") ? v.file.slice(cwd.length + 1) : v.file;
+			const relPath = v.file.startsWith(`${cwd}/`) ? v.file.slice(cwd.length + 1) : v.file;
 			const entry: Exception = {
 				rule: v.ruleId as DriftRuleId,
 				path: relPath,

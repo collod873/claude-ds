@@ -70,7 +70,7 @@ export async function regenIndexes(ctx: ProjectContext): Promise<Change[]> {
 				barrelLines.push(`export { ${exportedNames.join(", ")} } from "./${name}";`);
 			}
 		}
-		const barrelContent = barrelLines.length > 0 ? barrelLines.join("\n") + "\n" : "";
+		const barrelContent = barrelLines.length > 0 ? `${barrelLines.join("\n")}\n` : "";
 
 		const barrelPath = `design-system/${tierDir}/index.ts`;
 		const absBarrelPath = join(cwd, barrelPath);
@@ -120,7 +120,7 @@ export async function regenIndexes(ctx: ProjectContext): Promise<Change[]> {
 		generated: new Date().toISOString(),
 		components: allComponents,
 	};
-	const manifestContent = JSON.stringify(manifest, null, 2) + "\n";
+	const manifestContent = `${JSON.stringify(manifest, null, 2)}\n`;
 	const manifestPath = "design-system/manifest.json";
 	let existingManifest: string | null = null;
 	try {

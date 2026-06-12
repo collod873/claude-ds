@@ -34,7 +34,7 @@ describe("fixer output validation gate", () => {
 
 			const result = validateFixerOutput(change, "TEST-RULE");
 			expect(result).not.toBeNull();
-			expect(result!.message).toContain("TEST-RULE");
+			expect(result?.message).toContain("TEST-RULE");
 		});
 
 		it("accepts valid output from a valid TS input", () => {
@@ -178,8 +178,8 @@ describe("fixer output validation gate", () => {
 				(r) => r.finding.file === "design-system/atoms/chip.tsx",
 			);
 			expect(fixResult).toBeDefined();
-			expect(fixResult!.fixed).toBe(false);
-			expect(fixResult!.message).toMatch(/DRIFT-META-KIND-MISSING/);
+			expect(fixResult?.fixed).toBe(false);
+			expect(fixResult?.message).toMatch(/DRIFT-META-KIND-MISSING/);
 
 			const content = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
 			expect(content).toBe(validSource);
@@ -220,7 +220,7 @@ describe("fixer output validation gate", () => {
 			const fixResult = result.results.find(
 				(r) => r.finding.file === "design-system/atoms/chip.tsx",
 			);
-			expect(fixResult!.fixed).toBe(true);
+			expect(fixResult?.fixed).toBe(true);
 
 			const content = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
 			expect(content).toBe(validOutput);
@@ -261,7 +261,7 @@ describe("fixer output validation gate", () => {
 			const fixResult = result.results.find(
 				(r) => r.finding.file === "design-system/atoms/chip.tsx",
 			);
-			expect(fixResult!.fixed).toBe(true);
+			expect(fixResult?.fixed).toBe(true);
 
 			const content = await readFile(join(dir, "design-system/atoms/chip.tsx"), "utf8");
 			expect(content).toBe(brokenAfter);
@@ -302,7 +302,7 @@ describe("fixer output validation gate", () => {
 			const fixResult = result.results.find(
 				(r) => r.finding.file === "design-system/atoms/chip.css",
 			);
-			expect(fixResult!.fixed).toBe(true);
+			expect(fixResult?.fixed).toBe(true);
 
 			const content = await readFile(join(dir, "design-system/atoms/chip.css"), "utf8");
 			expect(content).toBe(brokenCss);

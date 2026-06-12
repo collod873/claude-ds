@@ -22,10 +22,10 @@ describe("next-react manifest", () => {
 			"design-system/failure-log.md",
 		])
 			expect(paths).toContain(p);
-		expect(m.files.find((f) => f.path === "CLAUDE.md")!.category).toBe("hybrid");
-		expect(m.files.find((f) => f.path === ".claude/settings.json")!.category).toBe("hybrid");
-		expect(m.files.find((f) => f.path === ".claude/settings.json")!.format).toBe("json");
-		expect(m.files.find((f) => f.path === "design-system/contracts.md")!.category).toBe("seeded");
+		expect(m.files.find((f) => f.path === "CLAUDE.md")?.category).toBe("hybrid");
+		expect(m.files.find((f) => f.path === ".claude/settings.json")?.category).toBe("hybrid");
+		expect(m.files.find((f) => f.path === ".claude/settings.json")?.format).toBe("json");
+		expect(m.files.find((f) => f.path === "design-system/contracts.md")?.category).toBe("seeded");
 	});
 
 	// #293: DOM test runtime — vitest config + setup land as seeded so a fresh adopt

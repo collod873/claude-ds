@@ -89,11 +89,11 @@ describe("fix-pass: fixerAsOperation wrapper (#224)", () => {
 			);
 
 			expect(alphaResult).toBeDefined();
-			expect(alphaResult!.fixed).toBe(false);
-			expect(alphaResult!.message).toMatch(/DRIFT-META-KIND-MISSING/);
+			expect(alphaResult?.fixed).toBe(false);
+			expect(alphaResult?.message).toMatch(/DRIFT-META-KIND-MISSING/);
 
 			expect(betaResult).toBeDefined();
-			expect(betaResult!.fixed).toBe(true);
+			expect(betaResult?.fixed).toBe(true);
 
 			// Alpha's file content is untouched
 			const alphaContent = await readFile(join(dir, "design-system/atoms/alpha.tsx"), "utf8");

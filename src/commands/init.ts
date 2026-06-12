@@ -39,7 +39,7 @@ export async function initCmd(opts: { pack: string; yes?: boolean; cwd?: string 
 		const src = join(packDir, "files", srcName);
 		const dest = resolve(cwd, f.path);
 		const cwdResolved = resolve(cwd);
-		if (dest !== cwdResolved && !dest.startsWith(cwdResolved + "/")) {
+		if (dest !== cwdResolved && !dest.startsWith(`${cwdResolved}/`)) {
 			err(`manifest path escapes project root: ${f.path}`);
 			process.exit(2);
 		}
@@ -60,6 +60,6 @@ export async function initCmd(opts: { pack: string; yes?: boolean; cwd?: string 
 		enforce_threshold: 10,
 		removed: [],
 	};
-	await writeFile(join(cwd, ".claude-ds.json"), JSON.stringify(cfg, null, 2) + "\n", "utf8");
+	await writeFile(join(cwd, ".claude-ds.json"), `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
 	info(`initialized claude-ds (${opts.pack} @ v${version}, mode=block)`);
 }

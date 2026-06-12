@@ -143,13 +143,13 @@ describe("OWNED-TOKEN-LINT detector", () => {
 		});
 		const hit = findings.find((f) => f.concernId === "OWNED-TOKEN-LINT");
 		expect(hit).toBeDefined();
-		expect(hit!.file).toBe("scripts/lint-tokens.ts");
-		expect(hit!.supersededBy).toBe("DRIFT-TOKEN-PARITY");
+		expect(hit?.file).toBe("scripts/lint-tokens.ts");
+		expect(hit?.supersededBy).toBe("DRIFT-TOKEN-PARITY");
 		// The detect message describes the detection; the supersession +
 		// remove-or-flag recommendation is constructed by formatOwnedConcernFinding
 		// (issue #348 gating). The corrected claim must not silently re-emerge as
 		// the original false claim anywhere in the rule.
-		expect(hit!.message).not.toMatch(/DRIFT-RAW-PRIMITIVE/);
+		expect(hit?.message).not.toMatch(/DRIFT-RAW-PRIMITIVE/);
 	});
 
 	it("keys on intent, not filename — flags even when renamed", () => {
@@ -268,7 +268,7 @@ describe("OWNED-BASE-UI-ASCHILD-VALIDATOR detector", () => {
 		});
 		const hit = findings.find((f) => f.concernId === "OWNED-BASE-UI-ASCHILD-VALIDATOR");
 		expect(hit).toBeDefined();
-		expect(hit!.supersededBy).toBe("HOOK-BASE-UI-ASCHILD");
+		expect(hit?.supersededBy).toBe("HOOK-BASE-UI-ASCHILD");
 	});
 
 	it("keys on intent, not filename — flags even when renamed", () => {
@@ -302,7 +302,7 @@ describe("OWNED-APP-WIDE-TOKEN-LINT detector", () => {
 		});
 		const hit = findings.find((f) => f.concernId === "OWNED-APP-WIDE-TOKEN-LINT");
 		expect(hit).toBeDefined();
-		expect(hit!.supersededBy).toBe("HOOK-TOKENS-APP-WIDE");
+		expect(hit?.supersededBy).toBe("HOOK-TOKENS-APP-WIDE");
 	});
 
 	it("does not also fire OWNED-TOKEN-LINT — exactly one concern claims it", () => {

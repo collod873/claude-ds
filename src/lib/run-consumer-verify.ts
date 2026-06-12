@@ -246,7 +246,7 @@ export async function runConsumerVerify(
 	const timeoutMs = explicitTimeoutMs ?? envTimeoutMs() ?? DEFAULT_TIMEOUT_MS;
 	const result = await exec(command.cmd, command.args, { cwd, timeoutMs });
 
-	const errors = parseVerifyErrors(result.stdout + "\n" + result.stderr);
+	const errors = parseVerifyErrors(`${result.stdout}\n${result.stderr}`);
 	const { scaffoldErrors, handVerifyErrors, consumerErrors } = await partitionErrors(cwd, errors, {
 		touchedFiles: opts.touchedFiles,
 		managedFiles: opts.managedFiles,
@@ -400,7 +400,7 @@ function isScaffoldPath(file: string, opts: PartitionOpts): boolean {
 	if (opts.touchedFiles?.has(normalized)) return true;
 	if (opts.managedFiles?.has(normalized)) return true;
 	for (const root of opts.managedRoots) {
-		const prefix = root.endsWith("/") ? root : root + "/";
+		const prefix = root.endsWith("/") ? root : `${root}/`;
 		if (normalized.startsWith(prefix)) return true;
 	}
 	return false;

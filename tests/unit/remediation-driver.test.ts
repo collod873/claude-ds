@@ -96,10 +96,10 @@ describe("driveRemediation (shared loop)", () => {
 		const cfg = JSON.parse(await readFile(cfgPath, "utf8"));
 		cfg.enforce_threshold = 0;
 		cfg.mode = "warn";
-		await writeFile(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+		await writeFile(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
 		await writeFile(
 			join(dir, "design-system/exceptions.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					exceptions: [
 						{
@@ -112,7 +112,7 @@ describe("driveRemediation (shared loop)", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 
 		const outcome = await driveRemediation({

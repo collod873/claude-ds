@@ -251,9 +251,9 @@ async function captureFrontDoor(opts: { cwd: string }): Promise<string> {
 	const origConsoleInfo = console.info;
 	let stdout = "";
 	const fmt = (args: unknown[]) =>
-		args
+		`${args
 			.map((a) => (typeof a === "string" ? a : a instanceof Error ? a.message : JSON.stringify(a)))
-			.join(" ") + "\n";
+			.join(" ")}\n`;
 	process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
 		stdout += typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8");
 		const cb = rest.find((r) => typeof r === "function") as ((err?: Error) => void) | undefined;

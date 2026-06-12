@@ -64,5 +64,5 @@ export async function emitStubHint(ctx: ProjectContext): Promise<void> {
 		lines.push(`  ${u.rel} (${tag}) — ${u.recipe}`);
 	}
 	lines.push("");
-	process.stdout.write(lines.join("\n") + "\n");
+	process.stdout.write(`${lines.join("\n")}\n`);
 }

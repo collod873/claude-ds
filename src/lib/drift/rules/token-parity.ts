@@ -199,7 +199,7 @@ function appendDeclarationsToRoot(
 	additions: { name: string; value: string }[],
 ): string {
 	if (additions.length === 0) return css;
-	const newLines = additions.map((a) => renderDeclaration(a.name, a.value)).join("\n") + "\n";
+	const newLines = `${additions.map((a) => renderDeclaration(a.name, a.value)).join("\n")}\n`;
 
 	const m = ROOT_BLOCK_RE.exec(css);
 	if (m && m.index !== undefined) {
@@ -213,7 +213,7 @@ function appendDeclarationsToRoot(
 	}
 
 	const block = `:root {\n${newLines}}\n`;
-	return css.length === 0 || css.endsWith("\n") ? css + block : css + "\n" + block;
+	return css.length === 0 || css.endsWith("\n") ? css + block : `${css}\n${block}`;
 }
 
 function rewriteDeclarationValues(

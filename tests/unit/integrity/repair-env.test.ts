@@ -245,8 +245,8 @@ describe("buildRepairEnv — sibling DS-tree resolver", () => {
 		const result = env.resolve("FileUploadItem");
 		expect(result).not.toBeNull();
 		// Must be the canonical alias, never a relative path.
-		expect(result!.specifier).toBe("@ds/composites/file-uploader");
-		expect(result!.specifier).not.toMatch(/^\./);
+		expect(result?.specifier).toBe("@ds/composites/file-uploader");
+		expect(result?.specifier).not.toMatch(/^\./);
 	});
 
 	// C4 — #263: two symbols from the same module are both imported
@@ -265,8 +265,8 @@ describe("buildRepairEnv — sibling DS-tree resolver", () => {
 		const status = env.resolve("FileUploadStatus");
 		expect(item).not.toBeNull();
 		expect(status).not.toBeNull();
-		expect(item!.specifier).toBe("@ds/composites/file-uploader");
-		expect(status!.specifier).toBe("@ds/composites/file-uploader");
+		expect(item?.specifier).toBe("@ds/composites/file-uploader");
+		expect(status?.specifier).toBe("@ds/composites/file-uploader");
 	});
 
 	// C2 — #263: DS atom name collides with lucide icon → prefer lucide-react
@@ -291,7 +291,7 @@ describe("buildRepairEnv — sibling DS-tree resolver", () => {
 		// The DS atom of the same name is a collision — lucide-react must win.
 		const result = env.resolve("Calendar");
 		expect(result).not.toBeNull();
-		expect(result!.specifier).toBe("lucide-react");
+		expect(result?.specifier).toBe("lucide-react");
 	});
 
 	it("C2 CONTROL: a DS-atom name with no lucide-react collision still resolves to the DS atom", async () => {
@@ -314,7 +314,7 @@ describe("buildRepairEnv — sibling DS-tree resolver", () => {
 		// No lucide collision — should resolve to DS atom.
 		const result = env.resolve("Button");
 		expect(result).not.toBeNull();
-		expect(result!.specifier).toBe("@ds/atoms/button");
+		expect(result?.specifier).toBe("@ds/atoms/button");
 	});
 
 	// #263 Bug 2 regression: module-level `import type { X }` must NOT contribute to Tier 3 value-import graph
@@ -339,9 +339,9 @@ describe("buildRepairEnv — sibling DS-tree resolver", () => {
 		const result = env.resolve("FileUploadItem");
 		// Tier 1 (DS export index) must resolve to the canonical alias.
 		expect(result).not.toBeNull();
-		expect(result!.specifier).toBe("@ds/composites/file-uploader");
+		expect(result?.specifier).toBe("@ds/composites/file-uploader");
 		// Must NOT be the relative sibling path from the showcase.
-		expect(result!.specifier).not.toMatch(/^\.\//);
+		expect(result?.specifier).not.toMatch(/^\.\//);
 	});
 
 	// #263 Tier 3b: module-level `import type { LucideIcon }` from an absolute specifier
@@ -365,6 +365,6 @@ describe("buildRepairEnv — sibling DS-tree resolver", () => {
 
 		const result = env.resolve("LucideIcon");
 		expect(result).not.toBeNull();
-		expect(result!.specifier).toBe("lucide-react");
+		expect(result?.specifier).toBe("lucide-react");
 	});
 });

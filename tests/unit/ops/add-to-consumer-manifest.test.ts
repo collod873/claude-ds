@@ -50,11 +50,11 @@ describe("addToConsumerManifest op", () => {
 		await mkdir(join(cwd, ".claude-ds"), { recursive: true });
 		await writeFile(
 			join(cwd, TRACKING_PATH),
-			JSON.stringify(
+			`${JSON.stringify(
 				{ files: [{ path: "design-system/contracts.md", category: "managed" }] },
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
 		const changes = await op.plan(makeCtx());
@@ -73,11 +73,11 @@ describe("addToConsumerManifest op", () => {
 	it("falls back to pack manifest when tracking manifest is missing", async () => {
 		await writeFile(
 			join(packDir, "manifest.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{ files: [{ path: "design-system/contracts.md", category: "managed" }] },
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
 		const changes = await op.plan(makeCtx());
@@ -95,11 +95,11 @@ describe("addToConsumerManifest op", () => {
 		await mkdir(join(cwd, ".claude-ds"), { recursive: true });
 		await writeFile(
 			join(cwd, TRACKING_PATH),
-			JSON.stringify(
+			`${JSON.stringify(
 				{ files: [{ path: "design-system/atoms/my-button.tsx", category: "seeded" }] },
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
 		const changes = await op.plan(makeCtx());
@@ -115,12 +115,11 @@ describe("addToConsumerManifest op", () => {
 
 	it("preserves before bytes for accurate dry-run diff", async () => {
 		await mkdir(join(cwd, ".claude-ds"), { recursive: true });
-		const beforeRaw =
-			JSON.stringify(
-				{ files: [{ path: "design-system/contracts.md", category: "managed" }] },
-				null,
-				2,
-			) + "\n";
+		const beforeRaw = `${JSON.stringify(
+			{ files: [{ path: "design-system/contracts.md", category: "managed" }] },
+			null,
+			2,
+		)}\n`;
 		await writeFile(join(cwd, TRACKING_PATH), beforeRaw);
 		const op = addToConsumerManifest(["design-system/atoms/new.tsx"]);
 		const changes = await op.plan(makeCtx());
@@ -130,7 +129,7 @@ describe("addToConsumerManifest op", () => {
 
 	it("applied via run() actually writes to disk at the tracking path", async () => {
 		await mkdir(join(cwd, ".claude-ds"), { recursive: true });
-		await writeFile(join(cwd, TRACKING_PATH), JSON.stringify({ files: [] }, null, 2) + "\n");
+		await writeFile(join(cwd, TRACKING_PATH), `${JSON.stringify({ files: [] }, null, 2)}\n`);
 		const { run } = await import("../../../src/lib/runner");
 		const op = addToConsumerManifest(["design-system/atoms/my-button.tsx"]);
 		await run(makeCtx(), [op], "apply");

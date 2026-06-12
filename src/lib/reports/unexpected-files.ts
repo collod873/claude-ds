@@ -73,7 +73,7 @@ export function findDeprecatedMatch(
 	const fileDir = filePath.substring(0, filePath.lastIndexOf("/") + 1);
 	for (const dp of deprecatedPaths) {
 		if (filePath === dp.path) return dp;
-		const dpAsDir = dp.path.endsWith("/") ? dp.path : dp.path + "/";
+		const dpAsDir = dp.path.endsWith("/") ? dp.path : `${dp.path}/`;
 		if (filePath.startsWith(dpAsDir)) return dp;
 		const dpDir = dp.path.substring(0, dp.path.lastIndexOf("/") + 1);
 		if (dpDir && fileDir === dpDir && !managedRootSet.has(dpDir)) return dp;
@@ -115,8 +115,8 @@ export async function findUnexpectedFiles(
 		for (const f of files) {
 			if (strict && openPrefixes.some((prefix) => f.startsWith(prefix))) continue;
 			if (isManifestOrKeepfile(f, manifestPaths)) continue;
-			if (isGenerated && isGenerated(f)) continue;
-			if (isIgnored && isIgnored(f)) continue;
+			if (isGenerated?.(f)) continue;
+			if (isIgnored?.(f)) continue;
 			const deprecatedMatch = findDeprecatedMatch(f, deprecatedPaths, managedRootSet);
 			unexpected.push({ path: f, root, strict, deprecatedMatch });
 		}
@@ -238,6 +238,6 @@ export function formatDeprecatedMatchWarnings(
 ): string[] {
 	return deprecatedMatches.map(
 		(f) =>
-			`WARNING  unexpected (deprecated-related): ${f.path} — related to deprecated ${f.deprecatedMatch!.path}; run --fix to delete`,
+			`WARNING  unexpected (deprecated-related): ${f.path} — related to deprecated ${f.deprecatedMatch?.path}; run --fix to delete`,
 	);
 }

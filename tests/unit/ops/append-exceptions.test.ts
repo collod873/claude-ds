@@ -57,11 +57,11 @@ describe("appendExceptions op", () => {
 		await mkdir(join(cwd, "design-system"), { recursive: true });
 		await writeFile(
 			join(cwd, "design-system/exceptions.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{ exceptions: [{ rule: "DRIFT-MISPLACED", path: "a.tsx", issue: "#1" }] },
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		const finalList: Exception[] = [
 			{ rule: "DRIFT-MISPLACED", path: "a.tsx", issue: "#1" },
@@ -78,7 +78,7 @@ describe("appendExceptions op", () => {
 		await mkdir(join(cwd, "design-system"), { recursive: true });
 		await writeFile(
 			join(cwd, "design-system/exceptions.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					exceptions: [
 						{ rule: "DRIFT-MISPLACED", path: "a.tsx", issue: "#1" },
@@ -87,7 +87,7 @@ describe("appendExceptions op", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		const remaining: Exception[] = [{ rule: "DRIFT-MISPLACED", path: "b.tsx", issue: "#2" }];
 		const op = appendExceptions(remaining);
@@ -102,7 +102,7 @@ describe("appendExceptions op", () => {
 		await mkdir(join(cwd, "design-system"), { recursive: true });
 		await writeFile(
 			join(cwd, "design-system/exceptions.json"),
-			JSON.stringify({ exceptions: list }, null, 2) + "\n",
+			`${JSON.stringify({ exceptions: list }, null, 2)}\n`,
 		);
 		const op = appendExceptions(list);
 		const changes = await op.plan(makeCtx());
@@ -117,12 +117,11 @@ describe("appendExceptions op", () => {
 
 	it("preserves before bytes for accurate dry-run diff", async () => {
 		await mkdir(join(cwd, "design-system"), { recursive: true });
-		const beforeRaw =
-			JSON.stringify(
-				{ exceptions: [{ rule: "DRIFT-MISPLACED", path: "a.tsx", issue: "#1" }] },
-				null,
-				2,
-			) + "\n";
+		const beforeRaw = `${JSON.stringify(
+			{ exceptions: [{ rule: "DRIFT-MISPLACED", path: "a.tsx", issue: "#1" }] },
+			null,
+			2,
+		)}\n`;
 		await writeFile(join(cwd, "design-system/exceptions.json"), beforeRaw);
 		const op = appendExceptions([
 			{ rule: "DRIFT-MISPLACED", path: "a.tsx", issue: "#1" },

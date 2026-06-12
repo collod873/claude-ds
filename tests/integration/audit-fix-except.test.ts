@@ -503,21 +503,20 @@ describe("audit --fix abort handling", () => {
 			join(dir, "design-system/atoms/button.tsx"),
 			`export function Button() { return <button />; }\n`,
 		);
-		const existingExceptions =
-			JSON.stringify(
-				{
-					exceptions: [
-						{
-							rule: "DRIFT-META-KIND-MISSING",
-							path: "design-system/atoms/other.tsx",
-							issue: "#1",
-							reason: "test",
-						},
-					],
-				},
-				null,
-				2,
-			) + "\n";
+		const existingExceptions = `${JSON.stringify(
+			{
+				exceptions: [
+					{
+						rule: "DRIFT-META-KIND-MISSING",
+						path: "design-system/atoms/other.tsx",
+						issue: "#1",
+						reason: "test",
+					},
+				],
+			},
+			null,
+			2,
+		)}\n`;
 		await writeFile(join(dir, "design-system/exceptions.json"), existingExceptions);
 		await chmod(join(dir, "design-system/atoms"), 0o555);
 

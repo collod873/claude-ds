@@ -33,8 +33,8 @@ describe("DRIFT-MISPLACED rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-MISPLACED");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("composites/");
-		expect(hit!.message).toContain("atom");
+		expect(hit?.message).toContain("composites/");
+		expect(hit?.message).toContain("atom");
 	});
 
 	it("fires when composite file is placed in atoms/", () => {
@@ -47,8 +47,8 @@ describe("DRIFT-MISPLACED rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-MISPLACED");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("atoms/");
-		expect(hit!.message).toContain("composite");
+		expect(hit?.message).toContain("atoms/");
+		expect(hit?.message).toContain("composite");
 	});
 
 	it("does not fire when location matches classifier verdict", () => {
@@ -115,7 +115,7 @@ describe("DRIFT-MISPLACED rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-MISPLACED");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("composes 2 design-system components");
+		expect(hit?.message).toContain("composes 2 design-system components");
 	});
 });
 
@@ -137,8 +137,8 @@ describe("DRIFT-DS-IMPORTS-FEATURE rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE");
 		expect(hit).toBeDefined();
-		expect(hit!.file).toBe("design-system/atoms/invoice-amount.tsx");
-		expect(hit!.message).toContain("imports from features/");
+		expect(hit?.file).toBe("design-system/atoms/invoice-amount.tsx");
+		expect(hit?.message).toContain("imports from features/");
 	});
 
 	it("fires when DS composite imports from lib/", () => {
@@ -154,7 +154,7 @@ describe("DRIFT-DS-IMPORTS-FEATURE rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-DS-IMPORTS-FEATURE");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("imports from lib/");
+		expect(hit?.message).toContain("imports from lib/");
 	});
 
 	it("does not fire when DS file imports only atoms (fixture: DS file importing only atoms)", () => {
@@ -234,7 +234,7 @@ describe("DRIFT-PATTERN-NO-SLOTS rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-PATTERN-NO-SLOTS");
 		expect(hit).toBeDefined();
-		expect(hit!.file).toBe("design-system/patterns/app-layout.tsx");
+		expect(hit?.file).toBe("design-system/patterns/app-layout.tsx");
 	});
 
 	it("does not fire when pattern-tier file has children prop", () => {
@@ -307,7 +307,7 @@ describe("DRIFT-PATTERN-IMPORTS-PATTERN rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-PATTERN-IMPORTS-PATTERN");
 		expect(hit).toBeDefined();
-		expect(hit!.file).toBe("design-system/patterns/app-wrapper.tsx");
+		expect(hit?.file).toBe("design-system/patterns/app-wrapper.tsx");
 	});
 
 	it("does not fire for non-pattern location files (locationTier is not pattern)", () => {
@@ -374,8 +374,8 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-INLINE-STATIC-STYLE");
 		expect(hit).toBeDefined();
-		expect(hit!.file).toBe("design-system/atoms/badge.tsx");
-		expect(hit!.message).toContain("literal");
+		expect(hit?.file).toBe("design-system/atoms/badge.tsx");
+		expect(hit?.message).toContain("literal");
 	});
 
 	it("fires on style={{ color: '#fff', padding: '8px' }} (multiple literal values)", () => {
@@ -548,7 +548,7 @@ export function SearchBar() {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-RAW-PRIMITIVE");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("button");
+		expect(hit?.message).toContain("button");
 	});
 
 	it("fires on composite file containing raw <input>", () => {
@@ -564,7 +564,7 @@ export function SearchBar() {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-RAW-PRIMITIVE");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("input");
+		expect(hit?.message).toContain("input");
 	});
 
 	it("reports count when multiple raw elements are found", () => {
@@ -584,8 +584,8 @@ export function SearchBar() {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-RAW-PRIMITIVE");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("2 <input>");
-		expect(hit!.message).toContain("1 <button>");
+		expect(hit?.message).toContain("2 <input>");
+		expect(hit?.message).toContain("1 <button>");
 	});
 
 	it("fires on pattern-tier files containing raw primitives", () => {
@@ -623,8 +623,8 @@ export function CalendarView() {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-RAW-PRIMITIVE");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain(EXTRACTION_NEEDED_MARKER);
-		expect(hit!.message).toContain("claude-ds classify");
+		expect(hit?.message).toContain(EXTRACTION_NEEDED_MARKER);
+		expect(hit?.message).toContain("claude-ds classify");
 		expect(isExtractionNeededFinding(hit!)).toBe(true);
 	});
 
@@ -642,7 +642,7 @@ export function SearchBar() {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-RAW-PRIMITIVE");
 		expect(hit).toBeDefined();
-		expect(hit!.message).not.toContain(EXTRACTION_NEEDED_MARKER);
+		expect(hit?.message).not.toContain(EXTRACTION_NEEDED_MARKER);
 		expect(isExtractionNeededFinding(hit!)).toBe(false);
 	});
 
@@ -710,8 +710,8 @@ describe("DRIFT-MISCLASSIFIED-ATOM rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-MISCLASSIFIED-ATOM");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("meta.kind=atom");
-		expect(hit!.message).toContain("composite");
+		expect(hit?.message).toContain("meta.kind=atom");
+		expect(hit?.message).toContain("composite");
 	});
 
 	it("does not fire when meta.kind=atom and classifier agrees", () => {
@@ -768,7 +768,7 @@ describe("DRIFT-MISCLASSIFIED-ATOM rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-MISCLASSIFIED-ATOM");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("composes 3 design-system components");
+		expect(hit?.message).toContain("composes 3 design-system components");
 	});
 
 	it("does not fire when classifier verdict is ambiguous (PRD #241 / #244)", () => {
@@ -801,8 +801,8 @@ describe("DRIFT-MISCLASSIFIED-COMPOSITE rule", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-MISCLASSIFIED-COMPOSITE");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("meta.kind=composite");
-		expect(hit!.message).toContain("atom");
+		expect(hit?.message).toContain("meta.kind=composite");
+		expect(hit?.message).toContain("atom");
 	});
 
 	it("does not fire when meta.kind=composite and classifier agrees", () => {
@@ -887,8 +887,8 @@ export const meta = {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-CVA-VARIANT-UNRENDERED");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("ghost");
-		expect(hit!.message).toContain("outline");
+		expect(hit?.message).toContain("ghost");
+		expect(hit?.message).toContain("outline");
 	});
 
 	it("does NOT fire when all variant values are exercised", () => {
@@ -988,9 +988,9 @@ export const meta = {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-CVA-VARIANT-UNRENDERED");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("outline");
-		expect(hit!.message).toContain("md");
-		expect(hit!.message).toContain("lg");
+		expect(hit?.message).toContain("outline");
+		expect(hit?.message).toContain("md");
+		expect(hit?.message).toContain("lg");
 	});
 
 	it("does NOT fire when examples is empty (authoritative stub signal)", () => {
@@ -1038,7 +1038,7 @@ export const meta = {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-META-EXAMPLES-DUPLICATE");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain("2 duplicate");
+		expect(hit?.message).toContain("2 duplicate");
 	});
 
 	it("does NOT fire when all examples are unique", () => {
@@ -1174,8 +1174,8 @@ export function Button(props: import("class-variance-authority").VariantProps<ty
   return <button className={buttonVariants(props)} />;
 }`;
 		const result = attributedAxes(source, "design-system/atoms/button.tsx");
-		expect(result).not.toBeNull();
-		expect([...result!.keys()]).toEqual(["variant", "size"]);
+		if (!result) throw new Error("attributedAxes returned null");
+		expect([...result.keys()]).toEqual(["variant", "size"]);
 	});
 
 	it("excludes focusVisible and focusWithin pseudo-state axes", () => {
@@ -1259,9 +1259,9 @@ describe("DRIFT-SMART-PART-NO-ROLE rule (PRD #301 / #311)", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-SMART-PART-NO-ROLE");
 		expect(hit).toBeDefined();
-		expect(hit!.file).toBe("design-system/atoms/dropdown.tsx");
-		expect(hit!.message).toMatch(/role/);
-		expect(hit!.message).toMatch(/classify/);
+		expect(hit?.file).toBe("design-system/atoms/dropdown.tsx");
+		expect(hit?.message).toMatch(/role/);
+		expect(hit?.message).toMatch(/classify/);
 	});
 
 	it("does not fire when role_contracts_strict is false (silent path)", () => {
@@ -1369,8 +1369,8 @@ describe("DRIFT-ROLE-NO-CONTRACT rule (PRD #301 / #311)", () => {
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-ROLE-NO-CONTRACT");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toMatch(/tabs/);
-		expect(hit!.message).toMatch(/exceptions\.json/);
+		expect(hit?.message).toMatch(/tabs/);
+		expect(hit?.message).toMatch(/exceptions\.json/);
 	});
 
 	it("does not fire when the declared role has a shipped contract (combobox)", () => {
@@ -1441,7 +1441,7 @@ export function Badge({ tone }: { tone?: "neutral" | "danger" }) {
 		const findings = evaluateDrift({ ...base, file: "design-system/atoms/badge.tsx", source });
 		const hit = findings.find((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain('tone="dark"');
+		expect(hit?.message).toContain('tone="dark"');
 	});
 
 	it("fires on a sub-element axis leaked onto the component", () => {
@@ -1461,9 +1461,9 @@ export const meta = {
 		const findings = evaluateDrift({ ...base, file: "design-system/atoms/badge.tsx", source });
 		const hit = findings.find((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain('leaked sub-element axis "density"');
+		expect(hit?.message).toContain('leaked sub-element axis "density"');
 		// The valid axis value is not flagged.
-		expect(hit!.message).not.toContain("tone=");
+		expect(hit?.message).not.toContain("tone=");
 	});
 
 	it("stays silent when no export matches the filename (acronym casing)", () => {
@@ -1525,10 +1525,10 @@ export const meta = {
 		const findings = evaluateDrift({ ...base, file: "design-system/atoms/combobox.tsx", source });
 		const hit = findings.find((f) => f.ruleId === "DRIFT-META-EXAMPLES-INVALID-PROP");
 		expect(hit).toBeDefined();
-		expect(hit!.message).toContain('"size"');
-		expect(hit!.message).toContain('"invalid"');
+		expect(hit?.message).toContain('"size"');
+		expect(hit?.message).toContain('"invalid"');
 		// The reserved children example is untouched.
-		expect(hit!.message).not.toContain("children");
+		expect(hit?.message).not.toContain("children");
 	});
 
 	it("leaves a non-axis prop alone — it may be a real, even required, prop (Crewops radio shape)", () => {

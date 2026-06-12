@@ -31,7 +31,7 @@ async function buildCrewopsFixture(dir: string): Promise<void> {
 	// Minimal .claude-ds.json so reconcile can load the pack
 	await writeFile(
 		join(dir, ".claude-ds.json"),
-		JSON.stringify(
+		`${JSON.stringify(
 			{
 				version: "v0.2.1",
 				pack: "next-react",
@@ -40,7 +40,7 @@ async function buildCrewopsFixture(dir: string): Promise<void> {
 			},
 			null,
 			2,
-		) + "\n",
+		)}\n`,
 	);
 
 	// Root-level orphans from deprecated paths
@@ -170,7 +170,7 @@ describe("reconcile — root-dupe handling (#23)", () => {
 	async function setupRootDupes(differing: boolean): Promise<void> {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.2.1",
 					pack: "next-react",
@@ -179,7 +179,7 @@ describe("reconcile — root-dupe handling (#23)", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		await mkdir(join(dir, "design-system"), { recursive: true });
 		const rootContent = differing ? "# Contracts (live root, more content)\n" : "# Same content\n";
@@ -254,7 +254,7 @@ describe("reconcile — dangling hook pruning (#136)", () => {
 	async function setupDanglingHooks(opts?: { noExistingScript?: boolean }): Promise<void> {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.8.0",
 					pack: "next-react",
@@ -263,7 +263,7 @@ describe("reconcile — dangling hook pruning (#136)", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 
 		await mkdir(join(dir, ".claude", "hooks"), { recursive: true });
@@ -301,7 +301,7 @@ describe("reconcile — dangling hook pruning (#136)", () => {
 				],
 			},
 		};
-		await writeFile(join(dir, ".claude/settings.json"), JSON.stringify(settings, null, 2) + "\n");
+		await writeFile(join(dir, ".claude/settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
 	}
 
 	it("--force prunes dangling hook entries from settings.json after deleting deprecated scripts", async () => {
@@ -370,7 +370,7 @@ describe("reconcile — dangling hook pruning (#136)", () => {
 	it("no settings.json does not crash", async () => {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.8.0",
 					pack: "next-react",
@@ -379,7 +379,7 @@ describe("reconcile — dangling hook pruning (#136)", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		// Plant a deprecated script but no settings.json
 		await mkdir(join(dir, ".claude", "hooks"), { recursive: true });

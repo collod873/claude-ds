@@ -92,8 +92,8 @@ describe("mergeJsonKeys — scripts namespace-aware merge", () => {
 		const result = mergeJsonKeys(upstream, current, ["scripts"]);
 		const parsed = JSON.parse(result);
 		// all 3 scripts present
-		expect(parsed.scripts["test"]).toBe("vitest");
-		expect(parsed.scripts["myproj"]).toBe("echo hi");
+		expect(parsed.scripts.test).toBe("vitest");
+		expect(parsed.scripts.myproj).toBe("echo hi");
 		expect(parsed.scripts["ds:check-tiers"]).toBe(
 			"node --experimental-strip-types scripts/check-tier-imports.ts",
 		);
@@ -120,7 +120,7 @@ describe("mergeJsonKeys — scripts namespace-aware merge", () => {
 		expect(parsed.scripts["ds:check-tiers"]).toBeDefined();
 		expect(parsed.scripts["ci:consistency"]).toBeDefined();
 		// user script survives
-		expect(parsed.scripts["test"]).toBe("vitest");
+		expect(parsed.scripts.test).toBe("vitest");
 	});
 
 	it("ds:-prefixed user script not in upstream is stripped (pack owns the namespace)", () => {
@@ -139,7 +139,7 @@ describe("mergeJsonKeys — scripts namespace-aware merge", () => {
 		// ds:custom stripped because ds: namespace is pack-owned
 		expect(parsed.scripts["ds:custom"]).toBeUndefined();
 		// user's non-namespaced script survives
-		expect(parsed.scripts["test"]).toBe("vitest");
+		expect(parsed.scripts.test).toBe("vitest");
 		// pack script present
 		expect(parsed.scripts["ds:check-tiers"]).toBeDefined();
 	});
@@ -168,9 +168,9 @@ describe("mergeJsonKeys — devDependencies namespace-aware merge (F8)", () => {
 		const parsed = JSON.parse(result);
 		expect(parsed.devDependencies["@testing-library/react"]).toBe("^15.0.0");
 		expect(parsed.devDependencies["@testing-library/jest-dom"]).toBe("^6.4.0");
-		expect(parsed.devDependencies["jsdom"]).toBe("^24.0.0");
+		expect(parsed.devDependencies.jsdom).toBe("^24.0.0");
 		// user dep preserved
-		expect(parsed.devDependencies["typescript"]).toBe("^5.0.0");
+		expect(parsed.devDependencies.typescript).toBe("^5.0.0");
 		// other top-level keys untouched
 		expect(parsed.name).toBe("my-app");
 	});
@@ -228,7 +228,7 @@ describe("mergeJsonKeys — devDependencies namespace-aware merge (F8)", () => {
 		});
 		const result = mergeJsonKeys(upstream, current, ["devDependencies"]);
 		const parsed = JSON.parse(result);
-		expect(parsed.devDependencies["lodash"]).toBe("^4.0.0");
+		expect(parsed.devDependencies.lodash).toBe("^4.0.0");
 		expect(parsed.devDependencies["@types/node"]).toBe("^20.0.0");
 		expect(parsed.devDependencies["@testing-library/react"]).toBe("^15.0.0");
 	});
@@ -243,7 +243,7 @@ describe("mergeJsonKeys — devDependencies namespace-aware merge (F8)", () => {
 		const result = mergeJsonKeys(upstream, current, ["devDependencies"]);
 		const parsed = JSON.parse(result);
 		expect(parsed.devDependencies["@testing-library/react"]).toBe("^15.0.0");
-		expect(parsed.devDependencies["typescript"]).toBe("^5.0.0");
+		expect(parsed.devDependencies.typescript).toBe("^5.0.0");
 	});
 });
 

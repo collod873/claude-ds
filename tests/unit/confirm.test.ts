@@ -60,7 +60,7 @@ function setup(stdin: { isTTY: boolean; data?: string }): {
 		return true;
 	}) as typeof process.stderr.write;
 	console.error = (...args: unknown[]) => {
-		captured.stderr += args.map((a) => (typeof a === "string" ? a : String(a))).join(" ") + "\n";
+		captured.stderr += `${args.map((a) => (typeof a === "string" ? a : String(a))).join(" ")}\n`;
 	};
 
 	(process as unknown as { exit: (code?: number) => never }).exit = ((code?: number) => {

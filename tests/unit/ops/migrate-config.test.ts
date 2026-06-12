@@ -39,8 +39,7 @@ function fakeCtx(): ProjectContext {
 
 describe("migrateConfig op — plan()", () => {
 	it("pre-v0.6 config (missing app_dir + claude_md_target) → one write Change with correct bytes", async () => {
-		const raw =
-			JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }, null, 2) + "\n";
+		const raw = `${JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }, null, 2)}\n`;
 		await writeFile(join(cwd, ".claude-ds.json"), raw, "utf8");
 
 		const changes = await migrateConfig.plan(fakeCtx());
@@ -61,18 +60,17 @@ describe("migrateConfig op — plan()", () => {
 	});
 
 	it("current-shape config → []", async () => {
-		const raw =
-			JSON.stringify(
-				{
-					version: "v0.6.0",
-					pack: "next-react",
-					mode: "warn",
-					app_dir: "src/app",
-					claude_md_target: ".claude/CLAUDE.md",
-				},
-				null,
-				2,
-			) + "\n";
+		const raw = `${JSON.stringify(
+			{
+				version: "v0.6.0",
+				pack: "next-react",
+				mode: "warn",
+				app_dir: "src/app",
+				claude_md_target: ".claude/CLAUDE.md",
+			},
+			null,
+			2,
+		)}\n`;
 		await writeFile(join(cwd, ".claude-ds.json"), raw, "utf8");
 
 		const changes = await migrateConfig.plan(fakeCtx());
@@ -80,8 +78,7 @@ describe("migrateConfig op — plan()", () => {
 	});
 
 	it("round-trip idempotence: apply via Runner, re-plan returns []", async () => {
-		const raw =
-			JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }, null, 2) + "\n";
+		const raw = `${JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }, null, 2)}\n`;
 		await writeFile(join(cwd, ".claude-ds.json"), raw, "utf8");
 
 		// We need a real ProjectContext for the Runner (it only uses cwd for writes).
@@ -102,8 +99,7 @@ describe("migrateConfig op — plan()", () => {
 
 	it("detects src/app/ layout when present", async () => {
 		await mkdir(join(cwd, "src", "app"), { recursive: true });
-		const raw =
-			JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }, null, 2) + "\n";
+		const raw = `${JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }, null, 2)}\n`;
 		await writeFile(join(cwd, ".claude-ds.json"), raw, "utf8");
 		const changes = await migrateConfig.plan(fakeCtx());
 		const c = changes[0] as Extract<Change, { kind: "write" }>;
@@ -112,8 +108,7 @@ describe("migrateConfig op — plan()", () => {
 	});
 
 	it("loadProject + migrateConfig pipeline integrates cleanly on pre-v0.6 config", async () => {
-		const raw =
-			JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }, null, 2) + "\n";
+		const raw = `${JSON.stringify({ version: "v0.5.0", pack: "next-react", mode: "warn" }, null, 2)}\n`;
 		await writeFile(join(cwd, ".claude-ds.json"), raw, "utf8");
 		// loadProject must not mutate the file (no hidden side effect, per #84).
 		await loadProject(cwd).catch(() => undefined); // packDir resolution may fail in this fixture, that's fine

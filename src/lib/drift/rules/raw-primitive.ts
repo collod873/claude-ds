@@ -223,7 +223,7 @@ function rewriteRawElement(
 		const parts = [`<${atomComponent}`];
 		if (variantProp) parts.push(` ${variantProp}`);
 		if (cleanAttrs) parts.push(` ${cleanAttrs}`);
-		return parts.join("") + ">";
+		return `${parts.join("")}>`;
 	});
 
 	result = result.replace(closeTagRe, `</${atomComponent}>`);
@@ -238,7 +238,7 @@ function rewriteRawElement(
 		const parts = [`<${atomComponent}`];
 		if (variantProp) parts.push(` ${variantProp}`);
 		if (cleanAttrs) parts.push(` ${cleanAttrs}`);
-		return parts.join("") + " />";
+		return `${parts.join("")} />`;
 	});
 
 	return result;
@@ -263,8 +263,7 @@ function rewriteInstances(source: string, rewrites: InstanceRewrite[]): string {
 			const parts = [`<${atomComponent}`];
 			if (variantProp) parts.push(` ${variantProp}`);
 			if (cleanAttrs) parts.push(` ${cleanAttrs}`);
-			result =
-				result.slice(0, index) + parts.join("") + " />" + result.slice(index + selfMatch[0].length);
+			result = `${result.slice(0, index) + parts.join("")} />${result.slice(index + selfMatch[0].length)}`;
 			continue;
 		}
 
@@ -277,8 +276,7 @@ function rewriteInstances(source: string, rewrites: InstanceRewrite[]): string {
 			const parts = [`<${atomComponent}`];
 			if (variantProp) parts.push(` ${variantProp}`);
 			if (cleanAttrs) parts.push(` ${cleanAttrs}`);
-			let replaced =
-				result.slice(0, index) + parts.join("") + ">" + result.slice(index + openMatch[0].length);
+			let replaced = `${result.slice(0, index) + parts.join("")}>${result.slice(index + openMatch[0].length)}`;
 
 			const closeRe = new RegExp(`</${element}>`);
 			const closeMatch = replaced.slice(index).match(closeRe);

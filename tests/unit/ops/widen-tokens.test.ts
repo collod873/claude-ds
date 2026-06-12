@@ -39,7 +39,7 @@ const BASE_TOKENS = { color: { primary: "#0070f3", background: "#ffffff", foregr
 
 async function writeTokens(tokens: object): Promise<void> {
 	await mkdir(join(cwd, "design-system"), { recursive: true });
-	await writeFile(join(cwd, "design-system/tokens.json"), JSON.stringify(tokens, null, 2) + "\n");
+	await writeFile(join(cwd, "design-system/tokens.json"), `${JSON.stringify(tokens, null, 2)}\n`);
 }
 
 async function readTokens(): Promise<Record<string, unknown>> {
@@ -171,7 +171,7 @@ describe("widen-tokens migration Op", () => {
 		const current = await readTokens();
 		const [change] = await widenTokensMigration.plan(makeCtx());
 		const before = (change as { kind: "write"; before: Buffer | null }).before;
-		expect(before).not.toBeNull();
-		expect(JSON.parse(before!.toString("utf8"))).toEqual(current);
+		if (!before) throw new Error("expected write change to carry before snapshot");
+		expect(JSON.parse(before.toString("utf8"))).toEqual(current);
 	});
 });

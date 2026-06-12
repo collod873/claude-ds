@@ -167,7 +167,7 @@ export async function adoptCmd(opts: {
 		lines.push("");
 		lines.push("No files were modified.");
 		lines.push("If these matches are false positives, re-run with --ignore '<glob>,<glob>'");
-		process.stderr.write(lines.join("\n") + "\n");
+		process.stderr.write(`${lines.join("\n")}\n`);
 		if (opts.json) {
 			emitHeadless(
 				errorResult("adopt", "lookalikes detected — rename to canonical names first", {
@@ -398,7 +398,7 @@ export async function adoptCmd(opts: {
 			lines.push("To diff before adopt, run: claude-ds doctor --pack <name>");
 			// Issue #408: under --json the JSON document must be the entirety of
 			// stdout. The overwrite preview rides on `actions.overwrites` instead.
-			if (!opts.json) process.stdout.write(lines.join("\n") + "\n");
+			if (!opts.json) process.stdout.write(`${lines.join("\n")}\n`);
 		}
 
 		progress.start("finishing setup");

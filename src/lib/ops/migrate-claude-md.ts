@@ -81,7 +81,7 @@ export const migrateClaudeMd: Operation = {
 		const before = rootContent.slice(0, openIdx).replace(/\n+$/, "");
 		const after = rootContent.slice(closeIdx + CLOSE_MARKER.length).replace(/^\n+/, "");
 		const trimmedHeading = before.replace(/##\s+claude-ds\s*$/m, "").replace(/\n+$/, "");
-		const stripped = (trimmedHeading + (after ? "\n\n" + after : "")).trim();
+		const stripped = (trimmedHeading + (after ? `\n\n${after}` : "")).trim();
 		const isClaudeOwnedShell = stripped === "" || /^#\s+Project\s*$/.test(stripped);
 
 		if (isClaudeOwnedShell) {
@@ -95,7 +95,7 @@ export const migrateClaudeMd: Operation = {
 				kind: "write",
 				path: "CLAUDE.md",
 				before: Buffer.from(rootContent, "utf8"),
-				after: Buffer.from(stripped + "\n", "utf8"),
+				after: Buffer.from(`${stripped}\n`, "utf8"),
 			});
 		}
 

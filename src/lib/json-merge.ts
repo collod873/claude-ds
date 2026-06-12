@@ -234,7 +234,7 @@ export function pruneHooksJson(
 	}
 
 	if (!changed) return null;
-	return JSON.stringify({ ...obj, hooks: pruned }, null, indent) + "\n";
+	return `${JSON.stringify({ ...obj, hooks: pruned }, null, indent)}\n`;
 }
 
 /**
@@ -279,19 +279,19 @@ export function mergeJsonKeys(
 	for (const key of ownedKeys) {
 		if (key === "hooks") {
 			// Namespace-aware merge: user hooks survive, pack hooks are idempotently applied
-			const upstreamHooks = (upstreamObj["hooks"] ?? {}) as Record<string, unknown>;
-			const currentHooks = (currentObj["hooks"] ?? {}) as Record<string, unknown>;
-			merged["hooks"] = mergeHooks(upstreamHooks, currentHooks);
+			const upstreamHooks = (upstreamObj.hooks ?? {}) as Record<string, unknown>;
+			const currentHooks = (currentObj.hooks ?? {}) as Record<string, unknown>;
+			merged.hooks = mergeHooks(upstreamHooks, currentHooks);
 		} else if (key === "scripts") {
 			// Namespace-aware merge: user scripts survive, pack-owned namespace is idempotently applied
-			const upstreamScripts = (upstreamObj["scripts"] ?? {}) as Record<string, unknown>;
-			const currentScripts = (currentObj["scripts"] ?? {}) as Record<string, unknown>;
-			merged["scripts"] = mergeScripts(upstreamScripts, currentScripts);
+			const upstreamScripts = (upstreamObj.scripts ?? {}) as Record<string, unknown>;
+			const currentScripts = (currentObj.scripts ?? {}) as Record<string, unknown>;
+			merged.scripts = mergeScripts(upstreamScripts, currentScripts);
 		} else if (key === "devDependencies") {
 			// Namespace-aware merge: user devDeps survive, pack devDeps declared idempotently (F8 / #351)
-			const upstreamDeps = (upstreamObj["devDependencies"] ?? {}) as Record<string, unknown>;
-			const currentDeps = (currentObj["devDependencies"] ?? {}) as Record<string, unknown>;
-			merged["devDependencies"] = mergeDevDependencies(upstreamDeps, currentDeps);
+			const upstreamDeps = (upstreamObj.devDependencies ?? {}) as Record<string, unknown>;
+			const currentDeps = (currentObj.devDependencies ?? {}) as Record<string, unknown>;
+			merged.devDependencies = mergeDevDependencies(upstreamDeps, currentDeps);
 		} else {
 			// Wholesale replace for all other owned keys
 			if (Object.hasOwn(upstreamObj, key)) {
@@ -300,5 +300,5 @@ export function mergeJsonKeys(
 		}
 	}
 
-	return JSON.stringify(merged, null, indent) + "\n";
+	return `${JSON.stringify(merged, null, indent)}\n`;
 }

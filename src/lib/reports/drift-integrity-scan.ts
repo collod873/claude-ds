@@ -64,7 +64,7 @@ export async function scanDriftAndIntegrity(ctx: ProjectContext): Promise<DriftI
 			continue;
 		const subPath = f.slice("design-system/".length);
 		const inTierDir = DRIFT_TIER_DIRS.some(
-			(d) => f.startsWith(d + "/") && !subPath.slice(subPath.indexOf("/") + 1).includes("/"),
+			(d) => f.startsWith(`${d}/`) && !subPath.slice(subPath.indexOf("/") + 1).includes("/"),
 		);
 		const inReferencesDir =
 			f.startsWith("design-system/references/") &&

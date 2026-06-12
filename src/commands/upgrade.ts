@@ -72,12 +72,12 @@ function renderUpgradePreview(
 	}
 	if (mode === "diff") {
 		for (const { opName, change } of entries) {
-			process.stdout.write(renderDiff(opName, change) + "\n");
+			process.stdout.write(`${renderDiff(opName, change)}\n`);
 		}
 		return;
 	}
 	for (const line of renderChangeSummary(entries)) {
-		process.stdout.write(line + "\n");
+		process.stdout.write(`${line}\n`);
 	}
 }
 
@@ -106,7 +106,7 @@ function emitUpgradeHeadless(
 		remaining,
 		changes: payload.changes,
 	};
-	process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+	process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
 	setJsonMode(false);
 	return resultForExit(exitCode);
 }

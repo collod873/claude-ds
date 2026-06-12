@@ -240,7 +240,7 @@ function aliasSpecifierFor(
 		for (const v of vals) {
 			const target = String(v).replace(/^\.\//, "").replace(/\/\*$/, "");
 			if (!target) continue;
-			if (noExt === target || noExt.startsWith(target + "/")) {
+			if (noExt === target || noExt.startsWith(`${target}/`)) {
 				candidates.push({ specifier: prefix + noExt.slice(target.length), prefix });
 				break;
 			}
@@ -294,7 +294,7 @@ export async function buildRepairEnv(ctx: ProjectContext, fileName: string): Pro
 	const sources = collected.map((c) => c.source);
 	const { named, defaults, namedTypeOnly } = indexImportGraph(sources);
 
-	const dsPrefix = "design-system" + sep;
+	const dsPrefix = `design-system${sep}`;
 	const dsFiles = collected.filter(
 		(c) => c.rel.startsWith(dsPrefix) || c.rel.startsWith("design-system/"),
 	);

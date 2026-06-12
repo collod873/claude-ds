@@ -255,7 +255,7 @@ describe("scanOwnedConcerns — hook-liveness gate (#505)", () => {
 		});
 		const hit = findings.find((f) => f.concernId === "OWNED-APP-WIDE-TOKEN-LINT");
 		expect(hit).toBeDefined();
-		expect(hit!.supersededBy).toBe("HOOK-TOKENS-APP-WIDE");
+		expect(hit?.supersededBy).toBe("HOOK-TOKENS-APP-WIDE");
 	});
 
 	it("downgrades supersededBy to null when the hook is dormant (default scope)", async () => {
@@ -269,6 +269,6 @@ describe("scanOwnedConcerns — hook-liveness gate (#505)", () => {
 		});
 		const hit = findings.find((f) => f.concernId === "OWNED-APP-WIDE-TOKEN-LINT");
 		expect(hit).toBeDefined();
-		expect(hit!.supersededBy).toBeNull();
+		expect(hit?.supersededBy).toBeNull();
 	});
 });

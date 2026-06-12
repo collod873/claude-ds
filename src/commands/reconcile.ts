@@ -296,7 +296,7 @@ export async function reconcileCmd(opts: {
 		}
 	}
 	lines.push("");
-	process.stdout.write(lines.join("\n") + "\n");
+	process.stdout.write(`${lines.join("\n")}\n`);
 
 	if (dryRun) {
 		const total =

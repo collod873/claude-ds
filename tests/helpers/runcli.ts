@@ -58,9 +58,9 @@ export async function runCli(args: string[], opts: RunOpts): Promise<RunResult> 
 	// to catch both the CLI's info()/err() (which call console.log/error) and
 	// anything else that bypasses process.std{out,err}.write.
 	const fmt = (args: unknown[]) =>
-		args
+		`${args
 			.map((a) => (typeof a === "string" ? a : a instanceof Error ? a.message : JSON.stringify(a)))
-			.join(" ") + "\n";
+			.join(" ")}\n`;
 	console.log = (...args: unknown[]) => {
 		stdout += fmt(args);
 	};

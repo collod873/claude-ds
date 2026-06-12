@@ -311,7 +311,7 @@ function insertHelpersAfterImports(source: string, helpers: string): string {
 	}
 	if (lastImportEnd === 0) {
 		// No imports — prepend at the very start
-		return helpers + "\n\n" + source;
+		return `${helpers}\n\n${source}`;
 	}
 	// Insert after the last import
 	return (
@@ -327,9 +327,9 @@ function addImportLine(source: string, line: string): string {
 	if (source.includes(line.trim())) return source;
 	const m = source.match(/^import\s/m);
 	if (m && m.index !== undefined) {
-		return source.slice(0, m.index) + line + "\n" + source.slice(m.index);
+		return `${source.slice(0, m.index) + line}\n${source.slice(m.index)}`;
 	}
-	return line + "\n" + source;
+	return `${line}\n${source}`;
 }
 
 /** Collect all tier files in a directory. */

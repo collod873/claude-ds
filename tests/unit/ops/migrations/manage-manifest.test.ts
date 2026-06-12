@@ -56,8 +56,8 @@ describe("manageManifestMigration.plan()", () => {
 			(c): c is Extract<Change, { kind: "write" }> => c.kind === "write" && c.path === PACK_SCRIPT,
 		);
 		expect(write).toBeDefined();
-		expect(write!.before).toBeNull();
-		expect(write!.after.toString("utf8")).toBe(FAKE_SCRIPT);
+		expect(write?.before).toBeNull();
+		expect(write?.after.toString("utf8")).toBe(FAKE_SCRIPT);
 	});
 
 	it("updates build-manifest.ts when consumer has an outdated version", async () => {
@@ -69,8 +69,8 @@ describe("manageManifestMigration.plan()", () => {
 			(c): c is Extract<Change, { kind: "write" }> => c.kind === "write" && c.path === PACK_SCRIPT,
 		);
 		expect(write).toBeDefined();
-		expect(write!.before?.toString("utf8")).toBe("// old version\n");
-		expect(write!.after.toString("utf8")).toBe(FAKE_SCRIPT);
+		expect(write?.before?.toString("utf8")).toBe("// old version\n");
+		expect(write?.after.toString("utf8")).toBe(FAKE_SCRIPT);
 	});
 
 	it("emits no write for build-manifest.ts when already up to date", async () => {
@@ -92,7 +92,7 @@ describe("manageManifestMigration.plan()", () => {
 			(c): c is Extract<Change, { kind: "delete" }> => c.kind === "delete" && c.path === GENERATED,
 		);
 		expect(del).toBeDefined();
-		expect(del!.before.toString("utf8")).toBe(handBuilt);
+		expect(del?.before.toString("utf8")).toBe(handBuilt);
 	});
 
 	it("emits no delete when manifest.generated.ts is absent", async () => {

@@ -61,8 +61,8 @@ function ensureMetaImport(source: string): { source: string; injected: boolean }
 	while (backIdx > 0 && lines[backIdx - 1].trim() === "") backIdx--;
 	const head = lines.slice(0, backIdx).join("\n");
 	const tail = lines.slice(backIdx).join("\n");
-	const headPart = head === "" ? "" : head + "\n";
-	const tailPart = tail.startsWith("\n") ? tail : tail ? "\n" + tail : "";
+	const headPart = head === "" ? "" : `${head}\n`;
+	const tailPart = tail.startsWith("\n") ? tail : tail ? `\n${tail}` : "";
 	return { source: headPart + importLine + tailPart, injected: true };
 }
 

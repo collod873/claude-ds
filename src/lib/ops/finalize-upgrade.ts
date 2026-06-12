@@ -22,7 +22,7 @@ export function finalizeUpgrade(packVersion: string, allowedImports: string[]): 
 			const parsed = JSON.parse(before.toString("utf8")) as Record<string, unknown>;
 			parsed.packVersion = packVersion;
 			parsed.allowed_imports = allowedImports;
-			const after = Buffer.from(JSON.stringify(parsed, null, 2) + "\n", "utf8");
+			const after = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, "utf8");
 			if (before.equals(after)) return [];
 			return [{ kind: "write", path: cfgRel, before, after }];
 		},

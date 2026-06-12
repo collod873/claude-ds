@@ -106,7 +106,7 @@ describe("classificationMovesOp (sub-issue #228)", () => {
 			(c): c is Extract<Change, { kind: "write" }> => c.kind === "write" && c.path === consumerRel,
 		);
 		expect(consumerWrite).toBeDefined();
-		const afterText = consumerWrite!.after.toString("utf8");
+		const afterText = consumerWrite?.after.toString("utf8");
 		expect(afterText).toContain(`from "@/design-system/composites/combobox"`);
 		expect(afterText).not.toContain(`from "@/design-system/atoms/combobox"`);
 	});

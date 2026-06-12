@@ -37,7 +37,7 @@ export const metaKindHardMigration: Operation = {
 				kind: "write",
 				path: cfgRel,
 				before: Buffer.from(raw, "utf8"),
-				after: Buffer.from(JSON.stringify(updated, null, 2) + "\n", "utf8"),
+				after: Buffer.from(`${JSON.stringify(updated, null, 2)}\n`, "utf8"),
 			},
 		];
 	},

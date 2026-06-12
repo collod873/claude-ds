@@ -39,8 +39,8 @@ export function addToConsumerManifest(paths: string[]): Operation {
 
 			const nextFiles = [...files, ...toAdd.map((p) => ({ path: p, category: "seeded" }))];
 			manifestJson.files = nextFiles;
-			const after = Buffer.from(JSON.stringify(manifestJson, null, 2) + "\n", "utf8");
-			if (before && before.equals(after)) return [];
+			const after = Buffer.from(`${JSON.stringify(manifestJson, null, 2)}\n`, "utf8");
+			if (before?.equals(after)) return [];
 
 			return [{ kind: "write", path: CONSUMER_MANIFEST_PATH, before, after }];
 		},

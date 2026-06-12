@@ -133,7 +133,7 @@ export async function applyMigration(
 		onDisk.claude_md_target = target;
 	}
 
-	return { before: rawJson, migrated: JSON.stringify(onDisk, null, 2) + "\n" };
+	return { before: rawJson, migrated: `${JSON.stringify(onDisk, null, 2)}\n` };
 }
 
 /**

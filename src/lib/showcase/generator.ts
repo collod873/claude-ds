@@ -186,7 +186,7 @@ function resolveAtPrefix(importPath: string, consumerRoot: string): string {
 				const prefix = pattern.replace(/\/\*$/, "/");
 				if (importPath.startsWith(prefix) && targets[0]) {
 					const mapped = targets[0].replace(/\/\*$/, "/").replace(/^\.\//, "");
-					const result = importPath.replace(prefix, mapped + "/").replace(/\/+/g, "/");
+					const result = importPath.replace(prefix, `${mapped}/`).replace(/\/+/g, "/");
 					// Strip any accidental leading "/" that would be misread as a filesystem root.
 					// e.g. when targets[0] = "./*" the replacement produces "/foo" instead of "foo".
 					return result.startsWith("/") ? result.slice(1) : result;
@@ -229,7 +229,7 @@ function filePathToAlias(absoluteFilePath: string, consumerRoot: string): string
 			const targetAbsDir = targetRelDir ? resolvePath(canonicalRoot, targetRelDir) : canonicalRoot;
 			// Strip any trailing "/" for normalised comparison
 			const normalTarget = targetAbsDir.replace(/\/$/, "");
-			if (canonicalFile.startsWith(normalTarget + "/")) {
+			if (canonicalFile.startsWith(`${normalTarget}/`)) {
 				const rest = canonicalFile.slice(normalTarget.length + 1);
 				// Drop known TS extensions — the alias specifier shouldn't include them
 				const noExt = rest.replace(/\.(tsx?|d\.ts)$/, "");
@@ -1213,10 +1213,10 @@ function buildScopes(
 			// Try extensions
 			const candidates = [
 				resolved,
-				resolved + ".ts",
-				resolved + ".tsx",
-				resolved + "/index.ts",
-				resolved + "/index.tsx",
+				`${resolved}.ts`,
+				`${resolved}.tsx`,
+				`${resolved}/index.ts`,
+				`${resolved}/index.tsx`,
 			];
 			const found = candidates.find((c) => existsSync(c));
 			if (!found) continue;
@@ -1573,7 +1573,7 @@ function autoChildren(
 	acceptsChildren = true,
 ): string {
 	if ("children" in props) return ""; // explicit children present
-	const sizeVal = props["size"] ?? "";
+	const sizeVal = props.size ?? "";
 	if (isIconSize(sizeVal)) return `<Square aria-hidden="true" className="h-4 w-4" />`;
 	// #68: components without a `children` prop should self-close, not stuff
 	// displayName as a text node (which fails the prop type and breaks tsc).
@@ -1742,7 +1742,7 @@ function emitUsageBlock(usage: UsageInfo | undefined, cvaConfig: CvaConfig | nul
 		for (const [value, count] of valueMap.entries()) {
 			if (count <= 0) continue;
 			const label = `${prop}="${value}" (${count})`;
-			if (isExactCvaVariant && cvaValues!.includes(value)) {
+			if (isExactCvaVariant && cvaValues?.includes(value)) {
 				used.push(label);
 			} else if (isExactCvaVariant || isNearCvaVariant) {
 				// Exact variant name with a value outside the enum, OR a near-miss variant name
@@ -1832,7 +1832,7 @@ function renderCarriedRefs(carried: Map<string, CarriedRef>): string {
 			if (re.test(src)) {
 				// `name` depends on `dep` — dep must come before name
 				inDegree.set(name, (inDegree.get(name) ?? 0) + 1);
-				dependents.get(dep)!.push(name);
+				dependents.get(dep)?.push(name);
 			}
 		}
 	}
@@ -1999,7 +1999,7 @@ function emitAtomCompositeShowcase(
 				const propsStr = renderPropsAttr(ex.props);
 				return [
 					`        <div className="flex flex-col items-start gap-1">`,
-					`          <${displayName}${propsStr ? " " + propsStr : ""} />`,
+					`          <${displayName}${propsStr ? ` ${propsStr}` : ""} />`,
 					`          <span className="text-xs text-muted-foreground">${ex.name}</span>`,
 					`        </div>`,
 				].join("\n");
@@ -2061,7 +2061,7 @@ function emitAtomCompositeShowcase(
 							.join(", ");
 						return [
 							`          <div className="flex flex-col items-start gap-1">`,
-							`            <${displayName}${propsStr ? " " + propsStr : ""}${children ? `>${children}</${displayName}>` : " />"}`,
+							`            <${displayName}${propsStr ? ` ${propsStr}` : ""}${children ? `>${children}</${displayName}>` : " />"}`,
 							`            <span className="text-xs text-muted-foreground">${secondaryLabel || primaryVal}</span>`,
 							`          </div>`,
 						].join("\n");
@@ -2104,7 +2104,7 @@ function emitAtomCompositeShowcase(
 	// Square placeholder is injected for any icon-size cell without explicit children.
 	const needsSquareImport = cvaExamples.some((ce) => {
 		if ("children" in ce.props) return false;
-		return isIconSize(ce.props["size"] ?? "");
+		return isIconSize(ce.props.size ?? "");
 	});
 	const squareImportLine = needsSquareImport ? `import { Square } from "lucide-react";` : "";
 

@@ -394,7 +394,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 	it("auto-deletes deprecated orphans without needing a separate reconcile call", async () => {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.2.1",
 					pack: "next-react",
@@ -403,7 +403,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		// Plant deprecated orphans
 		await writeFile(join(dir, "contracts.md"), "# legacy\n");
@@ -426,7 +426,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 	it("auto-prunes dangling hook scripts", async () => {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.8.0",
 					pack: "next-react",
@@ -435,7 +435,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		await mkdir(join(dir, ".claude", "hooks"), { recursive: true });
 		// Deprecated script
@@ -467,7 +467,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 				],
 			},
 		};
-		await writeFile(join(dir, ".claude/settings.json"), JSON.stringify(settings, null, 2) + "\n");
+		await writeFile(join(dir, ".claude/settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
 
 		const r = await runCli(["audit", "--fix"], { cwd: dir });
 		expect(r.code).toBe(0);
@@ -486,7 +486,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 	it("auto-resolves CLAUDE.md collision by deleting root CLAUDE.md", async () => {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.2.1",
 					pack: "next-react",
@@ -496,7 +496,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		await writeFile(join(dir, "CLAUDE.md"), "<!-- claude-ds managed -->\n# Project\n");
 		await mkdir(join(dir, ".claude"), { recursive: true });
@@ -511,7 +511,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 	it("standalone reconcile command still works independently", async () => {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.2.1",
 					pack: "next-react",
@@ -520,7 +520,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		await writeFile(join(dir, "contracts.md"), "# legacy\n");
 		await mkdir(join(dir, "design-system"), { recursive: true });
@@ -534,7 +534,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 	it("reconcile scorecard counts appear in audit output", async () => {
 		await writeFile(
 			join(dir, ".claude-ds.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					version: "v0.2.1",
 					pack: "next-react",
@@ -543,7 +543,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 				},
 				null,
 				2,
-			) + "\n",
+			)}\n`,
 		);
 		await writeFile(join(dir, "contracts.md"), "# legacy\n");
 		await mkdir(join(dir, "design-system"), { recursive: true });
