@@ -3,6 +3,7 @@ import { join } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
 import { type CleanTreeState, checkCleanTree } from "../lib/clean-tree.js";
 import type { PendingDecision } from "../lib/decision/index.js";
+import { awaitCommitment, buildCommitmentGate, gateFindingCounts } from "../lib/gate-preview.js";
 import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
 import { err, info, setJsonMode } from "../lib/log.js";
 import {
@@ -13,7 +14,8 @@ import { loadProject } from "../lib/project.js";
 import { deriveProjectState } from "../lib/project-state.js";
 import { driveRemediation } from "../lib/remediation-driver.js";
 import { planRemediation } from "../lib/remediation-planner.js";
-import { createProgress } from "../lib/render/tty-layer.js";
+import { isTTY } from "../lib/render/index.js";
+import { createProgress, printLines } from "../lib/render/tty-layer.js";
 import { formatVerifyErrors } from "../lib/reports/findings-format.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 import type { RunLedger } from "../lib/run-ledger.js";
@@ -141,6 +143,21 @@ export interface HealOpts {
 	 * to `CLAUDE_DS_VERIFY_TIMEOUT` then the default.
 	 */
 	verifyTimeout?: number;
+	/**
+	 * Issue #585: skip the upfront consent gate. `heal` in a TTY renders the plan
+	 * preview and the same `[Enter]`-approves prompt the front door uses before
+	 * mutating anything; `--yes` opts past it. Non-TTY runs imply `yes` (the gate
+	 * never blocks CI), so this flag only matters when a human runs heal in a
+	 * terminal but wants to skip the confirmation.
+	 */
+	yes?: boolean;
+	/**
+	 * Issue #585: whether the consent gate's `[Enter]` prompt may run. Mirrors the
+	 * front door's `interactive` seam — `cli.ts` sets it from `isTTY()`, and tests
+	 * pass it explicitly to drive the real prompt against a fake stdin without a
+	 * pseudo-TTY. Defaults to `isTTY()`.
+	 */
+	interactive?: boolean;
 }
 
 export async function healCmd(opts: HealOpts): Promise<void> {
@@ -216,6 +233,38 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 			err(`heal --dry-run: plan would run ${plan.join(" → ")} (${plan.length} step(s))`);
 		}
 		process.exit(ok ? 0 : 1);
+	}
+
+	// Upfront consent gate (#585, PRD #576). heal is the headless driver, but a
+	// human typing `claude-ds heal` in a terminal gets the same informed `[Enter]`
+	// gate the front door shows before any mutation: the projected plan, the
+	// per-rule `audit --fix` preview (#584), then one prompt. `--yes` opts past it;
+	// non-TTY implies `--yes` (so CI never blocks), and `--json` is a headless
+	// contract whose stdout must stay machine-clean — both skip the gate. No
+	// per-step gates inside the loop: the single-planner contract (ADR-0018) holds,
+	// and front-door-driven runs are never double-gated because the front door
+	// drives `driveRemediation` directly, never `healCmd` — its own gate already
+	// fired upstream.
+	// An interactive gate needs a terminal on BOTH ends: stdout to render the
+	// preview, stdin to read the `[Enter]`. A piped/redirected stdin (CI, agents,
+	// `echo | heal`) can't approve, so it implies `--yes` and drives straight
+	// through — the "non-TTY implies --yes" contract. Tests pass `interactive`
+	// explicitly to drive the prompt against a fake stdin.
+	const interactive = opts.interactive ?? (isTTY() && process.stdin.isTTY === true);
+	if (interactive && !opts.yes && !opts.json) {
+		const ctx = await loadProject(cwd);
+		const plan = planRemediation(await deriveProjectState(cwd));
+		// An empty plan is already a fixed point — nothing to consent to. Fall
+		// through to the loop, which converges immediately and runs the verify gate.
+		if (plan.length > 0) {
+			const counts = await gateFindingCounts(ctx);
+			printLines(await buildCommitmentGate(ctx, plan, counts));
+			const approved = await awaitCommitment();
+			if (!approved) {
+				info("heal: cancelled — nothing changed.");
+				return;
+			}
+		}
 	}
 
 	// Resumability hint (PRD #325 / sub-issue #328). TTY only — agent runs
