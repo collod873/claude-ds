@@ -64,6 +64,20 @@ describe("audit — structural-bypass advisory (#457)", () => {
 		expect(r.stdout).toContain("toast");
 	});
 
+	it("groups same-rule advisories: mechanism sentence once, paths once (#586)", async () => {
+		const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
+		// Two BYPASS-BADGE findings (StatusBadge + the over-flagged FilterPill),
+		// but the dismiss/mechanism sentence renders exactly once for the rule.
+		const badgeMechanism = r.stdout
+			.split("\n")
+			.filter((l) => l.includes("[BYPASS-BADGE]") && l.includes("dismiss via"));
+		expect(badgeMechanism).toHaveLength(1);
+		expect(badgeMechanism[0]).toContain("(2 findings)");
+		// Each finding's path appears once, indented under its rule header.
+		expect(r.stdout.match(/StatusBadge\.tsx/g) ?? []).toHaveLength(1);
+		expect(r.stdout.match(/FilterPill\.tsx/g) ?? []).toHaveLength(1);
+	});
+
 	it("advisory findings do not change the exit code (non-blocking)", async () => {
 		// A clean tree (no bypass files) and the bypass tree both exit 0 from a
 		// read-only audit — advisory candidates never flip the verdict.
