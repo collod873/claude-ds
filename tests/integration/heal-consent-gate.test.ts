@@ -138,8 +138,8 @@ describe("claude-ds heal — upfront consent gate (#585)", () => {
 		const { stdout } = await runHeal(dir, "no\n", { interactive: true });
 
 		// The gate rendered the commitment preview and the [Enter] prompt …
-		expect(stdout).toContain("I'll bring this tree to clean");
-		expect(stdout).toContain("[Enter] to run all, anything else to cancel");
+		expect(stdout).toContain("Pressing Enter will:");
+		expect(stdout).toMatch(/\[Enter\] runs the \d+ steps? above, anything else to cancel/);
 		expect(stdout).toContain("heal: cancelled — nothing changed.");
 		// … and the cancel returned before the loop, so nothing moved.
 		expect(await fileExists(combo)).toBe(true);
@@ -152,7 +152,7 @@ describe("claude-ds heal — upfront consent gate (#585)", () => {
 		// Empty input ([Enter]) approves the whole plan.
 		const { stdout } = await runHeal(dir, "\n", { interactive: true });
 
-		expect(stdout).toContain("I'll bring this tree to clean");
+		expect(stdout).toContain("Pressing Enter will:");
 		// Approval let the loop run: the corrupt atom relocated to composites/.
 		expect(await fileExists(join(dir, "design-system/composites/combo.tsx"))).toBe(true);
 		expect(await fileExists(join(dir, "design-system/atoms/combo.tsx"))).toBe(false);
@@ -165,8 +165,8 @@ describe("claude-ds heal — upfront consent gate (#585)", () => {
 		const { stdout } = await runHeal(dir, "", { interactive: true, yes: true });
 
 		// No gate preview, no prompt — and the loop still converged.
-		expect(stdout).not.toContain("I'll bring this tree to clean");
-		expect(stdout).not.toContain("[Enter] to run all");
+		expect(stdout).not.toContain("Pressing Enter will:");
+		expect(stdout).not.toMatch(/\[Enter\] runs the/);
 		expect(await fileExists(join(dir, "design-system/composites/combo.tsx"))).toBe(true);
 		expect(stdout).toMatch(/converged/);
 	}, 30000);
@@ -176,8 +176,8 @@ describe("claude-ds heal — upfront consent gate (#585)", () => {
 
 		const { stdout } = await runHeal(dir, "", { interactive: false });
 
-		expect(stdout).not.toContain("I'll bring this tree to clean");
-		expect(stdout).not.toContain("[Enter] to run all");
+		expect(stdout).not.toContain("Pressing Enter will:");
+		expect(stdout).not.toMatch(/\[Enter\] runs the/);
 		expect(await fileExists(join(dir, "design-system/composites/combo.tsx"))).toBe(true);
 		expect(stdout).toMatch(/converged/);
 	}, 30000);

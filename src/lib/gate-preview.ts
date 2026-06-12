@@ -45,7 +45,7 @@ import { scanDriftAndIntegrity } from "./reports/drift-integrity-scan.js";
 import { walkDir } from "./reports/unexpected-files.js";
 import { run } from "./runner.js";
 import { metaKindFromSource } from "./three-signal.js";
-import { cliVersion, upgradeHeadline } from "./version-vocab.js";
+import { cliVersion } from "./version-vocab.js";
 
 /**
  * Real finding counts the planner's finding-driven steps respond to. Folded by
@@ -183,9 +183,9 @@ function summaryEntriesFromRun(
 	return entries;
 }
 
-/** Indent a rendered summary block under its step header. */
+/** Indent a rendered summary block under its numbered step action (#621). */
 function indent(lines: string[]): string[] {
-	return lines.map((l) => `    ${l}`);
+	return lines.map((l) => `     ${l}`);
 }
 
 /**
@@ -244,42 +244,51 @@ export async function previewStepChanges(
 	}
 }
 
+/**
+ * The plain-language sentence for a step the consumer reads in the gate's
+ * numbered run list (#621). Internal step keys (`reconform`, `audit --fix`) and
+ * internal vocabulary (`pin advance`, `drift`) stay in code and docs — they
+ * never reach this string. The behavior each line names is unchanged; only the
+ * words are consumer-facing.
+ */
 function stepHeader(step: LoopStep, ctx: ProjectContext, counts: GateFindingCounts): string {
 	switch (step) {
 		case "upgrade": {
-			// Issue #412: route every upgrade headline through `upgradeHeadline` so
-			// an empty chain cannot render `pack X → Y`. The previous header was
-			// synthesised from `(packVersion, pkg.version)` alone — when the CLI
-			// was ahead but no migrations spanned the gap, it falsely promised a
-			// migration. On an empty chain the headline now names the real pin
-			// advance and the body (#536) shows the matching `.claude-ds.json` write.
+			// Issue #412: the header is computed from the real migration chain, never
+			// synthesised from `(packVersion, pkg.version)` alone — an empty chain
+			// cannot promise a migration. When migrations span the gap the pack
+			// genuinely moves; when none do, only the version pin advances and the
+			// consumer's files are untouched (#540). Both keep the `from → to` visible
+			// so the dashboard/loop cross-check still holds — but in plain words, never
+			// the internal "pin advance (no migrations)" phrasing.
 			const from = ctx.cfg.packVersion;
 			const to = cliVersion();
 			const chain = computeMigrationChain(from, to, MIGRATION_REGISTRY);
-			return `upgrade — ${upgradeHeadline({ from, to, chainLength: chain.length })}`;
+			if (from === to) return `re-check your ${to} files are intact`;
+			if (chain.length === 0) return `update ${from} → ${to} (your files don't change)`;
+			return `update the pack ${from} → ${to}`;
 		}
 		case "sync":
-			return "sync — restore managed scaffold files";
+			return "restore the design-system files claude-ds manages";
 		case "repair":
-			return "repair — restore drifted migration end-states";
+			return "restore files that drifted from a past update";
 		case "classify": {
 			const n = counts.classifyCount;
 			const noun = n === 1 ? "component" : "components";
-			return `classify — extract / relocate ${n} ${noun}`;
+			return `extract or relocate ${n} ${noun}`;
 		}
 		case "audit --fix": {
 			const n = counts.autoFixableCount;
-			const noun = n === 1 ? "finding" : "findings";
-			return `audit --fix — auto-repair ${n} ${noun}`;
+			const noun = n === 1 ? "issue" : "issues";
+			return `fix ${n} ${noun} automatically`;
 		}
 		case "reconform":
 			// #590: reconform regenerates generated-integrity companions
 			// (GEN-001/GEN-002) after sync. It is finding-driven — no faithful
 			// up-front dry-run — so unlike sync/upgrade it renders no Change[] block
-			// (`previewStepChanges` returns null). Without an explainer the entry was
-			// a bare "reconform" header: a counted plan step with no line saying what
-			// it does or why nothing previews under it.
-			return "reconform — regenerates companions post-sync; nothing to preview";
+			// (`previewStepChanges` returns null). The consumer sentence names what it
+			// does; the "nothing to preview" note was internal bookkeeping and is gone.
+			return "regenerate the auto-generated files";
 		case "migrate-layout":
 		case "reconcile":
 			return step;
@@ -425,6 +434,33 @@ export interface GateOpts {
 	 * verbose only changes how much detail the operator sees while consenting.
 	 */
 	verbose?: boolean;
+	/**
+	 * Issue #621 / block 2. The count of completeness findings (hand-rolled DS
+	 * infra, ADR-0003) the gate's plan will NOT fix — these are not remediation-
+	 * loop members, so pressing Enter never touches them. When > 0 the gate
+	 * renders the honest "won't fix" block naming the exact follow-up command
+	 * (`npx claude-ds doctor --completeness`); when 0 (or omitted) there is nothing
+	 * the gate leaves behind, so the block is silent.
+	 */
+	completenessCount?: number;
+}
+
+/**
+ * Block 2 of the honest gate (#621): what pressing Enter will NOT fix, and the
+ * one command that does. Completeness findings (hand-rolled DS infra, ADR-0003)
+ * are not remediation-loop members — the run list above never touches them — so
+ * naming them here, with the exact follow-up command, is the difference between
+ * an honest gate and one that over-promises. Plain words: "scripts you built by
+ * hand", never the internal "hand-rolled DS infra" label.
+ */
+function renderWontFixBlock(count: number): string[] {
+	const noun = count === 1 ? "thing" : "things";
+	return [
+		"",
+		"Pressing Enter won't fix:",
+		`  ${count} ${noun} you built by hand that the design-system now provides —`,
+		"  run `npx claude-ds doctor --completeness` to retire those.",
+	];
 }
 
 export async function buildCommitmentGate(
@@ -444,21 +480,19 @@ export async function buildCommitmentGate(
 	};
 
 	const lines: string[] = [];
+	// Block 1 (#621): what pressing Enter will run, as a numbered list of plain-
+	// language actions. The internal `sync → upgrade → audit --fix` step-key chain
+	// and the "Converging until no drift" jargon are gone — the consumer reads the
+	// actions, not the tool's vocabulary.
 	lines.push("");
-	lines.push(
-		`I'll bring this tree to clean — ${projected.length} step${projected.length === 1 ? "" : "s"}:`,
-	);
-	lines.push(`  ${projected.join(" → ")}`);
-	// C3 convergence explainer: name the bounded loop so "pass 1/3" later
-	// reads as planned, not stuck.
-	lines.push("  Converging until no drift — up to 3 passes.");
-	lines.push("");
+	lines.push("Pressing Enter will:");
 
 	const render = opts.verbose ? renderChangeSummary : renderChangeTierSummary;
 
-	for (const step of projected) {
-		lines.push(stepHeader(step, ctx, effectiveCounts));
-		// Per-rule audit preview (#584): under the `audit --fix` header, group the
+	for (let i = 0; i < projected.length; i++) {
+		const step = projected[i];
+		lines.push(`  ${i + 1}. ${stepHeader(step, ctx, effectiveCounts)}`);
+		// Per-rule audit preview (#584): under the `audit --fix` action, group the
 		// consumed finding set by rule so the bare count is backed by rule × severity
 		// × file detail. The cascade-projected backfill (when present) is disclosed
 		// separately under its origin step, so this lists only what the scan saw.
@@ -476,7 +510,7 @@ export async function buildCommitmentGate(
 				// only" tail was upgrade-specific and, post-#540, contradicted the pin
 				// write the upgrade step now shows (Crewops defect 3, #536); kept
 				// generic so it can never imply a hidden change.
-				lines.push("    (no file changes)");
+				lines.push("     (no file changes)");
 			} else {
 				lines.push(...indent(render(entries)));
 			}
@@ -487,34 +521,49 @@ export async function buildCommitmentGate(
 		// `repair`, the same loop renders it under its origin via `originStep`.
 		for (const c of cascades) {
 			if (c.originStep === step) {
-				lines.push(`    ${c.message}`);
+				lines.push(`     ${c.message}`);
 			}
 		}
 	}
 
+	// The bounded-loop explainer in plain words — "pass 1/3" later reads as
+	// planned, not stuck, without the internal "drift" / "converging" vocabulary.
+	lines.push("");
+	lines.push("  I'll repeat these until nothing's left to fix — up to 3 passes.");
+
 	if (!opts.verbose) {
-		lines.push("");
 		lines.push("  (re-run with --verbose for the full per-file change list)");
+	}
+
+	// Block 2 (#621): what Enter won't fix, with the exact follow-up command.
+	if ((opts.completenessCount ?? 0) > 0) {
+		lines.push(...renderWontFixBlock(opts.completenessCount ?? 0));
 	}
 
 	return lines;
 }
 
 /**
- * The single commitment gate prompt. Empty input (`[Enter]`) approves the whole
- * plan; any other input cancels. One prompt for the entire remediation — after
- * it, the auto-advance loop pauses only for genuine Ambiguities, never for the
- * mechanical work the gate already covered.
+ * Block 3 of the honest gate (#621): the prompt line. Empty input (`[Enter]`)
+ * approves the whole plan; any other input cancels. The prompt states the count
+ * of steps it runs — "[Enter] runs the 2 steps above" — so consent is to the
+ * specific numbered actions block 1 enumerated, never a vague "run all".
+ *
+ * `stepCount` is the projected plan length the caller rendered, so the count the
+ * operator approves equals the count of numbered actions shown above.
  *
  * Shared by both drivers (#585): the front door gates the bare invocation, and
  * `heal` gates a TTY invocation before its loop, so an operator sees the same
  * `[Enter]`-approves contract from either entry point.
  */
-export async function awaitCommitment(): Promise<boolean> {
+export async function awaitCommitment(stepCount: number): Promise<boolean> {
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
+	const noun = stepCount === 1 ? "step" : "steps";
 	let answer: string;
 	try {
-		answer = await rl.question("[Enter] to run all, anything else to cancel: ");
+		answer = await rl.question(
+			`[Enter] runs the ${stepCount} ${noun} above, anything else to cancel: `,
+		);
 	} catch {
 		answer = "x";
 	} finally {

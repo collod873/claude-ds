@@ -75,12 +75,10 @@ describe("B1/B2: preview integrity — announced plan equals executed plan", () 
 		});
 		const gate = gateLines.join("\n");
 
-		// The plan header lists each step ordered by `→`. With the cascade
-		// disclosed, `audit --fix` must appear in the announced plan even though
-		// the current scan (strict=false) sees zero meta-kind-missing findings.
-		expect(gate).toMatch(/upgrade.*→.*audit --fix/);
-		// The plan-count line is rendered from `plan.length` — also bumps.
-		expect(gate).toMatch(/2 steps:/);
+		// The numbered run list enumerates each action in plan order (#621). With
+		// the cascade disclosed, the `audit --fix` action must appear even though the
+		// current scan (strict=false) sees zero meta-kind-missing findings.
+		expect(gate).toMatch(/1\. update the pack[\s\S]*2\. fix \d+ issues? automatically/);
 	});
 
 	it("a flag-flip cascade discloses the affected-file count in the preview", async () => {
@@ -96,8 +94,8 @@ describe("B1/B2: preview integrity — announced plan equals executed plan", () 
 		// Blast radius: the flag flip's downstream impact named in counts, not
 		// just a "config flipped" line. Four files lack meta.kind in the fixture.
 		expect(gate).toMatch(/meta_kind_strict.*false.*true.*backfills meta\.kind.*4 files/i);
-		// audit --fix header reflects the projected finding count, not zero.
-		expect(gate).toMatch(/audit --fix — auto-repair 4 finding/);
+		// audit --fix action reflects the projected finding count, not zero.
+		expect(gate).toMatch(/fix 4 issues automatically/);
 	});
 
 	it("announced step set equals executed step set on the cascade fixture", async () => {
@@ -135,14 +133,26 @@ describe("B1/B2: preview integrity — announced plan equals executed plan", () 
 });
 
 function extractAnnouncedSteps(lines: string[]): string[] {
-	// The plan header line is the second non-blank line: `  upgrade → audit --fix`.
-	// Split on the unicode arrow.
-	const header = lines.find((l) => /→/.test(l) && !/^\s+[AMRD] /.test(l));
-	if (!header) return [];
-	return header
-		.split("→")
-		.map((s) => s.trim())
-		.filter(Boolean);
+	// Post-#621 the gate enumerates a numbered list of plain-language actions
+	// (`  1. update the pack v0.8.0 → v1.9.0`), not the internal `→`-joined step
+	// keys. Map each numbered action back to its LoopStep via the consumer copy so
+	// the announced ⊇ executed invariant still holds against step keys.
+	const PHRASES: Array<[RegExp, string]> = [
+		[/update |re-check your /, "upgrade"],
+		[/restore the design-system files/, "sync"],
+		[/restore files that drifted/, "repair"],
+		[/extract or relocate/, "classify"],
+		[/fix \d+ issues? automatically/, "audit --fix"],
+		[/regenerate the auto-generated files/, "reconform"],
+	];
+	const steps: string[] = [];
+	for (const line of lines) {
+		const action = line.match(/^\s+\d+\.\s+(.*)$/);
+		if (!action) continue;
+		const match = PHRASES.find(([re]) => re.test(action[1]));
+		if (match) steps.push(match[1]);
+	}
+	return steps;
 }
 
 function makeRecordingProgress(sink: LoopStep[]): ProgressController {

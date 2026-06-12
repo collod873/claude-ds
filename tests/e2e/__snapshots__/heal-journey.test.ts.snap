@@ -9,29 +9,29 @@ exports[`journey: heal end-to-end on the time-travel fixture (#538) > golden: th
 ! Needs attention: 93 missing files, 2 issues I can fix, 1 script you built by hand that the design-system pack now provides, a newer design-system pack is available
 ✓ Also checked: nothing stale or deprecated
 
-I'll bring this tree to clean — 5 steps:
-  upgrade → sync → repair → reconform → audit --fix
-  Converging until no drift — up to 3 passes.
+Pressing Enter will:
+  1. update <prev-version> → <cli-version> (your files don't change)
+     Substantive changes:
+     ! .claude-ds.json  pack pinned <prev-version> → <cli-version>
+     ! .claude-ds.json  (config flag flipped)
+         allowed_imports: undefined -> []
+  2. restore the design-system files claude-ds manages
+     2 files modified — 2 scaffold files
+     91 files added — 1 atom, 1 composite, 89 scaffold files
+  3. restore files that drifted from a past update
+     Added 3 scaffold files
+     
+     Skipped: 2 files (hand-edited or unsafe to overwrite)
+  4. regenerate the auto-generated files
+  5. fix 2 issues automatically
+     [DRIFT-META-KIND-MISSING] error · 2 findings · 2 files
 
-upgrade — pin advance <prev-version> → <cli-version> (no migrations)
-    Substantive changes:
-    ! .claude-ds.json  pack pinned <prev-version> → <cli-version>
-    ! .claude-ds.json  (config flag flipped)
-        allowed_imports: undefined -> []
-sync — restore managed scaffold files
-    2 files modified — 2 scaffold files
-    91 files added — 1 atom, 1 composite, 89 scaffold files
-repair — restore drifted migration end-states
-    Added 3 scaffold files
-    
-    Skipped: 2 files (hand-edited or unsafe to overwrite)
-reconform — regenerates companions post-sync; nothing to preview
-audit --fix — auto-repair 2 findings
-    [DRIFT-META-KIND-MISSING] error · 2 findings · 2 files
-
+  I'll repeat these until nothing's left to fix — up to 3 passes.
   (re-run with --verbose for the full per-file change list)
 
-1 hand-rolled DS infra finding → \`npx claude-ds doctor --completeness\`
+Pressing Enter won't fix:
+  1 thing you built by hand that the design-system now provides —
+  run \`npx claude-ds doctor --completeness\` to retire those.
 "
 `;
 

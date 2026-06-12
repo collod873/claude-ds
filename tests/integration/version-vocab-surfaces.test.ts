@@ -152,10 +152,14 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 			const out = await captureFrontDoor({ cwd: dir });
 
 			if (HAS_STALE_EMPTY_CHAIN) {
+				// #631's dashboard names the stale pack in consumer words.
 				expect(out).toMatch(/a newer design-system pack is available/);
+				// Post-#621 the gate action reads in plain words — `update vX → vY
+				// (your files don't change)` — never the internal "pin advance (no
+				// migrations)" jargon, but still carrying the real from→to.
 				expect(out).toMatch(
 					new RegExp(
-						`upgrade — pin advance ${escapeRegex(EMPTY_CHAIN_PIN)} → ${escapeRegex(CLI_VERSION)} \\(no migrations\\)`,
+						`update ${escapeRegex(EMPTY_CHAIN_PIN)} → ${escapeRegex(CLI_VERSION)} \\(your files don't change\\)`,
 					),
 				);
 				// Defect 3 (#536): the body must reconcile with the header. The pin
@@ -177,7 +181,7 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 			expect(out).not.toMatch(PHANTOM_PACK_ARROW);
 		});
 
-		it("non-empty chain (pinned very old): gate header still renders `pack X → Y`", async () => {
+		it("non-empty chain (pinned very old): gate action still names `pack X → Y`", async () => {
 			const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
 			expect(adopt.code).toBe(0);
 			const cfgPath = join(dir, ".claude-ds.json");
@@ -188,8 +192,8 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 			const out = await captureFrontDoor({ cwd: dir });
 
 			// A v0.0.1 pin against the current CLI has registered migrations to
-			// apply — the real, non-phantom `pack X → Y` headline.
-			expect(out).toMatch(new RegExp(`upgrade — pack v0\\.0\\.1 → ${escapeRegex(CLI_VERSION)}`));
+			// apply — the real, non-phantom `update the pack X → Y` action (#621).
+			expect(out).toMatch(new RegExp(`update the pack v0\\.0\\.1 → ${escapeRegex(CLI_VERSION)}`));
 		});
 	});
 
