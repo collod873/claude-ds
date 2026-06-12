@@ -34,6 +34,45 @@ import {
 	collectFileCvaAxes,
 	collectRequiredPropNames,
 } from "../cva/analyzer.js";
+import type { GeneratorWarningCollector } from "./warning-collector.js";
+
+// ── warning channel (issue #619 / PRD #618) ────────────────────────────────────
+//
+// The generator's internal AST skip notices used to write straight to stderr,
+// interleaving raw `[AST]: …` debug lines with the front-door dashboard. The
+// command runner now installs a `GeneratorWarningCollector` for the duration of
+// a run; `warnGen` routes structured `{kind, detail}` warnings to it (the active
+// collector tracks the source file via `beginSource`). With no collector
+// installed — every non-front-door caller, including the per-save regen hook —
+// the legacy stderr line is emitted unchanged, so their behavior is preserved.
+//
+// `generateShowcase` is synchronous, so a single module-level slot is safe: the
+// command sets it before the run and clears it after; there is no interleaving.
+
+let activeCollector: GeneratorWarningCollector | null = null;
+
+/**
+ * Install (or clear with `null`) the collector that captures generator warnings
+ * for the current run. Returns the previously installed collector so callers can
+ * save/restore. Owned by the command runner — see warning-collector.ts.
+ */
+export function setGeneratorWarningCollector(
+	collector: GeneratorWarningCollector | null,
+): GeneratorWarningCollector | null {
+	const prev = activeCollector;
+	activeCollector = collector;
+	return prev;
+}
+
+/**
+ * Route one AST skip warning. With a collector installed it is recorded
+ * structurally (and summarized by the command); otherwise the legacy
+ * `generate-showcase-companion [AST]: …` stderr line is written unchanged.
+ */
+function warnGen(kind: string, detail: string): void {
+	if (activeCollector) activeCollector.warn(kind, detail);
+	else process.stderr.write(`generate-showcase-companion [AST]: ${detail}\n`);
+}
 
 // ── header constants ──────────────────────────────────────────────────────────
 
@@ -287,9 +326,7 @@ function astNodeToValue(
 	// Template literals — only plain (no substitutions) → string
 	if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
 	if (ts.isTemplateExpression(node)) {
-		process.stderr.write(
-			`generate-showcase-companion [AST]: template literal with substitutions — dropping example\n`,
-		);
+		warnGen("template-substitution", "template literal with substitutions — dropping example");
 		return null;
 	}
 
@@ -324,9 +361,7 @@ function astNodeToValue(
 			return resolveImportedValue(imp.filePath, imp.exportName, consumerRoot, carried, depth + 1);
 		}
 		// unknown identifier — skip with warning
-		process.stderr.write(
-			`generate-showcase-companion [AST]: unresolved identifier "${name}" — dropping value\n`,
-		);
+		warnGen("unresolved-identifier", `unresolved identifier "${name}" — dropping value`);
 		return null;
 	}
 
@@ -351,9 +386,7 @@ function astNodeToValue(
 					continue;
 				}
 				// Non-array spread (e.g. fn marker from .map()) — emit as fn marker for whole array
-				process.stderr.write(
-					`generate-showcase-companion [AST]: spread element in array could not be expanded — skipping\n`,
-				);
+				warnGen("spread-array", "spread element in array could not be expanded — skipping");
 				continue;
 			}
 			result.push(
@@ -383,9 +416,7 @@ function astNodeToValue(
 						? prop.name.text
 						: null;
 				if (key === null) {
-					process.stderr.write(
-						`generate-showcase-companion [AST]: computed property key — skipping\n`,
-					);
+					warnGen("computed-key", "computed property key — skipping");
 					continue;
 				}
 				result[key] = astNodeToValue(
@@ -429,7 +460,7 @@ function astNodeToValue(
 				) {
 					Object.assign(result, spread);
 				} else {
-					process.stderr.write(`generate-showcase-companion [AST]: spread in object — skipping\n`);
+					warnGen("spread-object", "spread in object — skipping");
 				}
 			} else if (ts.isMethodDeclaration(prop) || ts.isGetAccessorDeclaration(prop)) {
 				const key = ts.isIdentifier(prop.name) ? prop.name.text : null;
@@ -614,9 +645,7 @@ function astNodeToValue(
 	}
 
 	// Anything else — warn and drop
-	process.stderr.write(
-		`generate-showcase-companion [AST]: unhandled node kind ${ts.SyntaxKind[node.kind]} — dropping value\n`,
-	);
+	warnGen("unhandled-node", `unhandled node kind ${ts.SyntaxKind[node.kind]} — dropping value`);
 	return null;
 }
 
@@ -2218,6 +2247,11 @@ export function generateShowcase({ filePath, source }: ShowcaseGenInput): Showca
 	const sourceName = basename(filePath);
 	const componentName = basename(filePath, ".tsx");
 	const displayName = toPascalCase(componentName);
+
+	// Open a warning sweep for this source so any AST skip routes through the
+	// installed collector attributed to this file (#619). A no-op when no
+	// collector is installed — `warnGen` falls back to the legacy stderr line.
+	activeCollector?.beginSource(sourceName);
 
 	const astExtract = extractMetaFromAST(filePath);
 	if (!astExtract) return { content: null, skipReason: "no-meta" };
