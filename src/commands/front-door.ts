@@ -48,6 +48,7 @@ import { planRemediation } from "../lib/remediation-planner.js";
 import { renderDashboard } from "../lib/render/index.js";
 import { createProgress, printLines } from "../lib/render/tty-layer.js";
 import { scanDriftAndIntegrity } from "../lib/reports/drift-integrity-scan.js";
+import { formatVerifyErrors } from "../lib/reports/findings-format.js";
 import { scanScaffoldDrift } from "../lib/reports/scaffold-drift.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import { scanRootDupes } from "../lib/root-dupes.js";
@@ -472,12 +473,7 @@ function renderRedGate(verify: VerifyResult): string[] {
 		lines.push(
 			`✗ Verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files:`,
 		);
-		for (const e of verify.scaffoldErrors.slice(0, 20)) {
-			lines.push(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
-		}
-		if (verify.scaffoldErrors.length > 20) {
-			lines.push(`  …and ${verify.scaffoldErrors.length - 20} more`);
-		}
+		lines.push(...formatVerifyErrors(verify.scaffoldErrors, { maxGroups: 20 }));
 	} else {
 		lines.push(
 			`✗ Verify gate failed — ${verify.reason ?? `${verify.command} exited ${verify.exitCode}`}`,
