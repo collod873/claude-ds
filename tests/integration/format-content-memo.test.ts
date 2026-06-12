@@ -25,11 +25,16 @@ import { cleanup, freshTmpDir } from "../helpers/tmpdir";
  * `<name>.calls`) and echoes stdin back as its "formatted" output. The call log
  * is the spawn counter the memoization assertion reads.
  */
-async function installRecordingFormatter(dir: string, name: string): Promise<string> {
+async function installRecordingFormatter(dir: string, name: string, exitCode = 0): Promise<string> {
 	const binDir = join(dir, "node_modules", ".bin");
 	await mkdir(binDir, { recursive: true });
 	const calledLog = join(binDir, `${name}.calls`);
-	const script = ["#!/usr/bin/env bash", `echo call >> "${calledLog}"`, "cat", "exit 0"].join("\n");
+	const script = [
+		"#!/usr/bin/env bash",
+		`echo call >> "${calledLog}"`,
+		"cat",
+		`exit ${exitCode}`,
+	].join("\n");
 	const p = join(binDir, name);
 	await writeFile(p, script, "utf8");
 	await chmod(p, 0o755);
@@ -95,6 +100,26 @@ describe("formatContent — per-run memoization (#624)", () => {
 		formatContent(rf, content, "design-system/atoms/a.showcase.tsx", dir);
 		formatContent(rf, content, "design-system/atoms/b.showcase.tsx", dir);
 
+		expect(await countCalls(calls)).toBe(2);
+	});
+
+	it("does NOT cache failures — a non-zero exit re-spawns and never pins a stale fallback", async () => {
+		// A formatter that exits non-zero falls through to the original `content`.
+		// That fallback must NOT be cached: a transient spawn failure can't be
+		// allowed to pin a never-formatted result for the rest of the run. Pin it
+		// here so a future "cache the fallback too" tweak can't silently regress.
+		const calls = await installRecordingFormatter(dir, "biome", 1);
+		const rf: ResolvedFormatter = {
+			kind: "biome",
+			bin: join(dir, "node_modules", ".bin", "biome"),
+		};
+		const content = "export const x = 1;\n";
+		const path = "design-system/atoms/tag.showcase.tsx";
+
+		expect(formatContent(rf, content, path, dir)).toBe(content);
+		expect(formatContent(rf, content, path, dir)).toBe(content);
+
+		// Both calls spawned — the failing result was never memoized.
 		expect(await countCalls(calls)).toBe(2);
 	});
 });
