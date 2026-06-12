@@ -26,7 +26,11 @@ export type { DiffEntry } from "./diff.js";
 export { colorizeDiffLines, renderCommitmentGateDiff } from "./diff.js";
 export type { RenderableFinding } from "./findings.js";
 export { renderFindings } from "./findings.js";
-export type { ClosingSummaryState, ExhaustedSummaryState } from "./front-door.js";
+export type {
+	ClosingSummaryState,
+	ExhaustedSummaryState,
+	RedGateReportOptions,
+} from "./front-door.js";
 export {
 	renderClosingSummary,
 	renderExhaustedSummary,

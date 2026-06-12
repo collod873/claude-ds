@@ -131,7 +131,7 @@ describe("heal red-gate report — state statement, ledger, off-ramp (#580)", ()
 
 		const msgs = errLines();
 		const idx = (re: RegExp) => msgs.findIndex((m) => re.test(m));
-		const scaffold = idx(/verify gate failed/);
+		const scaffold = idx(/verify gate failed/i);
 		const state = idx(/tree was clean when heal started/);
 		const ledger = idx(/What heal wrote this run/);
 		const offRamp = idx(/deterministic: a re-run reproduces it/);

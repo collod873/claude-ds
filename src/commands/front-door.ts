@@ -402,15 +402,22 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 					managedFiles: new Set(settledCtx.manifest.files.map((f) => f.path)),
 					managedRoots: ["design-system/"],
 				});
+				if (!verify.ok) {
+					// Step-glyph rule (#638): a run ending on a red gate renders the gate
+					// outcome as the step's conclusion (✗ on a TTY), never a bare ✓ from
+					// the last loop step. The shared partitioned report (heal renders the
+					// same one) gets this run's changed-file set from the run ledger so it
+					// can attribute the breakage as pre-existing when the sets are disjoint.
+					progress.fail("verify gate failed");
+					const changedFiles = new Set(outcome.ledger.entries().map((e) => e.toPath ?? e.path));
+					printLines(renderRedGate(verify, { changedFiles }));
+					process.exit(1);
+					return;
+				}
 				// Stop progress only after the gate returns, as heal does (heal.ts): the
 				// spinner stays live through the verify subprocess so a multi-second run
 				// (the timeout ceiling is 300s) reads as "still working," not a freeze.
 				progress.stop();
-				if (!verify.ok) {
-					printLines(renderRedGate(verify));
-					process.exit(1);
-					return;
-				}
 				// Two independent closing signals reconciled here (#504 + #510):
 				// `consumerErrorCount` notes pre-existing consumer errors the verify
 				// gate let pass (warn-only); `handRolledInfra` — the completeness scan
