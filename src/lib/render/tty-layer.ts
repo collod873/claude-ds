@@ -14,6 +14,7 @@
 import ora, { type Ora } from "ora";
 import pc from "picocolors";
 import { type ColorAdapter, identityColor } from "./color.js";
+import { CHECK } from "./glyphs.js";
 import { isTTY } from "./tty.js";
 
 const ttyColor: ColorAdapter = {
@@ -59,13 +60,13 @@ export function printLines(lines: string[]): void {
 export interface ProgressController {
 	/** Begin (or replace) the active phase. Subsequent succeed/fail commits it. */
 	start(text: string): void;
-	/** Persist the active phase as completed (✔). */
+	/** Persist the active phase as completed (✓). */
 	succeed(text?: string): void;
 	/** Persist the active phase as failed (✖). The heal ceiling failure uses this. */
 	fail(text?: string): void;
 	/**
 	 * Persist the active phase as a warning (⚠) — the third terminal state (#588).
-	 * A step that made progress *and* reported skips lands here instead of ✔: the
+	 * A step that made progress *and* reported skips lands here instead of ✓: the
 	 * work advanced, but a skipped file may hide an unverified end-state. `reason`
 	 * renders as a suffix (e.g. the skip count) so the glyph carries why it warned.
 	 */
@@ -142,10 +143,13 @@ export function createProgress(): ProgressController {
 		},
 		succeed(text) {
 			if (spinner) {
-				spinner.succeed(text);
+				// Persist the unified checkmark (#636) instead of ora's default heavy
+				// check (U+2714) so the live spinner and the pure renderers print one
+				// glyph. Kept green to match ora's success symbol — only the glyph changes.
+				spinner.stopAndPersist({ symbol: pc.green(CHECK), text });
 				spinner = null;
 			} else if (text !== undefined) {
-				process.stderr.write(`✔ ${text}\n`);
+				process.stderr.write(`${CHECK} ${text}\n`);
 			}
 			active = false;
 		},

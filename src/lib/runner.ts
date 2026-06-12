@@ -40,7 +40,7 @@ export interface OpReport<TOutcome = unknown> {
 	 * plan-time throw — an Op that errored made no progress.
 	 *
 	 * heal reads this so a step scheduled to clear a complaint that produced no
-	 * progress is never marked ✔ and never repeated identically next pass
+	 * progress is never marked ✓ and never repeated identically next pass
 	 * (defects 2, 6). The Runner stays the only writer; Ops stay pure planners —
 	 * the signal is derived from the Changes they already emit, not a new field
 	 * Ops set themselves.
