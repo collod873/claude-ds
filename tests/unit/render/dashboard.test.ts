@@ -105,13 +105,48 @@ const INCOMPLETE_WITH_ALSO_CHECKED: DashboardState = {
 	alsoChecked: ["no hand-built design-system scripts", "nothing stale or deprecated"],
 };
 
-const HAND_ROLLED_INFRA: DashboardState = {
+const HAND_ROLLED_RETIRABLE: DashboardState = {
 	cwd: "/repo/example-app",
 	mode: "adopted",
 	scaffold: { present: 12, total: 12 },
 	findings: [],
-	handRolledInfra: 2,
+	handRolled: {
+		retirable: 2,
+		needsReview: 0,
+		total: 2,
+		retirableNoun: "file",
+		needsReviewNoun: "file",
+	},
 	alsoChecked: ["nothing stale or deprecated"],
+};
+
+const HAND_ROLLED_NEEDS_REVIEW: DashboardState = {
+	cwd: "/repo/example-app",
+	mode: "adopted",
+	scaffold: { present: 12, total: 12 },
+	findings: [],
+	handRolled: {
+		retirable: 0,
+		needsReview: 1,
+		total: 1,
+		retirableNoun: "file",
+		needsReviewNoun: "file",
+	},
+	alsoChecked: ["nothing stale or deprecated"],
+};
+
+const HAND_ROLLED_MIXED: DashboardState = {
+	cwd: "/repo/example-app",
+	mode: "adopted",
+	scaffold: { present: 12, total: 12 },
+	findings: [],
+	handRolled: {
+		retirable: 1,
+		needsReview: 2,
+		total: 3,
+		retirableNoun: "file",
+		needsReviewNoun: "file",
+	},
 };
 
 // A marker-tagging adapter: wraps each band so a test can prove the renderer
@@ -213,15 +248,39 @@ describe("renderDashboard (pure)", () => {
     `);
 	});
 
-	it("hand-built scripts are a needs-attention signal, never an 'also checked' one (#504)", () => {
+	it("retirable hand-built files render 'now provides', a needs-attention signal (#504/#639)", () => {
 		// The scan that found something is NOT named as clean — it surfaces in the
-		// needs-attention roll-up so the tree is never falsely reported clean.
-		expect(renderDashboard(HAND_ROLLED_INFRA, identityColor)).toMatchInlineSnapshot(`
+		// needs-attention roll-up so the tree is never falsely reported clean. A
+		// retirable finding (a live capability supersedes it) earns "now provides".
+		expect(renderDashboard(HAND_ROLLED_RETIRABLE, identityColor)).toMatchInlineSnapshot(`
       [
         "✓ Design system in place — /repo/example-app",
         "✓ Managed files: 12/12",
-        "! Needs attention: 2 scripts you built by hand that the design-system pack now provides",
+        "! Needs attention: 2 files you built by hand that the design-system pack now provides",
         "✓ Also checked: nothing stale or deprecated",
+      ]
+    `);
+	});
+
+	it("needs-review files render 'possible … to review', never 'now provides' (#639)", () => {
+		const lines = renderDashboard(HAND_ROLLED_NEEDS_REVIEW, identityColor);
+		expect(lines).toMatchInlineSnapshot(`
+      [
+        "✓ Design system in place — /repo/example-app",
+        "✓ Managed files: 12/12",
+        "! Needs attention: 1 possible hand-built design-system file to review",
+        "✓ Also checked: nothing stale or deprecated",
+      ]
+    `);
+		expect(lines.join("\n")).not.toMatch(/now provides/);
+	});
+
+	it("mixed set renders both phrasings, retirable first (#639)", () => {
+		expect(renderDashboard(HAND_ROLLED_MIXED, identityColor)).toMatchInlineSnapshot(`
+      [
+        "✓ Design system in place — /repo/example-app",
+        "✓ Managed files: 12/12",
+        "! Needs attention: 1 file you built by hand that the design-system pack now provides, 2 possible hand-built design-system files to review",
       ]
     `);
 	});
@@ -257,7 +316,9 @@ describe("renderDashboard (pure)", () => {
 			PRE_ADOPT,
 			CLEAN_WITH_ALSO_CHECKED,
 			INCOMPLETE_WITH_ALSO_CHECKED,
-			HAND_ROLLED_INFRA,
+			HAND_ROLLED_RETIRABLE,
+			HAND_ROLLED_NEEDS_REVIEW,
+			HAND_ROLLED_MIXED,
 		];
 		for (const state of states) {
 			for (const line of renderDashboard(state, identityColor)) {
@@ -270,7 +331,7 @@ describe("renderDashboard (pure)", () => {
 
 	it("uses only the ✓ / ! / ✗ marker vocabulary", () => {
 		const allowed = new Set(["✓", "!", "✗"]);
-		const states = [CLEAN, WITH_FINDINGS, INCOMPLETE_SCAFFOLD, PRE_ADOPT, HAND_ROLLED_INFRA];
+		const states = [CLEAN, WITH_FINDINGS, INCOMPLETE_SCAFFOLD, PRE_ADOPT, HAND_ROLLED_MIXED];
 		for (const state of states) {
 			for (const line of renderDashboard(state, identityColor)) {
 				const marker = line.charAt(0);

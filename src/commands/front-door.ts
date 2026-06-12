@@ -34,6 +34,7 @@ import { composeDashboardState } from "../lib/dashboard.js";
 import { isExtractionNeededFinding } from "../lib/drift/index.js";
 import { type Exception, parseExceptions } from "../lib/exceptions.js";
 import { awaitCommitment, buildCommitmentGate, projectFullPlan } from "../lib/gate-preview.js";
+import { type HandRolledSplit, splitHandRolled } from "../lib/hand-rolled-split.js";
 import { detectBuildCommand } from "../lib/log.js";
 import { parseManifest } from "../lib/manifest.js";
 import { type OwnedConcernScannerFinding, scanOwnedConcerns } from "../lib/owned-concerns/index.js";
@@ -195,10 +196,10 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		// Read-only completeness scans (ADR-0003 / #504). A check that passes
 		// silently reads as a check that never ran, so the front door runs the
 		// owned-concern (hand-rolled DS infra) and deprecated-dupe scans and names
-		// the clean ones in the dashboard. `handRolledInfra` is a "what's wrong"
-		// signal when non-zero; the labels below are only claimed when the scan
-		// genuinely returned zero — never asserting a false negative.
-		let handRolledInfra = 0;
+		// the clean ones in the dashboard. `handRolled` is a "what's wrong"
+		// signal when its total is non-zero; the labels below are only claimed
+		// when the scan genuinely returned zero — never asserting a false negative.
+		let handRolled: HandRolledSplit = splitHandRolled([]);
 		const alsoChecked: string[] = [];
 		if (ctx.kind === "adopted") {
 			const exceptionsPath = join(cwd, "design-system/exceptions.json");
@@ -246,10 +247,16 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 				manifestPaths: new Set(manifest.files.map((f) => f.path)),
 				generatedPatterns: manifest.generated_patterns,
 			});
-			handRolledInfra = rawOwned.filter((f) => !suppressed.has(`${f.concernId}:${f.file}`)).length;
+			// #639: split the surviving findings into retirable (a live shipped
+			// capability supersedes — `supersededBy` non-null after the hook-liveness
+			// downgrade) vs needs-review (null). Every surface renders from this one
+			// split, so the dashboard headline can't promise a retirement the gate or
+			// closing copy deny for the same set.
+			const activeOwned = rawOwned.filter((f) => !suppressed.has(`${f.concernId}:${f.file}`));
+			handRolled = splitHandRolled(activeOwned);
 			// Consumer phrasing on the dashboard (#620) — the internal "hand-rolled DS
 			// infra" term names the scan in code/docs but never prints to the consumer.
-			if (handRolledInfra === 0) alsoChecked.push("no hand-built design-system scripts");
+			if (handRolled.total === 0) alsoChecked.push("no hand-built design-system scripts");
 
 			// Deprecated/stale root-level dupes (#23): a canonical design-system/ file
 			// left shadowed by a pre-adopt root copy. `rootDupes` was already scanned
@@ -285,7 +292,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			unfixableCount,
 			buildCmd,
 			upgradeAvailable,
-			handRolledInfra,
+			handRolled,
 			alsoChecked,
 		});
 
@@ -307,11 +314,14 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		const projectState = await deriveProjectState(cwd);
 		const plan = planRemediation(projectState);
 
-		// Generator warnings, summarized (#619). Deriving state ran a full generator
-		// sweep, so any skipped examples are now collected. Rendered here — between
-		// the dashboard and the plan/gate — as one consumer-language line, or the
-		// full itemized list under --verbose. Zero warnings → nothing prints.
-		// A leading blank line separates the warnings summary from the dashboard so
+		// Skipped-example warnings, as an owned dashboard section (#643 / PRD #635
+		// module 7). Deriving state ran a full generator sweep, so any skipped
+		// examples are now collected. Rendered here — between the dashboard and the
+		// plan/gate — attributed to its hand-verify owner: a count, the affected
+		// files named *without* --verbose, and the consequence (excluded from audit
+		// but still compiled by verify, so it can hide type errors). The full
+		// per-skip itemization stays behind --verbose. Zero warnings → nothing
+		// prints. A leading blank line separates the section from the dashboard so
 		// the two read as distinct sections (#622 / PRD #618 visual hierarchy).
 		const warningLines = generatorWarnings.render({ verbose: opts.verbose });
 		if (warningLines.length > 0) printLines(["", ...warningLines]);
@@ -357,11 +367,11 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			// plan does NOT imply the owned-concern scan was clean. If it flagged
 			// hand-rolled DS infra, route to the command that resolves it rather than
 			// asserting clean — the dashboard already named it under "What's wrong".
-			if (handRolledInfra > 0) {
+			if (handRolled.total > 0) {
 				printLines([
 					"",
 					"Loop is clean, but completeness work remains:",
-					...renderHandRolledRouting(handRolledInfra),
+					...renderHandRolledRouting(handRolled),
 				]);
 				return;
 			}
@@ -390,7 +400,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			// never fixes it. The gate's "won't fix" block (block 2) names it and the
 			// follow-up command so the header count is never a dead end and the operator
 			// sees what Enter leaves behind before they consent.
-			{ verbose: opts.verbose, completenessCount: handRolledInfra },
+			{ verbose: opts.verbose, handRolled },
 		);
 		printLines(gateLines);
 
@@ -467,7 +477,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 				progress.stop();
 				// Two independent closing signals reconciled here (#504 + #510):
 				// `consumerErrorCount` notes pre-existing consumer errors the verify
-				// gate let pass (warn-only); `handRolledInfra` — the completeness scan
+				// gate let pass (warn-only); `handRolled` — the completeness scan
 				// run before the loop (ADR-0003, not a loop member) — downgrades the
 				// "start working" go-ahead to `doctor --completeness` when infra remains.
 				printLines(
@@ -475,7 +485,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 						version: cliVersion(),
 						pinnedBefore: parsedCfg?.packVersion,
 						consumerErrorCount: verify.consumerErrors.length,
-						handRolledInfra,
+						handRolled,
 						handVerifyCount: verify.handVerifyErrors.length,
 					}),
 				);

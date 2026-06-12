@@ -135,7 +135,11 @@ fi
 		const out = await captureFrontDoor({ cwd: dir });
 
 		expect(out).toMatch(/Design system in place/);
-		expect(out).toMatch(/Needs attention:.*scripts? you built by hand/);
+		// next-react seeds componentLib=radix, so the base-ui validator's hook is
+		// dormant — the supersession downgrades to needs-review (#505/#639). It
+		// surfaces as "possible … to review", never the "now provides" promise.
+		expect(out).toMatch(/Needs attention:.*possible hand-built design-system files? to review/);
+		expect(out).not.toMatch(/now provides/);
 		// The found scan is not named clean; the deprecated scan still is.
 		expect(out).not.toMatch(/Also checked:.*hand-built design-system scripts/);
 		expect(out).toMatch(/✓ Also checked: nothing stale or deprecated/);
@@ -220,8 +224,11 @@ if grep -q "asChild" "$1"; then exit 1; fi
 
 		const out = await captureFrontDoor({ cwd: dir });
 
-		// Both concerns are counted in the header.
-		expect(out).toMatch(/Needs attention:.*issue.*scripts? you built by hand/);
+		// Both concerns are counted in the header (the validator as needs-review,
+		// #639 — its hook is dormant on a radix scaffold).
+		expect(out).toMatch(
+			/Needs attention:.*issue.*possible hand-built design-system files? to review/,
+		);
 		// The drift finding maps to a plan line (audit --fix)...
 		expect(out).toMatch(/fix \d+ issue.* automatically/);
 		// ...and the completeness count maps to the gate's "won't fix" block (#621)
@@ -229,7 +236,9 @@ if grep -q "asChild" "$1"; then exit 1; fi
 		// #590 closes, now stated in plain words. The command renders in the
 		// consumer's `npx claude-ds` invocation form (#629).
 		expect(out).toMatch(/won't fix/i);
-		expect(out).toMatch(/built by hand[\s\S]*npx claude-ds doctor --completeness/);
+		expect(out).toMatch(
+			/possible hand-rolled DS files? to review[\s\S]*npx claude-ds doctor --completeness/,
+		);
 	});
 
 	it("reconform plan entry carries the explainer line, not a bare header (#590)", async () => {
@@ -593,9 +602,12 @@ if grep -q "asChild" "$1"; then exit 1; fi
 
 		// Loop converged...
 		expect(out).toMatch(new RegExp(`Tree is clean — ${CURRENT}`));
-		// ...but the go-ahead is withheld and routed to the resolving command.
+		// ...but the go-ahead is withheld and routed to the resolving command. The
+		// validator is needs-review on a radix scaffold (#639), so it reads
+		// "possible … to review", never the "now provides" promise.
 		expect(out).not.toMatch(/Nothing needs your attention — start working/);
-		expect(out).toMatch(/hand-rolled DS infra finding.*remain/);
+		expect(out).toMatch(/possible hand-rolled DS files? to review/);
+		expect(out).not.toMatch(/now provides/);
 		expect(out).toMatch(/npx claude-ds doctor --completeness/);
 	}, 60000);
 
@@ -813,15 +825,20 @@ export function PaymentSummary() { return <div />; }
 		return { stdout, stderr };
 	}
 
-	it("summarizes skipped examples in one line and never prints raw [AST] (criteria 1)", async () => {
+	it("renders the owned skipped-example section naming files without --verbose (criteria 1, #643)", async () => {
 		await setupWarningSource();
 		const { stdout, stderr } = await captureBoth(false);
 
-		// One plain-language summary line naming the count.
+		// Headline: count + file count, attributed to its hand-verify owner.
 		expect(stdout).toMatch(
-			/4 component examples couldn't be parsed and were skipped — re-run with --verbose for details/,
+			/4 component examples couldn't be parsed and were skipped \(1 file\) — these need your eye:/,
 		);
-		// #622: a blank line separates the dashboard from the warnings summary so
+		// The affected file is named without --verbose.
+		expect(stdout).toContain("payment-summary.tsx");
+		// The consequence copy states the audit blind spot.
+		expect(stdout).toContain("excluded from audit but still compiled by your verify");
+		expect(stdout).toContain("hide type errors");
+		// #622: a blank line separates the dashboard from the warnings section so
 		// the two read as distinct sections.
 		expect(stdout).toMatch(/\n\n4 component examples couldn't be parsed/);
 		// The internal AST text never reaches either stream un-summarized.

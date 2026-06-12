@@ -28,6 +28,7 @@ import { createInterface } from "node:readline/promises";
 import { ownerForFinding } from "./complaint-ownership.js";
 import { type DriftRuleId, ruleSeverity } from "./drift/index.js";
 import { type Exception, parseExceptions } from "./exceptions.js";
+import type { HandRolledSplit } from "./hand-rolled-split.js";
 import { type IntegrityRuleId, integrityRuleSeverity } from "./integrity/index.js";
 import {
 	computeMigrationChain,
@@ -39,6 +40,7 @@ import { finalizeUpgrade } from "./ops/finalize-upgrade.js";
 import { makeSyncPackFiles } from "./ops/sync-pack-files.js";
 import type { ProjectContext } from "./project.js";
 import type { LoopStep } from "./remediation-planner.js";
+import { needsReviewInfraClause, retirableClause } from "./render/hand-rolled.js";
 import type { SummaryEntry } from "./render/index.js";
 import { renderChangeSummary, renderChangeTierSummary } from "./render/index.js";
 import { scanDriftAndIntegrity } from "./reports/drift-integrity-scan.js";
@@ -435,14 +437,15 @@ export interface GateOpts {
 	 */
 	verbose?: boolean;
 	/**
-	 * Issue #621 / block 2. The count of completeness findings (hand-rolled DS
-	 * infra, ADR-0003) the gate's plan will NOT fix — these are not remediation-
-	 * loop members, so pressing Enter never touches them. When > 0 the gate
-	 * renders the honest "won't fix" block naming the exact follow-up command
-	 * (`npx claude-ds doctor --completeness`); when 0 (or omitted) there is nothing
-	 * the gate leaves behind, so the block is silent.
+	 * Issue #621 / block 2, #639. The retirable / needs-review split of
+	 * completeness findings (hand-rolled DS infra, ADR-0003) the gate's plan will
+	 * NOT fix — these are not remediation-loop members, so pressing Enter never
+	 * touches them. When its total is > 0 the gate renders the honest "won't fix"
+	 * block naming the exact follow-up command (`npx claude-ds doctor
+	 * --completeness`); when 0 (or omitted) there is nothing the gate leaves
+	 * behind, so the block is silent.
 	 */
-	completenessCount?: number;
+	handRolled?: HandRolledSplit;
 }
 
 /**
@@ -450,17 +453,24 @@ export interface GateOpts {
  * one command that does. Completeness findings (hand-rolled DS infra, ADR-0003)
  * are not remediation-loop members — the run list above never touches them — so
  * naming them here, with the exact follow-up command, is the difference between
- * an honest gate and one that over-promises. Plain words: "scripts you built by
- * hand", never the internal "hand-rolled DS infra" label.
+ * an honest gate and one that over-promises.
+ *
+ * #639: the block splits retirable from needs-review. "The pack now provides" is
+ * said only for retirable findings (a live capability supersedes them); needs-
+ * review findings render "possible … to review" — so the gate never promises a
+ * retirement the dashboard/closing copy deny for the same set.
  */
-function renderWontFixBlock(count: number): string[] {
-	const noun = count === 1 ? "thing" : "things";
-	return [
-		"",
-		"Pressing Enter won't fix:",
-		`  ${count} ${noun} you built by hand that the design-system now provides —`,
-		"  run `npx claude-ds doctor --completeness` to retire those.",
-	];
+function renderWontFixBlock(split: HandRolledSplit): string[] {
+	const lines = ["", "Pressing Enter won't fix:"];
+	if (split.retirable > 0) {
+		lines.push(
+			`  ${retirableClause(split)} — run \`npx claude-ds doctor --completeness\` to retire those.`,
+		);
+	}
+	if (split.needsReview > 0) {
+		lines.push(`  ${needsReviewInfraClause(split)} — run \`npx claude-ds doctor --completeness\`.`);
+	}
+	return lines;
 }
 
 export async function buildCommitmentGate(
@@ -535,9 +545,10 @@ export async function buildCommitmentGate(
 		lines.push("  (re-run with --verbose for the full per-file change list)");
 	}
 
-	// Block 2 (#621): what Enter won't fix, with the exact follow-up command.
-	if ((opts.completenessCount ?? 0) > 0) {
-		lines.push(...renderWontFixBlock(opts.completenessCount ?? 0));
+	// Block 2 (#621 / #639): what Enter won't fix, with the exact follow-up
+	// command, split into retirable vs needs-review.
+	if (opts.handRolled && opts.handRolled.total > 0) {
+		lines.push(...renderWontFixBlock(opts.handRolled));
 	}
 
 	return lines;

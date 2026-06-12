@@ -32,7 +32,7 @@ describe("GeneratorWarningCollector", () => {
 		expect(c.total).toBe(4);
 		expect(c.fileCount).toBe(1);
 		expect(c.summaryLine()).toBe(
-			"4 component examples couldn't be parsed and were skipped — re-run with --verbose for details",
+			"4 component examples couldn't be parsed and were skipped (1 file) — these need your eye:",
 		);
 	});
 
@@ -41,7 +41,7 @@ describe("GeneratorWarningCollector", () => {
 		c.beginSource("badge.tsx");
 		c.warn("computed-key", "computed property key — skipping");
 		expect(c.summaryLine()).toBe(
-			"1 component example couldn't be parsed and was skipped — re-run with --verbose for details",
+			"1 component example couldn't be parsed and was skipped (1 file) — these need your eye:",
 		);
 	});
 
@@ -75,22 +75,46 @@ describe("GeneratorWarningCollector", () => {
 		c.warn("spread-object", "spread in object — skipping");
 
 		const lines = c.render({ verbose: true });
-		// Every skipped example is listed, and each line names the source file.
-		const fileLines = lines.filter((l) => l.includes("payment-summary.tsx"));
-		expect(fileLines).toHaveLength(2);
-		expect(fileLines.every((l) => l.includes("spread in object"))).toBe(true);
+		// Every skipped example is itemized with its source file and AST detail.
+		const detailLines = lines.filter((l) => l.includes("spread in object"));
+		expect(detailLines).toHaveLength(2);
+		expect(detailLines.every((l) => l.includes("payment-summary.tsx"))).toBe(true);
 		// The collapsing `--verbose` hint never appears in the itemized list.
 		expect(lines.some((l) => l.includes("re-run with --verbose"))).toBe(false);
 	});
 
-	it("renders exactly one summary line (no raw detail) when not verbose", () => {
+	it("names the affected files without --verbose and states the audit blind spot (#643)", () => {
 		const c = new GeneratorWarningCollector();
 		c.beginSource("payment-summary.tsx");
 		for (let i = 0; i < 4; i++) c.warn("spread-object", "spread in object — skipping");
+		c.beginSource("data-table.tsx");
+		c.warn("unresolved-identifier", 'unresolved identifier "cols" — dropping value');
+
 		const lines = c.render({});
-		expect(lines).toHaveLength(1);
-		expect(lines[0]).toContain("4 component examples couldn't be parsed");
-		expect(lines.some((l) => l.includes("spread in object"))).toBe(false);
+		const text = lines.join("\n");
+		// Count + file count, without --verbose.
+		expect(text).toContain("5 component examples");
+		expect(text).toContain("2 files");
+		// Both affected files named — no --verbose required.
+		expect(text).toContain("payment-summary.tsx");
+		expect(text).toContain("data-table.tsx");
+		// The consequence copy: skipped → excluded from audit, still compiled by
+		// verify, so it can hide type errors (the owner's reason, asserted as a string).
+		expect(text).toContain("excluded from audit");
+		expect(text).toContain("still compiled by your verify");
+		expect(text).toContain("hide type errors");
+		// The non-verbose section does NOT spill the raw per-skip AST detail.
+		expect(text).not.toContain("spread in object");
+		// No longer an orphaned "re-run with --verbose for details" floating line.
+		expect(text).not.toContain("re-run with --verbose for details");
+	});
+
+	it("attributes the section to its hand-verify owner (need your eye), not an orphaned line", () => {
+		const c = new GeneratorWarningCollector();
+		c.beginSource("badge.tsx");
+		c.warn("computed-key", "computed property key — skipping");
+		const text = c.render({}).join("\n");
+		expect(text).toContain("need your eye");
 	});
 
 	it("ignores warnings emitted with no active source (defensive)", () => {
