@@ -189,16 +189,10 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		// Read-only completeness scans (ADR-0003 / #504). A check that passes
 		// silently reads as a check that never ran, so the front door runs the
 		// owned-concern (hand-rolled DS infra) and deprecated-dupe scans and names
-		// the clean ones in the dashboard. `handRolledInfra` is a "what's wrong"
-		// signal when non-zero; the labels below are only claimed when the scan
-		// genuinely returned zero — never asserting a false negative.
-		let handRolled: HandRolledSplit = {
-			retirable: 0,
-			needsReview: 0,
-			total: 0,
-			retirableNoun: "file",
-			needsReviewNoun: "file",
-		};
+		// the clean ones in the dashboard. `handRolled` is a "what's wrong"
+		// signal when its total is non-zero; the labels below are only claimed
+		// when the scan genuinely returned zero — never asserting a false negative.
+		let handRolled: HandRolledSplit = splitHandRolled([]);
 		const alsoChecked: string[] = [];
 		if (ctx.kind === "adopted") {
 			const exceptionsPath = join(cwd, "design-system/exceptions.json");
@@ -426,7 +420,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 				}
 				// Two independent closing signals reconciled here (#504 + #510):
 				// `consumerErrorCount` notes pre-existing consumer errors the verify
-				// gate let pass (warn-only); `handRolledInfra` — the completeness scan
+				// gate let pass (warn-only); `handRolled` — the completeness scan
 				// run before the loop (ADR-0003, not a loop member) — downgrades the
 				// "start working" go-ahead to `doctor --completeness` when infra remains.
 				printLines(
