@@ -170,7 +170,7 @@ export const meta = { kind: "atom" as const, role: "tabs" as const, examples: []
 			maxIterations: 2,
 			progress: { ...NOOP_PROGRESS },
 		});
-		expect(outcome).toMatchObject({ kind: "exhausted", lastStep: null });
+		expect(outcome).toMatchObject({ kind: "exhausted", lastStep: null, reason: "stuck" });
 	}, 60000);
 
 	it("regenerates a drifted generated showcase companion via reconform (#509)", async () => {
@@ -286,13 +286,47 @@ export const meta = { kind: "atom" as const, examples: [] };
 
 		// Not converged (the complaint is unresolved), not spun to the ceiling
 		// running the identical pass three times — exited at once naming `classify`.
-		expect(outcome).toMatchObject({ kind: "exhausted", lastStep: "classify" });
+		expect(outcome).toMatchObject({ kind: "exhausted", lastStep: "classify", reason: "stuck" });
 		// The misplaced file was never silently relocated as a side effect.
 		const stillThere = await readFile(
 			join(dir, "design-system", "composites", "lonelybtn.tsx"),
 			"utf8",
 		);
 		expect(stillThere).toContain("Lonelybtn");
+	}, 60000);
+
+	it("ceiling hit while still making progress is `reason: ceiling`, not `stuck` (#626)", async () => {
+		// The two exhausted shapes must NOT be conflated: a pass that changed zero
+		// bytes is `stuck` (hand-edit territory), but running out of iterations while
+		// every pass DID change bytes is `ceiling` — the loop was still progressing
+		// and a re-run continues. The front door keys its honest copy off this: a
+		// `ceiling` consumer is told to re-run, never to hand-edit.
+		const adopt = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(adopt.code).toBe(0);
+
+		// One auto-fixable finding → the first plan is non-empty and the pass changes
+		// bytes (audit --fix strips the retired meta.states field). With the ceiling
+		// pinned at 1, the loop never gets a confirming stable pass, so it exits via
+		// the iteration-ceiling path with progress still in flight.
+		await writeFile(
+			join(dir, "design-system", "atoms", "solo-label.tsx"),
+			`export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function SoloLabel() { return <span />; }
+`,
+		);
+
+		const outcome = await driveRemediation({
+			cwd: dir,
+			maxIterations: 1,
+			progress: { ...NOOP_PROGRESS },
+		});
+
+		// Reducible-but-not-in-one-pass → ceiling, with a named step (never null).
+		expect(outcome.kind).toBe("exhausted");
+		if (outcome.kind === "exhausted") {
+			expect(outcome.reason).toBe("ceiling");
+			expect(outcome.lastStep).not.toBeNull();
+		}
 	}, 60000);
 
 	it("reconform that skipped every file it visited reports no progress, not ✔ (#532 defect 6)", async () => {

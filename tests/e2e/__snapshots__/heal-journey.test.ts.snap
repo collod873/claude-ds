@@ -31,7 +31,7 @@ Pressing Enter will:
 
 Pressing Enter won't fix:
   1 thing you built by hand that the design-system now provides —
-  run \`claude-ds doctor --completeness\` to retire those.
+  run \`npx claude-ds doctor --completeness\` to retire those.
 "
 `;
 

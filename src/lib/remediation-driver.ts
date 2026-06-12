@@ -314,6 +314,20 @@ export interface DriveOpts {
 }
 
 /**
+ * Why a loop stopped without a clean tree — NOT interchangeable to a consumer:
+ *   - `stuck`   — a pass changed zero bytes while a finding persisted (#532), or a
+ *                 finding remains that no loop step owns (unresolvable). The next
+ *                 run would be byte-for-byte identical; the fix is a hand-edit or
+ *                 an `exceptions.json` entry, never a re-run.
+ *   - `ceiling` — every pass DID change bytes but the iteration ceiling hit before
+ *                 a fixed point. The loop was still making progress; re-running
+ *                 picks up where it left off. Telling this consumer to hand-edit
+ *                 would be a lie — the findings are reducible, just not in
+ *                 `maxIterations` passes.
+ */
+export type ExhaustedReason = "stuck" | "ceiling";
+
+/**
  * The driver's terminal verdict. The caller maps it to exit codes / UI:
  *   - `converged` — the plan came back empty at the top of an iteration, or a
  *     pass changed zero bytes and the re-derived plan is empty with no
@@ -321,13 +335,13 @@ export interface DriveOpts {
  *   - `pending` — bytes stable but new Pending decisions were collected this
  *     iteration (only reachable when `pendingSink` is supplied). heal writes the
  *     `--answers` scaffold and exits 3; the front door never sees this.
- *   - `exhausted` — non-convergence, from one of two places: the iteration
- *     ceiling was hit, or a pass changed zero bytes while its re-derived plan
- *     stayed non-empty (#532). In the latter case the plan is a pure function of
- *     the tree, so the next pass would be byte-for-byte identical — heal stops at
- *     once naming the blocker rather than spin the same no-op to the ceiling.
- *     `lastStep` is that blocker (the re-derived plan's first step, else the last
- *     phase that ran), for the failure message.
+ *   - `exhausted` — non-convergence. `reason` says which of two shapes (see
+ *     `ExhaustedReason`): `stuck` (a no-op pass with a finding still present — the
+ *     #532 stop — or an unresolvable finding no step owns) versus `ceiling` (the
+ *     iteration ceiling hit while every pass was still changing bytes). The two
+ *     are NOT the same to a consumer: `stuck` needs a hand-edit, `ceiling` needs a
+ *     re-run. `lastStep` is the blocker (the re-derived plan's first step, else the
+ *     last phase that ran), for the failure message.
  *
  * Every variant carries the run `ledger` (#579) — the deduplicated inventory of
  * what heal wrote across all passes, accumulated from each step's RunReport. heal
@@ -337,7 +351,7 @@ export interface DriveOpts {
 export type DriveOutcome =
 	| { kind: "converged"; iterations: number; ledger: RunLedger }
 	| { kind: "pending"; ledger: RunLedger }
-	| { kind: "exhausted"; lastStep: LoopStep | null; ledger: RunLedger };
+	| { kind: "exhausted"; lastStep: LoopStep | null; reason: ExhaustedReason; ledger: RunLedger };
 
 /**
  * Walk the shared remediation plan to a fixed point.
@@ -374,7 +388,7 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 			// surface it as non-convergence so heal exits loudly and the operator
 			// sees the audit findings instead of a "Tree is clean" message.
 			if (state.unresolvableFindings) {
-				return { kind: "exhausted", lastStep: null, ledger };
+				return { kind: "exhausted", lastStep: null, reason: "stuck", ledger };
 			}
 			await promoteModeAtConvergence(cwd, progress);
 			return { kind: "converged", iterations: iter, ledger };
@@ -450,9 +464,12 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 				await promoteModeAtConvergence(cwd, progress);
 				return { kind: "converged", iterations: iter, ledger };
 			}
-			return { kind: "exhausted", lastStep: nextPlan[0] ?? lastStep, ledger };
+			return { kind: "exhausted", lastStep: nextPlan[0] ?? lastStep, reason: "stuck", ledger };
 		}
 	}
 
-	return { kind: "exhausted", lastStep, ledger };
+	// Ceiling hit: every pass changed bytes (a stable pass would have returned
+	// above), so the loop was STILL making progress — `ceiling`, not `stuck`. The
+	// caller must not tell the consumer to hand-edit; another run continues.
+	return { kind: "exhausted", lastStep, reason: "ceiling", ledger };
 }

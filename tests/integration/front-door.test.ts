@@ -76,7 +76,7 @@ describe("frontDoorCmd (TTY dashboard + commitment gate)", () => {
 		const out = await captureFrontDoor({ cwd: dir });
 
 		expect(out).toMatch(/Design system not set up here yet/);
-		expect(out).toMatch(/Run `claude-ds adopt --pack next-react`/);
+		expect(out).toMatch(/Run `npx claude-ds adopt --pack next-react`/);
 		// No commitment gate in pre-adopt — adopt hands the project INTO the loop.
 		expect(out).not.toMatch(/Pressing Enter will:/);
 	});
@@ -141,7 +141,7 @@ fi
 		expect(out).toMatch(/✓ Also checked: nothing stale or deprecated/);
 		// Never reported clean — routed to the command that resolves it.
 		expect(out).not.toMatch(/Nothing to remediate — the tree is clean/);
-		expect(out).toMatch(/claude-ds doctor --completeness/);
+		expect(out).toMatch(/npx claude-ds doctor --completeness/);
 	});
 
 	it("adopted + auto-fixable drift: the gate plans audit --fix", async () => {
@@ -226,9 +226,10 @@ if grep -q "asChild" "$1"; then exit 1; fi
 		expect(out).toMatch(/fix \d+ issue.* automatically/);
 		// ...and the completeness count maps to the gate's "won't fix" block (#621)
 		// naming the follow-up command, even though the plan is NON-empty — the gap
-		// #590 closes, now stated in plain words.
+		// #590 closes, now stated in plain words. The command renders in the
+		// consumer's `npx claude-ds` invocation form (#629).
 		expect(out).toMatch(/won't fix/i);
-		expect(out).toMatch(/built by hand[\s\S]*claude-ds doctor --completeness/);
+		expect(out).toMatch(/built by hand[\s\S]*npx claude-ds doctor --completeness/);
 	});
 
 	it("reconform plan entry carries the explainer line, not a bare header (#590)", async () => {
@@ -595,7 +596,83 @@ if grep -q "asChild" "$1"; then exit 1; fi
 		// ...but the go-ahead is withheld and routed to the resolving command.
 		expect(out).not.toMatch(/Nothing needs your attention — start working/);
 		expect(out).toMatch(/hand-rolled DS infra finding.*remain/);
-		expect(out).toMatch(/claude-ds doctor --completeness/);
+		expect(out).toMatch(/npx claude-ds doctor --completeness/);
+	}, 60000);
+
+	it("exhausted exit summary: names the stuck step, never an unconditional `run audit` (#626)", async () => {
+		// The retired exhausted line was "Some findings still need attention — run
+		// `claude-ds audit` to see what remains" — but audit can only report, never
+		// reduce, an exhausted loop's findings (#623's follow-up). Seed a tree that
+		// converges its auto-fixable share and then stalls on an unresolvable finding
+		// no loop step owns, so the loop returns `exhausted` with `lastStep: null`.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		// Auto-fixable drift → the first plan is non-empty, so the loop enters the
+		// drive (an all-unresolvable tree would short-circuit before `driveRemediation`).
+		await writeFile(
+			join(dir, "design-system/atoms/solo-label.tsx"),
+			`export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function SoloLabel() { return <span />; }
+`,
+		);
+		// One pattern importing another → DRIFT-PATTERN-IMPORTS-PATTERN, a terminal
+		// `manual` finding (hand-edit or exceptions.json — no loop step clears it).
+		await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+		await writeFile(
+			join(dir, "design-system/patterns/app-shell.tsx"),
+			`export function AppShell({ children }: { children: React.ReactNode }) { return <main>{children}</main>; }`,
+		);
+		await writeFile(
+			join(dir, "design-system/patterns/page-wrapper.tsx"),
+			`import { AppShell } from "@/design-system/patterns/app-shell";\nexport function PageWrapper({ children }: { children: React.ReactNode }) { return <AppShell>{children}</AppShell>; }`,
+		);
+
+		const out = await captureFrontDoor({
+			cwd: dir,
+			interactive: false,
+			yes: true,
+			maxIterations: 5,
+		});
+
+		// Honest non-convergence verdict — not the clean go-ahead.
+		expect(out).toMatch(/Couldn't reach a clean tree/);
+		expect(out).not.toMatch(/Nothing needs your attention — start working/);
+		// The remedy is named honestly (hand-edit / exceptions.json) and the retired
+		// unconditional "run audit" pointer is gone.
+		expect(out).toMatch(/hand-edit or an `exceptions\.json` entry/);
+		expect(out).not.toMatch(/run `claude-ds audit` to see what remains/i);
+	}, 60000);
+
+	it("ceiling exit summary: a still-progressing run says re-run, never hand-edit (#626)", async () => {
+		// The dishonest trap the `reason` split closes: an exhausted loop that hit the
+		// iteration ceiling while STILL making progress is not stuck — the findings are
+		// reducible, just not in this many passes. Telling that consumer to hand-edit
+		// would be a lie. One auto-fixable finding + a 1-pass ceiling reproduces it: the
+		// pass changes bytes (so the loop never gets a confirming stable pass) and exits
+		// via the ceiling path with progress in flight.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		await writeFile(
+			join(dir, "design-system/atoms/solo-label.tsx"),
+			`export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function SoloLabel() { return <span />; }
+`,
+		);
+
+		const out = await captureFrontDoor({
+			cwd: dir,
+			interactive: false,
+			yes: true,
+			maxIterations: 1,
+		});
+
+		// Honest ceiling verdict: still-making-progress + a re-run pointer...
+		expect(out).toMatch(/Couldn't reach a clean tree within 1 pass/);
+		expect(out).toMatch(/still making progress/);
+		expect(out).toMatch(/re-run `npx claude-ds`/i);
+		// ...and crucially NOT the `stuck` hand-edit framing — the lie this guards.
+		expect(out).not.toMatch(/hand-edit or an `exceptions\.json` entry/);
+		expect(out).not.toMatch(/re-running won't help/);
 	}, 60000);
 });
 

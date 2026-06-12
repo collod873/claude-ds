@@ -439,7 +439,7 @@ export interface GateOpts {
 	 * infra, ADR-0003) the gate's plan will NOT fix — these are not remediation-
 	 * loop members, so pressing Enter never touches them. When > 0 the gate
 	 * renders the honest "won't fix" block naming the exact follow-up command
-	 * (`claude-ds doctor --completeness`); when 0 (or omitted) there is nothing
+	 * (`npx claude-ds doctor --completeness`); when 0 (or omitted) there is nothing
 	 * the gate leaves behind, so the block is silent.
 	 */
 	completenessCount?: number;
@@ -459,7 +459,7 @@ function renderWontFixBlock(count: number): string[] {
 		"",
 		"Pressing Enter won't fix:",
 		`  ${count} ${noun} you built by hand that the design-system now provides —`,
-		"  run `claude-ds doctor --completeness` to retire those.",
+		"  run `npx claude-ds doctor --completeness` to retire those.",
 	];
 }
 
