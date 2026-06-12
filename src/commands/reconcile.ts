@@ -9,7 +9,7 @@ import {
 	makePruneDanglingHooks,
 } from "../lib/ops/reconcile-mutations.js";
 import { loadProject } from "../lib/project.js";
-import { RootDupeFinding, scanRootDupes } from "../lib/root-dupes.js";
+import { scanRootDupes } from "../lib/root-dupes.js";
 import { type Operation, run } from "../lib/runner.js";
 
 async function exists(p: string): Promise<boolean> {
@@ -192,7 +192,7 @@ export async function runReconcileActions(
 	}
 
 	// CLAUDE.md collisions: delete root CLAUDE.md (prefer .claude/CLAUDE.md per #34).
-	for (const f of collisionList) {
+	if (collisionList.length > 0) {
 		pathsToDelete.push("CLAUDE.md");
 		info("deleting root CLAUDE.md (keeping .claude/CLAUDE.md — original in git history)");
 	}

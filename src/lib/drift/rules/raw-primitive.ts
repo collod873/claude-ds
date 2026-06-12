@@ -5,7 +5,6 @@ import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
 
 import { attributedEnumVariants } from "../cva.js";
-import { extractUntilStatement } from "../extract.js";
 import type { DriftFinding, DriftRule, DriftRuleInput, FixResult } from "../rule.js";
 
 /**
@@ -148,10 +147,6 @@ const ELEMENT_TO_ATOM: Record<string, string> = {
 
 function capitalize(s: string): string {
 	return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-function kebabToPascal(s: string): string {
-	return s.split("-").map(capitalize).join("");
 }
 
 interface RawElementMatch {
@@ -311,71 +306,11 @@ function addImportIfMissing(source: string, componentName: string, importPath: s
 	return importLine + source;
 }
 
-const LOCAL_DECL_RE = /^(?:type|interface|const|let|var|function)\s+([A-Za-z_$][\w$]*)/gm;
-
-function deriveAtomName(componentName: string, parentFileName: string): string {
-	const parentPascal = kebabToPascal(parentFileName.replace(/\.\w+$/, ""));
-	if (componentName.startsWith(parentPascal) && componentName.length > parentPascal.length) {
-		return componentName.slice(parentPascal.length);
-	}
-	return componentName;
-}
-
 export function toKebab(pascal: string): string {
 	return pascal
 		.replace(/([a-z0-9])([A-Z])/g, "$1-$2")
 		.replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
 		.toLowerCase();
-}
-
-function findLocalDeps(
-	componentBody: string,
-	source: string,
-): { name: string; declaration: string; usedOnlyByComponent: boolean }[] {
-	const deps: { name: string; declaration: string; usedOnlyByComponent: boolean }[] = [];
-	LOCAL_DECL_RE.lastIndex = 0;
-	let m: RegExpExecArray | null;
-	while ((m = LOCAL_DECL_RE.exec(source)) !== null) {
-		const declName = m[1];
-		if (
-			/^export\s/.test(
-				source.slice(Math.max(0, source.lastIndexOf("\n", m.index) + 1), m.index + m[0].length),
-			)
-		)
-			continue;
-
-		const nameRe = new RegExp(`\\b${declName}\\b`);
-		if (!nameRe.test(componentBody)) continue;
-
-		const declaration = extractUntilStatement(source, m.index);
-		const remainingSource = source.replace(componentBody, "").replace(declaration, "");
-		const usedElsewhere = nameRe.test(remainingSource);
-
-		deps.push({
-			name: declName,
-			declaration,
-			usedOnlyByComponent: !usedElsewhere,
-		});
-	}
-	return deps;
-}
-
-function extractCodeContext(source: string, element: string, file: string): string {
-	const lines = source.split("\n");
-	const elementRe = new RegExp(`<${element}[\\s>]`);
-	for (let i = 0; i < lines.length; i++) {
-		if (elementRe.test(lines[i])) {
-			const lineNum = i + 1;
-			const start = Math.max(0, i - 1);
-			const end = Math.min(lines.length, i + 2);
-			const snippet = lines
-				.slice(start, end)
-				.map((l, idx) => `  ${start + idx + 1}| ${l}`)
-				.join("\n");
-			return `${file}:${lineNum}\n${snippet}`;
-		}
-	}
-	return file;
 }
 
 function inferVariantForInstance(

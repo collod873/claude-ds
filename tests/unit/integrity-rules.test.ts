@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	allIntegrityRuleIds,
 	evaluateIntegrity,
-	type IntegrityRuleId,
 	integrityRuleDescription,
 	integrityRuleSeverity,
 } from "../../src/lib/integrity/index";

@@ -441,7 +441,7 @@ describe("audit --fix stale exception cleanup", () => {
 				],
 			}),
 		);
-		const r = await runCli(["audit", "--fix"], { cwd: dir });
+		await runCli(["audit", "--fix"], { cwd: dir });
 		// Even after fixing META-KIND-MISSING, MISPLACED still fires → exception stays
 		const raw = await readFile(join(dir, "design-system/exceptions.json"), "utf8");
 		const parsed = JSON.parse(raw);

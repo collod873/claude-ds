@@ -13,7 +13,7 @@
  *      doctor and upgrade violating that mandate is the defect being fixed.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import pkg from "../../package.json" with { type: "json" };

@@ -1,18 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeJsonKeys, pruneHooksJson } from "../../src/lib/json-merge";
 
-// Helper to build a pack hook entry (uses .claude/hooks/ namespace)
-function packHook(event: string, matcher: string, commands: string[]) {
-	return {
-		[event]: [
-			{
-				matcher,
-				hooks: commands.map((cmd) => ({ type: "command", command: cmd })),
-			},
-		],
-	};
-}
-
 describe("mergeJsonKeys — non-hooks owned keys (wholesale replace)", () => {
 	it("owned non-hooks key from upstream replaces nothing when not in current", () => {
 		const upstream = JSON.stringify({ customSection: { val: "x" } });

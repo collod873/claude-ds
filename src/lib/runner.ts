@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { chmod, mkdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
-import type { Change, Operation, PlanResult } from "./operation.js";
+import type { Change, PlanResult } from "./operation.js";
 import type { ProjectContext } from "./project.js";
 
 export type RunMode = "dry-run" | "apply";

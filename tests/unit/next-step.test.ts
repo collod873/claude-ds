@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { detectBuildCommand, printNextStep } from "../../src/lib/log.js";
 
 describe("detectBuildCommand", () => {
 	it("returns 'npm run build' when package.json has a build script", async () => {
-		const { writeFile, mkdir } = await import("node:fs/promises");
+		const { writeFile } = await import("node:fs/promises");
 		const { freshTmpDir, cleanup } = await import("../helpers/tmpdir.js");
 		const dir = await freshTmpDir();
 		try {

@@ -1,6 +1,6 @@
 import { validateFixerOutput } from "../fixer-validate.js";
 import { info } from "../log.js";
-import type { Change, Operation, PlanResult } from "../operation.js";
+import type { Operation, PlanResult } from "../operation.js";
 import type { ProjectContext } from "../project.js";
 import type { Severity } from "../severity.js";
 import { INTEGRITY_RULES, INTEGRITY_RULES_BY_ID } from "./registry.js";

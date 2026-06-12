@@ -502,7 +502,7 @@ describe("audit --fix — reconcile integration (#171)", () => {
 		await mkdir(join(dir, ".claude"), { recursive: true });
 		await writeFile(join(dir, ".claude/CLAUDE.md"), "# Pre-existing project context\n");
 
-		const r = await runCli(["audit", "--fix"], { cwd: dir });
+		await runCli(["audit", "--fix"], { cwd: dir });
 		// Root CLAUDE.md auto-deleted; .claude/CLAUDE.md kept
 		expect(await exists(join(dir, "CLAUDE.md"))).toBe(false);
 		expect(await exists(join(dir, ".claude/CLAUDE.md"))).toBe(true);

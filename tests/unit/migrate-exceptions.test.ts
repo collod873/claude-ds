@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrateExceptions } from "../../src/lib/ops/migrations/v1.0.0/migrate-exceptions.js";

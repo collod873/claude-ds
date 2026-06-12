@@ -18,7 +18,7 @@
  * "classifySource — DS path aliases" for that coverage.
  */
 
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { findMisclassified } from "../../src/lib/checks/classification";

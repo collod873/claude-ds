@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	classifySource,
-	countDsComponentImports,
-	type TierVerdict,
-} from "../../src/lib/classifier";
+import { classifySource, countDsComponentImports } from "../../src/lib/classifier";
 
 // ── Atom fixtures ────────────────────────────────────────────────────────────
 

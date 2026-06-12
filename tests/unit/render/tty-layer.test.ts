@@ -5,7 +5,7 @@
  * snapshot tests for the pure renderers is the coverage the issue specifies
  * — no pty harness needed.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { identityColor } from "../../../src/lib/render/index.js";
 import { loadColorAdapter, printLines } from "../../../src/lib/render/tty-layer.js";
 
