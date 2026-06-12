@@ -64,6 +64,13 @@ export interface ProgressController {
 	/** Persist the active phase as failed (✖). The heal ceiling failure uses this. */
 	fail(text?: string): void;
 	/**
+	 * Persist the active phase as a warning (⚠) — the third terminal state (#588).
+	 * A step that made progress *and* reported skips lands here instead of ✔: the
+	 * work advanced, but a skipped file may hide an unverified end-state. `reason`
+	 * renders as a suffix (e.g. the skip count) so the glyph carries why it warned.
+	 */
+	warn(text?: string, reason?: string): void;
+	/**
 	 * Print a status line above the spinner — used for the heal iteration
 	 * counter so the user can see the convergence loop progressing without
 	 * losing the current phase's spinner.
@@ -81,6 +88,7 @@ const NOOP_PROGRESS: ProgressController = {
 	start() {},
 	succeed() {},
 	fail() {},
+	warn() {},
 	info() {},
 	stop() {},
 	active: false,
@@ -147,6 +155,17 @@ export function createProgress(): ProgressController {
 				spinner = null;
 			} else if (text !== undefined) {
 				process.stderr.write(`✖ ${text}\n`);
+			}
+			active = false;
+		},
+		warn(text, reason) {
+			const label =
+				text !== undefined && reason !== undefined ? `${text} — ${reason}` : (reason ?? text);
+			if (spinner) {
+				spinner.warn(label);
+				spinner = null;
+			} else if (label !== undefined) {
+				process.stderr.write(`⚠ ${label}\n`);
 			}
 			active = false;
 		},

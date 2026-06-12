@@ -128,6 +128,14 @@ interface StepResult {
 	exitCode: number;
 	progress: boolean;
 	/**
+	 * How many files the step visited but could not act on (#588). A step that
+	 * made progress *and* skipped at least one file is the warn case: the work
+	 * advanced, but a skip may hide an unverified end-state, so the loop renders ⚠
+	 * with this count instead of ✔. Only `reconform` introspects its skips today
+	 * (ADR-0026 JSX-bearing companions); command-wrapped members report `0`.
+	 */
+	skipped?: number;
+	/**
 	 * The step's `RunReport`, when the driver dispatched it through `run()` directly
 	 * (`reconform`). The driver feeds it to the run ledger (#579) so the outcome can
 	 * carry an inventory of what heal wrote. The command-wrapped members
@@ -209,7 +217,8 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
 			// #534: collapse a per-file wall of identical "verify by hand" notices to
 			// one count via the shared rendering-layer path (defect 5). The driver runs
 			// heal's inner steps quietly, so it never opts into the verbose per-file list.
-			const skipNotices = (outcome?.skipped ?? []).map((file) => ({
+			const skipped = outcome?.skipped ?? [];
+			const skipNotices = skipped.map((file) => ({
 				kind: "reconform-skipped-jsx",
 				line: `reconform: ${file} skipped — JSX-bearing example can't be regenerated (ADR-0026); verify by hand`,
 			}));
@@ -224,7 +233,12 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
 			// stamp ✔ on it; reading the Runner's per-Op progress signal tells the
 			// loop to report "nothing to do" instead (defect 6).
 			const madeProgress = report.ops.some((o) => o.progress);
-			return { exitCode: report.failed ? 1 : 0, progress: madeProgress, report };
+			return {
+				exitCode: report.failed ? 1 : 0,
+				progress: madeProgress,
+				skipped: skipped.length,
+				report,
+			};
 		}
 		case "migrate-layout":
 		case "reconcile":
@@ -379,8 +393,17 @@ export async function driveRemediation(opts: DriveOpts): Promise<DriveOutcome> {
 			// whose report shows progress. A step that visited its work and changed
 			// nothing (a skip-all reconform) reports "nothing to do" — never a ✔ that
 			// would falsely read as the complaint cleared (defect 6).
+			//
+			// warn-on-progress+skips (#588): a step that made progress *and* reported
+			// skips lands on the third terminal state — ⚠ with the skip count — rather
+			// than ✔. The work advanced, but a skipped file may hide an unverified
+			// end-state, so ✔ stays reserved for no-skip completion.
 			if (result.progress) {
-				progress.succeed(step);
+				if (result.skipped && result.skipped > 0) {
+					progress.warn(step, `${result.skipped} skipped`);
+				} else {
+					progress.succeed(step);
+				}
 			} else {
 				progress.info(`${step}: nothing to do`);
 			}
