@@ -56,8 +56,15 @@ import { scanScaffoldDrift } from "../lib/reports/scaffold-drift.js";
 import { scanScaffoldPresence } from "../lib/reports/scaffold-presence.js";
 import { scanRootDupes } from "../lib/root-dupes.js";
 import { runConsumerVerify } from "../lib/run-consumer-verify.js";
+import { run } from "../lib/runner.js";
 import { setGeneratorWarningCollector } from "../lib/showcase/generator.js";
 import { GeneratorWarningCollector } from "../lib/showcase/warning-collector.js";
+import {
+	newRunId,
+	readVerifyLedger,
+	verifyLedgerRecord,
+	writeVerifyLedger,
+} from "../lib/verify-ledger.js";
 import { checkVersionCurrency } from "../lib/version-currency.js";
 import { cliVersion } from "../lib/version-vocab.js";
 
@@ -320,6 +327,42 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		if (warningLines.length > 0) printLines(["", ...warningLines]);
 
 		if (plan.length === 0) {
+			// Verify-state re-check (PRD #635 Module 1 / #641). An empty plan is a
+			// planner fixed point — but the planner is blind to the consumer's verify
+			// gate. If the last recorded gate ended red with no green since, the tool
+			// must not print a clean verdict over a build it already reported red:
+			// re-run the consumer-verify gate before any "Loop is clean" line. A green
+			// re-check overwrites the record so the next run takes the fast path; a red
+			// re-check renders through the shared partitioned red-gate report and exits
+			// non-zero. A green or absent record keeps today's fast path (no re-run).
+			const lastGate = await readVerifyLedger(cwd);
+			if (lastGate?.verdict === "red") {
+				// Keep a spinner live through the verify subprocess (up to 300s) so the
+				// re-check reads as "still working," not a freeze — the same rule the
+				// convergence gate below documents. No-op off-TTY, so the empty-plan
+				// fast path's bytes are unchanged.
+				const progress = createProgress();
+				progress.start("re-checking the last red verify gate");
+				const verify = await runConsumerVerify(cwd, {
+					managedFiles: new Set(ctx.manifest.files.map((f) => f.path)),
+					managedRoots: ["design-system/"],
+				});
+				// Update the record with the re-check outcome — a green clears the gate
+				// so the next bare run is fast again. Written through the Runner.
+				await run(ctx, [writeVerifyLedger(verifyLedgerRecord(verify, newRunId()))], "apply");
+				if (!verify.ok) {
+					// Step-glyph rule (#638): a re-check ending red commits the spinner as
+					// ✗ before the report, never a stray ✓.
+					progress.fail("verify gate failed");
+					// This run changed nothing, so the failing files are disjoint from
+					// (empty) changes — the shared report attributes them as pre-existing.
+					printLines(renderRedGate(verify, { changedFiles: new Set() }));
+					process.exit(1);
+					return;
+				}
+				progress.stop();
+			}
+
 			// Completeness (ADR-0003) is not a remediation-loop member, so an empty
 			// plan does NOT imply the owned-concern scan was clean. If it flagged
 			// hand-rolled DS infra, route to the command that resolves it rather than
@@ -412,6 +455,10 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 					managedFiles: new Set(settledCtx.manifest.files.map((f) => f.path)),
 					managedRoots: ["design-system/"],
 				});
+				// Persist this gate outcome (PRD #635 Module 1 / #641) so a later bare
+				// invocation re-checks a red gate before printing any clean verdict.
+				// Written through the Runner like every other claude-ds artifact.
+				await run(settledCtx, [writeVerifyLedger(verifyLedgerRecord(verify, newRunId()))], "apply");
 				if (!verify.ok) {
 					// Step-glyph rule (#638): a run ending on a red gate renders the gate
 					// outcome as the step's conclusion (✗ on a TTY), never a bare ✓ from

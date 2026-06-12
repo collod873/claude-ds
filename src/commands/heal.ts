@@ -25,6 +25,7 @@ import { createProgress, printLines } from "../lib/render/tty-layer.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 import type { RunLedger } from "../lib/run-ledger.js";
 import { run } from "../lib/runner.js";
+import { newRunId, verifyLedgerRecord, writeVerifyLedger } from "../lib/verify-ledger.js";
 import { cliVersion } from "../lib/version-vocab.js";
 
 /**
@@ -336,6 +337,11 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 				managedRoots: ["design-system/"],
 				...(opts.verifyTimeout !== undefined ? { timeoutMs: opts.verifyTimeout * 1000 } : {}),
 			});
+			// Persist this gate outcome (PRD #635 Module 1 / #641). A red gate now
+			// survives between invocations, so a later bare `claude-ds` re-checks it
+			// before printing any clean verdict instead of certifying itself clean
+			// over a build heal already reported red. Written through the Runner.
+			await run(ctx, [writeVerifyLedger(verifyLedgerRecord(verify, newRunId()))], "apply");
 			if (!verify.ok) {
 				// Step-glyph rule (#638): a run ending on a red gate renders the gate
 				// outcome as the step's conclusion (✗ on a TTY), never a bare ✓ left by
