@@ -825,15 +825,20 @@ export function PaymentSummary() { return <div />; }
 		return { stdout, stderr };
 	}
 
-	it("summarizes skipped examples in one line and never prints raw [AST] (criteria 1)", async () => {
+	it("renders the owned skipped-example section naming files without --verbose (criteria 1, #643)", async () => {
 		await setupWarningSource();
 		const { stdout, stderr } = await captureBoth(false);
 
-		// One plain-language summary line naming the count.
+		// Headline: count + file count, attributed to its hand-verify owner.
 		expect(stdout).toMatch(
-			/4 component examples couldn't be parsed and were skipped — re-run with --verbose for details/,
+			/4 component examples couldn't be parsed and were skipped \(1 file\) — these need your eye:/,
 		);
-		// #622: a blank line separates the dashboard from the warnings summary so
+		// The affected file is named without --verbose.
+		expect(stdout).toContain("payment-summary.tsx");
+		// The consequence copy states the audit blind spot.
+		expect(stdout).toContain("excluded from audit but still compiled by your verify");
+		expect(stdout).toContain("hide type errors");
+		// #622: a blank line separates the dashboard from the warnings section so
 		// the two read as distinct sections.
 		expect(stdout).toMatch(/\n\n4 component examples couldn't be parsed/);
 		// The internal AST text never reaches either stream un-summarized.

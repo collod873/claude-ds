@@ -307,11 +307,14 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		const projectState = await deriveProjectState(cwd);
 		const plan = planRemediation(projectState);
 
-		// Generator warnings, summarized (#619). Deriving state ran a full generator
-		// sweep, so any skipped examples are now collected. Rendered here — between
-		// the dashboard and the plan/gate — as one consumer-language line, or the
-		// full itemized list under --verbose. Zero warnings → nothing prints.
-		// A leading blank line separates the warnings summary from the dashboard so
+		// Skipped-example warnings, as an owned dashboard section (#643 / PRD #635
+		// module 7). Deriving state ran a full generator sweep, so any skipped
+		// examples are now collected. Rendered here — between the dashboard and the
+		// plan/gate — attributed to its hand-verify owner: a count, the affected
+		// files named *without* --verbose, and the consequence (excluded from audit
+		// but still compiled by verify, so it can hide type errors). The full
+		// per-skip itemization stays behind --verbose. Zero warnings → nothing
+		// prints. A leading blank line separates the section from the dashboard so
 		// the two read as distinct sections (#622 / PRD #618 visual hierarchy).
 		const warningLines = generatorWarnings.render({ verbose: opts.verbose });
 		if (warningLines.length > 0) printLines(["", ...warningLines]);
