@@ -168,6 +168,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 	// drift+integrity scan `audit` uses and apply exceptions so the dashboard
 	// counts match what the user would see from `audit` itself.
 	let findings: Array<{ ruleId: string; file: string; message: string }> = [];
+	let autoFixableFindings: Array<{ ruleId: string; file: string }> = [];
 	let extractionCount = 0;
 	let unfixableCount = 0;
 	// Read-only completeness scans (ADR-0003 / #504). A check that passes
@@ -199,10 +200,18 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		// findings all fall here. Resolved through the same complaint-ownership
 		// registry the planner composes from (#533), so the front-door's status
 		// numbers cannot diverge from the steps the plan dispatches.
-		unfixableCount = active.filter((f) => {
+		const isAutoFixable = (f: { ruleId: string; file: string; message: string }): boolean => {
 			const owner = ownerForFinding(f);
-			return !(owner.kind === "operation" && owner.step === "audit --fix");
-		}).length;
+			return owner.kind === "operation" && owner.step === "audit --fix";
+		};
+		unfixableCount = active.filter((f) => !isAutoFixable(f)).length;
+		// The concrete auto-fixable set the planner consumed — fed to the gate so
+		// the `audit --fix` step previews a per-rule grouped list, not a bare count
+		// (#584). Same predicate as `unfixableCount`'s complement, so the preview's
+		// rows can never diverge from the header total they sit under.
+		autoFixableFindings = active
+			.filter((f) => isAutoFixable(f))
+			.map((f) => ({ ruleId: f.ruleId, file: f.file }));
 
 		// Owned-concern scan (ADR-0017 / #514): repo-wide, signature-as-identity.
 		// Catches hand-rolled DS infrastructure (the Crewops `ui-token-validator.sh`
@@ -303,6 +312,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		{
 			classifyCount: unfixableCount,
 			autoFixableCount: findings.length - unfixableCount,
+			autoFixableFindings,
 		},
 		{ verbose: opts.verbose },
 	);
