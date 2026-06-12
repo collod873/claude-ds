@@ -40,10 +40,19 @@ export async function doctorCmd(opts: {
 	completeness?: boolean;
 	json?: boolean;
 	verbose?: boolean;
+	answers?: string;
+	reason?: string;
+	issue?: string;
 }): Promise<void> {
 	const verbose = opts.verbose ?? false;
 	if (opts.completeness) {
-		await runCompletenessCheck({ pack: opts.pack, cwd: opts.cwd });
+		await runCompletenessCheck({
+			pack: opts.pack,
+			cwd: opts.cwd,
+			answers: opts.answers,
+			reason: opts.reason,
+			issue: opts.issue,
+		});
 		return;
 	}
 	const cwd = opts.cwd ?? process.cwd();
