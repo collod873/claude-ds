@@ -159,13 +159,12 @@ describe("issue #412 — empty migration chain never renders `pack X → Y`", ()
 					),
 				);
 				// Defect 3 (#536): the body must reconcile with the header. The pin
-				// advance is a real `.claude-ds.json` write, surfaced as a substantive
-				// flag flip — never the contradictory "no file changes — version pin
-				// only" line under a header that just promised a bump.
+				// advance is a real `.claude-ds.json` write — surfaced (per #591) as
+				// `pack pinned <from> → <to>` rather than a generic flag flip — never
+				// the contradictory "no file changes — version pin only" line under a
+				// header that just promised a bump.
 				expect(out).toMatch(
-					new RegExp(
-						`packVersion: "${escapeRegex(EMPTY_CHAIN_PIN)}" -> "${escapeRegex(CLI_VERSION)}"`,
-					),
+					new RegExp(`pack pinned ${escapeRegex(EMPTY_CHAIN_PIN)} → ${escapeRegex(CLI_VERSION)}`),
 				);
 				expect(out).not.toMatch(/no file changes/);
 			} else {

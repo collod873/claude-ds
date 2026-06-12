@@ -27,7 +27,6 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { adrUrl } from "../lib/adr-citation.js";
 import { ownerForFinding } from "../lib/complaint-ownership.js";
@@ -35,7 +34,7 @@ import { type Config, parseConfig } from "../lib/config.js";
 import { composeDashboardState } from "../lib/dashboard.js";
 import { isExtractionNeededFinding } from "../lib/drift/index.js";
 import { type Exception, parseExceptions } from "../lib/exceptions.js";
-import { buildCommitmentGate } from "../lib/gate-preview.js";
+import { awaitCommitment, buildCommitmentGate } from "../lib/gate-preview.js";
 import { detectBuildCommand } from "../lib/log.js";
 import { parseManifest } from "../lib/manifest.js";
 import { computeMigrationChain } from "../lib/migration-framework.js";
@@ -517,23 +516,4 @@ function renderRedGate(verify: VerifyResult): string[] {
 			: "Run `claude-ds audit` to see what remains, then re-run.",
 	);
 	return lines;
-}
-
-/**
- * The single commitment gate. Empty input (`[Enter]`) approves the whole plan;
- * any other input cancels. One prompt for the entire remediation — after it,
- * the auto-advance loop pauses only for genuine Ambiguities, never for the
- * mechanical work the gate already covered.
- */
-async function awaitCommitment(): Promise<boolean> {
-	const rl = createInterface({ input: process.stdin, output: process.stdout });
-	let answer: string;
-	try {
-		answer = await rl.question("[Enter] to run all, anything else to cancel: ");
-	} catch {
-		answer = "x";
-	} finally {
-		rl.close();
-	}
-	return answer.trim() === "";
 }

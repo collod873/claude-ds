@@ -94,4 +94,6 @@ audit → adopt → heal
 
 `audit` shows the gap. `adopt` installs the scaffold. `heal` is the self-converging brownfield loop: it runs `sync → upgrade → classify → audit --fix` until the tree reaches a fixed point (0 file changes, 0 audit findings) or fails loudly at the iteration ceiling (default 3). The classify ↔ `audit --fix` two-pass dance (#265 — corrupt-baseline atoms whose imports re-derive into composites after `audit --fix` runs) is automated; you don't think about it.
 
+In a terminal, `heal` shows the plan (including a per-rule preview of what `audit --fix` will repair) and waits for a single `[Enter]` before touching anything — cancel and nothing changes. Pass `--yes` to skip it; piped/CI runs (non-TTY) skip it automatically, so the gate never blocks automation.
+
 Once converged, `heal` gates the verdict on your own verify command (`verify`/`typecheck`/`build`). That gate has a **300s default timeout** (a full `typecheck && lint && test` chain routinely passes a minute on a warm run). Heavy suites that need longer raise it per-run with `heal --verify-timeout <seconds>`, or globally via the `CLAUDE_DS_VERIFY_TIMEOUT` env var (whole seconds).

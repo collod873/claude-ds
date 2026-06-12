@@ -72,10 +72,11 @@ describe("heal progress UI (#332)", () => {
 			// *some* per-phase progress marker reaches stderr — the ora ✔ persist
 			// is the same line regardless of phase name.
 			expect(r.stderr).toMatch(/✔|✖/);
-			// Pass counter is anchored to the progress UI (acceptance #1). C3
-			// (#414) renamed `iteration N/M` to `pass N/M` so the bare counter
-			// reads as planned, not stuck.
-			expect(r.stderr).toMatch(/pass 1\/\d+/i);
+			// Pass counter (acceptance #1). C3 (#414) renamed `iteration N/M` to
+			// `pass N/M` so it reads as planned, not stuck; #591 collapsed it to a
+			// single labeled stdout line (`heal: pass 1/3 (max) — …`) and dropped
+			// the bare stderr counter the driver used to double-print.
+			expect(r.stdout).toMatch(/heal: pass 1\/\d+ \(max\) — /);
 		});
 	}, 30000);
 
