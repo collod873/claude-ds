@@ -15,8 +15,30 @@ npx claude-ds@^1
 It routes itself:
 
 - **First run** (no `.claude-ds.json` yet) → the **greet**: detects your framework and whether you have existing components, asks one question, and dispatches to `init` (greenfield) or `adopt` (brownfield) for you. You don't have to know which onramp you need.
-- **Already adopted** (config exists) → the **dashboard**: a read-only health view (`doctor` structural state + drift/integrity scan) with `[Enter]` to run the recommended next command.
+- **Already adopted** (config exists) → the **dashboard**: a read-only health view (`doctor` structural state + drift/integrity scan), then a single commitment gate that names exactly what `[Enter]` will run before auto-advancing the tree to a clean fixed point.
 - **Non-interactive** (agent/CI, no TTY) → prints help. The dashboard is a human surface; an adopted project's automation contract stays byte-stable.
+
+Adopted, the front door reads as four stacked sections — status, then any skipped-example warnings, then the plan, then your decision — each separated by a blank line:
+
+```
+✓ Design system in place — ~/code/your-app
+✓ Managed files: 93/93
+! Needs attention: 1 issue I can fix
+✓ Also checked: no hand-built design-system scripts, nothing stale or deprecated
+
+Pressing Enter will:
+  1. restore files that drifted from a past update
+     1 file modified — 1 atom
+  2. fix 1 issue automatically
+     [DRIFT-STALE-META-STATES] error · 1 finding · 1 file
+
+  I'll repeat these until nothing's left to fix — up to 3 passes.
+  (re-run with --verbose for the full per-file change list)
+
+[Enter] runs the 2 steps above, anything else to cancel:
+```
+
+Press `[Enter]` and it drives `sync → upgrade → classify → audit --fix` to a fixed point, then gates the verdict on your own verify command. Type anything else and nothing changes.
 
 From the greet you land in the scaffold; from there `heal` (below) drives it to a fixed point. Everything else in this README is what runs *under* the front door — you usually just type the bare command.
 
