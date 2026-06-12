@@ -145,6 +145,9 @@ describe("front door verify gate at convergence (#510)", () => {
 		expect(out).toMatch(/verify gate failed/i);
 		expect(out).toContain("button.showcase.tsx");
 		expect(out).toContain("TS2322");
+		// #644: the early-stop line reconciles the gate's "up to N passes" promise —
+		// it stopped before the ceiling because the verify gate failed.
+		expect(out).toMatch(/stopped after pass \d+ of up to 5 — verify gate failed/i);
 		// Exit non-zero, like heal.
 		expect(exitSpy).toHaveBeenCalledWith(1);
 	}, 60000);

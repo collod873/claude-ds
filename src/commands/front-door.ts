@@ -465,9 +465,14 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 					// the last loop step. The shared partitioned report (heal renders the
 					// same one) gets this run's changed-file set from the run ledger so it
 					// can attribute the breakage as pre-existing when the sets are disjoint.
-					progress.fail("verify gate failed");
+					// #644: reconcile the gate's "up to N passes" promise — the loop
+					// converged in `outcome.iterations` passes, then the verify gate
+					// failed, so it stopped before the ceiling. Naming the pass count keeps
+					// the up-front promise from reading as broken.
+					const stopLine = `Stopped after pass ${outcome.iterations} of up to ${maxIterations} — verify gate failed`;
+					progress.fail(stopLine);
 					const changedFiles = new Set(outcome.ledger.entries().map((e) => e.toPath ?? e.path));
-					printLines(renderRedGate(verify, { changedFiles }));
+					printLines([stopLine, ...renderRedGate(verify, { changedFiles })]);
 					process.exit(1);
 					return;
 				}

@@ -53,16 +53,40 @@ function unquote(jsonStr: string): string {
 }
 
 /**
+ * True when the substantive set is *only* a version-pin advance — every flip on
+ * every entry is a `packVersion`/`version` key — and nothing else changed this
+ * run (`hasOtherChanges` is false). A pin-only upgrade (empty migration chain,
+ * `allowed_imports` already current, no migrated files) is a metadata bump, not
+ * an operator-decision flag flip buried under a dump — so it renders the pin
+ * advance bare, without the "Substantive changes:" label that would oversell it
+ * (#644). A pin alongside any other flip (e.g. `allowed_imports`) or any file
+ * change is a substantive upgrade and keeps the label.
+ */
+function isPinOnly(
+	substantive: { entry: SummaryEntry; flips: FlagFlip[] }[],
+	hasOtherChanges: boolean,
+): boolean {
+	if (hasOtherChanges || substantive.length === 0) return false;
+	return substantive.every(
+		({ flips }) => flips.length > 0 && flips.every((f) => VERSION_PIN_KEYS.has(f.key)),
+	);
+}
+
+/**
  * Render the "Substantive changes:" block shared by the per-file and tier
  * summaries. A version-pin flip becomes `pack pinned <from> → <to>` (#591); every
  * other `.claude-ds.json` key keeps the `(config flag flipped)` label with a
  * per-key `before -> after` callout. Returns `[]` when nothing is substantive.
+ *
+ * `bare` (the pin-only case, #644) drops the "Substantive changes:" header so a
+ * lone metadata pin advance isn't dressed up as a buried operator decision.
  */
 function renderSubstantiveLines(
 	substantive: { entry: SummaryEntry; flips: FlagFlip[] }[],
+	bare = false,
 ): string[] {
 	if (substantive.length === 0) return [];
-	const lines: string[] = ["Substantive changes:"];
+	const lines: string[] = bare ? [] : ["Substantive changes:"];
 	for (const { entry, flips } of substantive) {
 		const pins = flips.filter((f) => VERSION_PIN_KEYS.has(f.key));
 		const rest = flips.filter((f) => !VERSION_PIN_KEYS.has(f.key));
@@ -192,7 +216,8 @@ export function renderChangeSummary(entries: SummaryEntry[]): string[] {
 		}
 	}
 
-	const lines: string[] = [...renderSubstantiveLines(substantive)];
+	const pinOnly = isPinOnly(substantive, regular.length > 0 || abortCount > 0);
+	const lines: string[] = [...renderSubstantiveLines(substantive, pinOnly)];
 
 	if (regular.length > 0) {
 		if (substantive.length > 0) {
@@ -321,7 +346,14 @@ export function renderChangeTierSummary(entries: SummaryEntry[]): string[] {
 		}
 	}
 
-	const lines: string[] = [...renderSubstantiveLines(substantive)];
+	const hasOtherChanges =
+		added.total > 0 ||
+		modified.total > 0 ||
+		deleted.total > 0 ||
+		renamed.total > 0 ||
+		abortCount > 0;
+	const pinOnly = isPinOnly(substantive, hasOtherChanges);
+	const lines: string[] = [...renderSubstantiveLines(substantive, pinOnly)];
 
 	const verbs: { verb: string; buckets: TierBuckets }[] = [
 		{ verb: "modified", buckets: modified },

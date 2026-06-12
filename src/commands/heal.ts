@@ -346,7 +346,13 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 				// Step-glyph rule (#638): a run ending on a red gate renders the gate
 				// outcome as the step's conclusion (✗ on a TTY), never a bare ✓ left by
 				// the last loop step. `fail` replaces the plain `stop` on this branch.
-				progress.fail("heal: verify gate failed");
+				// #644: reconcile the up-front "up to N passes" promise — the loop
+				// reached a fixed point in `outcome.iterations` passes, then the verify
+				// gate failed, so it stopped before exhausting the ceiling. Stating the
+				// pass count keeps "up to 3 passes" from reading as a broken promise.
+				const stopLine = `heal: stopped after pass ${outcome.iterations} of up to ${maxIterations} — verify gate failed`;
+				progress.fail(stopLine);
+				err(stopLine);
 				// `guard` is narrowed to `ok: true` here — the `!guard.ok` arm at the top
 				// of the function exits the process, so `guard.state` is in scope.
 				reportRedGate(verify, {

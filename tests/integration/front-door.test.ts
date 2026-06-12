@@ -291,9 +291,10 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
 
 		const out = await captureFrontDoor({ cwd: dir });
 
-		// #631's dashboard names the stale pack under "Needs attention"; #621's gate
-		// action reads `update the pack X → Y` (replacing the old `upgrade — pack`).
-		expect(out).toMatch(/Needs attention: .*a newer design-system pack is available/);
+		// #631's dashboard names the stale pack; #644 gives it its own line (no
+		// longer comma-spliced under "Needs attention"). #621's gate action reads
+		// `update the pack X → Y` (replacing the old `upgrade — pack`).
+		expect(out).toMatch(/A newer design-system pack is available/);
 		expect(out).toMatch(/update the pack v0\.0\.1 → /);
 	});
 
