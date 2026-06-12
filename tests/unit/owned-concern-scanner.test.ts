@@ -150,6 +150,36 @@ describe("scanOwnedConcerns", () => {
 		expect(findings).toEqual([]);
 	});
 
+	it("never flags a non-code file (markdown notes) carrying validator prose", async () => {
+		// #637: the over-flag bias covers uncertainty, not category errors. A
+		// notes file is not infrastructure — non-code files are skipped before
+		// detection. The motivating false positive was a markdown notes file
+		// flagged as a hand-rolled validator.
+		await mkdir(join(dir, "docs"), { recursive: true });
+		await writeFile(join(dir, "docs", "token-notes.md"), LINT_TOKENS_SRC);
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: [],
+		});
+		expect(findings).toEqual([]);
+	});
+
+	it("stamps the actual first-match line, not a hardcoded 1", async () => {
+		// #637: the scanner stops stamping line 1. The detector returns the
+		// real first-match line; for this fixture the first DS signal is past
+		// line 1, so a `:1` would be a fabricated location.
+		await mkdir(join(dir, "scripts"), { recursive: true });
+		await writeFile(join(dir, "scripts", "lint-tokens.ts"), LINT_TOKENS_SRC);
+		const findings = await scanOwnedConcerns({
+			cwd: dir,
+			manifestPaths: new Set<string>(),
+			generatedPatterns: [],
+		});
+		expect(findings).toHaveLength(1);
+		expect(findings[0].line).toBeGreaterThan(1);
+	});
+
 	it("stays silent on a non-DS script with zero DS signal", async () => {
 		await mkdir(join(dir, "scripts"), { recursive: true });
 		await writeFile(join(dir, "scripts", "check-where-chain.sh"), CHECK_WHERE_CHAIN_SRC);

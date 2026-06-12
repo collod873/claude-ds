@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	allOwnedConcernIds,
+	countOwnedConcernFindings,
 	evaluateOwnedConcerns,
 	formatOwnedConcernFinding,
 	type OwnedConcernId,
@@ -133,6 +134,17 @@ describe("owned-concern registry", () => {
 	it("OWNED-APP-WIDE-TOKEN-LINT is superseded by the app-wide tokens hook", () => {
 		expect(ownedConcernSupersededBy("OWNED-APP-WIDE-TOKEN-LINT")).toBe("HOOK-TOKENS-APP-WIDE");
 	});
+
+	// #637: the two token-lint concerns have near-identical IDs. Their
+	// consumer-facing descriptions must distinguish scope (DS-parity vs
+	// app-wide) so the pair does not read as a duplicated-bug.
+	it("the two token-lint concerns expose distinct descriptions distinguishing scope", () => {
+		const dsParity = ownedConcernDescription("OWNED-TOKEN-LINT");
+		const appWide = ownedConcernDescription("OWNED-APP-WIDE-TOKEN-LINT");
+		expect(dsParity).not.toBe(appWide);
+		expect(dsParity).toMatch(/design-system|parity/i);
+		expect(appWide).toMatch(/app-wide/i);
+	});
 });
 
 describe("OWNED-TOKEN-LINT detector", () => {
@@ -182,6 +194,35 @@ describe("OWNED-TOKEN-LINT detector", () => {
 			source: "",
 		});
 		expect(findings).toHaveLength(0);
+	});
+
+	// #637: the over-flag bias covers genuine uncertainty, not category errors.
+	// A markdown notes file that happens to carry the same prose can never be a
+	// hand-rolled validator — validator/script-signature detectors skip non-code
+	// files. The motivating false positive was a markdown notes file flagged as
+	// a hand-rolled validator.
+	it("never flags a non-code file (markdown notes) even with matching prose", () => {
+		const findings = evaluateOwnedConcerns({
+			file: "docs/token-notes.md",
+			source: LINT_TOKENS_FIXTURE,
+		});
+		expect(findings.filter((f) => f.concernId === "OWNED-TOKEN-LINT")).toHaveLength(0);
+	});
+
+	// #637: each detector returns the actual first-match line for its finding,
+	// not a hardcoded 1. Here the first signature evidence sits on line 4.
+	it("reports the actual first-match line, not line 1", () => {
+		const source = [
+			"#!/usr/bin/env node", // 1
+			"import { readFileSync } from 'node:fs';", // 2
+			"", // 3
+			"// lines marked design-system-ignore are skipped", // 4 — first DS signal
+			"const violations: string[] = [];", // 5 — lint-shape signal
+		].join("\n");
+		const findings = evaluateOwnedConcerns({ file: "scripts/style-guard.ts", source });
+		const hit = findings.find((f) => f.concernId === "OWNED-TOKEN-LINT");
+		expect(hit).toBeDefined();
+		expect(hit?.line).toBe(4);
 	});
 
 	it("detect is a pure function of (content, path) — same input, same output", () => {
@@ -380,6 +421,68 @@ describe("formatOwnedConcernFinding — completeness gating", () => {
 		// deletion (PRD #340 F10, issue #348).
 		expect(line).not.toMatch(/\b(?:delete|remove)\b/i);
 		expect(line).not.toMatch(/superseded by/i);
+	});
+
+	// #637: when a concrete match line applies, render `file:line`.
+	it("renders file:line when the finding carries a real line", () => {
+		const out = formatOwnedConcernFinding({
+			file: "scripts/lint-tokens.ts",
+			line: 42,
+			concernId: "OWNED-TOKEN-LINT",
+			supersededBy: "DRIFT-TOKEN-PARITY",
+			message: "hand-rolled design-token linter in scripts/lint-tokens.ts",
+		});
+		expect(out).toMatch(/`scripts\/lint-tokens\.ts:42`/);
+	});
+
+	// #637: when no concrete match line applies, the finding omits the line
+	// component entirely — no fake `:1` is rendered.
+	it("omits the line component when the finding carries no line", () => {
+		const out = formatOwnedConcernFinding({
+			file: "scripts/lint-tokens.ts",
+			concernId: "OWNED-TOKEN-LINT",
+			supersededBy: "DRIFT-TOKEN-PARITY",
+			message: "hand-rolled design-token linter in scripts/lint-tokens.ts",
+		});
+		expect(out).toMatch(/`scripts\/lint-tokens\.ts`/);
+		expect(out).not.toMatch(/lint-tokens\.ts:/);
+	});
+});
+
+describe("countOwnedConcernFindings — per-concern breakdown (#637)", () => {
+	it("returns a count for every registered concern with the ids as keys", () => {
+		const counts = countOwnedConcernFindings([]);
+		expect(Object.keys(counts).sort()).toEqual([...allOwnedConcernIds()].sort());
+		for (const id of allOwnedConcernIds()) expect(counts[id]).toBe(0);
+	});
+
+	it("counts sum to the total number of findings", () => {
+		const findings = [
+			{
+				file: "a.ts",
+				concernId: "OWNED-TOKEN-LINT" as const,
+				supersededBy: "DRIFT-TOKEN-PARITY" as const,
+				message: "x",
+			},
+			{
+				file: "b.ts",
+				concernId: "OWNED-TOKEN-LINT" as const,
+				supersededBy: "DRIFT-TOKEN-PARITY" as const,
+				message: "y",
+			},
+			{
+				file: "c.sh",
+				concernId: "OWNED-APP-WIDE-TOKEN-LINT" as const,
+				supersededBy: "HOOK-TOKENS-APP-WIDE" as const,
+				message: "z",
+			},
+		];
+		const counts = countOwnedConcernFindings(findings);
+		const sum = allOwnedConcernIds().reduce((acc, id) => acc + counts[id], 0);
+		expect(sum).toBe(findings.length);
+		expect(counts["OWNED-TOKEN-LINT"]).toBe(2);
+		expect(counts["OWNED-APP-WIDE-TOKEN-LINT"]).toBe(1);
+		expect(counts["OWNED-BASE-UI-ASCHILD-VALIDATOR"]).toBe(0);
 	});
 });
 

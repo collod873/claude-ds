@@ -1,4 +1,10 @@
-import type { OwnedConcern, OwnedConcernFinding, OwnedConcernInput } from "../rule.js";
+import {
+	firstSignalLine,
+	isCodeFile,
+	type OwnedConcern,
+	type OwnedConcernFinding,
+	type OwnedConcernInput,
+} from "../rule.js";
 
 /**
  * OWNED-TOKEN-LINT — flag a hand-rolled design-token linter.
@@ -76,9 +82,21 @@ function countMatches(source: string, patterns: readonly RegExp[]): number {
 	return n;
 }
 
+// Union of every signal this detector keys on — used to locate the first
+// line of evidence backing a finding (#637).
+const ALL_SIGNALS: readonly RegExp[] = [
+	...TOKEN_GOVERNANCE_SIGNALS,
+	...RAW_COLOR_SIGNATURES,
+	...RAW_SPACING_SIGNATURES,
+	...LINT_SHAPE_SIGNALS,
+];
+
 function detect(input: OwnedConcernInput): OwnedConcernFinding | null {
 	const { file, source } = input;
 	if (source.length === 0) return null;
+	// #637: validator/script-signature detection is for code, not prose. A
+	// markdown notes file is never hand-rolled infrastructure.
+	if (!isCodeFile(file)) return null;
 
 	const governance = countMatches(source, TOKEN_GOVERNANCE_SIGNALS);
 	if (governance === 0) return null;
@@ -106,13 +124,14 @@ function detect(input: OwnedConcernInput): OwnedConcernFinding | null {
 		file,
 		supersededBy: "DRIFT-TOKEN-PARITY",
 		message: `hand-rolled design-token linter in ${file}`,
+		line: firstSignalLine(source, ALL_SIGNALS),
 	};
 }
 
 export const ownedTokenLintRule: OwnedConcern = {
 	id: "OWNED-TOKEN-LINT",
 	description:
-		"Consumer hand-rolled a design-token linter (raw color/spacing flagger + JSON↔CSS parity) — superseded by DRIFT-TOKEN-PARITY",
+		"Consumer hand-rolled a design-system token-parity linter (flags raw color/spacing under design-system/ and cross-checks tokens.json ↔ emitted CSS) — superseded by DRIFT-TOKEN-PARITY",
 	supersededBy: "DRIFT-TOKEN-PARITY",
 	detect,
 };

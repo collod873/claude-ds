@@ -40,6 +40,23 @@ export function allOwnedConcernIds(): OwnedConcernId[] {
 	return OWNED_CONCERNS.map((c) => c.id);
 }
 
+/**
+ * Per-concern finding-count breakdown over a scan's findings (#637). Every
+ * registered concern id is a key (0 when it produced no finding), so the
+ * counts sum to `findings.length` and the doctor footer can reconcile its
+ * "concerns checked" coverage line with the findings actually shown.
+ */
+export function countOwnedConcernFindings(
+	findings: readonly OwnedConcernScannerFinding[],
+): Record<OwnedConcernId, number> {
+	const counts = Object.fromEntries(allOwnedConcernIds().map((id) => [id, 0])) as Record<
+		OwnedConcernId,
+		number
+	>;
+	for (const f of findings) counts[f.concernId] += 1;
+	return counts;
+}
+
 /** Human-readable description for an Owned-concern id. */
 export function ownedConcernDescription(id: OwnedConcernId): string {
 	return OWNED_CONCERNS_BY_ID[id].description;
@@ -66,7 +83,10 @@ export function ownedConcernSupersededBy(id: OwnedConcernId): SupersedingRuleId 
  * `scripts/lint-tokens.ts` near-miss.
  */
 export function formatOwnedConcernFinding(finding: OwnedConcernScannerFinding): string {
-	const head = `- \`${finding.file}:${finding.line}\` (${finding.concernId}): ${finding.message}`;
+	// #637: render `file:line` only when a real match line exists — a finding
+	// with no concrete line shows the bare path, never a fabricated `:1`.
+	const loc = finding.line !== undefined ? `${finding.file}:${finding.line}` : finding.file;
+	const head = `- \`${loc}\` (${finding.concernId}): ${finding.message}`;
 	if (finding.supersededBy !== null) {
 		return `${head} — superseded by ${finding.supersededBy} (remove this file; the pack's ${finding.supersededBy} covers the same failure mode)`;
 	}
