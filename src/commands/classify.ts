@@ -1,6 +1,7 @@
 import type { Stats } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { adrUrl } from "../lib/adr-citation.js";
 import { classifySource } from "../lib/classifier.js";
 import { applyAmbiguityPass } from "../lib/classify/ambiguity-pass.js";
 import {
@@ -479,7 +480,7 @@ export async function classifyCmd(opts: {
 			// relocate-to-features/ hand-off is grounded in real evidence.
 			info(
 				`classify: ${p.file} — smart part imports from a domain root and no shipped role contract matches. ` +
-					`Candidate feature: relocate to features/, or mark presentational (ADR-0005).`,
+					`Candidate feature: relocate to features/, or mark presentational (${adrUrl("ds-vs-features-boundary")}).`,
 			);
 			continue;
 		}
@@ -490,7 +491,7 @@ export async function classifyCmd(opts: {
 			// features/" (ADR-0005, ADR-0003).
 			info(
 				`classify: ${p.file} — smart part with no shipped role contract yet. ` +
-					`Default tracked exception (no shipped contract) — or mark presentational, or register an entry in design-system/exceptions.json (ADR-0003).`,
+					`Default tracked exception (no shipped contract) — or mark presentational, or register an entry in design-system/exceptions.json (${adrUrl("completeness-principle")}).`,
 			);
 			continue;
 		}

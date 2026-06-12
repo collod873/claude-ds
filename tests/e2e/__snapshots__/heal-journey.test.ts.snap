@@ -96,7 +96,7 @@ create: commitlint.config.js — new in this version — creating
 create: vitest.config.ts — new in this version — creating
 create: vitest.setup.ts — new in this version — creating
 create: CLAUDE.md → .claude/CLAUDE.md — new in this version — creating
-rewrite: package.json — hybrid json owned keys changed upstream
+rewrite: package.json — pack-owned keys changed upstream
 create: design-system/exceptions.json — new in this version — creating
 create: design-system/enforcement.json — new in this version — creating
 create: design-system/failure-log.md — new in this version — creating

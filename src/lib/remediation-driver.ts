@@ -35,6 +35,7 @@ import { auditCmd } from "../commands/audit.js";
 import { classifyCmd } from "../commands/classify.js";
 import { syncCmd } from "../commands/sync.js";
 import { upgradeCmd } from "../commands/upgrade.js";
+import { adrUrl } from "./adr-citation.js";
 import { SCAN_SKIP_DIRS } from "./build-outputs.js";
 import {
 	type GenIntegrityOutcome,
@@ -218,13 +219,16 @@ export async function dispatchStep(step: LoopStep, opts: DispatchOpts): Promise<
 			// one count via the shared rendering-layer path (defect 5). The driver runs
 			// heal's inner steps quietly, so it never opts into the verbose per-file list.
 			const skipped = outcome?.skipped ?? [];
+			const adr = adrUrl("composed-widget-rendering");
 			const skipNotices = skipped.map((file) => ({
 				kind: "reconform-skipped-jsx",
-				line: `reconform: ${file} skipped — JSX-bearing example can't be regenerated (ADR-0026); verify by hand`,
+				line: `reconform: ${file} skipped — JSX-bearing example can't be regenerated; verify by hand (${adr})`,
 			}));
 			for (const line of renderPerFileNotices(skipNotices, {
 				summarize: (_kind, n) =>
-					`reconform: ${n} files skipped — JSX-bearing examples can't be regenerated (ADR-0026); verify by hand`,
+					`reconform: ${n} files skipped — JSX-bearing examples can't be regenerated; verify by hand (${adr})`,
+				// #592: the non-mutating recovery command, not a re-run of the loop.
+				verboseHint: "re-run `reconform --verbose --dry-run` to list them",
 			})) {
 				progress.info(line);
 			}

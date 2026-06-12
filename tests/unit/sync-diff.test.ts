@@ -21,6 +21,90 @@ describe("sync-diff (managed)", () => {
 	});
 });
 
+describe("sync-diff (consumer-legible reasons, #592)", () => {
+	// Internal-glossary terms that must never reach a rendered reason string.
+	const FORBIDDEN = ["hybrid json", "seeded; never re-touched", "marker region"];
+
+	function reasonOf(
+		info: Parameters<typeof diffFile>[0],
+		d: Parameters<typeof diffFile>[1],
+	): string {
+		return diffFile(info, d).reason;
+	}
+
+	it("seeded skip reads plainly and names neither 'seeded' nor 're-touched'", () => {
+		const r = reasonOf({ category: "seeded" }, { prev: null, upstream: "X", current: "X" });
+		expect(r).toBe("set up once at adopt; never overwritten");
+	});
+
+	it("hybrid-json in-sync skip says 'pack-owned keys unchanged'", () => {
+		const settings = `${JSON.stringify({ hooks: {} }, null, 2)}\n`;
+		const r = reasonOf(
+			{ category: "hybrid", format: "json" },
+			{ prev: null, upstream: settings, current: settings },
+		);
+		expect(r).toBe("pack-owned keys unchanged");
+	});
+
+	it("hybrid-json rewrite says 'pack-owned keys changed upstream'", () => {
+		const upstream = `${JSON.stringify({ hooks: { PostToolUse: [{ a: 1 }] } }, null, 2)}\n`;
+		const current = `${JSON.stringify({ hooks: {} }, null, 2)}\n`;
+		const r = reasonOf({ category: "hybrid", format: "json" }, { prev: null, upstream, current });
+		expect(r).toBe("pack-owned keys changed upstream");
+	});
+
+	it("marker in-sync skip says 'pack-managed section unchanged'", () => {
+		const same =
+			"outer\n<!-- >>> claude-ds managed >>> -->\nA\n<!-- <<< claude-ds managed <<< -->\n";
+		const r = reasonOf(
+			{ category: "hybrid", format: "markdown" },
+			{ prev: same, upstream: same, current: same },
+		);
+		expect(r).toBe("pack-managed section unchanged");
+	});
+
+	it("marker rewrite-region says 'pack-managed section changed upstream'", () => {
+		const r = reasonOf(
+			{ category: "hybrid", format: "markdown" },
+			{
+				prev: "o\n<!-- >>> claude-ds managed >>> -->\nA\n<!-- <<< claude-ds managed <<< -->\n",
+				upstream: "o\n<!-- >>> claude-ds managed >>> -->\nB\n<!-- <<< claude-ds managed <<< -->\n",
+				current: "o\n<!-- >>> claude-ds managed >>> -->\nA\n<!-- <<< claude-ds managed <<< -->\n",
+			},
+		);
+		expect(r).toBe("pack-managed section changed upstream");
+	});
+
+	it("no verdict reason leaks an internal-glossary term", () => {
+		const markerBlock = (inner: string) =>
+			`o\n<!-- >>> claude-ds managed >>> -->\n${inner}\n<!-- <<< claude-ds managed <<< -->\n`;
+		const reasons = [
+			reasonOf({ category: "seeded" }, { prev: null, upstream: "X", current: "X" }),
+			reasonOf(
+				{ category: "hybrid", format: "json" },
+				{ prev: null, upstream: '{\n  "hooks": {}\n}\n', current: '{\n  "hooks": {}\n}\n' },
+			),
+			reasonOf(
+				{ category: "hybrid", format: "json" },
+				{ prev: null, upstream: '{\n  "hooks": {"x":[1]}\n}\n', current: '{\n  "hooks": {}\n}\n' },
+			),
+			reasonOf(
+				{ category: "hybrid", format: "markdown" },
+				{ prev: markerBlock("A"), upstream: markerBlock("A"), current: markerBlock("A") },
+			),
+			reasonOf(
+				{ category: "hybrid", format: "markdown" },
+				{ prev: markerBlock("A"), upstream: markerBlock("B"), current: markerBlock("A") },
+			),
+		];
+		for (const r of reasons) {
+			for (const term of FORBIDDEN) {
+				expect(r.toLowerCase()).not.toContain(term);
+			}
+		}
+	});
+});
+
 describe("sync-diff (missing on disk)", () => {
 	it("reports 'new in this version' when the file was never tracked (prev=null)", () => {
 		const v = diffFile({ category: "managed" }, { prev: null, upstream: "B", current: null });

@@ -407,10 +407,19 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 		},
 	];
 
+	// #592: when a whole example is removed it's because an earlier fixer pass
+	// stripped its offending props until nothing was left — tool-authored residue,
+	// not consumer content. Say so, so tool-cleanup reads differently from data loss.
+	let message = `dropped ${parts.join(" and ")} from meta.examples in ${finding.file}`;
+	if (droppedEntries > 0) {
+		const wasWere = droppedEntries === 1 ? "was" : "were";
+		message += ` (the emptied example${droppedEntries === 1 ? "" : "s"} ${wasWere} tool-authored residue of an earlier fixer, not your content)`;
+	}
+
 	return {
 		finding,
 		fixed: true,
-		message: `dropped ${parts.join(" and ")} from meta.examples in ${finding.file}`,
+		message,
 		changes,
 	};
 }

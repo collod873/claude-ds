@@ -332,9 +332,16 @@ export const meta = { kind: "atom" as const, examples: [{ name: "default", props
 		// Every visited companion was skipped — no bytes changed → no progress.
 		expect(result.progress).toBe(false);
 		// The skipped file is named for hand review, not hidden behind a checkmark.
-		expect(infoLines.some((l) => l.includes("widget.showcase.tsx") && l.includes("skipped"))).toBe(
-			true,
+		const skipLine = infoLines.find(
+			(l) => l.includes("widget.showcase.tsx") && l.includes("skipped"),
 		);
+		expect(skipLine).toBeDefined();
+		// #592: the ADR citation is reachable — a resolvable GitHub URL, not a bare
+		// "ADR-0026" the pack ships no copy of.
+		expect(skipLine).toMatch(
+			/https:\/\/github\.com\/collod873\/claude-ds\/blob\/main\/docs\/adr\//,
+		);
+		expect(skipLine).not.toMatch(/\(ADR-\d{4}\)/);
 	}, 60000);
 
 	it("reconform that regenerated one companion but skipped another reports the skip count (#588)", async () => {

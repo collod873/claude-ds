@@ -293,6 +293,9 @@ export async function reconformCmd(opts: {
 			verbose,
 			summarize: (_kind, n) =>
 				`integrity check: ${n} files skipped (no mechanically-regenerable showcase) — not compared; verify by hand`,
+			// #592: recovering the full list must not require re-running a mutating
+			// command — name reconform's own non-mutating dry-run instead.
+			verboseHint: "re-run `reconform --verbose --dry-run` to list them",
 		})) {
 			info(c.cyan(line));
 		}

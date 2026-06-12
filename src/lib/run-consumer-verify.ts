@@ -33,6 +33,7 @@
 import { spawn } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { adrUrl } from "./adr-citation.js";
 import { detectPackageManager } from "./package-manager.js";
 
 /** Parsed entry from `tsc --noEmit` (or compatible) output. */
@@ -327,7 +328,7 @@ export function handVerifyNote(verify: VerifyResult): string | null {
 	if (n === 0) return null;
 	return (
 		`${n} hand-verify blocker${n === 1 ? "" : "s"} need your eye — JSX-bearing example(s) you authored ` +
-		`that claude-ds can't regenerate (ADR-0026); claude-ds's own files type-check`
+		`that claude-ds can't regenerate (${adrUrl("composed-widget-rendering")}); claude-ds's own files type-check`
 	);
 }
 

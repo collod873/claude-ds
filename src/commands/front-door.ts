@@ -28,6 +28,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { adrUrl } from "../lib/adr-citation.js";
 import { ownerForFinding } from "../lib/complaint-ownership.js";
 import { type Config, parseConfig } from "../lib/config.js";
 import { composeDashboardState } from "../lib/dashboard.js";
@@ -461,7 +462,7 @@ function renderClosingSummary(
 	// don't — name them so "clean" isn't read as "the whole tree compiles" (#537).
 	if (handVerifyCount > 0) {
 		lines.push(
-			`  ${handVerifyCount} hand-verify example(s) need your eye — claude-ds can't regenerate JSX-bearing showcases (ADR-0026).`,
+			`  ${handVerifyCount} hand-verify example(s) need your eye — claude-ds can't regenerate JSX-bearing showcases (${adrUrl("composed-widget-rendering")}).`,
 		);
 	}
 	// The remediation loop converged, but completeness (ADR-0003) is not a loop
