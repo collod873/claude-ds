@@ -21,6 +21,7 @@ import { detectFormatter, runFormatter } from "../lib/formatter.js";
 import { migrateConfig } from "../lib/ops/migrate-config.js";
 import { makeSyncPackFiles } from "../lib/ops/sync-pack-files.js";
 import { loadProject } from "../lib/project.js";
+import { formatVerifyErrors } from "../lib/reports/findings-format.js";
 import {
 	handVerifyNote,
 	runConsumerVerify,
@@ -330,11 +331,8 @@ function reportRedGate(verify: VerifyResult): void {
 		err(
 			`verify gate failed: ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
 		);
-		for (const e of verify.scaffoldErrors.slice(0, 20)) {
-			err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
-		}
-		if (verify.scaffoldErrors.length > 20) {
-			err(`  …and ${verify.scaffoldErrors.length - 20} more`);
+		for (const line of formatVerifyErrors(verify.scaffoldErrors, { maxGroups: 20 })) {
+			err(line);
 		}
 	} else {
 		// Timeout or non-tsc failure (Biome/eslint/vitest) — no parseable TS

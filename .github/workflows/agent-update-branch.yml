@@ -75,8 +75,11 @@ jobs:
           # Lease against the SHA we checked out — fails if anything pushed
           # to the branch during our run (race detection), and tolerates
           # history-rewriting updates (rebase) when the remote is unchanged.
+          # --no-verify so a local pre-push hook on the runner can't hijack the
+          # push (hook stderr defeats the error classifiers below, leaving a
+          # blocked PR with no reason). PR CI stays the gate.
           set +e
-          git push --force-with-lease="refs/heads/$BRANCH:$BRANCH_HEAD_SHA" origin "$BRANCH" 2> push_err.txt
+          git push --no-verify --force-with-lease="refs/heads/$BRANCH:$BRANCH_HEAD_SHA" origin "$BRANCH" 2> push_err.txt
           status=$?
           set -e
           if [ $status -ne 0 ]; then

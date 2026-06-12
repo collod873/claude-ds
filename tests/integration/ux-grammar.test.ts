@@ -161,9 +161,11 @@ describe("C3: convergence explainer + labeled passes (#414)", () => {
 		);
 
 		const r = await runCli(["heal"], { cwd: dir });
-		// C3: a pass line names its plan (`pass 1/3 — sync → classify → audit --fix`)
-		// so the operator sees what work this pass is doing, not a bare counter.
-		expect(r.stdout).toMatch(/pass \d+\/\d+ — .+( → .+)*/);
+		// C3 + #591: a single pass line names its plan and the bound it counts toward
+		// (`pass 1/3 (max) — sync → classify → audit --fix`), not a bare counter.
+		expect(r.stdout).toMatch(/heal: pass \d+\/\d+ \(max\) — .+( → .+)*/);
+		// The driver's bare `pass N/M` double-print is gone (#591).
+		expect(r.stdout).not.toMatch(/^pass \d+\/\d+$/m);
 	});
 });
 

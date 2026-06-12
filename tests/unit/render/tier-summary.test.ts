@@ -77,6 +77,18 @@ describe("renderChangeTierSummary", () => {
 		expect(lines.some((l) => /1 file modified.*1 atom/.test(l))).toBe(true);
 	});
 
+	it("surfaces a version pin as `pack pinned <from> → <to>` (#591)", () => {
+		const before = JSON.stringify({ pack: "next-react", packVersion: "v1.0.0" }, null, 2);
+		const after = JSON.stringify({ pack: "next-react", packVersion: "v1.4.0" }, null, 2);
+		const entries: SummaryEntry[] = [
+			{ opName: "finalizeUpgrade", change: write(".claude-ds.json", before, after) },
+		];
+		const lines = renderChangeTierSummary(entries);
+		expect(lines[0]).toBe("Substantive changes:");
+		expect(lines).toContain("! .claude-ds.json  pack pinned v1.0.0 → v1.4.0");
+		expect(lines.some((l) => l.includes("config flag"))).toBe(false);
+	});
+
 	it("collapses aborts to a count", () => {
 		const entries: SummaryEntry[] = [
 			{ opName: "syncPackFiles", change: write("design-system/atoms/foo.tsx", "old\n", "new\n") },

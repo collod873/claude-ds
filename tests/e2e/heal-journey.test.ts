@@ -102,17 +102,32 @@ describe("journey: heal end-to-end on the time-travel fixture (#538)", () => {
 			return;
 		}
 
-		// Non-zero: every remaining blocker is named by file:line:col + TS code, and
-		// the count of named blockers equals the count the gate advertises (capped at
-		// the gate's 20-line ceiling). The defect this guards: a non-zero exit with a
-		// generic "some errors remain" and nothing actionable named.
+		// Non-zero: every remaining blocker is named by TS code + file:line:col, now
+		// grouped by file × code (#587) so a repeated diagnostic renders once with a
+		// count + exemplar rather than once per occurrence. The defect this guards: a
+		// non-zero exit with a generic "some errors remain" and nothing actionable
+		// named. The invariant: the per-line occurrence counts (a `N×` group counts N,
+		// a lone line counts 1) sum back to the total the gate advertises — no blocker
+		// silently dropped — while distinct groups stay under the 20-group ceiling.
 		const advertised = Number(
 			(combined.match(/reported (\d+) error/) ?? combined.match(/(\d+) hand-verify blocker/))?.[1],
 		);
 		expect(Number.isFinite(advertised)).toBe(true);
 		expect(advertised).toBeGreaterThan(0);
-		const blockerLines = combined.match(/\S+:\d+:\d+\s+TS\d+/g) ?? [];
-		expect(blockerLines.length).toBe(Math.min(advertised, 20));
+		const blockerLines = combined
+			.split("\n")
+			.filter((l) => /^\s+/.test(l) && /\bTS\d+\b/.test(l) && /:\d+:\d+/.test(l));
+		expect(blockerLines.length).toBeGreaterThan(0);
+		expect(blockerLines.length).toBeLessThanOrEqual(20);
+		// Every group line carries its TS code (actionable, never generic).
+		expect(blockerLines.every((l) => /\bTS\d+\b/.test(l))).toBe(true);
+		// Occurrence counts reconcile to the advertised total when nothing is capped.
+		const capped = /…and \d+ more/.test(combined);
+		const accounted = blockerLines.reduce((sum, l) => {
+			const grouped = l.match(/(\d+)× TS\d+/);
+			return sum + (grouped ? Number(grouped[1]) : 1);
+		}, 0);
+		if (!capped) expect(accounted).toBe(advertised);
 
 		// Parting guidance is never the circular "run audit, then re-run" (defect 8):
 		// claude-ds either owns the fix or the file is the consumer's to verify — both
@@ -141,7 +156,7 @@ describe("journey: heal end-to-end on the time-travel fixture (#538)", () => {
 		// (its plan string + everything that pass emitted). A no-op pass that changed
 		// and cleared nothing would emit a byte-identical body to the pass before it —
 		// the defect-2 signature. At least one pass must have run.
-		const segments = heal.stdout.split(/heal: pass \d+\/\d+ — /).slice(1);
+		const segments = heal.stdout.split(/heal: pass \d+\/\d+ \(max\) — /).slice(1);
 		expect(segments.length).toBeGreaterThanOrEqual(1);
 		for (let i = 1; i < segments.length; i++) {
 			expect(segments[i]).not.toBe(segments[i - 1]);

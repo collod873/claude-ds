@@ -34,6 +34,53 @@ interface FlagFlip {
 	after: string;
 }
 
+/**
+ * `.claude-ds.json` keys that pin the pack version (`packVersion`, plus the
+ * legacy `version` written by pre-v0.8 init). A flip on one of these reads as
+ * `pack pinned <from> → <to>` (#591) — the real event, not a generic flag flip —
+ * matching the `pack`/`pinned` vocabulary every other version surface uses.
+ */
+const VERSION_PIN_KEYS = new Set<string>(["packVersion", "version"]);
+
+/** Unwrap a JSON-stringified scalar to its bare value (`"v1.0.0"` → `v1.0.0`). */
+function unquote(jsonStr: string): string {
+	try {
+		const v = JSON.parse(jsonStr);
+		return typeof v === "string" ? v : jsonStr;
+	} catch {
+		return jsonStr;
+	}
+}
+
+/**
+ * Render the "Substantive changes:" block shared by the per-file and tier
+ * summaries. A version-pin flip becomes `pack pinned <from> → <to>` (#591); every
+ * other `.claude-ds.json` key keeps the `(config flag flipped)` label with a
+ * per-key `before -> after` callout. Returns `[]` when nothing is substantive.
+ */
+function renderSubstantiveLines(
+	substantive: { entry: SummaryEntry; flips: FlagFlip[] }[],
+): string[] {
+	if (substantive.length === 0) return [];
+	const lines: string[] = ["Substantive changes:"];
+	for (const { entry, flips } of substantive) {
+		const pins = flips.filter((f) => VERSION_PIN_KEYS.has(f.key));
+		const rest = flips.filter((f) => !VERSION_PIN_KEYS.has(f.key));
+		for (const pin of pins) {
+			lines.push(
+				`! ${entry.change.path}  pack pinned ${unquote(pin.before)} → ${unquote(pin.after)}`,
+			);
+		}
+		if (rest.length > 0) {
+			lines.push(`! ${entry.change.path}  (config flag${rest.length === 1 ? "" : "s"} flipped)`);
+			for (const flip of rest) {
+				lines.push(`    ${flip.key}: ${flip.before} -> ${flip.after}`);
+			}
+		}
+	}
+	return lines;
+}
+
 function safeJsonObject(buf: Buffer): Record<string, unknown> | null {
 	try {
 		const v = JSON.parse(buf.toString("utf8"));
@@ -145,17 +192,7 @@ export function renderChangeSummary(entries: SummaryEntry[]): string[] {
 		}
 	}
 
-	const lines: string[] = [];
-
-	if (substantive.length > 0) {
-		lines.push("Substantive changes:");
-		for (const { entry, flips } of substantive) {
-			lines.push(`! ${entry.change.path}  (config flag${flips.length === 1 ? "" : "s"} flipped)`);
-			for (const flip of flips) {
-				lines.push(`    ${flip.key}: ${flip.before} -> ${flip.after}`);
-			}
-		}
-	}
+	const lines: string[] = [...renderSubstantiveLines(substantive)];
 
 	if (regular.length > 0) {
 		if (substantive.length > 0) {
@@ -284,17 +321,7 @@ export function renderChangeTierSummary(entries: SummaryEntry[]): string[] {
 		}
 	}
 
-	const lines: string[] = [];
-
-	if (substantive.length > 0) {
-		lines.push("Substantive changes:");
-		for (const { entry, flips } of substantive) {
-			lines.push(`! ${entry.change.path}  (config flag${flips.length === 1 ? "" : "s"} flipped)`);
-			for (const flip of flips) {
-				lines.push(`    ${flip.key}: ${flip.before} -> ${flip.after}`);
-			}
-		}
-	}
+	const lines: string[] = [...renderSubstantiveLines(substantive)];
 
 	const verbs: { verb: string; buckets: TierBuckets }[] = [
 		{ verb: "modified", buckets: modified },

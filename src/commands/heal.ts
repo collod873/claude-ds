@@ -16,6 +16,7 @@ import { driveRemediation } from "../lib/remediation-driver.js";
 import { planRemediation } from "../lib/remediation-planner.js";
 import { isTTY } from "../lib/render/index.js";
 import { createProgress, printLines } from "../lib/render/tty-layer.js";
+import { formatVerifyErrors } from "../lib/reports/findings-format.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 import type { RunLedger } from "../lib/run-ledger.js";
 import { run } from "../lib/runner.js";
@@ -309,7 +310,9 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 			// self-explanatory. The pre-plan `onIteration` log is dropped — the
 			// labeled `onPassPlan` line below subsumes it and the bare counter was
 			// exactly the "stuck loop" reading C3 was filed to fix.
-			onPassPlan: (iter, max, plan) => info(`heal: pass ${iter}/${max} — ${plan.join(" → ")}`),
+			// #591: `(max)` states the literal — N/M is the ceiling, not a target.
+			onPassPlan: (iter, max, plan) =>
+				info(`heal: pass ${iter}/${max} (max) — ${plan.join(" → ")}`),
 		});
 
 		if (outcome.kind === "converged") {
@@ -618,11 +621,8 @@ function reportRedGate(verify: VerifyResult, ctx: RedGateContext): void {
 		err(
 			`heal: verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
 		);
-		for (const e of verify.scaffoldErrors.slice(0, 20)) {
-			err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);
-		}
-		if (verify.scaffoldErrors.length > 20) {
-			err(`  …and ${verify.scaffoldErrors.length - 20} more`);
+		for (const line of formatVerifyErrors(verify.scaffoldErrors, { maxGroups: 20 })) {
+			err(line);
 		}
 		// Defect 7: these live in claude-ds-managed files — including `@generated`
 		// showcases whose header forbids editing. claude-ds owns the fix; the remedy

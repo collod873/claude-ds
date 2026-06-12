@@ -1,8 +1,8 @@
 {
   "templateRepo": "collod873/sandcastle",
-  "templateCommit": "24d36ede0ff164be3ba8533ee7fd7d31f11c8480",
+  "templateCommit": "393f6a9022cbebdf42f9c1612087d64cb501f027",
   "templateTreeClean": true,
-  "stampedAt": "2026-06-11T23:52:54.959Z",
+  "stampedAt": "2026-06-12T02:25:29.746Z",
   "files": {
     ".claude/skills/sequence/SKILL.md": "efad4a1714fd2b11d2eb3af2953130dc1fba87b73ed83be0aa3715470b368e8c",
     ".claude/skills/to-issues-project/SKILL.md": "87d14ba73a2dd31a4ac6ecf92a6d9221aa33e20069915b8fc41adfbf0ad701c1",
@@ -14,9 +14,9 @@
     ".github/workflows/agent-implement-prd.yml": "bfa5e5d41d0bc6ef9e42d3b0774ce8785650cac623e2085b0e4fcac02911c1e1",
     ".github/workflows/agent-implement.yml": "8df453154edcf90ffd0ff1ed746c627e6dcd35bf5b41e62880ea0203c8f2b057",
     ".github/workflows/agent-promote-queued.yml": "96721701a1fa5d28ec568578905375c75e678c9fcbbb1d4a82fcea6b91b1b886",
-    ".github/workflows/agent-review.yml": "61de29b70a6e9e241a26ae1d3d461156ff3516a33c375c5a7532453effeb5172",
+    ".github/workflows/agent-review.yml": "a29d469117d3cb975b55c7c649a16bf2f4a8b81f7c06b56e3c24703df3f40d71",
     ".github/workflows/agent-to-issues-prd.yml": "0789a93b4f33b707428c215da86034bdb4ea45e89d7389dea64e97fc1add2eb3",
-    ".github/workflows/agent-update-branch.yml": "197c920b01d990a6947ea1ad022c07cc7825b3da24a9d4c8393c43a5dcc330ea",
+    ".github/workflows/agent-update-branch.yml": "34966b0a6510a75fbb0d26d460bbf0e3b12a7a74e2a8b43a1c27c32020a58a33",
     ".sandcastle/.env.example": "468219ea1a042f978650e41d7c80a127573329d34303ec42b86a938711c9703c",
     ".sandcastle/.gitignore": "72f62fa730899e9992153d243f30d9262e8329c218cdc29027778cdc43a296fc",
     ".sandcastle/CODING_STANDARDS.md": "90cb3844c4831310f0cdbd769d6f166bcde0daf1f18f982c7854d008c82a9a56",
