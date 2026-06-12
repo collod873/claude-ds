@@ -161,39 +161,95 @@ export function renderClosingSummary(state: ClosingSummaryState): string[] {
 	return lines;
 }
 
+export interface RedGateReportOptions {
+	/**
+	 * Paths claude-ds wrote this run — the run ledger's paths (#579/#580). When
+	 * provided and disjoint from the failing scaffold files, the report states the
+	 * breakage is **pre-existing — not caused by this update** (PRD #635 story 4),
+	 * so an upgrade isn't blamed for a defect a prior run's generation left behind.
+	 * Omitted ⇒ no attribution line (the caller can't say what this run touched).
+	 */
+	changedFiles?: Set<string>;
+}
+
 /**
- * The red-gate report the front door prints when the consumer-verify gate fails
- * after convergence (#510). Mirror of heal's `reportRedGate`, rendered to the
- * front door's stdout channel (`printLines`) instead of `err()` so it sits with
- * the dashboard the operator is already reading. Scaffold errors are listed
- * (capped at 20); a non-tsc / timeout failure surfaces the `reason` + output
- * tail so the failure is diagnosable from the report alone.
+ * The one shared, partitioned red-gate report (#638, PRD #635). heal and the
+ * front door both render through this — heal routing the lines to `err()` (then
+ * appending its state/ledger/off-ramp blocks), the front door to `printLines` so
+ * it sits with the dashboard the operator is already reading.
+ *
+ * It is driven by the verify result's three buckets plus this run's changed-file
+ * set, and frames each by **ownership**, never the retired circular "run audit,
+ * then re-run":
+ *   - **scaffold / `@generated`** (ADR-0030): a claude-ds defect — listed (capped
+ *     at 20), framed as claude-ds's to fix, never consumer homework. When the
+ *     changed-file set is disjoint from the failing files, the breakage is
+ *     attributed as pre-existing rather than blamed on this run.
+ *   - **hand-verify** (ADR-0026, narrowed by ADR-0030): consumer-authored
+ *     JSX-bearing showcases claude-ds can't regenerate — the operator's to fix.
+ *   - **consumer-scope**: pre-existing errors outside claude-ds's scope.
+ *
+ * A non-tsc / timeout failure (no parseable scaffold errors) surfaces the
+ * `reason` + output tail so it's diagnosable from the report alone, and its
+ * next step is a genuine re-run (a cold cache / env failure can change on the
+ * next run) — distinct from the deterministic scaffold defect, which never is.
  */
-export function renderRedGate(verify: VerifyResult): string[] {
+export function renderRedGate(verify: VerifyResult, opts: RedGateReportOptions = {}): string[] {
 	const lines = [""];
 	if (verify.scaffoldErrors.length > 0) {
 		lines.push(
 			`✗ Verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files:`,
 		);
 		lines.push(...formatVerifyErrors(verify.scaffoldErrors, { maxGroups: 20 }));
+		// Attribution (PRD #635 story 4): this run's writes vs the failing files. A
+		// disjoint set means the gate is red on a defect that predates this run.
+		if (opts.changedFiles && isDisjointFromChanges(verify.scaffoldErrors, opts.changedFiles)) {
+			lines.push("  These errors are pre-existing — not caused by this update.");
+		}
+		// Ownership (ADR-0030, defect 7): these live in claude-ds-managed files —
+		// including `@generated` showcases whose header forbids editing. claude-ds
+		// owns the fix; the consumer is never told to fix or audit them.
+		lines.push("These are claude-ds's to fix — do not hand-edit `@generated` files.");
 	} else {
 		lines.push(
 			`✗ Verify gate failed — ${verify.reason ?? `${verify.command} exited ${verify.exitCode}`}`,
 		);
+		if (verify.outputTail) {
+			lines.push("  ── verify output (tail) ──");
+			for (const line of verify.outputTail.split("\n")) lines.push(`  ${line}`);
+		}
 	}
-	if (verify.outputTail) {
-		lines.push("  ── verify output (tail) ──");
-		for (const line of verify.outputTail.split("\n")) lines.push(`  ${line}`);
+	// Hand-verify bucket: consumer-authored JSX showcases claude-ds can't
+	// regenerate (ADR-0026, narrowed by ADR-0030). The operator's to fix.
+	if (verify.handVerifyErrors.length > 0) {
+		const n = verify.handVerifyErrors.length;
+		lines.push(
+			`${n} hand-verify example(s) need your eye — JSX-bearing showcase(s) you authored that claude-ds can't regenerate (${adrUrl("composed-widget-rendering")}). These are yours to fix:`,
+		);
+		lines.push(...formatVerifyErrors(verify.handVerifyErrors, { maxGroups: 20 }));
 	}
+	// Consumer-scope bucket: pre-existing errors outside claude-ds's scope.
 	if (verify.consumerErrors.length > 0) {
 		lines.push(
-			`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`,
+			`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope — not caused by this update)`,
 		);
 	}
-	lines.push(
-		verify.timedOut
-			? "Re-run after warming the consumer's tsc/test cache, or raise the verify timeout via CLAUDE_DS_VERIFY_TIMEOUT."
-			: "Run `npx claude-ds audit` to see what remains, then re-run.",
-	);
+	// The scaffold branch's next step is its ownership line above (a deterministic
+	// defect — a re-run reproduces it byte-for-byte, so no re-run is offered). The
+	// timeout / non-tsc branch genuinely can change on re-run, so it gets one.
+	if (verify.scaffoldErrors.length === 0) {
+		lines.push(
+			verify.timedOut
+				? "Re-run after warming the consumer's tsc/test cache, or raise the verify timeout via CLAUDE_DS_VERIFY_TIMEOUT."
+				: "Address the failure above, then re-run.",
+		);
+	}
 	return lines;
+}
+
+/** True when none of the failing files were written by this run (the ledger). */
+function isDisjointFromChanges(errors: VerifyResult["errors"], changedFiles: Set<string>): boolean {
+	const normalize = (p: string): string => p.replace(/\\/g, "/").replace(/^\.\//, "");
+	const changed = new Set([...changedFiles].map(normalize));
+	return !errors.some((e) => changed.has(normalize(e.file)));
 }
