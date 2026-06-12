@@ -16,6 +16,8 @@ export { renderDecision } from "../decision/render.js";
 
 export type { ColorAdapter } from "./color.js";
 export { identityColor } from "./color.js";
+export type { CompletenessRenderState } from "./completeness.js";
+export { renderCompleteness } from "./completeness.js";
 export type {
 	DashboardFinding,
 	DashboardMode,
@@ -26,7 +28,11 @@ export type { DiffEntry } from "./diff.js";
 export { colorizeDiffLines, renderCommitmentGateDiff } from "./diff.js";
 export type { RenderableFinding } from "./findings.js";
 export { renderFindings } from "./findings.js";
-export type { ClosingSummaryState, ExhaustedSummaryState } from "./front-door.js";
+export type {
+	ClosingSummaryState,
+	ExhaustedSummaryState,
+	RedGateReportOptions,
+} from "./front-door.js";
 export {
 	renderClosingSummary,
 	renderExhaustedSummary,

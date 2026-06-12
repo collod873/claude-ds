@@ -20,9 +20,8 @@ import { loadProject } from "../lib/project.js";
 import { deriveProjectState } from "../lib/project-state.js";
 import { driveRemediation } from "../lib/remediation-driver.js";
 import { planRemediation } from "../lib/remediation-planner.js";
-import { isTTY } from "../lib/render/index.js";
+import { isTTY, renderRedGate } from "../lib/render/index.js";
 import { createProgress, printLines } from "../lib/render/tty-layer.js";
-import { formatVerifyErrors } from "../lib/reports/findings-format.js";
 import { runConsumerVerify, type VerifyResult } from "../lib/run-consumer-verify.js";
 import type { RunLedger } from "../lib/run-ledger.js";
 import { run } from "../lib/runner.js";
@@ -337,8 +336,11 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 				managedRoots: ["design-system/"],
 				...(opts.verifyTimeout !== undefined ? { timeoutMs: opts.verifyTimeout * 1000 } : {}),
 			});
-			progress.stop();
 			if (!verify.ok) {
+				// Step-glyph rule (#638): a run ending on a red gate renders the gate
+				// outcome as the step's conclusion (✗ on a TTY), never a bare ✓ left by
+				// the last loop step. `fail` replaces the plain `stop` on this branch.
+				progress.fail("heal: verify gate failed");
 				// `guard` is narrowed to `ok: true` here — the `!guard.ok` arm at the top
 				// of the function exits the process, so `guard.state` is in scope.
 				reportRedGate(verify, {
@@ -371,6 +373,10 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 				process.exit(1);
 				return;
 			}
+			// Gate green for claude-ds-owned files — stop the spinner before the
+			// hand-verify / converged-success copy below (the red branch above already
+			// concluded the step with `fail`).
+			progress.stop();
 			// Second partial fixed point (issue #537): claude-ds's own files are
 			// clean, bytes are stable, but the consumer's verify still fails on
 			// hand-verify-only blockers — JSX-bearing showcases the consumer authored
@@ -613,62 +619,31 @@ interface RedGateContext {
 }
 
 /**
- * Surface scaffold errors on stderr. Mirror of `audit.ts:reportRedGate`.
+ * Surface the red gate on stderr through the **one shared partitioned report**
+ * heal and the front door both render (#638) — the bucket framing, ADR-0030
+ * ownership, disjoint-changes attribution, and retired circular copy all live
+ * there now. heal supplies its run ledger's paths as the changed-file set so the
+ * attribution names whether this run touched the failing files.
  *
- * On the plain `verify-failed` branch (scaffold errors present) the report gains,
- * in order after the errors (PRD #575 / #580): a **state statement** (was the
- * tree clean at start, and the exact revert command if so), the **run ledger**
- * (what heal wrote, from the driver's accumulated reports — never re-scanned),
- * and an **off-ramp** (determinism + where to file a bug + the version-pin
- * escape). The circular "re-run `claude-ds heal`" advice is gone from this
- * branch — a re-run is deterministic and reproduces the same red gate. It stays
- * on the timeout/environment-failure branch below, where a re-run genuinely can
- * change the outcome.
+ * On the plain `verify-failed` branch (scaffold errors present) heal then appends
+ * the blocks the shared body doesn't carry (PRD #575 / #580): a **state
+ * statement** (was the tree clean at start, and the exact revert command if so),
+ * the **run ledger** (what heal wrote, never re-scanned), and an **off-ramp**
+ * (determinism + where to file a bug + the version-pin escape). The circular
+ * "re-run `claude-ds heal`" advice is gone — a scaffold red gate is deterministic.
  */
 function reportRedGate(verify: VerifyResult, ctx: RedGateContext): void {
+	const changedFiles = new Set(ledgerPaths(ctx.ledger));
+	for (const line of renderRedGate(verify, { changedFiles })) {
+		err(line);
+	}
+	// The state/ledger/off-ramp blocks are heal-specific transaction-layer context
+	// (#580); they ride only the deterministic scaffold-defect branch, not the
+	// timeout/env-failure one where a re-run genuinely changes the outcome.
 	if (verify.scaffoldErrors.length > 0) {
-		err(
-			`heal: verify gate failed — ${verify.command} reported ${verify.scaffoldErrors.length} error(s) in claude-ds-managed files`,
-		);
-		for (const line of formatVerifyErrors(verify.scaffoldErrors, { maxGroups: 20 })) {
-			err(line);
-		}
-		// Defect 7: these live in claude-ds-managed files — including `@generated`
-		// showcases whose header forbids editing. claude-ds owns the fix; the remedy
-		// is never to hand-edit them. (Determinism + bug-report routing now live in
-		// the off-ramp below, so this line stays a pure ownership statement.)
-		if (verify.consumerErrors.length > 0) {
-			err(
-				`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`,
-			);
-		}
-		err("These are claude-ds's to fix — do not hand-edit `@generated` files.");
 		reportExitState(ctx.cleanState, ctx.ledger);
 		reportOffRamp(ctx.packPin);
-		return;
 	}
-	// No parseable TS errors — a timeout or a non-tsc failure (Biome/eslint/
-	// vitest). The reason carries the timeout label + limit or the env-failure
-	// note; the raw output tail makes it diagnosable from the report alone (#494).
-	err(
-		`heal: verify gate failed — ${verify.reason ?? `${verify.command} exited ${verify.exitCode}`}`,
-	);
-	if (verify.outputTail) {
-		err("  ── verify output (tail) ──");
-		for (const line of verify.outputTail.split("\n")) {
-			err(`  ${line}`);
-		}
-	}
-	if (verify.consumerErrors.length > 0) {
-		err(
-			`(also ${verify.consumerErrors.length} pre-existing consumer error(s) outside claude-ds's scope)`,
-		);
-	}
-	err(
-		verify.timedOut
-			? "Re-run with a longer verify timeout or after warming the consumer's tsc/test cache, then `claude-ds heal`."
-			: "Address the failure above and re-run `claude-ds heal`.",
-	);
 }
 
 /**
