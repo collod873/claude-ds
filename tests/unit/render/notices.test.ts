@@ -73,6 +73,26 @@ describe("renderPerFileNotices (pure)", () => {
 		expect(lines.some((l) => l.includes("--verbose"))).toBe(false);
 	});
 
+	it("uses the default --verbose hint when no override is supplied", () => {
+		const files = Array.from({ length: 10 }, (_, i) => `d-${i}.tsx`);
+		const lines = renderPerFileNotices(notices("reconform", files), {
+			summarize: (_k, n) => `${n} files skipped`,
+		});
+		expect(lines[0]).toContain("re-run with --verbose to list them");
+	});
+
+	it("honors a caller-supplied verboseHint — the non-mutating recovery command (#592)", () => {
+		const files = Array.from({ length: 10 }, (_, i) => `e-${i}.tsx`);
+		const lines = renderPerFileNotices(notices("reconform", files), {
+			summarize: (_k, n) => `${n} files skipped`,
+			verboseHint: "re-run `reconform --verbose --dry-run` to list them",
+		});
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("re-run `reconform --verbose --dry-run` to list them");
+		// The default mutating-re-run phrasing must not leak through.
+		expect(lines[0]).not.toContain("re-run with --verbose to list them");
+	});
+
 	it("collapses each kind independently, preserving first-seen order", () => {
 		const mixed: PerFileNotice[] = [
 			...notices(

@@ -28,7 +28,8 @@ export function diffFile(info: EntryInfo, d: DiffInput): FileVerdict {
 			// prev set → a previously-synced managed file is gone from disk; genuine restore.
 			reason: d.prev === null ? "new in this version — creating" : "missing on disk — recreating",
 		};
-	if (info.category === "seeded") return { action: "skip", reason: "seeded; never re-touched" };
+	if (info.category === "seeded")
+		return { action: "skip", reason: "set up once at adopt; never overwritten" };
 
 	if (info.category === "managed") {
 		if (d.upstream === d.current) return { action: "skip", reason: "in sync" };
@@ -46,16 +47,16 @@ export function diffFile(info: EntryInfo, d: DiffInput): FileVerdict {
 			try {
 				merged = mergeJsonKeys(d.upstream, d.current, info.owned_keys ?? ["hooks"]);
 			} catch (e) {
-				return { action: "abort", reason: `json merge failed: ${(e as Error).message}` };
+				return { action: "abort", reason: `config merge failed: ${(e as Error).message}` };
 			}
-			if (merged === d.current) return { action: "skip", reason: "hybrid json in sync" };
+			if (merged === d.current) return { action: "skip", reason: "pack-owned keys unchanged" };
 			return {
 				action: "rewrite",
-				reason: "hybrid json owned keys changed upstream",
+				reason: "pack-owned keys changed upstream",
 				newContent: merged,
 			};
 		}
-		if (!info.format) return { action: "abort", reason: "hybrid file has no format declared" };
+		if (!info.format) return { action: "abort", reason: "managed file has no format declared" };
 		const fmt = info.format;
 		let currentInner: string, upstreamInner: string, prevInner: string | null;
 		try {
@@ -63,14 +64,18 @@ export function diffFile(info: EntryInfo, d: DiffInput): FileVerdict {
 			upstreamInner = extractMarkerInner(d.upstream, fmt);
 			prevInner = d.prev === null ? null : extractMarkerInner(d.prev, fmt);
 		} catch (e) {
-			return { action: "abort", reason: `marker parse failed: ${(e as Error).message}` };
+			return { action: "abort", reason: `managed-section parse failed: ${(e as Error).message}` };
 		}
-		if (upstreamInner === currentInner) return { action: "skip", reason: "marker region in sync" };
+		if (upstreamInner === currentInner)
+			return { action: "skip", reason: "pack-managed section unchanged" };
 		if (prevInner !== null && prevInner !== currentInner)
-			return { action: "abort", reason: "user edited inside managed marker block" };
+			return {
+				action: "abort",
+				reason: "you edited inside the pack-managed section — won't overwrite",
+			};
 		return {
 			action: "rewrite-region",
-			reason: "marker region changed upstream",
+			reason: "pack-managed section changed upstream",
 			newContent: mergeMarkers(d.current, upstreamInner, fmt),
 		};
 	}

@@ -2073,6 +2073,10 @@ export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm"
 			const fixer = mustGetFixer("DRIFT-META-EXAMPLES-INVALID-PROP");
 			const result = await fixAndApply(fixer, finding, dir);
 			expect(result.fixed).toBe(true);
+			// #592: the message states tool-authored provenance, so a consumer can
+			// tell tool-cleanup of its own residue from a loss of their content.
+			expect(result.message).toContain("tool-authored residue of an earlier fixer");
+			expect(result.message).toContain("not your content");
 
 			const content = await readFile(join(dir, "design-system/atoms/badge.tsx"), "utf8");
 			// The poisoned example is gone entirely; the valid one survives.

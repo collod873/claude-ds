@@ -510,6 +510,6 @@ describe("adopt", () => {
 		expect(sync.code).toBe(0);
 		expect(sync.stdout).not.toMatch(/abort:.*CLAUDE\.md/);
 		expect(sync.stdout).not.toMatch(/rewrite:.*CLAUDE\.md/);
-		expect(sync.stdout).toMatch(/skip: CLAUDE\.md.* — marker region in sync/);
+		expect(sync.stdout).toMatch(/skip: CLAUDE\.md.* — pack-managed section unchanged/);
 	});
 });

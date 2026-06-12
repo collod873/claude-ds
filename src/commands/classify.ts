@@ -1,6 +1,7 @@
 import type { Stats } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { adrUrl } from "../lib/adr-citation.js";
 import { classifySource } from "../lib/classifier.js";
 import { applyAmbiguityPass } from "../lib/classify/ambiguity-pass.js";
 import {
@@ -490,7 +491,7 @@ export async function classifyCmd(opts: {
 			// features/" (ADR-0005, ADR-0003).
 			info(
 				`classify: ${p.file} — smart part with no shipped role contract yet. ` +
-					`Default tracked exception (no shipped contract) — or mark presentational, or register an entry in design-system/exceptions.json (ADR-0003).`,
+					`Default tracked exception (no shipped contract) — or mark presentational, or register an entry in design-system/exceptions.json (${adrUrl("completeness-principle")}).`,
 			);
 			continue;
 		}

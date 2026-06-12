@@ -48,6 +48,14 @@ export interface NoticeRenderOptions {
 	 * callers describe only *what* was aggregated, never *how to expand it*.
 	 */
 	summarize: (kind: string, count: number) => string;
+	/**
+	 * Override the expand hint appended to a collapsed summary. Defaults to the
+	 * shared `--verbose` phrasing. A caller whose verbose re-run would *mutate*
+	 * (reconform applies regeneration) names its non-mutating dry-run form here so
+	 * recovering the list never asks the consumer to re-run a writing command
+	 * (#592).
+	 */
+	verboseHint?: string;
 }
 
 const VERBOSE_HINT = "re-run with --verbose to list them";
@@ -83,7 +91,9 @@ export function renderPerFileNotices(
 		if (options.verbose || group.length <= threshold) {
 			for (const n of group) lines.push(n.line);
 		} else {
-			lines.push(`${options.summarize(kind, group.length)} — ${VERBOSE_HINT}`);
+			lines.push(
+				`${options.summarize(kind, group.length)} — ${options.verboseHint ?? VERBOSE_HINT}`,
+			);
 		}
 	}
 	return lines;

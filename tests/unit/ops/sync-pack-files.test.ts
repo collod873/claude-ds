@@ -109,7 +109,7 @@ describe("syncPackFiles op — plan()", () => {
 		const c = changes[0] as Extract<Change, { kind: "abort" }>;
 		expect(c.kind).toBe("abort");
 		expect(c.path).toBe("config.json");
-		expect(c.reason).toMatch(/json merge failed/);
+		expect(c.reason).toMatch(/config merge failed/);
 		expect(outcome.decisions[0].displayAction).toBe("abort");
 	});
 

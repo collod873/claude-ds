@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
+import { adrUrl } from "../lib/adr-citation.js";
 import { type CleanTreeState, checkCleanTree } from "../lib/clean-tree.js";
 import type { PendingDecision } from "../lib/decision/index.js";
 import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
@@ -506,7 +507,7 @@ function reportHandVerifyAndExit(
 	const count = verify.handVerifyErrors.length;
 	err(
 		`heal: converged everything automatable, but ${count} hand-verify blocker${count === 1 ? "" : "s"} remain — ` +
-			`JSX-bearing example(s) you authored that claude-ds can't regenerate (ADR-0026). Verify each by hand:`,
+			`JSX-bearing example(s) you authored that claude-ds can't regenerate (${adrUrl("composed-widget-rendering")}). Verify each by hand:`,
 	);
 	for (const e of verify.handVerifyErrors.slice(0, 20)) {
 		err(`  ${e.file}:${e.line}:${e.col}  ${e.code}: ${e.message}`);

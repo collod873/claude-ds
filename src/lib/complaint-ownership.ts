@@ -26,6 +26,7 @@
  * enumerates every emitted kind and fails on any that resolves to no owner.
  */
 
+import { adrUrl } from "./adr-citation.js";
 import {
 	type DriftRuleId,
 	isClassifyRelocatable,
@@ -114,14 +115,17 @@ export const PROJECT_STATE_SIGNALS = Object.keys(SIGNAL_OWNERS) as (keyof Projec
 const TERMINAL_COMPLETENESS: Owner = {
 	kind: "terminal",
 	state: "completeness",
-	reason:
-		"hand-rolled DS infrastructure — remove it; surfaced by `claude-ds doctor --completeness` (ADR-0003)",
+	reason: `hand-rolled DS infrastructure — remove it; surfaced by \`claude-ds doctor --completeness\` (${adrUrl(
+		"completeness-principle",
+	)})`,
 };
 
 const TERMINAL_ADVISORY: Owner = {
 	kind: "terminal",
 	state: "advisory",
-	reason: "advisory DS-atom bypass — import the atom, or dismiss via exceptions.json (ADR-0026)",
+	reason: `advisory DS-atom bypass — import the atom, or dismiss via exceptions.json (${adrUrl(
+		"structural-bypass-advisory",
+	)})`,
 };
 
 const TERMINAL_MANUAL: Owner = {

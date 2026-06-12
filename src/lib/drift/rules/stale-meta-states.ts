@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { adrUrl } from "../../adr-citation.js";
 import type { Change } from "../../operation.js";
 import type { ProjectContext } from "../../project.js";
 
@@ -21,7 +22,7 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 	return {
 		ruleId: "DRIFT-STALE-META-STATES",
 		file,
-		message: "meta contains retired `states` field — remove per ADR-0007",
+		message: `meta contains retired \`states\` field — remove per ${adrUrl("states-contract-retired")}`,
 	};
 }
 
