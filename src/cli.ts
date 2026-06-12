@@ -478,6 +478,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 			parseInt(v, 10),
 		)
 		.option("--allow-dirty", "bypass the clean-tree guard (top-level + sub-command propagation)")
+		.option("--yes", "skip the upfront consent gate (implied when non-TTY) — issue #585")
 		.option(
 			"--answers <file>",
 			"JSON bag of pre-supplied Decision answers (ADR-0023) — resolves Pending decisions from a prior heal run",
@@ -496,6 +497,7 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 			async (opts: {
 				maxIterations?: number;
 				allowDirty?: boolean;
+				yes?: boolean;
 				answers?: string;
 				json?: boolean;
 				dryRun?: boolean;
@@ -504,10 +506,16 @@ export function buildProgram(defaults: ProgramDefaults = {}): Command {
 				await healCmd({
 					maxIterations: opts.maxIterations,
 					allowDirty: opts.allowDirty,
+					yes: opts.yes,
 					answers: opts.answers,
 					json: opts.json,
 					dryRun: opts.dryRun,
 					verifyTimeout: opts.verifyTimeout,
+					// #585: the gate's `[Enter]` prompt needs a terminal on both ends —
+					// stdout to render, stdin to read the keystroke. The non-TTY path
+					// (agents, CI, pipes) implies `--yes` and drives straight through.
+					// `healCmd` defaults to the same condition; pass it so the CLI owns the policy.
+					interactive: isTTY() && process.stdin.isTTY === true,
 					cwd: defaults.cwd,
 				});
 			},

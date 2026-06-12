@@ -22,9 +22,12 @@
  * changes shown are the first iteration's. After `[Enter]`, `driveRemediation`
  * re-derives and walks to a fixed point.
  */
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { createInterface } from "node:readline/promises";
+import { ownerForFinding } from "./complaint-ownership.js";
 import { type DriftRuleId, ruleSeverity } from "./drift/index.js";
+import { type Exception, parseExceptions } from "./exceptions.js";
 import { type IntegrityRuleId, integrityRuleSeverity } from "./integrity/index.js";
 import {
 	computeMigrationChain,
@@ -38,6 +41,7 @@ import type { ProjectContext } from "./project.js";
 import type { LoopStep } from "./remediation-planner.js";
 import type { SummaryEntry } from "./render/index.js";
 import { renderChangeSummary, renderChangeTierSummary } from "./render/index.js";
+import { scanDriftAndIntegrity } from "./reports/drift-integrity-scan.js";
 import { walkDir } from "./reports/unexpected-files.js";
 import { run } from "./runner.js";
 import { metaKindFromSource } from "./three-signal.js";
@@ -69,6 +73,64 @@ export interface GateFindingCounts {
 export interface GateFinding {
 	ruleId: string;
 	file: string;
+}
+
+async function exists(p: string): Promise<boolean> {
+	try {
+		await stat(p);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Fold the same read-only drift/integrity scan the front door's dashboard runs
+ * into the `GateFindingCounts` the commitment gate consumes (#585). The front
+ * door computes these inline because it also needs the full finding list for the
+ * dashboard; `heal` — which renders the gate without a dashboard — calls this so
+ * the two drivers can't disagree about *what the gate previews* any more than
+ * they disagree about *what to run next* (the `deriveProjectState` principle,
+ * ADR-0018).
+ *
+ * The classify/auto-fix split routes through the single complaint-ownership
+ * registry (`ownerForFinding`, #533) — the same authority the planner and the
+ * front door compose from — so the counts here can never diverge from the steps
+ * the plan dispatches. Exceptions in `design-system/exceptions.json` are
+ * suppressed first, matching the front door and `deriveProjectState`, so a
+ * tracked exception never inflates the gate's totals.
+ */
+export async function gateFindingCounts(ctx: ProjectContext): Promise<GateFindingCounts> {
+	const exceptionsPath = join(ctx.cwd, "design-system/exceptions.json");
+	let exceptions: Exception[] = [];
+	if (await exists(exceptionsPath)) {
+		try {
+			exceptions = parseExceptions(await readFile(exceptionsPath, "utf8"));
+		} catch {
+			// Malformed exceptions.json is audit's job to surface — fall back to "no
+			// exceptions" so the gate still previews the rest of the tree.
+		}
+	}
+	const suppressed = new Set(exceptions.map((e) => `${e.rule}:${e.path}`));
+
+	const { findings } = await scanDriftAndIntegrity(ctx);
+	const active = findings.filter((f) => !suppressed.has(`${f.ruleId}:${f.file}`));
+
+	// "Auto-fixable" is "owner is the `audit --fix` Operation"; its complement —
+	// classify-relocatable, extraction, and terminal-manual findings — is
+	// classify's non-overlapping share, exactly as the front door splits it.
+	const isAutoFixable = (f: { ruleId: string; message: string }): boolean => {
+		const owner = ownerForFinding(f);
+		return owner.kind === "operation" && owner.step === "audit --fix";
+	};
+	const autoFixableFindings = active
+		.filter(isAutoFixable)
+		.map((f) => ({ ruleId: f.ruleId, file: f.file }));
+	return {
+		classifyCount: active.length - autoFixableFindings.length,
+		autoFixableCount: autoFixableFindings.length,
+		autoFixableFindings,
+	};
 }
 
 /**
@@ -429,4 +491,27 @@ export async function buildCommitmentGate(
 	}
 
 	return lines;
+}
+
+/**
+ * The single commitment gate prompt. Empty input (`[Enter]`) approves the whole
+ * plan; any other input cancels. One prompt for the entire remediation — after
+ * it, the auto-advance loop pauses only for genuine Ambiguities, never for the
+ * mechanical work the gate already covered.
+ *
+ * Shared by both drivers (#585): the front door gates the bare invocation, and
+ * `heal` gates a TTY invocation before its loop, so an operator sees the same
+ * `[Enter]`-approves contract from either entry point.
+ */
+export async function awaitCommitment(): Promise<boolean> {
+	const rl = createInterface({ input: process.stdin, output: process.stdout });
+	let answer: string;
+	try {
+		answer = await rl.question("[Enter] to run all, anything else to cancel: ");
+	} catch {
+		answer = "x";
+	} finally {
+		rl.close();
+	}
+	return answer.trim() === "";
 }
