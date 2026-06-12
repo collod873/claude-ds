@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { adrUrl } from "../../../src/lib/adr-citation.js";
+import type { HandRolledSplit } from "../../../src/lib/hand-rolled-split.js";
 import {
 	CHECK,
 	renderClosingSummary,
@@ -17,6 +18,20 @@ import {
 	renderRedGate,
 } from "../../../src/lib/render/index.js";
 import type { VerifyResult } from "../../../src/lib/run-consumer-verify.js";
+
+/** Build a `HandRolledSplit` for the renderer tests — defaults to the "file"
+ *  noun and zero in each bucket; override per case. */
+function split(over: Partial<HandRolledSplit> = {}): HandRolledSplit {
+	const retirable = over.retirable ?? 0;
+	const needsReview = over.needsReview ?? 0;
+	return {
+		retirable,
+		needsReview,
+		total: over.total ?? retirable + needsReview,
+		retirableNoun: over.retirableNoun ?? "file",
+		needsReviewNoun: over.needsReviewNoun ?? "file",
+	};
+}
 
 function verifyResult(overrides: Partial<VerifyResult> = {}): VerifyResult {
 	return {
@@ -39,16 +54,31 @@ describe("CHECK glyph (#636)", () => {
 	});
 });
 
-describe("renderHandRolledRouting", () => {
-	it("renders the routing line with a plural noun for a representative count", () => {
-		expect(renderHandRolledRouting(2)).toEqual([
-			"2 hand-rolled DS infra findings → `npx claude-ds doctor --completeness`",
+describe("renderHandRolledRouting (#639)", () => {
+	it("retirable only: the 'now provides' promise + a retire instruction", () => {
+		expect(renderHandRolledRouting(split({ retirable: 2 }))).toEqual([
+			"2 files you built by hand that the design-system pack now provides → run `npx claude-ds doctor --completeness` to retire them.",
 		]);
 	});
 
-	it("uses the singular noun for one finding", () => {
-		expect(renderHandRolledRouting(1)).toEqual([
-			"1 hand-rolled DS infra finding → `npx claude-ds doctor --completeness`",
+	it("needs-review only: 'possible … to review', never 'now provides'", () => {
+		const lines = renderHandRolledRouting(split({ needsReview: 1 }));
+		expect(lines).toEqual([
+			"1 possible hand-rolled DS file to review → run `npx claude-ds doctor --completeness`.",
+		]);
+		expect(lines.join("\n")).not.toMatch(/now provides/);
+	});
+
+	it("mixed: both phrasings render, retirable first", () => {
+		expect(renderHandRolledRouting(split({ retirable: 1, needsReview: 2 }))).toEqual([
+			"1 file you built by hand that the design-system pack now provides → run `npx claude-ds doctor --completeness` to retire them.",
+			"2 possible hand-rolled DS files to review → run `npx claude-ds doctor --completeness`.",
+		]);
+	});
+
+	it("derives the 'finding' noun when findings cluster in a file", () => {
+		expect(renderHandRolledRouting(split({ needsReview: 2, needsReviewNoun: "finding" }))).toEqual([
+			"2 possible hand-rolled DS findings to review → run `npx claude-ds doctor --completeness`.",
 		]);
 	});
 });
@@ -106,11 +136,40 @@ describe("renderClosingSummary", () => {
 		expect(renderClosingSummary({ version: "v1.9.2" })[1]).toBe(`${CHECK} Tree is clean — v1.9.2.`);
 	});
 
-	it("hand-rolled infra downgrades the go-ahead to doctor --completeness", () => {
-		expect(renderClosingSummary({ version: "v1.9.2", handRolledInfra: 1 })).toEqual([
+	it("retirable infra downgrades the go-ahead with the 'now provides' promise (#639)", () => {
+		expect(
+			renderClosingSummary({ version: "v1.9.2", handRolled: split({ retirable: 1 }) }),
+		).toEqual([
 			"",
 			"✓ Tree is clean — v1.9.2.",
-			"  1 hand-rolled DS infra finding remain — run `npx claude-ds doctor --completeness`.",
+			"  1 file you built by hand that the design-system pack now provides — run `npx claude-ds doctor --completeness` to retire them.",
+		]);
+	});
+
+	it("needs-review infra downgrades to 'possible … to review', never 'now provides' (#639)", () => {
+		const lines = renderClosingSummary({
+			version: "v1.9.2",
+			handRolled: split({ needsReview: 2 }),
+		});
+		expect(lines).toEqual([
+			"",
+			"✓ Tree is clean — v1.9.2.",
+			"  2 possible hand-rolled DS files to review — run `npx claude-ds doctor --completeness`.",
+		]);
+		expect(lines.join("\n")).not.toMatch(/now provides/);
+	});
+
+	it("mixed infra renders both clauses, retirable first (#639)", () => {
+		expect(
+			renderClosingSummary({
+				version: "v1.9.2",
+				handRolled: split({ retirable: 1, needsReview: 1 }),
+			}),
+		).toEqual([
+			"",
+			"✓ Tree is clean — v1.9.2.",
+			"  1 file you built by hand that the design-system pack now provides — run `npx claude-ds doctor --completeness` to retire them.",
+			"  1 possible hand-rolled DS file to review — run `npx claude-ds doctor --completeness`.",
 		]);
 	});
 
