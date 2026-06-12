@@ -361,6 +361,20 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 		}),
 	);
 
+	// Issue #589 / PRD #576 — advisory-aware clean verdict. "No action required."
+	// contradicts a just-printed advisory triage block (the output asks the
+	// operator to review N bypass candidates, then claims nothing to do). When
+	// advisories rode along, name them instead. Rendering only — advisories stay
+	// non-blocking (ADR-0026 sibling-layer contract); exit code and verdict are
+	// unchanged. `suffix` carries the verify-gate provenance when present.
+	const cleanVerdict = (suffix?: string): string => {
+		const base =
+			bypassFindings.length > 0
+				? `0 blocking findings — ${bypassFindings.length} advisory to review.`
+				: "No action required.";
+		return suffix ? `${base} (${suffix})` : base;
+	};
+
 	const buildCmd = await detectBuildCommand(cwd);
 	// Issue #408: build the headless contract incrementally so each branch
 	// can choose its verdict / exitCode. The contract is the source of truth
@@ -450,11 +464,11 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 				`verify gate passed (${verify.command}) — ${verify.consumerErrors.length} pre-existing consumer error(s) noted but not caused by claude-ds`,
 			);
 		} else if (verify?.reason) {
-			info(`No action required. (${verify.reason})`);
+			info(cleanVerdict(verify.reason));
 		} else if (verify) {
-			info(`No action required. (verified via ${verify.command})`);
+			info(cleanVerdict(`verified via ${verify.command}`));
 		} else {
-			info("No action required.");
+			info(cleanVerdict());
 		}
 		if (opts.json) {
 			emitHeadless({
@@ -542,11 +556,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 					`verify gate passed (${verify.command}) — ${verify.consumerErrors.length} pre-existing consumer error(s) noted but not caused by claude-ds`,
 				);
 			} else {
-				info(
-					verify.reason
-						? `No action required. (${verify.reason})`
-						: `No action required. (verified via ${verify.command})`,
-				);
+				info(cleanVerdict(verify.reason ?? `verified via ${verify.command}`));
 			}
 			if (opts.json) {
 				emitHeadless({
@@ -569,7 +579,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 			}
 			return success();
 		}
-		info("No action required.");
+		info(cleanVerdict());
 		if (opts.json) {
 			emitHeadless({
 				command: "audit",
