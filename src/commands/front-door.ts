@@ -46,7 +46,7 @@ import { deriveProjectState } from "../lib/project-state.js";
 import { driveRemediation } from "../lib/remediation-driver.js";
 import { planRemediation } from "../lib/remediation-planner.js";
 import { renderDashboard } from "../lib/render/index.js";
-import { createProgress, printLines } from "../lib/render/tty-layer.js";
+import { createProgress, loadColorAdapter, printLines } from "../lib/render/tty-layer.js";
 import { scanDriftAndIntegrity } from "../lib/reports/drift-integrity-scan.js";
 import { formatVerifyErrors } from "../lib/reports/findings-format.js";
 import { scanScaffoldDrift } from "../lib/reports/scaffold-drift.js";
@@ -238,7 +238,9 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 				generatedPatterns: manifest.generated_patterns,
 			});
 			handRolledInfra = rawOwned.filter((f) => !suppressed.has(`${f.concernId}:${f.file}`)).length;
-			if (handRolledInfra === 0) alsoChecked.push("no hand-rolled DS infra");
+			// Consumer phrasing on the dashboard (#620) — the internal "hand-rolled DS
+			// infra" term names the scan in code/docs but never prints to the consumer.
+			if (handRolledInfra === 0) alsoChecked.push("no hand-built design-system scripts");
 
 			// Deprecated/stale root-level dupes (#23): a canonical design-system/ file
 			// left shadowed by a pre-adopt root copy. `rootDupes` was already scanned
@@ -278,7 +280,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			alsoChecked,
 		});
 
-		printLines(renderDashboard(state));
+		printLines(renderDashboard(state, loadColorAdapter()));
 
 		// Pre-adopt is an Entry point, not a planner state (ADR-0018): `adopt` hands
 		// the project *into* the loop, it isn't a loop member, and `deriveProjectState`
