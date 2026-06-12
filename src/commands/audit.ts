@@ -37,7 +37,6 @@ import {
 	type VerifyResult,
 } from "../lib/run-consumer-verify.js";
 import {
-	formatStructuralBypassFinding,
 	type StructuralBypassFinding,
 	scanStructuralBypass,
 } from "../lib/structural-bypass/index.js";
@@ -321,7 +320,23 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 		info(
 			`\nAdvisory — possible DS-atom bypass (${bypassFindings.length}, non-blocking triage candidate${bypassFindings.length === 1 ? "" : "s"}):`,
 		);
-		for (const f of bypassFindings) info(formatStructuralBypassFinding(f));
+		// Delegate to the grouped-findings renderer (issue #586): mechanism/dismiss
+		// sentence once per rule, each finding's path once. The atom is per-rule
+		// (all BYPASS-CARD findings share "Card"), so map it off the findings.
+		const atomByRule = new Map<string, string>();
+		for (const f of bypassFindings) atomByRule.set(f.bypassId, f.atom);
+		const advisoryRows = bypassFindings.map((f) => ({
+			ruleId: f.bypassId,
+			file: `${f.file}:${f.line}`,
+			message: f.message,
+		}));
+		for (const line of formatFindings(advisoryRows, {
+			severityFor: () => "info",
+			noteFor: (ruleId) =>
+				`review: import the ${atomByRule.get(ruleId) ?? "DS"} atom, or dismiss via design-system/exceptions.json if a legitimate non-atom use`,
+		})) {
+			info(line);
+		}
 	}
 
 	if (coverageWarnings.length > 0) {
