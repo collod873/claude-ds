@@ -43,7 +43,7 @@ import { type OwnedConcernScannerFinding, scanOwnedConcerns } from "../lib/owned
 import { resolveManifestPath } from "../lib/paths.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { deriveProjectState } from "../lib/project-state.js";
-import { driveRemediation } from "../lib/remediation-driver.js";
+import { driveRemediation, type ExhaustedReason } from "../lib/remediation-driver.js";
 import { type LoopStep, planRemediation } from "../lib/remediation-planner.js";
 import { renderDashboard } from "../lib/render/index.js";
 import { createProgress, printLines } from "../lib/render/tty-layer.js";
@@ -347,10 +347,11 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 	// is supplied, and fails loud non-TTY otherwise (ADR-0023). Live progress on
 	// stderr; the loop never pauses for mechanical work.
 	const progress = createProgress();
+	const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 	try {
 		const outcome = await driveRemediation({
 			cwd,
-			maxIterations: opts.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+			maxIterations,
 			answers: opts.answers,
 			progress,
 		});
@@ -396,7 +397,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 				),
 			);
 		} else if (outcome.kind === "exhausted") {
-			printLines(renderExhaustedSummary(outcome.lastStep));
+			printLines(renderExhaustedSummary(outcome.lastStep, outcome.reason, maxIterations));
 		}
 	} finally {
 		progress.stop();
@@ -423,18 +424,39 @@ function renderHandRolledRouting(count: number): string[] {
  * line ("Some findings still need attention — run `claude-ds audit` …") failed a
  * real consumer three ways: it didn't say *what* was stuck, it pointed at a
  * command that can only report (never reduce) the findings, and it used the bare
- * `claude-ds` form consumers don't invoke. Two failure shapes, neither of which
- * suggests a command that cannot reduce the findings — an exhausted loop is past
- * the point any automated step can advance:
+ * `claude-ds` form consumers don't invoke.
  *
- *   - `lastStep` is a loop step: that step ran and changed nothing while its
- *     re-derived plan stayed non-empty, so the next pass would repeat byte-for-
- *     byte (`driveRemediation`'s #532 stop). Name the stuck step honestly instead
- *     of pointing at `audit`.
- *   - `lastStep` is null: findings remain that no loop step owns (the terminal
- *     `manual` owner — hand-edit or `exceptions.json`). No command reduces them.
+ * The honest copy turns on `reason` first, because an exhausted loop is NOT
+ * always past the point an automated step can advance — that holds for `stuck`,
+ * not `ceiling` (the two `driveRemediation` separates):
+ *
+ *   - `ceiling`: every pass changed bytes but the loop hit `maxIterations` before
+ *     a fixed point. It was STILL making progress, so the findings are reducible —
+ *     just not in this many passes. Telling the consumer to hand-edit here would
+ *     be the very dishonesty #626 exists to kill; point them at a re-run instead.
+ *   - `stuck` + `lastStep` is a loop step: that step ran and changed nothing while
+ *     its re-derived plan stayed non-empty, so the next pass would repeat byte-for-
+ *     byte (`driveRemediation`'s #532 stop). Name the stuck step honestly.
+ *   - `stuck` + `lastStep` is null: findings remain that no loop step owns (the
+ *     terminal `manual` owner — hand-edit or `exceptions.json`). No command
+ *     reduces them.
  */
-function renderExhaustedSummary(lastStep: LoopStep | null): string[] {
+function renderExhaustedSummary(
+	lastStep: LoopStep | null,
+	reason: ExhaustedReason,
+	maxIterations: number,
+): string[] {
+	if (reason === "ceiling") {
+		// The default front door exposes no --max-iterations flag (that's heal's),
+		// so the honest next step is simply to run it again — each run advances the
+		// tree another `maxIterations` passes from where this one left off.
+		const passes = maxIterations === 1 ? "pass" : "passes";
+		return [
+			"",
+			`✗ Couldn't reach a clean tree within ${maxIterations} ${passes} — the \`${lastStep}\` step was still making progress when the loop stopped.`,
+			"  The findings are reducible, just not in this many passes — re-run `npx claude-ds` to pick up where it left off.",
+		];
+	}
 	if (lastStep === null) {
 		return [
 			"",

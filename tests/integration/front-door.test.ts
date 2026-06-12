@@ -625,6 +625,38 @@ export function SoloLabel() { return <span />; }
 		expect(out).toMatch(/hand-edit or an `exceptions\.json` entry/);
 		expect(out).not.toMatch(/run `claude-ds audit` to see what remains/i);
 	}, 60000);
+
+	it("ceiling exit summary: a still-progressing run says re-run, never hand-edit (#626)", async () => {
+		// The dishonest trap the `reason` split closes: an exhausted loop that hit the
+		// iteration ceiling while STILL making progress is not stuck — the findings are
+		// reducible, just not in this many passes. Telling that consumer to hand-edit
+		// would be a lie. One auto-fixable finding + a 1-pass ceiling reproduces it: the
+		// pass changes bytes (so the loop never gets a confirming stable pass) and exits
+		// via the ceiling path with progress in flight.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		await writeFile(
+			join(dir, "design-system/atoms/solo-label.tsx"),
+			`export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function SoloLabel() { return <span />; }
+`,
+		);
+
+		const out = await captureFrontDoor({
+			cwd: dir,
+			interactive: false,
+			yes: true,
+			maxIterations: 1,
+		});
+
+		// Honest ceiling verdict: still-making-progress + a re-run pointer...
+		expect(out).toMatch(/Couldn't reach a clean tree within 1 pass/);
+		expect(out).toMatch(/still making progress/);
+		expect(out).toMatch(/re-run `npx claude-ds`/i);
+		// ...and crucially NOT the `stuck` hand-edit framing — the lie this guards.
+		expect(out).not.toMatch(/hand-edit or an `exceptions\.json` entry/);
+		expect(out).not.toMatch(/re-running won't help/);
+	}, 60000);
 });
 
 describe("front-door commitment-gate prompt contract (#584 / G3)", () => {
