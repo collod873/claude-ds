@@ -77,7 +77,8 @@ describe("CVA-unrendered fixer output typechecks against the real component", ()
 				file: ATOM_REL,
 				message: "unexercised",
 			};
-			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED");
+			if (!fixer) throw new Error("no fixer registered for DRIFT-CVA-VARIANT-UNRENDERED");
 			const result = await fixer(finding, makeFakeCtx(dir));
 			expect(result.fixed).toBe(true);
 

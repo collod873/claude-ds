@@ -48,6 +48,13 @@ function nextStepLine(stream: string): string | undefined {
 	return stream.split("\n").find((l) => l.includes("→ Next:"));
 }
 
+/** Checked `nextStepLine` — no `→ Next:` line fails the test with a message. */
+function mustNextStepLine(stream: string): string {
+	const line = nextStepLine(stream);
+	if (!line) throw new Error("no → Next: line in output");
+	return line;
+}
+
 describe("C2: → Next: run X is never a heal loop step (#414)", () => {
 	let dir: string;
 	beforeEach(async () => {
@@ -66,8 +73,7 @@ export function SoloLabel() { return <span />; }
 `,
 		);
 		const r = await runCli(["audit", "--pack", "next-react"], { cwd: dir });
-		const line = nextStepLine(r.stdout)!;
-		expect(line).toBeDefined();
+		const line = mustNextStepLine(r.stdout);
 		expect(line).toContain("claude-ds heal");
 		for (const step of LOOP_STEPS) expect(line).not.toContain(step);
 	});
@@ -84,8 +90,7 @@ export function SoloLabel() { return <span />; }
 			}),
 		);
 		const r = await runCli(["doctor"], { cwd: dir });
-		const line = nextStepLine(r.stdout)!;
-		expect(line).toBeDefined();
+		const line = mustNextStepLine(r.stdout);
 		expect(line).toContain("claude-ds heal");
 		for (const step of LOOP_STEPS) expect(line).not.toContain(step);
 	});
@@ -100,8 +105,7 @@ export function SoloLabel() { return <span />; }
 			}),
 		);
 		const r = await runCli(["version", "--check"], { cwd: dir });
-		const line = nextStepLine(r.stdout)!;
-		expect(line).toBeDefined();
+		const line = mustNextStepLine(r.stdout);
 		expect(line).toContain("claude-ds heal");
 		for (const step of LOOP_STEPS) expect(line).not.toContain(step);
 	});

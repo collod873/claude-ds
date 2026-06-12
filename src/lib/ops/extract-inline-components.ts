@@ -330,7 +330,8 @@ function planFile(
 		const includedLocalIdx = new Set<number>();
 		const queue = [...seedNodes];
 		while (queue.length > 0) {
-			const n = queue.shift()!;
+			const n = queue.shift();
+			if (n === undefined) break;
 			for (const name of collectReferencedNames(n)) referenced.add(name);
 			// Pull in any not-yet-included local decl this node references. Exported
 			// *runtime* decls (consts, functions, enums, classes) are skipped: copying
@@ -396,7 +397,9 @@ function planFile(
 			// make the new atom import itself. Drop it — the symbol stays resolved by
 			// the atom's own (about-to-be-written) declarations.
 			if (imp.module.replace(/\.\w+$/, "").endsWith(`/atoms/${selfKebab}`)) continue;
-			const trimmed = trimImport(findImportNode(sf, imp.start)!, sf, referenced);
+			const importNode = findImportNode(sf, imp.start);
+			if (!importNode) throw new Error(`unreachable: no import declaration at offset ${imp.start}`);
+			const trimmed = trimImport(importNode, sf, referenced);
 			if (trimmed) neededImports.push(trimmed);
 		}
 
@@ -474,7 +477,8 @@ function planFile(
 
 		const worklist = [...mustStayIdx];
 		while (worklist.length > 0) {
-			const idx = worklist.shift()!;
+			const idx = worklist.shift();
+			if (idx === undefined) break;
 			const d = locals[idx];
 			// Collect all names referenced inside this decl's AST node(s).
 			const stmtNodes = findStatementByRange(sf, d.start, d.end);

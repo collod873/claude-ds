@@ -306,9 +306,10 @@ function astNodeToValue(
 		// explicitly so props like `reference: undefined` round-trip correctly instead
 		// of being dropped with an "unresolved identifier" warning and rendered as null.
 		if (name === "undefined") return undefined;
-		if (localScope.has(name)) {
+		const localNode = localScope.get(name);
+		if (localNode !== undefined) {
 			return astNodeToValue(
-				localScope.get(name)!,
+				localNode,
 				sourceFile,
 				localScope,
 				importScope,
@@ -318,8 +319,8 @@ function astNodeToValue(
 				typeImportScope,
 			);
 		}
-		if (importScope.has(name)) {
-			const imp = importScope.get(name)!;
+		const imp = importScope.get(name);
+		if (imp !== undefined) {
 			return resolveImportedValue(imp.filePath, imp.exportName, consumerRoot, carried, depth + 1);
 		}
 		// unknown identifier — skip with warning
@@ -678,9 +679,10 @@ function resolveImportedValue(
 			for (const spec of stmt.exportClause.elements) {
 				if (spec.name.text === exportName) {
 					const localName = spec.propertyName?.text ?? spec.name.text;
-					if (scope.has(localName)) {
+					const localNode = scope.get(localName);
+					if (localNode !== undefined) {
 						result = astNodeToValue(
-							scope.get(localName)!,
+							localNode,
 							sf,
 							scope,
 							importScope,
@@ -746,8 +748,8 @@ function collectRefsFromNode(
 		if (bound.has(name) || carried.has(name)) return;
 		// React is implicitly imported by the showcase, JSX globals don't need carry
 		if (name === "React" || name === "undefined" || name === "null") return;
-		if (importScope.has(name)) {
-			const imp = importScope.get(name)!;
+		const imp = importScope.get(name);
+		if (imp !== undefined) {
 			// Normalise the specifier so it resolves from the showcase output directory.
 			// When the import came from a fixture file (transitive resolution), `imp.rawSpec`
 			// is relative to the fixture file's directory — not the showcase's. Prefer the
@@ -764,20 +766,20 @@ function collectRefsFromNode(
 			});
 			return;
 		}
-		if (typeImportScope.has(name)) {
-			const imp = typeImportScope.get(name)!;
+		const typeImp = typeImportScope.get(name);
+		if (typeImp !== undefined) {
 			carried.set(name, {
 				kind: "type-import",
 				localName: name,
-				exportedName: imp.exportName,
-				rawSpec: imp.rawSpec,
+				exportedName: typeImp.exportName,
+				rawSpec: typeImp.rawSpec,
 			});
 			return;
 		}
-		if (localScope.has(name)) {
+		const initNode = localScope.get(name);
+		if (initNode !== undefined) {
 			// Walk up from the initializer's parent to find the enclosing VariableStatement
 			// and slice the full text (annotation + initializer + semicolon) as rawSource.
-			const initNode = localScope.get(name)!;
 			// initNode is the initializer; parent is VariableDeclaration
 			let stmtNode: TS.Node = initNode;
 			while (stmtNode && !ts.isVariableStatement(stmtNode)) {
@@ -999,8 +1001,8 @@ function collectRefsFromTypeNode(
 		let typeName: TS.EntityName = node.typeName;
 		while (ts.isQualifiedName(typeName)) typeName = typeName.left;
 		const name = typeName.text;
-		if (!carried.has(name) && typeImportScope.has(name)) {
-			const imp = typeImportScope.get(name)!;
+		const imp = typeImportScope.get(name);
+		if (!carried.has(name) && imp !== undefined) {
 			carried.set(name, {
 				kind: "type-import",
 				localName: name,
@@ -1822,8 +1824,7 @@ function renderCarriedRefs(carried: Map<string, CarriedRef>): string {
 		inDegree.set(name, 0);
 		dependents.set(name, []);
 	}
-	for (const name of localNames) {
-		const src = localMap.get(name)!;
+	for (const [name, src] of localMap) {
 		for (const dep of localNames) {
 			if (dep === name) continue;
 			// Check if `name`'s rawSource contains `dep` as a standalone identifier.
@@ -1840,7 +1841,8 @@ function renderCarriedRefs(carried: Map<string, CarriedRef>): string {
 	// Queue: all locals with no dependencies on other carried locals
 	const queue: string[] = localNames.filter((n) => inDegree.get(n) === 0);
 	while (queue.length > 0) {
-		const name = queue.shift()!;
+		const name = queue.shift();
+		if (name === undefined) break;
 		sorted.push(name);
 		for (const dependent of dependents.get(name) ?? []) {
 			const newDegree = (inDegree.get(dependent) ?? 0) - 1;
@@ -1852,7 +1854,11 @@ function renderCarriedRefs(carried: Map<string, CarriedRef>): string {
 	for (const name of localNames) {
 		if (!sorted.includes(name)) sorted.push(name);
 	}
-	const locals = sorted.map((name) => localMap.get(name)!);
+	const locals = sorted.map((name) => {
+		const src = localMap.get(name);
+		if (src === undefined) throw new Error(`unreachable: ${name} missing from localMap`);
+		return src;
+	});
 
 	const importLines: string[] = [];
 	for (const [spec, group] of importsBySpec.entries()) {

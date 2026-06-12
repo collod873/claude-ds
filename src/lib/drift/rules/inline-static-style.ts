@@ -141,10 +141,12 @@ function findNearestNumericToken(
 	if (sourceNum === null) return null;
 
 	const group = CSS_PROP_TOKEN_GROUP[cssProp];
-	const candidates = entries.filter((e) => {
-		if (group && e.group !== group) return false;
-		return extractNumeric(e.value) !== null;
-	});
+	const candidates: { entry: TokenEntry; num: number }[] = [];
+	for (const e of entries) {
+		if (group && e.group !== group) continue;
+		const num = extractNumeric(e.value);
+		if (num !== null) candidates.push({ entry: e, num });
+	}
 
 	if (candidates.length === 0) return null;
 
@@ -153,13 +155,13 @@ function findNearestNumericToken(
 	let equidistant: TokenEntry | null = null;
 
 	for (const c of candidates) {
-		const d = Math.abs(extractNumeric(c.value)! - sourceNum);
+		const d = Math.abs(c.num - sourceNum);
 		if (d < bestDist) {
-			best = c;
+			best = c.entry;
 			bestDist = d;
 			equidistant = null;
 		} else if (d === bestDist && best !== null) {
-			equidistant = c;
+			equidistant = c.entry;
 		}
 	}
 

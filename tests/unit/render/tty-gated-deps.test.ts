@@ -40,7 +40,8 @@ describe("TTY-only runtime deps live behind the single isTTY() gate", () => {
 
 		const offenders: { file: string; spec: string }[] = [];
 		for (const file of files) {
-			const basename = file.split("/").pop()!;
+			const basename = file.split("/").pop();
+			if (!basename) throw new Error(`could not derive basename from ${file}`);
 			const allowed = basename === TTY_LAYER_BASENAME;
 			const src = await readFile(file, "utf8");
 			const matches = src.matchAll(STATIC_IMPORT_RE);

@@ -14,9 +14,9 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 	if (locationTier === null) return null;
 	if (source === undefined) return null;
 	if (!source.includes("export const meta")) return null;
-	const metaMatch = source.match(/export\s+const\s+meta[\s:=]/);
+	const metaMatch = /export\s+const\s+meta[\s:=]/.exec(source);
 	if (!metaMatch) return null;
-	const afterMeta = source.slice(metaMatch.index!);
+	const afterMeta = source.slice(metaMatch.index);
 	if (!META_STATES_RE.test(afterMeta)) return null;
 	return {
 		ruleId: "DRIFT-STALE-META-STATES",

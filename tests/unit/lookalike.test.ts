@@ -76,8 +76,10 @@ describe("detectLookalikes", () => {
 		await writeFile(join(dir, "design-tokens.json"), "{}");
 		const findings = await detectLookalikes(dir, ["tokens.json", "contracts.md"]);
 		expect(findings).toHaveLength(2);
-		const tokenFinding = findings.find((f) => f.canonical === "tokens.json")!;
-		const contractFinding = findings.find((f) => f.canonical === "contracts.md")!;
+		const tokenFinding = findings.find((f) => f.canonical === "tokens.json");
+		if (!tokenFinding) throw new Error("no finding for canonical tokens.json");
+		const contractFinding = findings.find((f) => f.canonical === "contracts.md");
+		if (!contractFinding) throw new Error("no finding for canonical contracts.md");
 		expect(tokenFinding.present).toBe(false);
 		expect(tokenFinding.lookalike).toBe("design-tokens.json");
 		expect(contractFinding.present).toBe(true);

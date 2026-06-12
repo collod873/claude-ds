@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { detectBuildCommand, printNextStep } from "../../src/lib/log.js";
 
+/** Checked `find` — no matching logged line fails the test with a message. */
+function mustFind(lines: string[], needle: string): string {
+	const line = lines.find((l) => l.includes(needle));
+	if (!line) throw new Error(`no logged line containing ${needle}`);
+	return line;
+}
+
 describe("detectBuildCommand", () => {
 	it("returns 'npm run build' when package.json has a build script", async () => {
 		const { writeFile } = await import("node:fs/promises");
@@ -80,14 +87,14 @@ describe("printNextStep", () => {
 	// steps (`audit --fix`, `classify`) heal already runs itself.
 	it("prints audit with-findings breadcrumb routing to heal", () => {
 		printNextStep("audit", { hasFindings: true });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("claude-ds heal");
 		expect(line).not.toContain("claude-ds audit --fix");
 	});
 
 	it("routes audit breadcrumb to heal when extraction-needed findings remain (C2)", () => {
 		printNextStep("audit", { hasFindings: true, extractionCount: 2 });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("claude-ds heal");
 		expect(line).toContain("2 inline components");
 		expect(line).not.toContain("claude-ds classify");
@@ -96,7 +103,7 @@ describe("printNextStep", () => {
 
 	it("singularizes the extraction breadcrumb for a single component", () => {
 		printNextStep("audit", { hasFindings: true, extractionCount: 1 });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("1 inline component");
 		expect(line).not.toContain("inline components");
 	});
@@ -109,7 +116,7 @@ describe("printNextStep", () => {
 
 	it("routes audit breadcrumb to heal when remaining findings are not auto-fixable (C2)", () => {
 		printNextStep("audit", { hasFindings: true, unfixableCount: 3 });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("claude-ds heal");
 		expect(line).not.toContain("claude-ds classify");
 		expect(line).not.toContain("claude-ds audit --fix");
@@ -117,7 +124,7 @@ describe("printNextStep", () => {
 
 	it("prefers the extraction breadcrumb when both extraction and other unfixable findings remain", () => {
 		printNextStep("audit", { hasFindings: true, extractionCount: 2, unfixableCount: 3 });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("claude-ds heal");
 		expect(line).toContain("2 inline components");
 		expect(line).not.toContain("claude-ds classify");
@@ -131,7 +138,7 @@ describe("printNextStep", () => {
 
 	it("routes sync breadcrumb to heal on a brownfield tree (C2)", () => {
 		printNextStep("sync", { brownfield: true });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("claude-ds heal");
 		expect(line).not.toContain("claude-ds classify");
 	});
@@ -140,7 +147,7 @@ describe("printNextStep", () => {
 	// out as a `→ Verify:` tip rather than a `→ Next:` action.
 	it("sync breadcrumb stays on audit (as a → Verify tip) when the tree is greenfield", () => {
 		printNextStep("sync", { brownfield: false });
-		const line = logged.find((l) => l.includes("→ Verify:"))!;
+		const line = mustFind(logged, "→ Verify:");
 		expect(line).toContain("claude-ds audit");
 		expect(line).not.toContain("claude-ds classify");
 		expect(logged.some((l) => l.includes("→ Next:"))).toBe(false);
@@ -173,7 +180,7 @@ describe("printNextStep", () => {
 
 	it("routes doctor's → Next at adopt when pre-adopt is the verdict (#349 F9/F21)", () => {
 		printNextStep("doctor", { doctorVerdict: "pre-adopt" });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("claude-ds adopt");
 	});
 
@@ -182,21 +189,21 @@ describe("printNextStep", () => {
 	// operator no longer has to pick which command runs which loop member.
 	it("routes doctor's → Next at heal when scaffold-gap is the verdict (C2)", () => {
 		printNextStep("doctor", { doctorVerdict: "scaffold-gap" });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("claude-ds heal");
 		expect(line).not.toMatch(/claude-ds sync\b/);
 	});
 
 	it("routes doctor's → Next at heal when repair-needed is the verdict (C2)", () => {
 		printNextStep("doctor", { doctorVerdict: "repair-needed" });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("claude-ds heal");
 		expect(line).not.toMatch(/claude-ds upgrade\b/);
 	});
 
 	it("routes doctor's → Next at heal when upgrade-available is the verdict (C2)", () => {
 		printNextStep("doctor", { doctorVerdict: "upgrade-available" });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("claude-ds heal");
 		expect(line).not.toMatch(/claude-ds upgrade\b/);
 	});
@@ -205,19 +212,19 @@ describe("printNextStep", () => {
 	// `→ Verify:` tip, not a `→ Next:` action.
 	it("routes upgrade's → Verify at audit when applied is the outcome", () => {
 		printNextStep("upgrade", { upgradeOutcome: "applied" });
-		const line = logged.find((l) => l.includes("→ Verify:"))!;
+		const line = mustFind(logged, "→ Verify:");
 		expect(line).toContain("claude-ds audit");
 	});
 
 	it("routes upgrade's → Verify at audit when no-op is the outcome", () => {
 		printNextStep("upgrade", { upgradeOutcome: "no-op" });
-		const line = logged.find((l) => l.includes("→ Verify:"))!;
+		const line = mustFind(logged, "→ Verify:");
 		expect(line).toContain("claude-ds audit");
 	});
 
 	it("routes audit's → Next at heal when actionable warnings remain (#349 F9 / C2)", () => {
 		printNextStep("audit", { hasActionableWarnings: true });
-		const line = logged.find((l) => l.includes("→ Next:"))!;
+		const line = mustFind(logged, "→ Next:");
 		expect(line).toContain("claude-ds heal");
 		expect(line).not.toContain("claude-ds audit --fix");
 	});

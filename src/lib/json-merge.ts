@@ -216,7 +216,11 @@ export function pruneHooksJson(
 			}
 			const keptHooks: HookEntry[] = [];
 			for (const entry of block.hooks) {
-				if (isPackOwned(entry) && shouldPrune(extractScriptPath(entry.command!))) {
+				if (
+					isPackOwned(entry) &&
+					typeof entry.command === "string" &&
+					shouldPrune(extractScriptPath(entry.command))
+				) {
 					changed = true;
 				} else {
 					keptHooks.push(entry);

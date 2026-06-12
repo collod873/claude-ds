@@ -40,6 +40,13 @@ async function applyChanges(cwd: string, changes: Change[]): Promise<void> {
 	}
 }
 
+/** Checked `getFixer` — a missing registration fails the test with a message. */
+function mustGetFixer(ruleId: DriftRuleId): DriftFixer {
+	const fixer = getFixer(ruleId);
+	if (!fixer) throw new Error(`no fixer registered for ${ruleId}`);
+	return fixer;
+}
+
 /**
  * `decisions` lets a test seed `ctx.decisions.fixerChoices` for the finding
  * under test — the same shape the audit-fix command-level pre-pass writes
@@ -218,7 +225,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ zIndex: 1000 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -232,7 +239,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ color: "#0070f3" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -246,7 +253,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ color: "#0070f3", zIndex: 1000 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -261,7 +268,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ zIndex: 1000, width: "500px" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -275,7 +282,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ width: "500px" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(false);
@@ -288,7 +295,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ zIndex: 1000 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			await fixAndApply(fixer, makeFinding(), dir);
 
 			const content = await readFile(join(dir, "design-system/atoms/card.tsx"), "utf8");
@@ -301,7 +308,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div className="existing" style={{ zIndex: 1000 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -318,7 +325,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ color: "#ffffff" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -335,7 +342,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ padding: 15 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -352,7 +359,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ padding: 2 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(false);
@@ -367,7 +374,7 @@ describe("drift-fixers", () => {
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
 			const finding = makeFinding();
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, finding, dir, {
 				fixerChoices: { [findingKey(finding)]: { "token-tie:padding:12": 0 } },
 			});
@@ -384,7 +391,7 @@ describe("drift-fixers", () => {
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
 			const finding = makeFinding();
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, finding, dir, {
 				fixerChoices: { [findingKey(finding)]: { "token-tie:padding:12": "defer" } },
 			});
@@ -400,7 +407,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ padding: 12 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(false);
@@ -414,7 +421,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ padding: 10 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -427,7 +434,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card({ z }) {\n  return <div style={{ zIndex: z }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(false);
@@ -440,7 +447,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ zIndex: 1000 }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(false);
@@ -449,7 +456,7 @@ describe("drift-fixers", () => {
 
 		it("returns fixed:false when the source file does not exist", async () => {
 			await setupTokens();
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 			expect(result.fixed).toBe(false);
 		});
@@ -459,7 +466,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ boxShadow: "0 1px 2px 0 rgb(0 0 0 / 0.05)" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -477,7 +484,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ padding: "16px", color: "#007bff" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -495,7 +502,7 @@ describe("drift-fixers", () => {
 			const source = `export function Card() {\n  return <div style={{ zIndex: "1000" }}>hello</div>;\n}\nexport const meta = { kind: "atom" as const, examples: [] };\n`;
 			await writeFile(join(dir, "design-system/atoms/card.tsx"), source);
 
-			const fixer = getFixer("DRIFT-INLINE-STATIC-STYLE")!;
+			const fixer = mustGetFixer("DRIFT-INLINE-STATIC-STYLE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -537,7 +544,7 @@ describe("drift-fixers", () => {
 			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -575,7 +582,7 @@ describe("drift-fixers", () => {
 				`import { formatDate } from "@/lib/utils/format";\nexport default function Page() { return <div>{formatDate(new Date())}</div>; }\n`,
 			);
 
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			await fixAndApply(fixer, makeFinding(), dir);
 
 			const pageContent = await readFile(join(dir, "src/page.tsx"), "utf8");
@@ -599,7 +606,7 @@ describe("drift-fixers", () => {
 			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
 
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			const result = await fixAndApply(
 				fixer,
 				makeFinding("design-system/composites/widget.tsx"),
@@ -627,7 +634,7 @@ describe("drift-fixers", () => {
 			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
 
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			const result = await fixAndApply(
 				fixer,
 				makeFinding("design-system/composites/badge.tsx"),
@@ -664,7 +671,7 @@ describe("drift-fixers", () => {
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
 			const finding = makeFinding();
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			const result = await fixAndApply(fixer, finding, dir, {
 				fixerChoices: {
 					[findingKey(finding)]: { "convert:../../lib/api/client:apiClient": 0 },
@@ -702,7 +709,7 @@ describe("drift-fixers", () => {
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
 			const finding = makeFinding();
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			const result = await fixAndApply(fixer, finding, dir, {
 				fixerChoices: {
 					[findingKey(finding)]: { "convert:../../lib/api/client:apiClient": "defer" },
@@ -714,7 +721,7 @@ describe("drift-fixers", () => {
 		});
 
 		it("returns fixed:false when the file does not exist", async () => {
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 			expect(result.fixed).toBe(false);
 		});
@@ -735,7 +742,7 @@ describe("drift-fixers", () => {
 			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 			// Auto-extracts pure function ≤2 params without needing a prompt
 			expect(result.fixed).toBe(true);
@@ -759,7 +766,7 @@ describe("drift-fixers", () => {
 			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/event-card.tsx"), dsSource);
 
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 
 			expect(result.fixed).toBe(true);
@@ -787,7 +794,7 @@ describe("drift-fixers", () => {
 			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/badge.tsx"), dsSource);
 
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			// No prompt callback — should auto-extract without one
 			const result = await fixAndApply(
 				fixer,
@@ -817,7 +824,7 @@ describe("drift-fixers", () => {
 			].join("\n")}\n`;
 			await writeFile(join(dir, "design-system/composites/widget.tsx"), dsSource);
 
-			const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+			const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 			const result = await fixAndApply(
 				fixer,
 				makeFinding("design-system/composites/widget.tsx"),
@@ -856,7 +863,7 @@ describe("drift-fixers", () => {
 		};
 
 		it("returns fixed:false when the file does not exist", async () => {
-			const fixer = getFixer("DRIFT-META-KIND-MISSING")!;
+			const fixer = mustGetFixer("DRIFT-META-KIND-MISSING");
 			const result = await fixAndApply(fixer, finding, dir);
 			expect(result.fixed).toBe(false);
 			expect(result.message).toMatch(/could not read/);
@@ -868,7 +875,7 @@ describe("drift-fixers", () => {
 				join(dir, "design-system/atoms/button.tsx"),
 				"export function Button() { return <button />; }\n",
 			);
-			const fixer = getFixer("DRIFT-META-KIND-MISSING")!;
+			const fixer = mustGetFixer("DRIFT-META-KIND-MISSING");
 			const result = await fixAndApply(fixer, finding, dir);
 			expect(result.fixed).toBe(true);
 			const content = await readFile(join(dir, "design-system/atoms/button.tsx"), "utf8");
@@ -898,7 +905,7 @@ describe("drift-fixers", () => {
 			].join("\n");
 			await writeFile(join(dir, "design-system/atoms/input.tsx"), source);
 
-			const fixer = getFixer("DRIFT-META-KIND-MISSING")!;
+			const fixer = mustGetFixer("DRIFT-META-KIND-MISSING");
 			const result = await fixAndApply(
 				fixer,
 				{
@@ -968,7 +975,7 @@ describe("drift-fixers", () => {
 				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				const result = await fixAndApply(fixer, makeFinding(), dir, {});
 
 				expect(result.fixed).toBe(true);
@@ -997,7 +1004,7 @@ describe("drift-fixers", () => {
 				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				await fixAndApply(fixer, makeFinding(), dir);
 
 				const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
@@ -1037,7 +1044,7 @@ describe("drift-fixers", () => {
 				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/search-form.tsx"), compositeSource);
 
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				const result = await fixAndApply(
 					fixer,
 					makeFinding("design-system/composites/search-form.tsx"),
@@ -1083,7 +1090,7 @@ describe("drift-fixers", () => {
 					].join("\n")}\n`,
 				);
 
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				const result = await fixAndApply(fixer, makeFinding(), dir);
 
 				expect(result.fixed).toBe(true);
@@ -1111,7 +1118,7 @@ describe("drift-fixers", () => {
 				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/toolbar.tsx"), compositeSource);
 
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				await fixAndApply(fixer, makeFinding(), dir);
 
 				const content = await readFile(join(dir, "design-system/composites/toolbar.tsx"), "utf8");
@@ -1153,7 +1160,7 @@ describe("drift-fixers", () => {
 				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				const result = await fixAndApply(
 					fixer,
 					makeFinding("design-system/composites/filter-bar.tsx"),
@@ -1199,7 +1206,7 @@ describe("drift-fixers", () => {
 				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				const result = await fixAndApply(
 					fixer,
 					makeFinding("design-system/composites/filter-bar.tsx"),
@@ -1236,7 +1243,7 @@ describe("drift-fixers", () => {
 				].join("\n")}\n`;
 				await writeFile(join(dir, "design-system/composites/filter-bar.tsx"), compositeSource);
 
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				const result = await fixAndApply(
 					fixer,
 					makeFinding("design-system/composites/filter-bar.tsx"),
@@ -1254,7 +1261,7 @@ describe("drift-fixers", () => {
 		});
 
 		it("returns fixed:false when the file does not exist", async () => {
-			const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+			const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 			expect(result.fixed).toBe(false);
 		});
@@ -1269,7 +1276,7 @@ describe("drift-fixers", () => {
 				].join("\n")}\n`,
 			);
 
-			const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+			const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 			const result = await fixAndApply(fixer, makeFinding(), dir);
 			expect(result.fixed).toBe(false);
 			expect(result.message).toContain("no base atom mapping");
@@ -1349,7 +1356,7 @@ describe("drift-fixers", () => {
 					file: "design-system/composites/toolbar.tsx",
 					message: "raw <button>",
 				};
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				const result = await fixAndApply(fixer, finding, dir);
 
 				expect(result.fixed).toBe(true);
@@ -1392,7 +1399,7 @@ describe("drift-fixers", () => {
 					file: "design-system/composites/form.tsx",
 					message: "raw <button>",
 				};
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				const result = await fixAndApply(fixer, finding, dir);
 
 				expect(result.fixed).toBe(true);
@@ -1434,7 +1441,7 @@ describe("drift-fixers", () => {
 					file: "design-system/composites/actions.tsx",
 					message: "raw <button>",
 				};
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				const result = await fixAndApply(fixer, finding, dir);
 
 				expect(result.fixed).toBe(true);
@@ -1471,7 +1478,7 @@ describe("drift-fixers", () => {
 					file: "design-system/composites/filter-bar.tsx",
 					message: "raw primitive",
 				};
-				const fixer = getFixer("DRIFT-RAW-PRIMITIVE")!;
+				const fixer = mustGetFixer("DRIFT-RAW-PRIMITIVE");
 				const result = await fixAndApply(fixer, finding, dir);
 
 				// Extraction is classify's job — audit defers, creates nothing.
@@ -1503,7 +1510,7 @@ describe("drift-fixers", () => {
 					file: "design-system/composites/event-card.tsx",
 					message: "domain import",
 				};
-				const fixer = getFixer("DRIFT-DS-IMPORTS-FEATURE")!;
+				const fixer = mustGetFixer("DRIFT-DS-IMPORTS-FEATURE");
 				const result = await fixAndApply(fixer, finding, dir);
 
 				expect(result.fixed).toBe(true);
@@ -1544,7 +1551,7 @@ export const meta = { kind: "atom" as const, examples: [] };
 				message:
 					"3 unexercised CVA variant values: variant=default, variant=ghost, variant=destructive",
 			};
-			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const fixer = mustGetFixer("DRIFT-CVA-VARIANT-UNRENDERED");
 			const result = await fixAndApply(fixer, finding, dir);
 
 			expect(result.fixed).toBe(true);
@@ -1578,7 +1585,7 @@ export const meta = {
 				file: "design-system/atoms/button.tsx",
 				message: "2 unexercised CVA variant values: variant=ghost, variant=destructive",
 			};
-			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const fixer = mustGetFixer("DRIFT-CVA-VARIANT-UNRENDERED");
 			const result = await fixAndApply(fixer, finding, dir);
 
 			expect(result.fixed).toBe(true);
@@ -1614,7 +1621,7 @@ export const meta = {
 				file: "design-system/atoms/chip.tsx",
 				message: "3 unexercised CVA variant values: variant=outline, size=md, size=lg",
 			};
-			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const fixer = mustGetFixer("DRIFT-CVA-VARIANT-UNRENDERED");
 			const result = await fixAndApply(fixer, finding, dir);
 
 			expect(result.fixed).toBe(true);
@@ -1645,7 +1652,7 @@ export const meta = { kind: "atom" as const, examples: [] };
 				file: "design-system/atoms/alert.tsx",
 				message: "3 unexercised CVA variant values: tone=info, tone=warning, tone=error",
 			};
-			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const fixer = mustGetFixer("DRIFT-CVA-VARIANT-UNRENDERED");
 			const result = await fixAndApply(fixer, finding, dir);
 
 			expect(result.fixed).toBe(true);
@@ -1681,7 +1688,7 @@ export const meta = { kind: "atom" as const, examples: [] };
 				file: "design-system/atoms/input.tsx",
 				message: "unexercised",
 			};
-			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const fixer = mustGetFixer("DRIFT-CVA-VARIANT-UNRENDERED");
 			const result = await fixAndApply(fixer, finding, dir);
 
 			expect(result.fixed).toBe(true);
@@ -1724,7 +1731,7 @@ export const meta = { kind: "atom" as const, examples: [] };
 				file: "design-system/atoms/combobox.tsx",
 				message: "unexercised",
 			};
-			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const fixer = mustGetFixer("DRIFT-CVA-VARIANT-UNRENDERED");
 			const result = await fixAndApply(fixer, finding, dir);
 
 			expect(result.fixed).toBe(true);
@@ -1744,7 +1751,7 @@ export const meta = { kind: "atom" as const, examples: [] };
 				file: "design-system/atoms/missing.tsx",
 				message: "unexercised",
 			};
-			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const fixer = mustGetFixer("DRIFT-CVA-VARIANT-UNRENDERED");
 			const result = await fixer(finding, makeFakeCtx(dir));
 			expect(result.fixed).toBe(false);
 		});
@@ -1761,7 +1768,7 @@ export const meta = { kind: "atom" as const, examples: [] };
 				file: "design-system/atoms/label.tsx",
 				message: "unexercised",
 			};
-			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const fixer = mustGetFixer("DRIFT-CVA-VARIANT-UNRENDERED");
 			const result = await fixer(finding, makeFakeCtx(dir));
 			expect(result.fixed).toBe(false);
 		});
@@ -1791,7 +1798,7 @@ export const meta = {
 				file: "design-system/atoms/button.tsx",
 				message: "1 unexercised CVA variant value: variant=destructive",
 			};
-			const fixer = getFixer("DRIFT-CVA-VARIANT-UNRENDERED")!;
+			const fixer = mustGetFixer("DRIFT-CVA-VARIANT-UNRENDERED");
 			const result = await fixAndApply(fixer, finding, dir);
 
 			expect(result.fixed).toBe(true);
@@ -1838,7 +1845,7 @@ export const meta = {
 				file: "design-system/atoms/combobox.tsx",
 				message: "2 duplicate meta.examples entries",
 			};
-			const fixer = getFixer("DRIFT-META-EXAMPLES-DUPLICATE")!;
+			const fixer = mustGetFixer("DRIFT-META-EXAMPLES-DUPLICATE");
 			expect(fixer).toBeDefined();
 			const result = await fixAndApply(fixer, finding, dir);
 
@@ -1871,7 +1878,7 @@ export const meta = {
 				file: "design-system/atoms/button.tsx",
 				message: "0 duplicate meta.examples entries",
 			};
-			const fixer = getFixer("DRIFT-META-EXAMPLES-DUPLICATE")!;
+			const fixer = mustGetFixer("DRIFT-META-EXAMPLES-DUPLICATE");
 			const result = await fixer(finding, makeFakeCtx(dir));
 			expect(result.fixed).toBe(false);
 		});
@@ -1946,7 +1953,7 @@ export const meta = {
 				file: "design-system/atoms/toaster.tsx",
 				message: "meta contains retired `states` field — remove per ADR-0007",
 			};
-			const fixer = getFixer("DRIFT-STALE-META-STATES")!;
+			const fixer = mustGetFixer("DRIFT-STALE-META-STATES");
 			const result = await fixAndApply(fixer, finding, dir);
 			expect(result.fixed).toBe(true);
 
@@ -2014,7 +2021,7 @@ export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm"
 			const finding = detect(source)[0];
 			expect(finding).toBeDefined();
 
-			const fixer = getFixer("DRIFT-META-EXAMPLES-INVALID-PROP")!;
+			const fixer = mustGetFixer("DRIFT-META-EXAMPLES-INVALID-PROP");
 			const result = await fixAndApply(fixer, finding, dir);
 			expect(result.fixed).toBe(true);
 
@@ -2038,7 +2045,7 @@ export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm"
 			const finding = detect(source)[0];
 			expect(finding).toBeDefined();
 
-			const fixer = getFixer("DRIFT-META-EXAMPLES-INVALID-PROP")!;
+			const fixer = mustGetFixer("DRIFT-META-EXAMPLES-INVALID-PROP");
 			const result = await fixAndApply(fixer, finding, dir);
 			expect(result.fixed).toBe(true);
 
@@ -2063,7 +2070,7 @@ export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm"
 			expect(finding).toBeDefined();
 			expect(finding.message).toContain('tone="dark"');
 
-			const fixer = getFixer("DRIFT-META-EXAMPLES-INVALID-PROP")!;
+			const fixer = mustGetFixer("DRIFT-META-EXAMPLES-INVALID-PROP");
 			const result = await fixAndApply(fixer, finding, dir);
 			expect(result.fixed).toBe(true);
 
@@ -2094,7 +2101,7 @@ export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm"
 			expect(finding).toBeDefined();
 			expect(finding.message).toContain('size="invalid"');
 
-			const fixer = getFixer("DRIFT-META-EXAMPLES-INVALID-PROP")!;
+			const fixer = mustGetFixer("DRIFT-META-EXAMPLES-INVALID-PROP");
 			const result = await fixAndApply(fixer, finding, dir);
 			expect(result.fixed).toBe(true);
 
@@ -2117,7 +2124,7 @@ export function Badge({ tone, size }: { tone?: "neutral" | "danger"; size?: "sm"
 			await seed(source);
 			expect(detect(source)).toHaveLength(0);
 
-			const fixer = getFixer("DRIFT-META-EXAMPLES-INVALID-PROP")!;
+			const fixer = mustGetFixer("DRIFT-META-EXAMPLES-INVALID-PROP");
 			const finding: DriftFinding = {
 				ruleId: "DRIFT-META-EXAMPLES-INVALID-PROP",
 				file: "design-system/atoms/badge.tsx",

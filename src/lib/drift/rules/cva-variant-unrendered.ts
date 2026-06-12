@@ -64,7 +64,9 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 
 	const unexercised: string[] = [];
 	for (const [name, axis] of axes) {
-		const exercisedValues = exercised.get(name)!;
+		const exercisedValues = exercised.get(name);
+		if (exercisedValues === undefined)
+			throw new Error(`unreachable: axis ${name} missing from exercised map`);
 		for (const value of axisValues(axis)) {
 			if (!exercisedValues.has(value)) {
 				unexercised.push(`${name}=${value}`);
@@ -114,7 +116,9 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 
 	const stubs: string[] = [];
 	for (const [name, axis] of axes) {
-		const exercisedValues = exercised.get(name)!;
+		const exercisedValues = exercised.get(name);
+		if (exercisedValues === undefined)
+			throw new Error(`unreachable: axis ${name} missing from exercised map`);
 		for (const value of axisValues(axis)) {
 			if (!exercisedValues.has(value)) {
 				stubs.push(buildExampleStub(name, value));

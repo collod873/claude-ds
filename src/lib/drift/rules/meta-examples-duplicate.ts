@@ -76,7 +76,15 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 		};
 	}
 
-	const opener = /examples\s*:\s*\[/.exec(source)!;
+	const opener = /examples\s*:\s*\[/.exec(source);
+	if (!opener) {
+		return {
+			finding,
+			fixed: false,
+			message: `no examples array found in ${finding.file}`,
+			changes: [],
+		};
+	}
 	const arrayStart = opener.index;
 	let depth = 1;
 	let arrayEnd = arrayStart + opener[0].length;

@@ -220,7 +220,8 @@ function computeHelperClosure(
 	const queue: string[] = [...seedNames];
 
 	while (queue.length > 0) {
-		const name = queue.shift()!;
+		const name = queue.shift();
+		if (name === undefined) break;
 		const idx = nameToIdx.get(name);
 		if (idx === undefined) {
 			// Symbol not found in this composite — cannot carry

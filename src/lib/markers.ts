@@ -13,8 +13,8 @@ export function mergeMarkers(current: string, desiredInner: string, fmt: Format)
 		throw new MarkerError(
 			`expected exactly one marker pair (open=${opens.length}, close=${closes.length})`,
 		);
-	const openEnd = opens[0].index! + open.length;
-	const closeStart = closes[0].index!;
+	const openEnd = opens[0].index + open.length;
+	const closeStart = closes[0].index;
 	if (closeStart < openEnd) throw new MarkerError("close before open");
 	return `${current.slice(0, openEnd)}\n${desiredInner}\n${current.slice(closeStart)}`;
 }

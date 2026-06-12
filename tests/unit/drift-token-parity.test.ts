@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	allRuleIds,
 	type DriftFinding,
+	type DriftFixer,
+	type DriftRuleId,
 	type DriftRuleInput,
 	evaluateDrift,
 	getFixer,
@@ -15,6 +17,13 @@ import {
 import type { Change } from "../../src/lib/operation";
 import { makeFakeCtx } from "../helpers/fake-ctx";
 import { cleanup, freshTmpDir } from "../helpers/tmpdir";
+
+/** Checked `getFixer` — a missing registration fails the test with a message. */
+function mustGetFixer(ruleId: DriftRuleId): DriftFixer {
+	const fixer = getFixer(ruleId);
+	if (!fixer) throw new Error(`no fixer registered for ${ruleId}`);
+	return fixer;
+}
 
 const TOKENS_PATH = "design-system/tokens.json";
 const CSS_PATH = "app/globals.css";
@@ -209,7 +218,7 @@ describe("DRIFT-TOKEN-PARITY fix", () => {
 		await seedTokens();
 		await seedCss(":root {\n  --color-background: #ffffff;\n  --color-foreground: #111111;\n}\n");
 
-		const fixer = getFixer("DRIFT-TOKEN-PARITY")!;
+		const fixer = mustGetFixer("DRIFT-TOKEN-PARITY");
 		const result = await fixer(makeFinding(), makeFakeCtx(dir));
 		expect(result.fixed).toBe(true);
 		await applyChanges(dir, result.changes);
@@ -230,7 +239,7 @@ describe("DRIFT-TOKEN-PARITY fix", () => {
 				"}\n",
 		);
 
-		const fixer = getFixer("DRIFT-TOKEN-PARITY")!;
+		const fixer = mustGetFixer("DRIFT-TOKEN-PARITY");
 		const result = await fixer(makeFinding(), makeFakeCtx(dir));
 		expect(result.fixed).toBe(true);
 		await applyChanges(dir, result.changes);
@@ -255,7 +264,7 @@ describe("DRIFT-TOKEN-PARITY fix", () => {
 				"}\n",
 		);
 
-		const fixer = getFixer("DRIFT-TOKEN-PARITY")!;
+		const fixer = mustGetFixer("DRIFT-TOKEN-PARITY");
 		const result = await fixer(makeFinding(), makeFakeCtx(dir));
 		expect(result.fixed).toBe(false);
 		expect(result.message).toContain("color-stale");
@@ -268,7 +277,7 @@ describe("DRIFT-TOKEN-PARITY fix", () => {
 	it("returns unfixed with a helpful message when globals.css is missing", async () => {
 		await seedTokens();
 
-		const fixer = getFixer("DRIFT-TOKEN-PARITY")!;
+		const fixer = mustGetFixer("DRIFT-TOKEN-PARITY");
 		const result = await fixer(makeFinding(), makeFakeCtx(dir));
 		expect(result.fixed).toBe(false);
 		expect(result.message).toMatch(/globals\.css|not found|could not/i);
@@ -277,7 +286,7 @@ describe("DRIFT-TOKEN-PARITY fix", () => {
 	it("returns unfixed when tokens.json is missing", async () => {
 		await seedCss(":root {\n  --color-primary: #0070f3;\n}\n");
 
-		const fixer = getFixer("DRIFT-TOKEN-PARITY")!;
+		const fixer = mustGetFixer("DRIFT-TOKEN-PARITY");
 		const result = await fixer(makeFinding(), makeFakeCtx(dir));
 		expect(result.fixed).toBe(false);
 		expect(result.message).toMatch(/tokens\.json|not found|could not/i);
@@ -301,7 +310,7 @@ describe("DRIFT-TOKEN-PARITY fix", () => {
 				"}\n",
 		);
 
-		const fixer = getFixer("DRIFT-TOKEN-PARITY")!;
+		const fixer = mustGetFixer("DRIFT-TOKEN-PARITY");
 		const result = await fixer(makeFinding(), makeFakeCtx(dir));
 		expect(result.fixed).toBe(true);
 		await applyChanges(dir, result.changes);

@@ -74,7 +74,15 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 		return { finding, fixed: false, message: `could not auto-repair ${finding.file}`, changes: [] };
 	}
 
-	const opener = /examples\s*:\s*\[/.exec(source)!;
+	const opener = /examples\s*:\s*\[/.exec(source);
+	if (!opener) {
+		return {
+			finding,
+			fixed: false,
+			message: `no examples array found in ${finding.file}`,
+			changes: [],
+		};
+	}
 	const arrayStart = opener.index;
 	let bracketDepth = 1;
 	let arrayEnd = arrayStart + opener[0].length;

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { mergeJsonKeys, pruneHooksJson } from "../../src/lib/json-merge";
 
+/** Checked parse of a nullable prune result — null fails the test with a message. */
+function mustParse(result: string | null) {
+	if (result === null) throw new Error("expected pruned JSON, got null");
+	return JSON.parse(result);
+}
+
 describe("mergeJsonKeys — non-hooks owned keys (wholesale replace)", () => {
 	it("owned non-hooks key from upstream replaces nothing when not in current", () => {
 		const upstream = JSON.stringify({ customSection: { val: "x" } });
@@ -425,8 +431,7 @@ describe("pruneHooksJson — remove dangling pack-owned hook entries", () => {
 			},
 		});
 		const result = pruneHooksJson(current, (cmd) => cmd === ".claude/hooks/token-only.sh");
-		expect(result).not.toBeNull();
-		const parsed = JSON.parse(result!);
+		const parsed = mustParse(result);
 		const commands = parsed.hooks.PostToolUse[0].hooks.map((h: { command: string }) => h.command);
 		expect(commands).toContain(".claude/hooks/atom-imports.sh $CLAUDE_FILE_PATHS");
 		expect(commands).not.toContain(".claude/hooks/token-only.sh $CLAUDE_FILE_PATHS");
@@ -447,8 +452,7 @@ describe("pruneHooksJson — remove dangling pack-owned hook entries", () => {
 			},
 		});
 		const result = pruneHooksJson(current, (cmd) => cmd === ".claude/hooks/token-only.sh");
-		expect(result).not.toBeNull();
-		const parsed = JSON.parse(result!);
+		const parsed = mustParse(result);
 		expect(parsed.hooks.PostToolUse[0].hooks).toHaveLength(1);
 		expect(parsed.hooks.PostToolUse[0].hooks[0].command).toBe("scripts/my-linter.sh");
 	});
@@ -478,8 +482,7 @@ describe("pruneHooksJson — remove dangling pack-owned hook entries", () => {
 			},
 		});
 		const result = pruneHooksJson(current, (cmd) => cmd === ".claude/hooks/pre-write-ds-states.sh");
-		expect(result).not.toBeNull();
-		const parsed = JSON.parse(result!);
+		const parsed = mustParse(result);
 		expect(parsed.hooks.PreToolUse).toBeUndefined();
 		expect(parsed.hooks.PostToolUse).toBeDefined();
 	});
@@ -514,8 +517,7 @@ describe("pruneHooksJson — remove dangling pack-owned hook entries", () => {
 			},
 		});
 		const result = pruneHooksJson(current, (cmd) => cmd === ".claude/hooks/token-only.sh");
-		expect(result).not.toBeNull();
-		const parsed = JSON.parse(result!);
+		const parsed = mustParse(result);
 		expect(parsed.permissions).toEqual({ allow: ["Bash(npm test:*)"] });
 	});
 

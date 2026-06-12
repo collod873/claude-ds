@@ -623,10 +623,10 @@ export function CalendarView() {
 		};
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-RAW-PRIMITIVE");
-		expect(hit).toBeDefined();
-		expect(hit?.message).toContain(EXTRACTION_NEEDED_MARKER);
-		expect(hit?.message).toContain("claude-ds classify");
-		expect(isExtractionNeededFinding(hit!)).toBe(true);
+		if (!hit) throw new Error("expected a DRIFT-RAW-PRIMITIVE finding");
+		expect(hit.message).toContain(EXTRACTION_NEEDED_MARKER);
+		expect(hit.message).toContain("claude-ds classify");
+		expect(isExtractionNeededFinding(hit)).toBe(true);
 	});
 
 	it("does NOT carry the extraction marker for a generic raw primitive (no inline component)", () => {
@@ -642,9 +642,9 @@ export function SearchBar() {
 		};
 		const findings = evaluateDrift(input);
 		const hit = findings.find((f) => f.ruleId === "DRIFT-RAW-PRIMITIVE");
-		expect(hit).toBeDefined();
-		expect(hit?.message).not.toContain(EXTRACTION_NEEDED_MARKER);
-		expect(isExtractionNeededFinding(hit!)).toBe(false);
+		if (!hit) throw new Error("expected a DRIFT-RAW-PRIMITIVE finding");
+		expect(hit.message).not.toContain(EXTRACTION_NEEDED_MARKER);
+		expect(isExtractionNeededFinding(hit)).toBe(false);
 	});
 
 	it("does NOT fire on atom-tier files", () => {
