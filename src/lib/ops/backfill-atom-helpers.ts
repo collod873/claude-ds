@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import ts from "typescript";
@@ -336,7 +337,7 @@ function addImportLine(source: string, line: string): string {
 async function collectDirFiles(cwd: string, dir: string): Promise<string[]> {
 	const out: string[] = [];
 	async function walk(rel: string): Promise<void> {
-		let entries;
+		let entries: Dirent[];
 		try {
 			entries = await readdir(join(cwd, rel), { withFileTypes: true });
 		} catch {

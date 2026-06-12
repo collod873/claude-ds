@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Change } from "../../src/lib/operation";
+import type { ProjectContext } from "../../src/lib/project";
 import { cleanup, freshTmpDir } from "../helpers/tmpdir";
 
 vi.mock("../../src/lib/drift/index.js", async (importOriginal) => {
@@ -160,7 +161,7 @@ describe("fix-pass: fixerAsOperation wrapper (#224)", () => {
 				message: "missing meta.kind",
 			};
 			const op = fixerAsOperation(finding);
-			const ctx = { cwd: dir } as any;
+			const ctx = { cwd: dir } as ProjectContext;
 			const { changes }: { changes: Change[] } = await op.plan(ctx);
 			expect(changes).toHaveLength(1);
 			expect(changes[0].kind).toBe("abort");

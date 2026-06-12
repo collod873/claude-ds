@@ -690,6 +690,7 @@ describe("doctor --completeness", () => {
 			"  src.split('\\n').forEach((line, i) => {",
 			"    if (line.includes('design-system-ignore:')) return;",
 			"    if (RAW_HEX_COLOR_RE.test(line) || RAW_SPACING_RE.test(line)) {",
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: fixture emits a real template literal into the generated lint script
 			"      violations.push(`${path}:${i + 1}: raw color/spacing — use a token`);",
 			"    }",
 			"  });",

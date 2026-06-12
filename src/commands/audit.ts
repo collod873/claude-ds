@@ -240,7 +240,7 @@ export async function auditCmd(opts: AuditOpts): Promise<CommandResult> {
 		(f) => !suppressedSet.has(suppressedKey(f.ruleId, f.file)),
 	);
 
-	let fixSummary;
+	let fixSummary: Awaited<ReturnType<typeof runAuditFix>>;
 	try {
 		fixSummary = await runAuditFix(ctx, {
 			unexpected,

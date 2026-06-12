@@ -16,6 +16,7 @@
  * (#331) routes to the greet rather than the dashboard's `pre-adopt` mode
  * whenever `hasConfig` is false.
  */
+import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { SCAN_SKIP_DIRS } from "./build-outputs.js";
@@ -104,7 +105,7 @@ function mergeDeps(pkg: Record<string, unknown>): Record<string, string> {
  */
 async function hasAnyComponentFile(cwd: string): Promise<boolean> {
 	async function walk(dir: string): Promise<boolean> {
-		let entries;
+		let entries: Dirent[];
 		try {
 			entries = await readdir(dir, { withFileTypes: true });
 		} catch {

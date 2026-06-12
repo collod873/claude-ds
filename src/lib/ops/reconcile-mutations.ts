@@ -19,8 +19,8 @@ export function makeDeleteFiles(relPaths: string[]): Operation {
 				let before: Buffer;
 				try {
 					before = await readFile(abs);
-				} catch (e: any) {
-					if (e.code === "ENOENT") continue;
+				} catch (e) {
+					if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
 					throw e;
 				}
 				changes.push({ kind: "delete", path: p, before });
@@ -98,8 +98,8 @@ export function makeMergeRootToCanonical(rootPath: string, canonicalPath: string
 			let canonicalBefore: Buffer | null;
 			try {
 				canonicalBefore = await readFile(canonicalAbs);
-			} catch (e: any) {
-				if (e.code === "ENOENT") canonicalBefore = null;
+			} catch (e) {
+				if ((e as NodeJS.ErrnoException).code === "ENOENT") canonicalBefore = null;
 				else throw e;
 			}
 			return [

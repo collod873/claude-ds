@@ -33,14 +33,12 @@ function parseExercisedVariants(
 	for (const [name, axis] of axes) {
 		if (axis.kind === "boolean") {
 			const re = new RegExp(`${name}\\s*:\\s*(true|false)\\b`, "g");
-			let m: RegExpExecArray | null;
-			while ((m = re.exec(examplesContent)) !== null) {
+			for (const m of examplesContent.matchAll(re)) {
 				exercised.get(name)?.add(m[1] === "true");
 			}
 		} else {
 			const re = new RegExp(`${name}\\s*:\\s*["']([^"']+)["']`, "g");
-			let m: RegExpExecArray | null;
-			while ((m = re.exec(examplesContent)) !== null) {
+			for (const m of examplesContent.matchAll(re)) {
 				exercised.get(name)?.add(m[1]);
 			}
 		}

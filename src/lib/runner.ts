@@ -161,8 +161,8 @@ async function applyChange(ctx: ProjectContext, c: Change): Promise<void> {
 		const abs = resolveIn(ctx.cwd, c.path);
 		try {
 			await unlink(abs);
-		} catch (e: any) {
-			if (e.code !== "ENOENT") throw e;
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
 		}
 	} else {
 		const absFrom = resolveIn(ctx.cwd, c.path);

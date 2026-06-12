@@ -76,9 +76,7 @@ function extractFullFunction(source: string, start: number): string {
  */
 export function findInternalComponents(source: string): InternalComponent[] {
 	const components: InternalComponent[] = [];
-	NAMED_COMPONENT_START_RE.lastIndex = 0;
-	let m: RegExpExecArray | null;
-	while ((m = NAMED_COMPONENT_START_RE.exec(source)) !== null) {
+	for (const m of source.matchAll(NAMED_COMPONENT_START_RE)) {
 		const lineStart = source.lastIndexOf("\n", m.index) + 1;
 		const beforeOnLine = source.slice(lineStart, m.index);
 		if (/export\s+/.test(beforeOnLine)) continue;
@@ -105,9 +103,7 @@ function detect(input: DriftRuleInput): DriftFinding | null {
 	if (source === undefined) return null;
 
 	const counts = new Map<string, number>();
-	let m: RegExpExecArray | null;
-	RAW_PRIMITIVE_RE.lastIndex = 0;
-	while ((m = RAW_PRIMITIVE_RE.exec(source)) !== null) {
+	for (const m of source.matchAll(RAW_PRIMITIVE_RE)) {
 		const el = m[1];
 		counts.set(el, (counts.get(el) ?? 0) + 1);
 	}
@@ -157,9 +153,7 @@ interface RawElementMatch {
 
 function findRawElements(source: string): RawElementMatch[] {
 	const matches: RawElementMatch[] = [];
-	RAW_PRIMITIVE_RE_FIXER.lastIndex = 0;
-	let m: RegExpExecArray | null;
-	while ((m = RAW_PRIMITIVE_RE_FIXER.exec(source)) !== null) {
+	for (const m of source.matchAll(RAW_PRIMITIVE_RE_FIXER)) {
 		matches.push({ element: m[1], fullMatch: m[0], index: m.index });
 	}
 	return matches;

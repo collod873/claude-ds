@@ -301,8 +301,7 @@ export async function runConsumerVerify(
 export function parseVerifyErrors(raw: string): VerifyError[] {
 	const errors: VerifyError[] = [];
 	const re = /^([^()\n]+)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.*)$/gm;
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(raw)) !== null) {
+	for (const m of raw.matchAll(re)) {
 		errors.push({
 			file: m[1],
 			line: Number(m[2]),

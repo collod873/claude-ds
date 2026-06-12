@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -30,9 +31,7 @@ const IMPORT_STMT_RE = /^import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["']\s*;?\s*$
 
 function parseDomainImports(source: string, domainRoots: string[]): DomainImport[] {
 	const results: DomainImport[] = [];
-	let m: RegExpExecArray | null;
-	IMPORT_STMT_RE.lastIndex = 0;
-	while ((m = IMPORT_STMT_RE.exec(source)) !== null) {
+	for (const m of source.matchAll(IMPORT_STMT_RE)) {
 		const importPath = m[2];
 		const isDomain = domainRoots.some((root) => {
 			const re = new RegExp(`(?:^|/)${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`);
@@ -196,7 +195,7 @@ async function collectProjectImportRewriteChanges(
 		for (const entry of entries) {
 			if (entry === "node_modules" || entry === ".git") continue;
 			const full = join(dir, entry);
-			let s;
+			let s: Stats;
 			try {
 				s = await stat(full);
 			} catch {

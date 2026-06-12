@@ -33,8 +33,7 @@ function hasSyntaxErrors(source: string, fileName: string): string | null {
 function findDuplicateImportIdentifiers(source: string): string | null {
 	const importRe = /import\s+\{([^}]+)\}\s+from\s+["'][^"']+["']/g;
 	const seen = new Map<string, string>();
-	let m: RegExpExecArray | null;
-	while ((m = importRe.exec(source)) !== null) {
+	for (const m of source.matchAll(importRe)) {
 		const specifiers = m[1]
 			.split(",")
 			.map((s) => {
@@ -56,8 +55,7 @@ function findDuplicateImportIdentifiers(source: string): string | null {
 function findSelfImport(source: string, filePath: string): string | null {
 	const fileRelNoExt = filePath.replace(/\.\w+$/, "");
 	const importRe = /from\s+["']([^"']+)["']/g;
-	let m: RegExpExecArray | null;
-	while ((m = importRe.exec(source)) !== null) {
+	for (const m of source.matchAll(importRe)) {
 		const importPath = m[1];
 		const resolved = importPath.replace(/^@\//, "");
 		if (resolved === fileRelNoExt) {

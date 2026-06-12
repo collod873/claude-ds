@@ -23,7 +23,7 @@ describe("non-TTY CI mode", () => {
 		dir = await freshTmpDir();
 		originalStdoutIsTTY = process.stdout.isTTY;
 		originalStdinIsTTY = process.stdin.isTTY;
-		exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
+		exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
 		vi.mocked(info).mockReset();
 	});
 

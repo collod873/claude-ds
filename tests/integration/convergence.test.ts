@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,7 +33,7 @@ const BASE_CFG = {
 async function snapshotTree(root: string): Promise<Map<string, string>> {
 	const result = new Map<string, string>();
 	async function walk(absDir: string): Promise<void> {
-		let entries;
+		let entries: Dirent[];
 		try {
 			entries = await readdir(absDir, { withFileTypes: true });
 		} catch {

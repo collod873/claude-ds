@@ -34,31 +34,31 @@ export type Change =
  * `RunReport.ops[i].outcome` so consumers never reach back through a side-channel
  * on the Op handle.
  */
-export interface PlanResult<TOutcome = void> {
+export interface PlanResult<TOutcome = undefined> {
 	changes: Change[];
 	outcome: TOutcome;
 }
 
 /**
- * The shape of `plan()`'s return. Byte-only Ops (the default `Operation<void>`)
+ * The shape of `plan()`'s return. Byte-only Ops (the default `Operation<undefined>`)
  * stay zero-touch — they keep returning `Change[]` directly. Ops that produce a
  * non-byte outcome declare it via `Operation<TOutcome>` and return the explicit
  * `{ changes, outcome }` shape so TypeScript can enforce that `outcome` is set.
  */
-export type PlanReturn<TOutcome> = [TOutcome] extends [void] ? Change[] : PlanResult<TOutcome>;
+export type PlanReturn<TOutcome> = [TOutcome] extends [undefined] ? Change[] : PlanResult<TOutcome>;
 
 /**
  * A planned mutation phase. `plan()` reads the filesystem through `ctx` and
  * returns the Changes it would make — it must not write to disk itself. The
  * Runner is the single chokepoint for bytes.
  *
- * Generic `TOutcome` (default `void`) is the type of the non-byte fact this Op
+ * Generic `TOutcome` (default `undefined`) is the type of the non-byte fact this Op
  * produces — fixer pass/fail+message, structural-decision summaries (extracted
  * components, per-file sync verdicts), violation lists. The Runner reports it
- * via `RunReport.ops[i].outcome`. Byte-only Ops use the default `void` and
+ * via `RunReport.ops[i].outcome`. Byte-only Ops use the default `undefined` and
  * return `Change[]` directly.
  */
-export interface Operation<TOutcome = void> {
+export interface Operation<TOutcome = undefined> {
 	name: string;
 	plan(ctx: ProjectContext): Promise<PlanReturn<TOutcome>>;
 }

@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { classifySource } from "../lib/classifier.js";
@@ -133,7 +134,7 @@ export async function classifyCmd(opts: {
 	const classified: ClassifiedFile[] = [];
 	if (hasSrc) {
 		const srcAbs = join(cwd, srcRel as string);
-		let srcStat;
+		let srcStat: Stats;
 		try {
 			srcStat = await stat(srcAbs);
 		} catch {

@@ -121,7 +121,9 @@ export async function applyMigration(
 			process.stdout.write(
 				`\nMigrating pre-v0.6 config — multiple CLAUDE.md files found.\nChoose where the managed pointer block should live:\n`,
 			);
-			nonRootCandidates.forEach((c, i) => process.stdout.write(`  ${i + 1}. ${c}\n`));
+			nonRootCandidates.forEach((c, i) => {
+				process.stdout.write(`  ${i + 1}. ${c}\n`);
+			});
 			const { createInterface } = await import("node:readline/promises");
 			const rl = createInterface({ input: process.stdin, output: process.stdout });
 			const ans = (await rl.question(`Pick [1-${nonRootCandidates.length}]: `)).trim();

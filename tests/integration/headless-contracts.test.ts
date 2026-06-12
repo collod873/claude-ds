@@ -355,6 +355,7 @@ describe("headless contract — byte-identical non-TTY stream", () => {
 		await cleanup(dir);
 	});
 
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: the raw ESC control character is the ANSI escape being detected
 	const ANSI_ESCAPE_RE = /\[/;
 
 	it("doctor (no --json) stdout contains no ANSI color codes", async () => {

@@ -243,7 +243,7 @@ export async function reconcileCmd(opts: {
 		err(".claude-ds.json absent — run `adopt` first");
 		process.exit(2);
 	}
-	let ctx;
+	let ctx: Awaited<ReturnType<typeof loadProject>>;
 	try {
 		ctx = await loadProject(cwd);
 	} catch (e) {

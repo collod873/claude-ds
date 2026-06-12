@@ -182,9 +182,7 @@ interface StyleProp {
 
 function parseStyleProps(innerBlock: string): StyleProp[] {
 	const props: StyleProp[] = [];
-	let m: RegExpExecArray | null;
-	STYLE_PROP_RE.lastIndex = 0;
-	while ((m = STYLE_PROP_RE.exec(innerBlock)) !== null) {
+	for (const m of innerBlock.matchAll(STYLE_PROP_RE)) {
 		const rawValue = m[2];
 		let normalizedValue = rawValue;
 		if (
@@ -258,11 +256,9 @@ async function fix(finding: DriftFinding, ctx: ProjectContext): Promise<FixResul
 	let anyFixed = false;
 	let result = source;
 
-	STATIC_STYLE_BLOCK_RE.lastIndex = 0;
 	const replacements: Array<{ original: string; replacement: string }> = [];
 
-	let match: RegExpExecArray | null;
-	while ((match = STATIC_STYLE_BLOCK_RE.exec(source)) !== null) {
+	for (const match of source.matchAll(STATIC_STYLE_BLOCK_RE)) {
 		const fullMatch = match[0];
 		const innerBlock = match[2];
 		const props = parseStyleProps(innerBlock);
@@ -368,8 +364,7 @@ function describeDecisions(
 ): FixerDecisionPoint[] {
 	const points: FixerDecisionPoint[] = [];
 	const re = new RegExp(STATIC_STYLE_BLOCK_RE.source, STATIC_STYLE_BLOCK_RE.flags);
-	let match: RegExpExecArray | null;
-	while ((match = re.exec(source)) !== null) {
+	for (const match of source.matchAll(re)) {
 		const props = parseStyleProps(match[2]);
 		for (const prop of props) {
 			if (!(prop.name in CSS_PROP_TOKEN_GROUP)) continue;

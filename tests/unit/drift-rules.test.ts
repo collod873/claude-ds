@@ -427,6 +427,7 @@ describe("DRIFT-INLINE-STATIC-STYLE rule", () => {
 			metaKind: null,
 			classifierVerdict: { tier: "atom", signals: ["no design-system tier imports"] },
 			source:
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: fixture source intentionally contains a template-literal expression
 				"export function Positioner({ y }: { y: number }) {\n  return <div style={{ transform: `translateY(${y}px)` }} />;\n}",
 		};
 		const findings = evaluateDrift(input);

@@ -72,12 +72,11 @@ async function resolveImportPath(
 function extractImportPaths(source: string): string[] {
 	const paths: string[] = [];
 	const re = /(?:import|export)\s+(?:.*?\s+from\s+)?["']([^"']+)["']/g;
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(source)) !== null) {
+	for (const m of source.matchAll(re)) {
 		paths.push(m[1]);
 	}
 	const fromRe = /}\s*from\s*["']([^"']+)["']/g;
-	while ((m = fromRe.exec(source)) !== null) {
+	for (const m of source.matchAll(fromRe)) {
 		if (!paths.includes(m[1])) paths.push(m[1]);
 	}
 	return paths;

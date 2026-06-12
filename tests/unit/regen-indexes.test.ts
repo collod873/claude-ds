@@ -2,8 +2,29 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { regenIndexes } from "../../src/lib/finalizers/regen-indexes";
+import type { Change } from "../../src/lib/operation";
 import { makeFakeCtx } from "../helpers/fake-ctx";
 import { cleanup, freshTmpDir } from "../helpers/tmpdir";
+
+function asWrite(change: Change | undefined): Extract<Change, { kind: "write" }> {
+	if (!change || change.kind !== "write") throw new Error("expected write change");
+	return change;
+}
+
+interface ManifestComponent {
+	name: string;
+	tier: string;
+	kind: string;
+	path: string;
+	path_no_ext: string;
+	has_showcase: boolean;
+	has_test: boolean;
+}
+
+interface ManifestJson {
+	generated: string;
+	components: ManifestComponent[];
+}
 
 describe("regenIndexes", () => {
 	let dir: string;
@@ -34,7 +55,7 @@ describe("regenIndexes", () => {
 				(c) => c.kind === "write" && c.path === "design-system/atoms/index.ts",
 			);
 			expect(barrelChange).toBeDefined();
-			const content = (barrelChange as any).after.toString("utf8");
+			const content = asWrite(barrelChange).after.toString("utf8");
 			expect(content).toContain("Button");
 			expect(content).toContain("Input");
 			expect(content).not.toContain("meta");
@@ -51,7 +72,7 @@ describe("regenIndexes", () => {
 				(c) => c.kind === "write" && c.path === "design-system/composites/index.ts",
 			);
 			expect(barrelChange).toBeDefined();
-			const content = (barrelChange as any).after.toString("utf8");
+			const content = asWrite(barrelChange).after.toString("utf8");
 			expect(content).toContain("Toolbar");
 			expect(content).not.toContain("meta");
 			expect(content).not.toContain("export *");
@@ -67,7 +88,7 @@ describe("regenIndexes", () => {
 				(c) => c.kind === "write" && c.path === "design-system/patterns/index.ts",
 			);
 			expect(barrelChange).toBeDefined();
-			const content = (barrelChange as any).after.toString("utf8");
+			const content = asWrite(barrelChange).after.toString("utf8");
 			expect(content).toContain("Layout");
 			expect(content).not.toContain("meta");
 			expect(content).not.toContain("export *");
@@ -87,7 +108,7 @@ describe("regenIndexes", () => {
 				(c) => c.kind === "write" && c.path === "design-system/atoms/index.ts",
 			);
 			expect(barrelChange).toBeDefined();
-			const content = (barrelChange as any).after.toString("utf8");
+			const content = asWrite(barrelChange).after.toString("utf8");
 			expect(content).toContain("Button");
 			expect(content).not.toContain("export *");
 			expect(content).not.toContain("showcase");
@@ -107,7 +128,7 @@ describe("regenIndexes", () => {
 				(c) => c.kind === "write" && c.path === "design-system/atoms/index.ts",
 			);
 			expect(barrelChange).toBeDefined();
-			const content = (barrelChange as any).after.toString("utf8");
+			const content = asWrite(barrelChange).after.toString("utf8");
 			expect(content).not.toContain("export *");
 			expect(content).toContain("Button");
 			expect(content).toContain("Input");
@@ -138,7 +159,7 @@ describe("regenIndexes", () => {
 			const barrelChange = changes.find(
 				(c) => c.kind === "write" && c.path === "design-system/atoms/index.ts",
 			);
-			const content = (barrelChange as any).after.toString("utf8");
+			const content = asWrite(barrelChange).after.toString("utf8");
 			const lines = content.trim().split("\n");
 			expect(lines[0]).toContain("alert");
 			expect(lines[1]).toContain("button");
@@ -155,7 +176,7 @@ describe("regenIndexes", () => {
 				(c) => c.kind === "write" && c.path === "design-system/atoms/index.ts",
 			);
 			expect(firstBarrel).toBeDefined();
-			const expectedContent = (firstBarrel as any).after.toString("utf8");
+			const expectedContent = asWrite(firstBarrel).after.toString("utf8");
 			await writeFile(join(dir, "design-system/atoms/index.ts"), expectedContent);
 
 			const changes = await regenIndexes(makeFakeCtx(dir));
@@ -180,7 +201,7 @@ describe("regenIndexes", () => {
 				(c) => c.kind === "write" && c.path === "design-system/atoms/index.ts",
 			);
 			expect(barrelChange).toBeDefined();
-			const content = (barrelChange as any).after.toString("utf8");
+			const content = asWrite(barrelChange).after.toString("utf8");
 			expect(content).toContain("button");
 			expect(content).toContain("input");
 		});
@@ -212,7 +233,7 @@ describe("regenIndexes", () => {
 				(c) => c.kind === "write" && c.path === "design-system/atoms/index.ts",
 			);
 			expect(barrelChange).toBeDefined();
-			expect((barrelChange as any).before).toBeNull();
+			expect(asWrite(barrelChange).before).toBeNull();
 		});
 
 		it("sets before to existing content when barrel exists", async () => {
@@ -227,7 +248,7 @@ describe("regenIndexes", () => {
 				(c) => c.kind === "write" && c.path === "design-system/atoms/index.ts",
 			);
 			expect(barrelChange).toBeDefined();
-			expect((barrelChange as any).before.toString("utf8")).toBe(existing);
+			expect(asWrite(barrelChange).before?.toString("utf8")).toBe(existing);
 		});
 	});
 
@@ -246,10 +267,10 @@ describe("regenIndexes", () => {
 			);
 			expect(manifestChange).toBeDefined();
 
-			const manifest = JSON.parse((manifestChange as any).after.toString("utf8"));
+			const manifest = JSON.parse(asWrite(manifestChange).after.toString("utf8")) as ManifestJson;
 			expect(manifest.components).toHaveLength(2);
 
-			const button = manifest.components.find((c: any) => c.name === "button");
+			const button = manifest.components.find((c) => c.name === "button");
 			expect(button).toMatchObject({
 				name: "button",
 				tier: "atom",
@@ -258,7 +279,7 @@ describe("regenIndexes", () => {
 				path_no_ext: "design-system/atoms/button",
 			});
 
-			const toolbar = manifest.components.find((c: any) => c.name === "toolbar");
+			const toolbar = manifest.components.find((c) => c.name === "toolbar");
 			expect(toolbar).toMatchObject({
 				name: "toolbar",
 				tier: "composite",
@@ -279,11 +300,11 @@ describe("regenIndexes", () => {
 			const manifestChange = changes.find(
 				(c) => c.kind === "write" && c.path === "design-system/manifest.json",
 			);
-			const manifest = JSON.parse((manifestChange as any).after.toString("utf8"));
+			const manifest = JSON.parse(asWrite(manifestChange).after.toString("utf8")) as ManifestJson;
 
-			const button = manifest.components.find((c: any) => c.name === "button");
-			expect(button.has_showcase).toBe(true);
-			expect(button.has_test).toBe(true);
+			const button = manifest.components.find((c) => c.name === "button");
+			expect(button?.has_showcase).toBe(true);
+			expect(button?.has_test).toBe(true);
 		});
 
 		it("reports has_showcase=false and has_test=false when no companions", async () => {
@@ -295,11 +316,11 @@ describe("regenIndexes", () => {
 			const manifestChange = changes.find(
 				(c) => c.kind === "write" && c.path === "design-system/manifest.json",
 			);
-			const manifest = JSON.parse((manifestChange as any).after.toString("utf8"));
+			const manifest = JSON.parse(asWrite(manifestChange).after.toString("utf8")) as ManifestJson;
 
-			const chip = manifest.components.find((c: any) => c.name === "chip");
-			expect(chip.has_showcase).toBe(false);
-			expect(chip.has_test).toBe(false);
+			const chip = manifest.components.find((c) => c.name === "chip");
+			expect(chip?.has_showcase).toBe(false);
+			expect(chip?.has_test).toBe(false);
 		});
 
 		it("uses meta.kind when present, falls back to tier-inferred kind", async () => {
@@ -312,13 +333,13 @@ describe("regenIndexes", () => {
 			const manifestChange = changes.find(
 				(c) => c.kind === "write" && c.path === "design-system/manifest.json",
 			);
-			const manifest = JSON.parse((manifestChange as any).after.toString("utf8"));
+			const manifest = JSON.parse(asWrite(manifestChange).after.toString("utf8")) as ManifestJson;
 
-			const button = manifest.components.find((c: any) => c.name === "button");
-			expect(button.kind).toBe("atom");
+			const button = manifest.components.find((c) => c.name === "button");
+			expect(button?.kind).toBe("atom");
 
-			const chip = manifest.components.find((c: any) => c.name === "chip");
-			expect(chip.kind).toBe("atom"); // falls back to tier-inferred kind
+			const chip = manifest.components.find((c) => c.name === "chip");
+			expect(chip?.kind).toBe("atom"); // falls back to tier-inferred kind
 		});
 
 		it("manifest has a generated timestamp", async () => {
@@ -330,7 +351,7 @@ describe("regenIndexes", () => {
 			const manifestChange = changes.find(
 				(c) => c.kind === "write" && c.path === "design-system/manifest.json",
 			);
-			const manifest = JSON.parse((manifestChange as any).after.toString("utf8"));
+			const manifest = JSON.parse(asWrite(manifestChange).after.toString("utf8")) as ManifestJson;
 			expect(manifest.generated).toBeDefined();
 			expect(() => new Date(manifest.generated)).not.toThrow();
 		});

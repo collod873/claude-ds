@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import picomatch from "picomatch";
@@ -35,7 +36,7 @@ export async function isDsRelatedSkill(ctx: ProjectContext, skillPath: string): 
  */
 export async function walkDir(base: string, rel: string): Promise<string[]> {
 	const abs = join(base, rel);
-	let entries;
+	let entries: Dirent[];
 	try {
 		entries = await readdir(abs, { withFileTypes: true });
 	} catch {

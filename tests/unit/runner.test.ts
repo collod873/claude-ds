@@ -59,10 +59,10 @@ describe("runner — dry-run", () => {
 			{ kind: "write", path: "good.txt", before: null, after: Buffer.from("g") },
 		]);
 		const written: string[] = [];
-		const spy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: any) => {
+		const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
 			written.push(String(chunk));
 			return true;
-		}) as any);
+		});
 		const report = await run(ctx, [bad, good], "dry-run");
 		spy.mockRestore();
 
@@ -82,10 +82,10 @@ describe("runner — dry-run", () => {
 			{ kind: "write", path: "b.txt", before: Buffer.from("b1"), after: Buffer.from("b2") },
 		]);
 		const written: string[] = [];
-		const spy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: any) => {
+		const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
 			written.push(String(chunk));
 			return true;
-		}) as any);
+		});
 		const report = await run(ctx, [op], "dry-run", { quiet: true });
 		spy.mockRestore();
 
@@ -181,10 +181,10 @@ describe("runner — abort change", () => {
 		const ctx = makeCtx(dir);
 		const op = writeOp("op", [{ kind: "abort", path: "f.txt", reason: "hand-edited" }]);
 		const written: string[] = [];
-		const spy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: any) => {
+		const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
 			written.push(String(chunk));
 			return true;
-		}) as any);
+		});
 		const report = await run(ctx, [op], "dry-run");
 		spy.mockRestore();
 

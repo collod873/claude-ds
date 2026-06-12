@@ -16,8 +16,8 @@ export async function initCmd(opts: { pack: string; yes?: boolean; cwd?: string 
 		await stat(join(cwd, ".claude-ds.json"));
 		err(".claude-ds.json already exists");
 		process.exit(2);
-	} catch (e: any) {
-		if (e.code !== "ENOENT") throw e;
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
 	}
 	if (!opts.yes && !(await confirm(`Initialize claude-ds with pack '${opts.pack}' here?`))) {
 		err("aborted");

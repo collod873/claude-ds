@@ -1,5 +1,5 @@
 import { execFile as execFileCb } from "node:child_process";
-import { existsSync } from "node:fs";
+import { type Dirent, existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -391,7 +391,7 @@ const COMPANION_SUFFIXES = [".showcase.tsx", ".test.tsx", ".stories.tsx"];
  */
 async function hasConsumerTierFiles(cwd: string): Promise<boolean> {
 	for (const dir of TIER_DIRS) {
-		let entries;
+		let entries: Dirent[];
 		try {
 			entries = await readdir(join(cwd, dir), { withFileTypes: true });
 		} catch {

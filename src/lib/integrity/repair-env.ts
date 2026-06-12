@@ -61,9 +61,7 @@ export function indexImportGraph(sources: string[]): {
 
 	const importRe = /import\s+([^;]+?)\s+from\s+["']([^"']+)["']/g;
 	for (const source of sources) {
-		let m: RegExpExecArray | null;
-		importRe.lastIndex = 0;
-		while ((m = importRe.exec(source)) !== null) {
+		for (const m of source.matchAll(importRe)) {
 			const clause = m[1].trim();
 			const spec = m[2];
 

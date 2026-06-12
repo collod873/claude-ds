@@ -54,6 +54,7 @@ describe("describeDecisions hook (PRD #266 Phase C step 1)", () => {
 	});
 
 	describe("findingKey helper", () => {
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: test name documents the key format literally
 		it("formats as `${ruleId}:${file}`", () => {
 			const f: DriftFinding = {
 				ruleId: "DRIFT-DS-IMPORTS-FEATURE",

@@ -250,7 +250,6 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
 					message =
 						"review the findings above — delete superseded files, link issues to exceptions, or mark permanent";
 					break;
-				case "clean":
 				default:
 					message = `run ${buildCmd} to verify everything compiles`;
 					verify = true;
@@ -281,7 +280,6 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
 					message = "run 'claude-ds audit' to check for drift";
 					verify = true;
 					break;
-				case "applied":
 				default:
 					message = "run 'claude-ds audit' to check for new drift after the upgrade";
 					verify = true;
@@ -304,7 +302,6 @@ export function printNextStep(command: NextStepCommand, ctx: NextStepContext): v
 				case "ahead":
 					message = "update the CLI binary to match (or downgrade the .claude-ds.json pin)";
 					break;
-				case "up-to-date":
 				default:
 					message = "run 'claude-ds audit' to check for drift";
 					verify = true;

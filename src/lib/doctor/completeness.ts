@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,7 +31,7 @@ async function exists(p: string): Promise<boolean> {
 
 async function walkDir(base: string, rel: string): Promise<string[]> {
 	const abs = join(base, rel);
-	let entries;
+	let entries: Dirent[];
 	try {
 		entries = await readdir(abs, { withFileTypes: true });
 	} catch {

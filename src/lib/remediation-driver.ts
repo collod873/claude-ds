@@ -28,6 +28,7 @@
  * non-zero loop member (audit findings remain → iterate again) no longer needs
  * a trap to keep it from tearing down the loop — it's a plain function return.
  */
+import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { auditCmd } from "../commands/audit.js";
@@ -66,7 +67,7 @@ export type { LoopStep } from "./remediation-planner.js";
 export async function snapshotTree(root: string): Promise<Map<string, string>> {
 	const result = new Map<string, string>();
 	async function walk(absDir: string): Promise<void> {
-		let entries;
+		let entries: Dirent[];
 		try {
 			entries = await readdir(absDir, { withFileTypes: true });
 		} catch {

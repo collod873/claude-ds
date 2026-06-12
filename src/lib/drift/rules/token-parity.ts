@@ -81,12 +81,10 @@ function parseTokensJson(source: string): Record<string, string> | null {
 export function parseCssVariables(source: string): Record<string, string> {
 	const out: Record<string, string> = {};
 	const blockRe = new RegExp(ROOT_BLOCK_RE_G.source, "g");
-	let bm: RegExpExecArray | null;
-	while ((bm = blockRe.exec(source)) !== null) {
+	for (const bm of source.matchAll(blockRe)) {
 		const body = bm[2];
 		const declRe = new RegExp(CSS_VAR_DECL_RE_G.source, "g");
-		let dm: RegExpExecArray | null;
-		while ((dm = declRe.exec(body)) !== null) {
+		for (const dm of body.matchAll(declRe)) {
 			out[dm[1]] = dm[2].trim();
 		}
 	}

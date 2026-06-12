@@ -96,7 +96,7 @@ export async function reconformCmd(opts: {
 	}
 
 	// Precondition: must be post-adopt.
-	let ctx;
+	let ctx: Awaited<ReturnType<typeof loadProject>>;
 	try {
 		ctx = await loadProject(cwd);
 	} catch (e) {

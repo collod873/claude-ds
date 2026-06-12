@@ -187,7 +187,7 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 	// UI, and the consumer-verify gate: it asks the planner "would this project
 	// need heal?", not "what does heal do to it?".
 	if (opts.dryRun) {
-		let state;
+		let state: Awaited<ReturnType<typeof deriveProjectState>>;
 		try {
 			state = await deriveProjectState(cwd);
 		} catch (e) {

@@ -20,9 +20,8 @@ const EXPORT_DECL_RE = /\bexport\s+(?:async\s+)?(?:function\*?|const|let|var|cla
 
 function extractExportedNames(source: string): string[] {
 	const names: string[] = [];
-	let m;
 	const re = new RegExp(EXPORT_DECL_RE.source, "g");
-	while ((m = re.exec(source))) {
+	for (const m of source.matchAll(re)) {
 		if (m[1] !== "meta") names.push(m[1]);
 	}
 	return [...new Set(names)];
