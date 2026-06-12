@@ -303,8 +303,9 @@ describe("doctor --completeness", () => {
 
 		const r = await runCli(["doctor", "--completeness"], { cwd: dir });
 		expect(r.code).toBe(0);
-		expect(r.stdout).toContain("completeness");
-		expect(r.stdout).toContain("OK");
+		expect(r.stdout).toContain("Looks complete");
+		// #640: consumer dialect — no raw markdown headings in the output.
+		expect(r.stdout).not.toMatch(/^#{2,3}\s/m);
 	});
 
 	// #257: consumer-owned skills in .claude/skills/ must NOT be flagged as orphans
@@ -322,7 +323,7 @@ describe("doctor --completeness", () => {
 		expect(r.code).toBe(0);
 		expect(r.stdout).not.toContain("go/SKILL.md");
 		expect(r.stdout).not.toContain("merge/SKILL.md");
-		expect(r.stdout).toContain("OK");
+		expect(r.stdout).toContain("Looks complete");
 	});
 
 	// #257 regression guard: stray file inside a PACK skill dir must still be flagged
@@ -335,7 +336,7 @@ describe("doctor --completeness", () => {
 		const r = await runCli(["doctor", "--completeness"], { cwd: dir });
 		expect(r.code).toBe(1);
 		expect(r.stdout).toContain(".claude/skills/component/junk.ts");
-		expect(r.stdout).toContain("Orphan files");
+		expect(r.stdout).toContain("the pack doesn't manage");
 	});
 
 	it("consumer with orphan DS file (not in manifest): exits 1, reports orphan", async () => {
@@ -358,7 +359,30 @@ describe("doctor --completeness", () => {
 		const r = await runCli(["doctor", "--completeness"], { cwd: dir });
 		expect(r.code).toBe(1);
 		expect(r.stdout).toContain("my-hand-rolled.ts");
-		expect(r.stdout).toContain("Orphan files");
+		expect(r.stdout).toContain("the pack doesn't manage");
+	});
+
+	// #640: a findings-pending state renders in the consumer dialect — the verdict
+	// reframes to "need your review", the word "failed" is reserved for genuine
+	// failures, no raw markdown headings print, and the CI exit contract (non-zero
+	// when findings exist) is preserved.
+	it("findings render 'need your review' in consumer dialect with exit 1 (#640)", async () => {
+		await writeFile(
+			join(dir, ".claude-ds.json"),
+			JSON.stringify(
+				{ packVersion: "v0.8.0", pack: "next-react", mode: "warn", removed: [] },
+				null,
+				2,
+			),
+		);
+		await mkdir(join(dir, "design-system"), { recursive: true });
+		await writeFile(join(dir, "design-system", "my-hand-rolled.ts"), "export const x = 1;");
+
+		const r = await runCli(["doctor", "--completeness"], { cwd: dir });
+		expect(r.code).toBe(1);
+		expect(r.stdout).toMatch(/need your review/);
+		expect(r.stdout).not.toContain("failed");
+		expect(r.stdout).not.toMatch(/^#{2,3}\s/m);
 	});
 
 	it("consumer with exception missing issue link: exits 1, reports lint warning", async () => {
@@ -486,7 +510,7 @@ describe("doctor --completeness", () => {
 		const r = await runCli(["doctor", "--completeness"], { cwd: dir });
 		expect(r.code).toBe(0);
 		expect(r.stdout).not.toContain("no issue link");
-		expect(r.stdout).toContain("Permanent exceptions");
+		expect(r.stdout).toContain("permanent exception");
 		expect(r.stdout).toContain("informational");
 		expect(r.stdout).toContain("AppShell.tsx");
 	});
@@ -523,7 +547,7 @@ describe("doctor --completeness", () => {
 		expect(r.code).toBe(1);
 		expect(r.stdout).toContain("Button.tsx");
 		expect(r.stdout).toContain("no issue link");
-		expect(r.stdout).toContain("Permanent exceptions");
+		expect(r.stdout).toContain("permanent exception");
 		expect(r.stdout).toContain("AppShell.tsx");
 	});
 
@@ -535,8 +559,8 @@ describe("doctor --completeness", () => {
 
 		const r = await runCli(["doctor", "--completeness"], { cwd: dir });
 		expect(r.code).toBe(0);
-		expect(r.stdout).toContain("OK");
-		expect(r.stdout).toMatch(/Owned concerns checked/i);
+		expect(r.stdout).toContain("Looks complete");
+		expect(r.stdout).toMatch(/Concerns checked/i);
 		expect(r.stdout).toContain("OWNED-TOKEN-LINT");
 	});
 
@@ -585,11 +609,11 @@ describe("doctor --completeness", () => {
 
 		const r = await runCli(["doctor", "--completeness"], { cwd: dir });
 		expect(r.code).toBe(0);
-		expect(r.stdout).toContain("OK");
+		expect(r.stdout).toContain("Looks complete");
 		expect(r.stdout).not.toMatch(/Shadow DS infrastructure \(\d+ found/);
 		expect(r.stdout).not.toContain("no issue link");
 		// Coverage footer must still print on the clean path.
-		expect(r.stdout).toMatch(/Owned concerns checked/i);
+		expect(r.stdout).toMatch(/Concerns checked/i);
 		expect(r.stdout).toContain("OWNED-TOKEN-LINT");
 	});
 
@@ -632,9 +656,9 @@ describe("doctor --completeness", () => {
 
 		const r = await runCli(["doctor", "--completeness"], { cwd: dir });
 		expect(r.code).toBe(0);
-		expect(r.stdout).toContain("OK");
+		expect(r.stdout).toContain("Looks complete");
 		expect(r.stdout).not.toMatch(/Shadow DS infrastructure \(\d+ found/);
-		expect(r.stdout).toMatch(/Owned concerns checked/i);
+		expect(r.stdout).toMatch(/Concerns checked/i);
 	});
 
 	// #320: an OWNED-* exception missing an issue link still warns via lintExceptions
@@ -712,6 +736,6 @@ describe("doctor --completeness", () => {
 		expect(r.stdout).not.toContain("DRIFT-RAW-PRIMITIVE");
 		// Coverage footer present on the failing path too — honest "what we checked"
 		// is exactly as important when there ARE findings.
-		expect(r.stdout).toMatch(/Owned concerns checked/i);
+		expect(r.stdout).toMatch(/Concerns checked/i);
 	});
 });
