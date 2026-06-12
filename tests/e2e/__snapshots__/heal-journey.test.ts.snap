@@ -4,10 +4,10 @@ exports[`journey: heal end-to-end on the time-travel fixture (#538) > golden: th
 "# command: claude-ds (front door — dashboard preview)
 # exit: 0
 # --- transcript below; bytes are verbatim from the built CLI, normalized for paths/versions/durations ---
-Where you are: adopted (<fixture>)
-Managed files: 0/93
-What's wrong: scaffold incomplete + 2 findings + 1 hand-rolled DS infra finding + upgrade available
-Also checked: nothing stale or deprecated ✓
+✓ Design system in place — <fixture>
+! Managed files: 0/93 (93 missing)
+! Needs attention: 93 missing files, 2 issues I can fix, 1 script you built by hand the design-system pack now provides, a newer design-system pack is available
+✓ Also checked: nothing stale or deprecated
 
 I'll bring this tree to clean — 5 steps:
   upgrade → sync → repair → reconform → audit --fix

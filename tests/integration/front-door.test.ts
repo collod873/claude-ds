@@ -59,7 +59,7 @@ describe("bare `claude-ds` non-TTY (agent / automation)", () => {
 		const r = await runCli([], { cwd: dir });
 		expect(r.code).toBe(0);
 		expect(r.stdout).toMatch(/Usage:\s*claude-ds/);
-		expect(r.stdout).not.toMatch(/Where you are:/);
+		expect(r.stdout).not.toMatch(/Design system (in place|not set up)/);
 	});
 });
 
@@ -75,7 +75,7 @@ describe("frontDoorCmd (TTY dashboard + commitment gate)", () => {
 	it("pre-adopt: renders the dashboard and routes to adopt (not a planner state)", async () => {
 		const out = await captureFrontDoor({ cwd: dir });
 
-		expect(out).toMatch(/Where you are: pre-adopt/);
+		expect(out).toMatch(/Design system not set up here yet/);
 		expect(out).toMatch(/Run `claude-ds adopt --pack next-react`/);
 		// No commitment gate in pre-adopt — adopt hands the project INTO the loop.
 		expect(out).not.toMatch(/\[Enter\] to run all/);
@@ -102,12 +102,14 @@ describe("frontDoorCmd (TTY dashboard + commitment gate)", () => {
 
 		const out = await captureFrontDoor({ cwd: dir });
 
-		expect(out).toMatch(/Where you are: adopted/);
+		expect(out).toMatch(/Design system in place/);
 		expect(out).toMatch(/Nothing to remediate — the tree is clean/);
 		expect(out).toMatch(/Run `npm run build`/);
 		// #504: the read-only completeness scans that ran clean are named, so a
 		// passing check is distinguishable from one that never ran.
-		expect(out).toMatch(/Also checked: no hand-rolled DS infra, nothing stale or deprecated ✓/);
+		expect(out).toMatch(
+			/✓ Also checked: no hand-built design-system scripts, nothing stale or deprecated/,
+		);
 	});
 
 	it("adopted + hand-rolled validator: surfaces it, never claims clean (#504)", async () => {
@@ -132,11 +134,11 @@ fi
 
 		const out = await captureFrontDoor({ cwd: dir });
 
-		expect(out).toMatch(/Where you are: adopted/);
-		expect(out).toMatch(/What's wrong:.*hand-rolled DS infra/);
+		expect(out).toMatch(/Design system in place/);
+		expect(out).toMatch(/Needs attention:.*scripts? you built by hand/);
 		// The found scan is not named clean; the deprecated scan still is.
-		expect(out).not.toMatch(/Also checked:.*no hand-rolled DS infra/);
-		expect(out).toMatch(/Also checked: nothing stale or deprecated ✓/);
+		expect(out).not.toMatch(/Also checked:.*hand-built design-system scripts/);
+		expect(out).toMatch(/✓ Also checked: nothing stale or deprecated/);
 		// Never reported clean — routed to the command that resolves it.
 		expect(out).not.toMatch(/Nothing to remediate — the tree is clean/);
 		expect(out).toMatch(/claude-ds doctor --completeness/);
@@ -156,7 +158,7 @@ export function SoloLabel() { return <span />; }
 
 		const out = await captureFrontDoor({ cwd: dir });
 
-		expect(out).toMatch(/Where you are: adopted/);
+		expect(out).toMatch(/Design system in place/);
 		expect(out).toMatch(/I'll bring this tree to clean/);
 		expect(out).toMatch(/audit --fix — auto-repair \d+ finding/);
 	});
@@ -217,7 +219,7 @@ if grep -q "asChild" "$1"; then exit 1; fi
 		const out = await captureFrontDoor({ cwd: dir });
 
 		// Both concerns are counted in the header.
-		expect(out).toMatch(/What's wrong:.*finding.*hand-rolled DS infra/);
+		expect(out).toMatch(/Needs attention:.*issue.*scripts? you built by hand/);
 		// The drift finding maps to a plan line (audit --fix)...
 		expect(out).toMatch(/audit --fix — auto-repair \d+ finding/);
 		// ...and the hand-rolled count maps to a routing line even though the plan
@@ -275,7 +277,7 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
 
 		const out = await captureFrontDoor({ cwd: dir });
 
-		expect(out).toMatch(/What's wrong: .*upgrade available/);
+		expect(out).toMatch(/Needs attention: .*a newer design-system pack is available/);
 		expect(out).toMatch(/upgrade — pack v0\.0\.1 → /);
 	});
 
@@ -297,9 +299,11 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
 
 		const out = await captureFrontDoor({ cwd: dir });
 
-		// No "clean" claim: the managed-files line must not carry the ✓ tick.
-		expect(out).not.toMatch(/Managed files: \d+\/\d+ ✓/);
-		expect(out).toMatch(/scaffold incomplete/);
+		// No "clean" claim: the managed-files line must not carry the ✓ tick (the
+		// drifted file drops it to the `!` action marker with a missing count).
+		expect(out).not.toMatch(/Managed files: \d+\/\d+\n/);
+		expect(out).toMatch(/! Managed files: \d+\/\d+ \(\d+ missing\)/);
+		expect(out).toMatch(/Needs attention:.*missing file/);
 		// And the gate plans the restore.
 		expect(out).toMatch(/sync — restore managed scaffold files/);
 	});
