@@ -31,7 +31,7 @@ audit --fix — auto-repair 2 findings
 
   (re-run with --verbose for the full per-file change list)
 
-1 hand-rolled DS infra finding → \`claude-ds doctor --completeness\`
+1 hand-rolled DS infra finding → \`npx claude-ds doctor --completeness\`
 "
 `;
 

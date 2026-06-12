@@ -76,7 +76,7 @@ describe("frontDoorCmd (TTY dashboard + commitment gate)", () => {
 		const out = await captureFrontDoor({ cwd: dir });
 
 		expect(out).toMatch(/Where you are: pre-adopt/);
-		expect(out).toMatch(/Run `claude-ds adopt --pack next-react`/);
+		expect(out).toMatch(/Run `npx claude-ds adopt --pack next-react`/);
 		// No commitment gate in pre-adopt — adopt hands the project INTO the loop.
 		expect(out).not.toMatch(/\[Enter\] to run all/);
 	});
@@ -139,7 +139,7 @@ fi
 		expect(out).toMatch(/Also checked: nothing stale or deprecated ✓/);
 		// Never reported clean — routed to the command that resolves it.
 		expect(out).not.toMatch(/Nothing to remediate — the tree is clean/);
-		expect(out).toMatch(/claude-ds doctor --completeness/);
+		expect(out).toMatch(/npx claude-ds doctor --completeness/);
 	});
 
 	it("adopted + auto-fixable drift: the gate plans audit --fix", async () => {
@@ -222,7 +222,7 @@ if grep -q "asChild" "$1"; then exit 1; fi
 		expect(out).toMatch(/audit --fix — auto-repair \d+ finding/);
 		// ...and the hand-rolled count maps to a routing line even though the plan
 		// is NON-empty — the gap #590 closes.
-		expect(out).toMatch(/hand-rolled DS infra finding.*→.*claude-ds doctor --completeness/);
+		expect(out).toMatch(/hand-rolled DS infra finding.*→.*npx claude-ds doctor --completeness/);
 	});
 
 	it("reconform plan entry carries the explainer line, not a bare header (#590)", async () => {
@@ -579,7 +579,51 @@ if grep -q "asChild" "$1"; then exit 1; fi
 		// ...but the go-ahead is withheld and routed to the resolving command.
 		expect(out).not.toMatch(/Nothing needs your attention — start working/);
 		expect(out).toMatch(/hand-rolled DS infra finding.*remain/);
-		expect(out).toMatch(/claude-ds doctor --completeness/);
+		expect(out).toMatch(/npx claude-ds doctor --completeness/);
+	}, 60000);
+
+	it("exhausted exit summary: names the stuck step, never an unconditional `run audit` (#626)", async () => {
+		// The retired exhausted line was "Some findings still need attention — run
+		// `claude-ds audit` to see what remains" — but audit can only report, never
+		// reduce, an exhausted loop's findings (#623's follow-up). Seed a tree that
+		// converges its auto-fixable share and then stalls on an unresolvable finding
+		// no loop step owns, so the loop returns `exhausted` with `lastStep: null`.
+		const r = await runCli(["adopt", "--pack", "next-react", "--yes"], { cwd: dir });
+		expect(r.code).toBe(0);
+		// Auto-fixable drift → the first plan is non-empty, so the loop enters the
+		// drive (an all-unresolvable tree would short-circuit before `driveRemediation`).
+		await writeFile(
+			join(dir, "design-system/atoms/solo-label.tsx"),
+			`export const meta = { kind: 'atom' as const, states: { loading: true } };
+export function SoloLabel() { return <span />; }
+`,
+		);
+		// One pattern importing another → DRIFT-PATTERN-IMPORTS-PATTERN, a terminal
+		// `manual` finding (hand-edit or exceptions.json — no loop step clears it).
+		await mkdir(join(dir, "design-system/patterns"), { recursive: true });
+		await writeFile(
+			join(dir, "design-system/patterns/app-shell.tsx"),
+			`export function AppShell({ children }: { children: React.ReactNode }) { return <main>{children}</main>; }`,
+		);
+		await writeFile(
+			join(dir, "design-system/patterns/page-wrapper.tsx"),
+			`import { AppShell } from "@/design-system/patterns/app-shell";\nexport function PageWrapper({ children }: { children: React.ReactNode }) { return <AppShell>{children}</AppShell>; }`,
+		);
+
+		const out = await captureFrontDoor({
+			cwd: dir,
+			interactive: false,
+			yes: true,
+			maxIterations: 5,
+		});
+
+		// Honest non-convergence verdict — not the clean go-ahead.
+		expect(out).toMatch(/Couldn't reach a clean tree/);
+		expect(out).not.toMatch(/Nothing needs your attention — start working/);
+		// The remedy is named honestly (hand-edit / exceptions.json) and the retired
+		// unconditional "run audit" pointer is gone.
+		expect(out).toMatch(/hand-edit or an `exceptions\.json` entry/);
+		expect(out).not.toMatch(/run `claude-ds audit` to see what remains/i);
 	}, 60000);
 });
 

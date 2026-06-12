@@ -44,7 +44,7 @@ import { resolveManifestPath } from "../lib/paths.js";
 import { loadPreAdoptProject, loadProject, type ProjectContext } from "../lib/project.js";
 import { deriveProjectState } from "../lib/project-state.js";
 import { driveRemediation } from "../lib/remediation-driver.js";
-import { planRemediation } from "../lib/remediation-planner.js";
+import { type LoopStep, planRemediation } from "../lib/remediation-planner.js";
 import { renderDashboard } from "../lib/render/index.js";
 import { createProgress, printLines } from "../lib/render/tty-layer.js";
 import { scanDriftAndIntegrity } from "../lib/reports/drift-integrity-scan.js";
@@ -272,7 +272,9 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 	// needs a loaded config the project doesn't have yet. Surface the one command
 	// that gets them in and stop — there is no plan to drive.
 	if (ctx.kind !== "adopted") {
-		printLines([`→ Run \`claude-ds adopt --pack ${pack}\` to install the design-system scaffold.`]);
+		printLines([
+			`→ Run \`npx claude-ds adopt --pack ${pack}\` to install the design-system scaffold.`,
+		]);
 		return;
 	}
 
@@ -394,10 +396,7 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 				),
 			);
 		} else if (outcome.kind === "exhausted") {
-			printLines([
-				"",
-				"Some findings still need attention — run `claude-ds audit` to see what remains.",
-			]);
+			printLines(renderExhaustedSummary(outcome.lastStep));
 		}
 	} finally {
 		progress.stop();
@@ -415,7 +414,39 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
  */
 function renderHandRolledRouting(count: number): string[] {
 	const noun = count === 1 ? "finding" : "findings";
-	return [`${count} hand-rolled DS infra ${noun} → \`claude-ds doctor --completeness\``];
+	return [`${count} hand-rolled DS infra ${noun} → \`npx claude-ds doctor --completeness\``];
+}
+
+/**
+ * The exit summary when the remediation loop ends `exhausted` — it ran but
+ * couldn't reach a clean tree (#626, the follow-up #623 deferred). The retired
+ * line ("Some findings still need attention — run `claude-ds audit` …") failed a
+ * real consumer three ways: it didn't say *what* was stuck, it pointed at a
+ * command that can only report (never reduce) the findings, and it used the bare
+ * `claude-ds` form consumers don't invoke. Two failure shapes, neither of which
+ * suggests a command that cannot reduce the findings — an exhausted loop is past
+ * the point any automated step can advance:
+ *
+ *   - `lastStep` is a loop step: that step ran and changed nothing while its
+ *     re-derived plan stayed non-empty, so the next pass would repeat byte-for-
+ *     byte (`driveRemediation`'s #532 stop). Name the stuck step honestly instead
+ *     of pointing at `audit`.
+ *   - `lastStep` is null: findings remain that no loop step owns (the terminal
+ *     `manual` owner — hand-edit or `exceptions.json`). No command reduces them.
+ */
+function renderExhaustedSummary(lastStep: LoopStep | null): string[] {
+	if (lastStep === null) {
+		return [
+			"",
+			"✗ Couldn't reach a clean tree — findings remain that no automated step can clear.",
+			"  These need a hand-edit or an `exceptions.json` entry; no `npx claude-ds` command will reduce them.",
+		];
+	}
+	return [
+		"",
+		`✗ Couldn't reach a clean tree — the \`${lastStep}\` step ran but couldn't clear the remaining findings.`,
+		`  It made no progress this pass, so re-running won't help — the \`${lastStep}\` findings need a hand-edit or an \`exceptions.json\` entry.`,
+	];
 }
 
 /**
@@ -473,7 +504,7 @@ function renderClosingSummary(
 	if (handRolledInfra > 0) {
 		const noun = handRolledInfra === 1 ? "finding" : "findings";
 		lines.push(
-			`  ${handRolledInfra} hand-rolled DS infra ${noun} remain — run \`claude-ds doctor --completeness\`.`,
+			`  ${handRolledInfra} hand-rolled DS infra ${noun} remain — run \`npx claude-ds doctor --completeness\`.`,
 		);
 	} else {
 		lines.push("  Nothing needs your attention — start working.");
@@ -513,7 +544,7 @@ function renderRedGate(verify: VerifyResult): string[] {
 	lines.push(
 		verify.timedOut
 			? "Re-run after warming the consumer's tsc/test cache, or raise the verify timeout via CLAUDE_DS_VERIFY_TIMEOUT."
-			: "Run `claude-ds audit` to see what remains, then re-run.",
+			: "Run `npx claude-ds audit` to see what remains, then re-run.",
 	);
 	return lines;
 }
