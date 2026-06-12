@@ -15,6 +15,7 @@ import { detectBuildCommand, printNextStep } from "../log.js";
 import { isManifestOrKeepfile, type ManagedRoot, parseManifest } from "../manifest.js";
 import {
 	allOwnedConcernIds,
+	countOwnedConcernFindings,
 	formatOwnedConcernFinding,
 	type OwnedConcernScannerFinding,
 	scanOwnedConcerns,
@@ -270,8 +271,15 @@ export async function runCompletenessCheck(opts: { pack?: string; cwd?: string }
 	// Coverage footer (ADR-0017): print which Owned concerns were checked so the
 	// verdict is honest about scope. A clean `✓` then tells the truth about what
 	// was evaluated — the residual blind spot is precisely "a concern not yet in
-	// the registry."
-	lines.push(`Owned concerns checked: ${ownedConcernsChecked.join(", ")}\n`);
+	// the registry." Each concern carries its finding count (#637) so the
+	// coverage line reconciles with the shadow-infra findings shown above — the
+	// per-concern counts sum to that section's total.
+	const ownedCounts = countOwnedConcernFindings(ownedFindings);
+	lines.push(
+		`Owned concerns checked: ${ownedConcernsChecked
+			.map((id) => `${id} (${ownedCounts[id]})`)
+			.join(", ")}\n`,
+	);
 
 	process.stdout.write(lines.join("\n"));
 

@@ -1,3 +1,4 @@
+import { extname } from "node:path";
 import type { DriftRuleId } from "../drift/rule.js";
 import type { IntegrityRuleId } from "../integrity/rule.js";
 
@@ -69,6 +70,50 @@ export interface OwnedConcernFinding {
 	file: string;
 	supersededBy: SupersedingRuleId | null;
 	message: string;
+	/**
+	 * The 1-based line of the first signature match backing this finding
+	 * (#637). Omitted when no concrete line applies — downstream renders
+	 * `file:line` only when present, never a fabricated `:1`.
+	 */
+	line?: number;
+}
+
+/**
+ * Extensions a validator/script-signature detector may fire on (#637). The
+ * detectors recognize *code* hand-rolling a DS job; a markdown/plaintext notes
+ * file carrying the same prose is a category error, not the uncertainty the
+ * over-flag bias covers. An allowlist (not a blocklist) keeps the guard
+ * conservative — an unknown extension is treated as non-code and skipped.
+ */
+const CODE_FILE_EXTS: ReadonlySet<string> = new Set([
+	".ts",
+	".tsx",
+	".js",
+	".jsx",
+	".mjs",
+	".cjs",
+	".sh",
+	".bash",
+	".py",
+	".rb",
+]);
+
+/** True when `file` is a code file a script-signature detector may inspect (#637). */
+export function isCodeFile(file: string): boolean {
+	return CODE_FILE_EXTS.has(extname(file));
+}
+
+/**
+ * The 1-based line of the first line in `source` matching any of `patterns`,
+ * or `undefined` when none match line-by-line (#637). Patterns must be
+ * non-global — `.test` over a `/g` regex is stateful across calls.
+ */
+export function firstSignalLine(source: string, patterns: readonly RegExp[]): number | undefined {
+	const lines = source.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		if (patterns.some((p) => p.test(lines[i]))) return i + 1;
+	}
+	return undefined;
 }
 
 export interface OwnedConcernInput {

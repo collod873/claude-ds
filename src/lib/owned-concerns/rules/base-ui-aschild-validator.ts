@@ -1,4 +1,10 @@
-import type { OwnedConcern, OwnedConcernFinding, OwnedConcernInput } from "../rule.js";
+import {
+	firstSignalLine,
+	isCodeFile,
+	type OwnedConcern,
+	type OwnedConcernFinding,
+	type OwnedConcernInput,
+} from "../rule.js";
 
 /**
  * OWNED-BASE-UI-ASCHILD-VALIDATOR — flag a hand-rolled base-ui `asChild` gate.
@@ -56,9 +62,19 @@ function countMatches(source: string, patterns: readonly RegExp[]): number {
 	return n;
 }
 
+// Union of every signal this detector keys on — used to locate the first
+// line of evidence backing a finding (#637).
+const ALL_SIGNALS: readonly RegExp[] = [
+	ASCHILD_SIGNAL,
+	...BASE_UI_SIGNALS,
+	...VALIDATOR_SHAPE_SIGNALS,
+];
+
 function detect(input: OwnedConcernInput): OwnedConcernFinding | null {
 	const { file, source } = input;
 	if (source.length === 0) return null;
+	// #637: validator/script-signature detection is for code, not prose.
+	if (!isCodeFile(file)) return null;
 
 	if (!ASCHILD_SIGNAL.test(source)) return null;
 	if (countMatches(source, BASE_UI_SIGNALS) === 0) return null;
@@ -69,6 +85,7 @@ function detect(input: OwnedConcernInput): OwnedConcernFinding | null {
 		file,
 		supersededBy: "HOOK-BASE-UI-ASCHILD",
 		message: `hand-rolled base-ui asChild validator in ${file}`,
+		line: firstSignalLine(source, ALL_SIGNALS),
 	};
 }
 

@@ -1,4 +1,10 @@
-import type { OwnedConcern, OwnedConcernFinding, OwnedConcernInput } from "../rule.js";
+import {
+	firstSignalLine,
+	isCodeFile,
+	type OwnedConcern,
+	type OwnedConcernFinding,
+	type OwnedConcernInput,
+} from "../rule.js";
 
 /**
  * OWNED-APP-WIDE-TOKEN-LINT — flag a hand-rolled *app-wide* token validator.
@@ -61,9 +67,19 @@ function countMatches(source: string, patterns: readonly RegExp[]): number {
 	return n;
 }
 
+// Union of every signal this detector keys on — used to locate the first
+// line of evidence backing a finding (#637).
+const ALL_SIGNALS: readonly RegExp[] = [
+	...RAW_VALUE_SIGNATURES,
+	...TOKEN_GOVERNANCE_SIGNALS,
+	...APP_WIDE_SCOPE_SIGNALS,
+];
+
 function detect(input: OwnedConcernInput): OwnedConcernFinding | null {
 	const { file, source } = input;
 	if (source.length === 0) return null;
+	// #637: validator/script-signature detection is for code, not prose.
+	if (!isCodeFile(file)) return null;
 
 	if (countMatches(source, RAW_VALUE_SIGNATURES) === 0) return null;
 	if (countMatches(source, TOKEN_GOVERNANCE_SIGNALS) === 0) return null;
@@ -74,6 +90,7 @@ function detect(input: OwnedConcernInput): OwnedConcernFinding | null {
 		file,
 		supersededBy: "HOOK-TOKENS-APP-WIDE",
 		message: `hand-rolled app-wide token validator in ${file}`,
+		line: firstSignalLine(source, ALL_SIGNALS),
 	};
 }
 
