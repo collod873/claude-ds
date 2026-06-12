@@ -327,6 +327,12 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			// non-zero. A green or absent record keeps today's fast path (no re-run).
 			const lastGate = await readVerifyLedger(cwd);
 			if (lastGate?.verdict === "red") {
+				// Keep a spinner live through the verify subprocess (up to 300s) so the
+				// re-check reads as "still working," not a freeze — the same rule the
+				// convergence gate below documents. No-op off-TTY, so the empty-plan
+				// fast path's bytes are unchanged.
+				const progress = createProgress();
+				progress.start("re-checking the last red verify gate");
 				const verify = await runConsumerVerify(cwd, {
 					managedFiles: new Set(ctx.manifest.files.map((f) => f.path)),
 					managedRoots: ["design-system/"],
@@ -335,12 +341,16 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 				// so the next bare run is fast again. Written through the Runner.
 				await run(ctx, [writeVerifyLedger(verifyLedgerRecord(verify, newRunId()))], "apply");
 				if (!verify.ok) {
+					// Step-glyph rule (#638): a re-check ending red commits the spinner as
+					// ✗ before the report, never a stray ✓.
+					progress.fail("verify gate failed");
 					// This run changed nothing, so the failing files are disjoint from
 					// (empty) changes — the shared report attributes them as pre-existing.
 					printLines(renderRedGate(verify, { changedFiles: new Set() }));
 					process.exit(1);
 					return;
 				}
+				progress.stop();
 			}
 
 			// Completeness (ADR-0003) is not a remediation-loop member, so an empty
