@@ -1,5 +1,5 @@
 {
-  "packVersion": "v1.8.3",
+  "packVersion": "v1.8.4",
   "pack": "next-react",
   "mode": "warn",
   "enforce_threshold": 10,
