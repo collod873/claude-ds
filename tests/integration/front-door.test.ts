@@ -707,6 +707,9 @@ export function SoloLabel() { return <span />; }
 		// The prompt string is pinned — the [Enter]-approves affordance is the
 		// consent contract this gate exists to honor.
 		expect(out).toMatch(/\[Enter\] runs the \d+ steps? above, anything else to cancel:/);
+		// #622: a blank line separates the plan from the prompt so the operator's
+		// decision reads as its own section.
+		expect(out).toMatch(/\n\n\[Enter\] runs the \d+ steps? above/);
 		// Non-empty input cancels; the tree is untouched.
 		expect(out).toMatch(/Cancelled — nothing changed\./);
 		expect(out).not.toMatch(/Tree is clean/);
@@ -818,6 +821,9 @@ export function PaymentSummary() { return <div />; }
 		expect(stdout).toMatch(
 			/4 component examples couldn't be parsed and were skipped — re-run with --verbose for details/,
 		);
+		// #622: a blank line separates the dashboard from the warnings summary so
+		// the two read as distinct sections.
+		expect(stdout).toMatch(/\n\n4 component examples couldn't be parsed/);
 		// The internal AST text never reaches either stream un-summarized.
 		expect(stdout).not.toContain("[AST]");
 		expect(stdout).not.toContain("spread in object");

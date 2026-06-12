@@ -302,7 +302,10 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		// sweep, so any skipped examples are now collected. Rendered here — between
 		// the dashboard and the plan/gate — as one consumer-language line, or the
 		// full itemized list under --verbose. Zero warnings → nothing prints.
-		printLines(generatorWarnings.render({ verbose: opts.verbose }));
+		// A leading blank line separates the warnings summary from the dashboard so
+		// the two read as distinct sections (#622 / PRD #618 visual hierarchy).
+		const warningLines = generatorWarnings.render({ verbose: opts.verbose });
+		if (warningLines.length > 0) printLines(["", ...warningLines]);
 
 		if (plan.length === 0) {
 			// Completeness (ADR-0003) is not a remediation-loop member, so an empty
@@ -351,6 +354,9 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 		const { plan: projectedPlan } = await projectFullPlan(ctx, plan);
 
 		if (interactive) {
+			// Blank line before the prompt so the operator's decision reads as its
+			// own section, distinct from the plan above it (#622 / PRD #618).
+			printLines([""]);
 			const approved = await awaitCommitment(projectedPlan.length);
 			if (!approved) {
 				printLines(["", "Cancelled — nothing changed."]);
