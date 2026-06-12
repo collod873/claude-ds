@@ -941,4 +941,18 @@ describe("doctor --completeness triage (#642)", () => {
 		expect(aschild).toBeDefined();
 		expect(aschild.path).toBe("scripts/aschild-validator.sh");
 	});
+
+	it("skip writes nothing and leaves the finding to surface again (exit 1)", async () => {
+		await adoptWithShadowLinter();
+		// Index 3 of [retire, dismiss, permanent, skip] for the retirable finding.
+		const answers = await writeAnswers({ [TOKEN_LINT_ID]: 3 });
+
+		const r = await runCli(["doctor", "--completeness", "--answers", answers], { cwd: dir });
+		// Skipped owned finding is still unresolved → CI exit contract holds.
+		expect(r.code).toBe(1);
+		expect(r.stdout).toMatch(/skipped scripts\/lint-tokens\.ts/);
+		// No byte written: file preserved, no exception recorded.
+		expect(await exists(join(dir, "scripts/lint-tokens.ts"))).toBe(true);
+		expect(await ownedEntries()).toHaveLength(0);
+	});
 });
