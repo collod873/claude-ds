@@ -179,7 +179,7 @@ describe("journey: heal end-to-end on the time-travel fixture (#538)", () => {
 		// Auto-fixable findings: the dashboard's audit --fix preview advertises a
 		// count; the loop's audit --fix step reports fixing that many. The Crewops
 		// miss was advertised findings silently dropping out of the plan.
-		const dashFindings = dashboard.match(/auto-repair (\d+) finding/)?.[1];
+		const dashFindings = dashboard.match(/fix (\d+) issues? automatically/)?.[1];
 		const healFixed = heal.stdout.match(/fix summary:\s*(\d+) fixed/)?.[1];
 		expect(dashFindings).toBeDefined();
 		expect(healFixed).toBe(dashFindings);
@@ -187,7 +187,9 @@ describe("journey: heal end-to-end on the time-travel fixture (#538)", () => {
 		expect(heal.stdout.match(/Fixed:\s*(\d+)/)?.[1]).toBe(dashFindings);
 
 		// Pin advance: the dashboard previews the same from→to the upgrade step runs.
-		const dashAdvance = dashboard.match(/pin advance (v[\d.]+)\s*→\s*(v[\d.]+)/);
+		// The gate's upgrade action now reads in plain words ("update vX → vY") but
+		// still carries the from→to the cross-check needs (#621).
+		const dashAdvance = dashboard.match(/update[^\n]*?(v[\d.]+)\s*→\s*(v[\d.]+)/);
 		expect(dashAdvance).not.toBeNull();
 		expect(dashAdvance?.[1]).toBe(pinnedBefore);
 		expect(dashAdvance?.[2]).toBe(pinnedAfter);

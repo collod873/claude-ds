@@ -4,7 +4,12 @@ import pkg from "../../package.json" with { type: "json" };
 import { adrUrl } from "../lib/adr-citation.js";
 import { type CleanTreeState, checkCleanTree } from "../lib/clean-tree.js";
 import type { PendingDecision } from "../lib/decision/index.js";
-import { awaitCommitment, buildCommitmentGate, gateFindingCounts } from "../lib/gate-preview.js";
+import {
+	awaitCommitment,
+	buildCommitmentGate,
+	gateFindingCounts,
+	projectFullPlan,
+} from "../lib/gate-preview.js";
 import { emitHeadless, errorResult, HEADLESS_EXIT } from "../lib/headless.js";
 import { err, info, setJsonMode } from "../lib/log.js";
 import {
@@ -260,7 +265,10 @@ export async function healCmd(opts: HealOpts): Promise<void> {
 		if (plan.length > 0) {
 			const counts = await gateFindingCounts(ctx);
 			printLines(await buildCommitmentGate(ctx, plan, counts));
-			const approved = await awaitCommitment();
+			// The prompt's step count equals the numbered actions the gate rendered —
+			// the plan projected forward through any config-flag cascade (#413 / #621).
+			const { plan: projectedPlan } = await projectFullPlan(ctx, plan);
+			const approved = await awaitCommitment(projectedPlan.length);
 			if (!approved) {
 				info("heal: cancelled — nothing changed.");
 				return;

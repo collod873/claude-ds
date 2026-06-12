@@ -34,7 +34,7 @@ import { type Config, parseConfig } from "../lib/config.js";
 import { composeDashboardState } from "../lib/dashboard.js";
 import { isExtractionNeededFinding } from "../lib/drift/index.js";
 import { type Exception, parseExceptions } from "../lib/exceptions.js";
-import { awaitCommitment, buildCommitmentGate } from "../lib/gate-preview.js";
+import { awaitCommitment, buildCommitmentGate, projectFullPlan } from "../lib/gate-preview.js";
 import { detectBuildCommand } from "../lib/log.js";
 import { parseManifest } from "../lib/manifest.js";
 import { computeMigrationChain } from "../lib/migration-framework.js";
@@ -314,21 +314,21 @@ export async function frontDoorCmd(opts: FrontDoorOpts): Promise<void> {
 			autoFixableCount: findings.length - unfixableCount,
 			autoFixableFindings,
 		},
-		{ verbose: opts.verbose },
+		// Completeness routing (#590 / #621): hand-rolled DS infra is counted in the
+		// dashboard header but is not a remediation-loop member, so the gate plan
+		// never fixes it. The gate's "won't fix" block (block 2) names it and the
+		// follow-up command so the header count is never a dead end and the operator
+		// sees what Enter leaves behind before they consent.
+		{ verbose: opts.verbose, completenessCount: handRolledInfra },
 	);
 	printLines(gateLines);
 
-	// Completeness routing (#590): hand-rolled DS infra is counted in the dashboard
-	// header but is not a remediation-loop member, so the gate plan above never
-	// lists it. Render the routing line here too — independent of plan emptiness —
-	// so the header count is never a dead end. The operator sees it while the gate
-	// awaits [Enter], so the completeness work is in view before they consent.
-	if (handRolledInfra > 0) {
-		printLines(["", ...renderHandRolledRouting(handRolledInfra)]);
-	}
+	// The prompt's step count must equal the numbered actions the gate rendered,
+	// which is the plan projected forward through any config-flag cascade (#413).
+	const { plan: projectedPlan } = await projectFullPlan(ctx, plan);
 
 	if (interactive) {
-		const approved = await awaitCommitment();
+		const approved = await awaitCommitment(projectedPlan.length);
 		if (!approved) {
 			printLines(["", "Cancelled — nothing changed."]);
 			return;

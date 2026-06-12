@@ -122,11 +122,15 @@ describe.runIf(HAS_STALE_EMPTY_CHAIN)(
 				await buildCommitmentGate(ctx, ["upgrade"], { classifyCount: 0, autoFixableCount: 0 })
 			).join("\n");
 
-			// Header names the real pin advance — never the retired contradiction
-			// ("pack stays vX") nor a phantom migration arrow.
-			expect(gate).toContain(`pin advance ${EMPTY_CHAIN_PIN} → ${CLI_VERSION} (no migrations)`);
+			// The action names the real pin advance in plain words (#621) — never the
+			// retired contradiction ("pack stays vX"), a phantom migration arrow, nor
+			// the internal "pin advance (no migrations)" jargon.
+			expect(gate).toContain(
+				`update ${EMPTY_CHAIN_PIN} → ${CLI_VERSION} (your files don't change)`,
+			);
 			expect(gate).not.toMatch(/pack stays/);
-			expect(gate).not.toMatch(/no file changes/);
+			expect(gate).not.toMatch(/pin advance/);
+			expect(gate).not.toMatch(/no migrations/);
 
 			// Body shows the matching `.claude-ds.json` pin write — surfaced (per
 			// #591) as `pack pinned <from> → <to>`, not a generic flag flip — so

@@ -78,7 +78,7 @@ describe("frontDoorCmd (TTY dashboard + commitment gate)", () => {
 		expect(out).toMatch(/Where you are: pre-adopt/);
 		expect(out).toMatch(/Run `claude-ds adopt --pack next-react`/);
 		// No commitment gate in pre-adopt — adopt hands the project INTO the loop.
-		expect(out).not.toMatch(/\[Enter\] to run all/);
+		expect(out).not.toMatch(/Pressing Enter will:/);
 	});
 
 	it("adopted + clean tree: nothing to remediate, routes to the build command", async () => {
@@ -157,8 +157,8 @@ export function SoloLabel() { return <span />; }
 		const out = await captureFrontDoor({ cwd: dir });
 
 		expect(out).toMatch(/Where you are: adopted/);
-		expect(out).toMatch(/I'll bring this tree to clean/);
-		expect(out).toMatch(/audit --fix — auto-repair \d+ finding/);
+		expect(out).toMatch(/Pressing Enter will:/);
+		expect(out).toMatch(/fix \d+ issue.* automatically/);
 	});
 
 	it("adopted + auto-fixable drift: the audit --fix step previews the finding set per rule (#584)", async () => {
@@ -181,9 +181,9 @@ export function ${name === "solo-label" ? "SoloLabel" : "DuoLabel"}() { return <
 
 		const out = await captureFrontDoor({ cwd: dir });
 
-		// The per-rule line sits under the audit --fix header, before the prompt:
+		// The per-rule line sits under the audit --fix action, before the prompt:
 		// rule id · severity · finding count · affected-file count.
-		expect(out).toMatch(/audit --fix — auto-repair 2 findings/);
+		expect(out).toMatch(/fix 2 issues automatically/);
 		expect(out).toMatch(/\[DRIFT-STALE-META-STATES\] error · 2 findings · 2 files/);
 	});
 
@@ -219,10 +219,12 @@ if grep -q "asChild" "$1"; then exit 1; fi
 		// Both concerns are counted in the header.
 		expect(out).toMatch(/What's wrong:.*finding.*hand-rolled DS infra/);
 		// The drift finding maps to a plan line (audit --fix)...
-		expect(out).toMatch(/audit --fix — auto-repair \d+ finding/);
-		// ...and the hand-rolled count maps to a routing line even though the plan
-		// is NON-empty — the gap #590 closes.
-		expect(out).toMatch(/hand-rolled DS infra finding.*→.*claude-ds doctor --completeness/);
+		expect(out).toMatch(/fix \d+ issue.* automatically/);
+		// ...and the completeness count maps to the gate's "won't fix" block (#621)
+		// naming the follow-up command, even though the plan is NON-empty — the gap
+		// #590 closes, now stated in plain words.
+		expect(out).toMatch(/won't fix/i);
+		expect(out).toMatch(/built by hand[\s\S]*claude-ds doctor --completeness/);
 	});
 
 	it("reconform plan entry carries the explainer line, not a bare header (#590)", async () => {
@@ -238,7 +240,7 @@ if grep -q "asChild" "$1"; then exit 1; fi
 		});
 		const gate = gateLines.join("\n");
 
-		expect(gate).toMatch(/reconform — regenerates companions post-sync; nothing to preview/);
+		expect(gate).toMatch(/regenerate the auto-generated files/);
 	});
 
 	it("adopted + MISPLACED finding: the gate plans classify (#245)", async () => {
@@ -262,7 +264,7 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
 
 		const out = await captureFrontDoor({ cwd: dir });
 
-		expect(out).toMatch(/classify — extract \/ relocate/);
+		expect(out).toMatch(/extract or relocate \d+ component/);
 	});
 
 	it("adopted + stale packVersion (clean tree): the gate plans upgrade first", async () => {
@@ -276,7 +278,7 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
 		const out = await captureFrontDoor({ cwd: dir });
 
 		expect(out).toMatch(/What's wrong: .*upgrade available/);
-		expect(out).toMatch(/upgrade — pack v0\.0\.1 → /);
+		expect(out).toMatch(/update the pack v0\.0\.1 → /);
 	});
 
 	it("adopted + content-drifted managed file: dashboard isn't clean, gate plans sync (#463)", async () => {
@@ -301,7 +303,7 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
 		expect(out).not.toMatch(/Managed files: \d+\/\d+ ✓/);
 		expect(out).toMatch(/scaffold incomplete/);
 		// And the gate plans the restore.
-		expect(out).toMatch(/sync — restore managed scaffold files/);
+		expect(out).toMatch(/restore the design-system files claude-ds manages/);
 	});
 
 	it("adopted + missing managed files: the gate previews the real sync Change[]", async () => {
@@ -322,7 +324,7 @@ export function Sidebar() { return <Card><Button /><Input /></Card>; }
 
 		const out = await captureFrontDoor({ cwd: dir });
 
-		expect(out).toMatch(/sync — restore managed scaffold files/);
+		expect(out).toMatch(/restore the design-system files claude-ds manages/);
 		// C4: tier-summary collapse. The count is the real planned Change[] count
 		// (the F11 invariant); the previous "A path" per-file assertion now lives
 		// on the F11 test below, which switches to `verbose: true`.
@@ -366,9 +368,15 @@ export function SoloLabel() { return <span />; }
 		expect(plan.indexOf("upgrade")).toBeLessThan(plan.indexOf("audit --fix"));
 
 		// The front door renders that exact ordered plan — no second brain, no
-		// re-ordering. The gate header lists the plan joined by ` → `.
+		// re-ordering. The gate enumerates the plan as numbered, plain-language
+		// actions (#621), so order shows as `1. update … → … 2. fix … automatically`
+		// — the upgrade action must precede the audit action.
 		const out = await captureFrontDoor({ cwd: dir });
-		expect(out).toContain(plan.join(" → "));
+		const upgradeAt = out.search(/1\. update the pack/);
+		const auditAt = out.search(/fix \d+ issue.* automatically/);
+		expect(upgradeAt).toBeGreaterThanOrEqual(0);
+		expect(auditAt).toBeGreaterThanOrEqual(0);
+		expect(upgradeAt).toBeLessThan(auditAt);
 	});
 
 	it("F11: the gate preview count equals the planned Change[] (no divergent recommender)", async () => {
@@ -613,7 +621,7 @@ export function SoloLabel() { return <span />; }
 
 		// The prompt string is pinned — the [Enter]-approves affordance is the
 		// consent contract this gate exists to honor.
-		expect(out).toContain("[Enter] to run all, anything else to cancel:");
+		expect(out).toMatch(/\[Enter\] runs the \d+ steps? above, anything else to cancel:/);
 		// Non-empty input cancels; the tree is untouched.
 		expect(out).toMatch(/Cancelled — nothing changed\./);
 		expect(out).not.toMatch(/Tree is clean/);
@@ -626,7 +634,7 @@ export function SoloLabel() { return <span />; }
 		const out = await captureFrontDoorInteractive(dir, "\n");
 
 		// Empty input is approval — the gate does not cancel and the loop converges.
-		expect(out).toContain("[Enter] to run all, anything else to cancel:");
+		expect(out).toMatch(/\[Enter\] runs the \d+ steps? above, anything else to cancel:/);
 		expect(out).not.toMatch(/Cancelled — nothing changed\./);
 		expect(out).toMatch(/Tree is clean/);
 		// The fixer ran: the retired meta.states field is gone.
