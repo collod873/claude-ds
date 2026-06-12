@@ -152,6 +152,7 @@ function makeRecordingProgress(sink: LoopStep[]): ProgressController {
 		},
 		succeed() {},
 		fail() {},
+		warn() {},
 		info() {},
 		stop() {},
 		active: false,
